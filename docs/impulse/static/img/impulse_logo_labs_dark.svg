@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120" width="480" height="120">
+  <defs>
+    <linearGradient id="pulseGradD" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#FF3621;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#E8582A;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FF6A33;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Impulse signal mark -->
+  <g transform="translate(20, 20)">
+    <path d="M 0,40 L 15,40 L 20,40 L 25,8 L 30,40 L 35,52 L 42,40 L 55,40"
+          fill="none" stroke="url(#pulseGradD)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 55,40 L 62,40 L 66,22 L 70,40 L 73,46 L 77,40 L 85,40"
+          fill="none" stroke="url(#pulseGradD)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+  </g>
+
+  <!-- Wordmark (white for dark backgrounds) -->
+  <text x="125" y="72" font-family="'Inter', 'Helvetica Neue', Arial, sans-serif" font-size="52" font-weight="700" fill="#F0F4F8" letter-spacing="-1">
+    Impulse
+  </text>
+
+  <!-- Divider line -->
+  <line x1="355" y1="30" x2="355" y2="95" stroke="#4A6575" stroke-width="1"/>
+
+  <!-- Databricks symbol (scaled down to ~40px height) -->
+  <g transform="translate(370, 35) scale(0.12)">
+    <path d="M283.923 136.449L150.144 213.624L6.88995 131.168L0 134.982V194.844L150.144 281.115L283.923 204.234V235.926L150.144 313.1L6.88995 230.644L0 234.458V244.729L150.144 331L300 244.729V184.867L293.11 181.052L150.144 263.215L16.0766 186.334V154.643L150.144 231.524L300 145.253V86.2713L292.536 81.8697L150.144 163.739L22.9665 90.9663L150.144 17.8998L254.641 78.055L263.828 72.773V65.4371L150.144 0L0 86.2713V95.6613L150.144 181.933L283.923 104.758V136.449Z" fill="#FF3621"/>
+  </g>
+
+  <!-- "Labs" text -->
+  <text x="412" y="62" font-family="'Inter', 'Helvetica Neue', Arial, sans-serif" font-size="18" font-weight="600" fill="#F0F4F8" letter-spacing="0.5">
+    Labs
+  </text>
+</svg>

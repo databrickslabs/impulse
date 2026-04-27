@@ -1,0 +1,5001 @@
+container_id,channel_id,key,value
+1,1,group_idx,0
+1,1,channel_idx,1
+1,1,channel_name,Engine Coolant Temperature
+1,1,unit,C
+1,1,brand,Seat
+1,1,model,Leon
+1,1,from_city,RT
+1,1,to_city,KA
+1,1,condition,Normal
+1,1,experiment_id,experiment_4
+1,2,group_idx,0
+1,2,channel_idx,2
+1,2,channel_name,Absolute Throttle Position
+1,2,unit,%
+1,2,brand,Seat
+1,2,model,Leon
+1,2,from_city,RT
+1,2,to_city,KA
+1,2,condition,Normal
+1,2,experiment_id,experiment_4
+1,3,group_idx,1
+1,3,channel_idx,1
+1,3,channel_name,Intake Manifold Absolute Pressure
+1,3,unit,kPa
+1,3,brand,Seat
+1,3,model,Leon
+1,3,from_city,RT
+1,3,to_city,KA
+1,3,condition,Normal
+1,3,experiment_id,experiment_4
+1,4,group_idx,1
+1,4,channel_idx,2
+1,4,channel_name,Ambient Air Temperature
+1,4,unit,C
+1,4,brand,Seat
+1,4,model,Leon
+1,4,from_city,RT
+1,4,to_city,KA
+1,4,condition,Normal
+1,4,experiment_id,experiment_4
+1,5,group_idx,2
+1,5,channel_idx,1
+1,5,channel_name,Engine RPM
+1,5,unit,RPM
+1,5,brand,Seat
+1,5,model,Leon
+1,5,from_city,RT
+1,5,to_city,KA
+1,5,condition,Normal
+1,5,experiment_id,experiment_4
+1,6,group_idx,2
+1,6,channel_idx,2
+1,6,channel_name,Accelerator Pedal Position D
+1,6,unit,%
+1,6,brand,Seat
+1,6,model,Leon
+1,6,from_city,RT
+1,6,to_city,KA
+1,6,condition,Normal
+1,6,experiment_id,experiment_4
+1,7,group_idx,3
+1,7,channel_idx,1
+1,7,channel_name,Vehicle Speed Sensor
+1,7,unit,km/h
+1,7,brand,Seat
+1,7,model,Leon
+1,7,from_city,RT
+1,7,to_city,KA
+1,7,condition,Normal
+1,7,experiment_id,experiment_4
+1,8,group_idx,3
+1,8,channel_idx,2
+1,8,channel_name,Accelerator Pedal Position E
+1,8,unit,%
+1,8,brand,Seat
+1,8,model,Leon
+1,8,from_city,RT
+1,8,to_city,KA
+1,8,condition,Normal
+1,8,experiment_id,experiment_4
+1,9,group_idx,4
+1,9,channel_idx,1
+1,9,channel_name,Intake Air Temperature
+1,9,unit,C
+1,9,brand,Seat
+1,9,model,Leon
+1,9,from_city,RT
+1,9,to_city,KA
+1,9,condition,Normal
+1,9,experiment_id,experiment_4
+1,10,group_idx,5
+1,10,channel_idx,1
+1,10,channel_name,Air Flow Rate from Mass Flow Sensor
+1,10,unit,g/s
+1,10,brand,Seat
+1,10,model,Leon
+1,10,from_city,RT
+1,10,to_city,KA
+1,10,condition,Normal
+1,10,experiment_id,experiment_4
+2,1,group_idx,0
+2,1,channel_idx,1
+2,1,channel_name,Engine Coolant Temperature
+2,1,unit,C
+2,1,brand,Seat
+2,1,model,Leon
+2,1,from_city,KA
+2,1,to_city,RT
+2,1,condition,Normal
+2,1,experiment_id,experiment_4
+2,2,group_idx,0
+2,2,channel_idx,2
+2,2,channel_name,Ambient Air Temperature
+2,2,unit,C
+2,2,brand,Seat
+2,2,model,Leon
+2,2,from_city,KA
+2,2,to_city,RT
+2,2,condition,Normal
+2,2,experiment_id,experiment_4
+2,3,group_idx,1
+2,3,channel_idx,1
+2,3,channel_name,Intake Manifold Absolute Pressure
+2,3,unit,kPa
+2,3,brand,Seat
+2,3,model,Leon
+2,3,from_city,KA
+2,3,to_city,RT
+2,3,condition,Normal
+2,3,experiment_id,experiment_4
+2,4,group_idx,1
+2,4,channel_idx,2
+2,4,channel_name,Accelerator Pedal Position D
+2,4,unit,%
+2,4,brand,Seat
+2,4,model,Leon
+2,4,from_city,KA
+2,4,to_city,RT
+2,4,condition,Normal
+2,4,experiment_id,experiment_4
+2,5,group_idx,2
+2,5,channel_idx,1
+2,5,channel_name,Engine RPM
+2,5,unit,RPM
+2,5,brand,Seat
+2,5,model,Leon
+2,5,from_city,KA
+2,5,to_city,RT
+2,5,condition,Normal
+2,5,experiment_id,experiment_4
+2,6,group_idx,2
+2,6,channel_idx,2
+2,6,channel_name,Accelerator Pedal Position E
+2,6,unit,%
+2,6,brand,Seat
+2,6,model,Leon
+2,6,from_city,KA
+2,6,to_city,RT
+2,6,condition,Normal
+2,6,experiment_id,experiment_4
+2,7,group_idx,3
+2,7,channel_idx,1
+2,7,channel_name,Vehicle Speed Sensor
+2,7,unit,km/h
+2,7,brand,Seat
+2,7,model,Leon
+2,7,from_city,KA
+2,7,to_city,RT
+2,7,condition,Normal
+2,7,experiment_id,experiment_4
+2,8,group_idx,4
+2,8,channel_idx,1
+2,8,channel_name,Intake Air Temperature
+2,8,unit,C
+2,8,brand,Seat
+2,8,model,Leon
+2,8,from_city,KA
+2,8,to_city,RT
+2,8,condition,Normal
+2,8,experiment_id,experiment_4
+2,9,group_idx,5
+2,9,channel_idx,1
+2,9,channel_name,Air Flow Rate from Mass Flow Sensor
+2,9,unit,g/s
+2,9,brand,Seat
+2,9,model,Leon
+2,9,from_city,KA
+2,9,to_city,RT
+2,9,condition,Normal
+2,9,experiment_id,experiment_4
+2,10,group_idx,6
+2,10,channel_idx,1
+2,10,channel_name,Absolute Throttle Position
+2,10,unit,%
+2,10,brand,Seat
+2,10,model,Leon
+2,10,from_city,KA
+2,10,to_city,RT
+2,10,condition,Normal
+2,10,experiment_id,experiment_4
+3,1,group_idx,0
+3,1,channel_idx,1
+3,1,channel_name,Engine Coolant Temperature
+3,1,unit,C
+3,1,brand,Seat
+3,1,model,Leon
+3,1,from_city,S
+3,1,to_city,RT
+3,1,condition,Normal
+3,1,experiment_id,experiment_4
+3,2,group_idx,0
+3,2,channel_idx,2
+3,2,channel_name,Intake Air Temperature
+3,2,unit,C
+3,2,brand,Seat
+3,2,model,Leon
+3,2,from_city,S
+3,2,to_city,RT
+3,2,condition,Normal
+3,2,experiment_id,experiment_4
+3,3,group_idx,0
+3,3,channel_idx,3
+3,3,channel_name,Accelerator Pedal Position D
+3,3,unit,%
+3,3,brand,Seat
+3,3,model,Leon
+3,3,from_city,S
+3,3,to_city,RT
+3,3,condition,Normal
+3,3,experiment_id,experiment_4
+3,4,group_idx,1
+3,4,channel_idx,1
+3,4,channel_name,Intake Manifold Absolute Pressure
+3,4,unit,kPa
+3,4,brand,Seat
+3,4,model,Leon
+3,4,from_city,S
+3,4,to_city,RT
+3,4,condition,Normal
+3,4,experiment_id,experiment_4
+3,5,group_idx,1
+3,5,channel_idx,2
+3,5,channel_name,Air Flow Rate from Mass Flow Sensor
+3,5,unit,g/s
+3,5,brand,Seat
+3,5,model,Leon
+3,5,from_city,S
+3,5,to_city,RT
+3,5,condition,Normal
+3,5,experiment_id,experiment_4
+3,6,group_idx,1
+3,6,channel_idx,3
+3,6,channel_name,Accelerator Pedal Position E
+3,6,unit,%
+3,6,brand,Seat
+3,6,model,Leon
+3,6,from_city,S
+3,6,to_city,RT
+3,6,condition,Normal
+3,6,experiment_id,experiment_4
+3,7,group_idx,2
+3,7,channel_idx,1
+3,7,channel_name,Engine RPM
+3,7,unit,RPM
+3,7,brand,Seat
+3,7,model,Leon
+3,7,from_city,S
+3,7,to_city,RT
+3,7,condition,Normal
+3,7,experiment_id,experiment_4
+3,8,group_idx,2
+3,8,channel_idx,2
+3,8,channel_name,Absolute Throttle Position
+3,8,unit,%
+3,8,brand,Seat
+3,8,model,Leon
+3,8,from_city,S
+3,8,to_city,RT
+3,8,condition,Normal
+3,8,experiment_id,experiment_4
+3,9,group_idx,3
+3,9,channel_idx,1
+3,9,channel_name,Vehicle Speed Sensor
+3,9,unit,km/h
+3,9,brand,Seat
+3,9,model,Leon
+3,9,from_city,S
+3,9,to_city,RT
+3,9,condition,Normal
+3,9,experiment_id,experiment_4
+3,10,group_idx,3
+3,10,channel_idx,2
+3,10,channel_name,Ambient Air Temperature
+3,10,unit,C
+3,10,brand,Seat
+3,10,model,Leon
+3,10,from_city,S
+3,10,to_city,RT
+3,10,condition,Normal
+3,10,experiment_id,experiment_4
+4,1,group_idx,0
+4,1,channel_idx,1
+4,1,channel_name,Engine Coolant Temperature
+4,1,unit,C
+4,1,brand,Seat
+4,1,model,Leon
+4,1,from_city,S
+4,1,to_city,RT
+4,1,condition,Normal
+4,1,experiment_id,experiment_4
+4,2,group_idx,0
+4,2,channel_idx,2
+4,2,channel_name,Absolute Throttle Position
+4,2,unit,%
+4,2,brand,Seat
+4,2,model,Leon
+4,2,from_city,S
+4,2,to_city,RT
+4,2,condition,Normal
+4,2,experiment_id,experiment_4
+4,3,group_idx,1
+4,3,channel_idx,1
+4,3,channel_name,Intake Manifold Absolute Pressure
+4,3,unit,kPa
+4,3,brand,Seat
+4,3,model,Leon
+4,3,from_city,S
+4,3,to_city,RT
+4,3,condition,Normal
+4,3,experiment_id,experiment_4
+4,4,group_idx,1
+4,4,channel_idx,2
+4,4,channel_name,Ambient Air Temperature
+4,4,unit,C
+4,4,brand,Seat
+4,4,model,Leon
+4,4,from_city,S
+4,4,to_city,RT
+4,4,condition,Normal
+4,4,experiment_id,experiment_4
+4,5,group_idx,2
+4,5,channel_idx,1
+4,5,channel_name,Engine RPM
+4,5,unit,RPM
+4,5,brand,Seat
+4,5,model,Leon
+4,5,from_city,S
+4,5,to_city,RT
+4,5,condition,Normal
+4,5,experiment_id,experiment_4
+4,6,group_idx,2
+4,6,channel_idx,2
+4,6,channel_name,Accelerator Pedal Position D
+4,6,unit,%
+4,6,brand,Seat
+4,6,model,Leon
+4,6,from_city,S
+4,6,to_city,RT
+4,6,condition,Normal
+4,6,experiment_id,experiment_4
+4,7,group_idx,3
+4,7,channel_idx,1
+4,7,channel_name,Vehicle Speed Sensor
+4,7,unit,km/h
+4,7,brand,Seat
+4,7,model,Leon
+4,7,from_city,S
+4,7,to_city,RT
+4,7,condition,Normal
+4,7,experiment_id,experiment_4
+4,8,group_idx,3
+4,8,channel_idx,2
+4,8,channel_name,Accelerator Pedal Position E
+4,8,unit,%
+4,8,brand,Seat
+4,8,model,Leon
+4,8,from_city,S
+4,8,to_city,RT
+4,8,condition,Normal
+4,8,experiment_id,experiment_4
+4,9,group_idx,4
+4,9,channel_idx,1
+4,9,channel_name,Intake Air Temperature
+4,9,unit,C
+4,9,brand,Seat
+4,9,model,Leon
+4,9,from_city,S
+4,9,to_city,RT
+4,9,condition,Normal
+4,9,experiment_id,experiment_4
+4,10,group_idx,5
+4,10,channel_idx,1
+4,10,channel_name,Air Flow Rate from Mass Flow Sensor
+4,10,unit,g/s
+4,10,brand,Seat
+4,10,model,Leon
+4,10,from_city,S
+4,10,to_city,RT
+4,10,condition,Normal
+4,10,experiment_id,experiment_4
+5,1,group_idx,0
+5,1,channel_idx,1
+5,1,channel_name,Engine Coolant Temperature
+5,1,unit,C
+5,1,brand,Seat
+5,1,model,Leon
+5,1,from_city,RT
+5,1,to_city,S
+5,1,condition,Normal
+5,1,experiment_id,experiment_4
+5,2,group_idx,0
+5,2,channel_idx,2
+5,2,channel_name,Intake Air Temperature
+5,2,unit,C
+5,2,brand,Seat
+5,2,model,Leon
+5,2,from_city,RT
+5,2,to_city,S
+5,2,condition,Normal
+5,2,experiment_id,experiment_4
+5,3,group_idx,0
+5,3,channel_idx,3
+5,3,channel_name,Accelerator Pedal Position D
+5,3,unit,%
+5,3,brand,Seat
+5,3,model,Leon
+5,3,from_city,RT
+5,3,to_city,S
+5,3,condition,Normal
+5,3,experiment_id,experiment_4
+5,4,group_idx,1
+5,4,channel_idx,1
+5,4,channel_name,Intake Manifold Absolute Pressure
+5,4,unit,kPa
+5,4,brand,Seat
+5,4,model,Leon
+5,4,from_city,RT
+5,4,to_city,S
+5,4,condition,Normal
+5,4,experiment_id,experiment_4
+5,5,group_idx,1
+5,5,channel_idx,2
+5,5,channel_name,Air Flow Rate from Mass Flow Sensor
+5,5,unit,g/s
+5,5,brand,Seat
+5,5,model,Leon
+5,5,from_city,RT
+5,5,to_city,S
+5,5,condition,Normal
+5,5,experiment_id,experiment_4
+5,6,group_idx,1
+5,6,channel_idx,3
+5,6,channel_name,Accelerator Pedal Position E
+5,6,unit,%
+5,6,brand,Seat
+5,6,model,Leon
+5,6,from_city,RT
+5,6,to_city,S
+5,6,condition,Normal
+5,6,experiment_id,experiment_4
+5,7,group_idx,2
+5,7,channel_idx,1
+5,7,channel_name,Engine RPM
+5,7,unit,RPM
+5,7,brand,Seat
+5,7,model,Leon
+5,7,from_city,RT
+5,7,to_city,S
+5,7,condition,Normal
+5,7,experiment_id,experiment_4
+5,8,group_idx,2
+5,8,channel_idx,2
+5,8,channel_name,Absolute Throttle Position
+5,8,unit,%
+5,8,brand,Seat
+5,8,model,Leon
+5,8,from_city,RT
+5,8,to_city,S
+5,8,condition,Normal
+5,8,experiment_id,experiment_4
+5,9,group_idx,3
+5,9,channel_idx,1
+5,9,channel_name,Vehicle Speed Sensor
+5,9,unit,km/h
+5,9,brand,Seat
+5,9,model,Leon
+5,9,from_city,RT
+5,9,to_city,S
+5,9,condition,Normal
+5,9,experiment_id,experiment_4
+5,10,group_idx,3
+5,10,channel_idx,2
+5,10,channel_name,Ambient Air Temperature
+5,10,unit,C
+5,10,brand,Seat
+5,10,model,Leon
+5,10,from_city,RT
+5,10,to_city,S
+5,10,condition,Normal
+5,10,experiment_id,experiment_4
+6,1,group_idx,0
+6,1,channel_idx,1
+6,1,channel_name,Engine Coolant Temperature
+6,1,unit,C
+6,1,brand,Seat
+6,1,model,Leon
+6,1,from_city,RT
+6,1,to_city,S
+6,1,condition,Normal
+6,1,experiment_id,experiment_4
+6,2,group_idx,0
+6,2,channel_idx,2
+6,2,channel_name,Intake Air Temperature
+6,2,unit,C
+6,2,brand,Seat
+6,2,model,Leon
+6,2,from_city,RT
+6,2,to_city,S
+6,2,condition,Normal
+6,2,experiment_id,experiment_4
+6,3,group_idx,0
+6,3,channel_idx,3
+6,3,channel_name,Accelerator Pedal Position D
+6,3,unit,%
+6,3,brand,Seat
+6,3,model,Leon
+6,3,from_city,RT
+6,3,to_city,S
+6,3,condition,Normal
+6,3,experiment_id,experiment_4
+6,4,group_idx,1
+6,4,channel_idx,1
+6,4,channel_name,Intake Manifold Absolute Pressure
+6,4,unit,kPa
+6,4,brand,Seat
+6,4,model,Leon
+6,4,from_city,RT
+6,4,to_city,S
+6,4,condition,Normal
+6,4,experiment_id,experiment_4
+6,5,group_idx,1
+6,5,channel_idx,2
+6,5,channel_name,Air Flow Rate from Mass Flow Sensor
+6,5,unit,g/s
+6,5,brand,Seat
+6,5,model,Leon
+6,5,from_city,RT
+6,5,to_city,S
+6,5,condition,Normal
+6,5,experiment_id,experiment_4
+6,6,group_idx,1
+6,6,channel_idx,3
+6,6,channel_name,Accelerator Pedal Position E
+6,6,unit,%
+6,6,brand,Seat
+6,6,model,Leon
+6,6,from_city,RT
+6,6,to_city,S
+6,6,condition,Normal
+6,6,experiment_id,experiment_4
+6,7,group_idx,2
+6,7,channel_idx,1
+6,7,channel_name,Engine RPM
+6,7,unit,RPM
+6,7,brand,Seat
+6,7,model,Leon
+6,7,from_city,RT
+6,7,to_city,S
+6,7,condition,Normal
+6,7,experiment_id,experiment_4
+6,8,group_idx,2
+6,8,channel_idx,2
+6,8,channel_name,Absolute Throttle Position
+6,8,unit,%
+6,8,brand,Seat
+6,8,model,Leon
+6,8,from_city,RT
+6,8,to_city,S
+6,8,condition,Normal
+6,8,experiment_id,experiment_4
+6,9,group_idx,3
+6,9,channel_idx,1
+6,9,channel_name,Vehicle Speed Sensor
+6,9,unit,km/h
+6,9,brand,Seat
+6,9,model,Leon
+6,9,from_city,RT
+6,9,to_city,S
+6,9,condition,Normal
+6,9,experiment_id,experiment_4
+6,10,group_idx,3
+6,10,channel_idx,2
+6,10,channel_name,Ambient Air Temperature
+6,10,unit,C
+6,10,brand,Seat
+6,10,model,Leon
+6,10,from_city,RT
+6,10,to_city,S
+6,10,condition,Normal
+6,10,experiment_id,experiment_4
+7,1,group_idx,0
+7,1,channel_idx,1
+7,1,channel_name,Engine Coolant Temperature
+7,1,unit,C
+7,1,brand,Seat
+7,1,model,Leon
+7,1,from_city,RT
+7,1,to_city,S
+7,1,condition,Normal
+7,1,experiment_id,experiment_4
+7,2,group_idx,0
+7,2,channel_idx,2
+7,2,channel_name,Air Flow Rate from Mass Flow Sensor
+7,2,unit,g/s
+7,2,brand,Seat
+7,2,model,Leon
+7,2,from_city,RT
+7,2,to_city,S
+7,2,condition,Normal
+7,2,experiment_id,experiment_4
+7,3,group_idx,1
+7,3,channel_idx,1
+7,3,channel_name,Intake Manifold Absolute Pressure
+7,3,unit,kPa
+7,3,brand,Seat
+7,3,model,Leon
+7,3,from_city,RT
+7,3,to_city,S
+7,3,condition,Normal
+7,3,experiment_id,experiment_4
+7,4,group_idx,1
+7,4,channel_idx,2
+7,4,channel_name,Absolute Throttle Position
+7,4,unit,%
+7,4,brand,Seat
+7,4,model,Leon
+7,4,from_city,RT
+7,4,to_city,S
+7,4,condition,Normal
+7,4,experiment_id,experiment_4
+7,5,group_idx,2
+7,5,channel_idx,1
+7,5,channel_name,Engine RPM
+7,5,unit,RPM
+7,5,brand,Seat
+7,5,model,Leon
+7,5,from_city,RT
+7,5,to_city,S
+7,5,condition,Normal
+7,5,experiment_id,experiment_4
+7,6,group_idx,2
+7,6,channel_idx,2
+7,6,channel_name,Ambient Air Temperature
+7,6,unit,C
+7,6,brand,Seat
+7,6,model,Leon
+7,6,from_city,RT
+7,6,to_city,S
+7,6,condition,Normal
+7,6,experiment_id,experiment_4
+7,7,group_idx,3
+7,7,channel_idx,1
+7,7,channel_name,Vehicle Speed Sensor
+7,7,unit,km/h
+7,7,brand,Seat
+7,7,model,Leon
+7,7,from_city,RT
+7,7,to_city,S
+7,7,condition,Normal
+7,7,experiment_id,experiment_4
+7,8,group_idx,3
+7,8,channel_idx,2
+7,8,channel_name,Accelerator Pedal Position D
+7,8,unit,%
+7,8,brand,Seat
+7,8,model,Leon
+7,8,from_city,RT
+7,8,to_city,S
+7,8,condition,Normal
+7,8,experiment_id,experiment_4
+7,9,group_idx,4
+7,9,channel_idx,1
+7,9,channel_name,Intake Air Temperature
+7,9,unit,C
+7,9,brand,Seat
+7,9,model,Leon
+7,9,from_city,RT
+7,9,to_city,S
+7,9,condition,Normal
+7,9,experiment_id,experiment_4
+7,10,group_idx,4
+7,10,channel_idx,2
+7,10,channel_name,Accelerator Pedal Position E
+7,10,unit,%
+7,10,brand,Seat
+7,10,model,Leon
+7,10,from_city,RT
+7,10,to_city,S
+7,10,condition,Normal
+7,10,experiment_id,experiment_4
+8,1,group_idx,0
+8,1,channel_idx,1
+8,1,channel_name,Engine Coolant Temperature
+8,1,unit,C
+8,1,brand,Seat
+8,1,model,Leon
+8,1,from_city,RT
+8,1,to_city,S
+8,1,condition,Normal
+8,1,experiment_id,experiment_4
+8,2,group_idx,0
+8,2,channel_idx,2
+8,2,channel_name,Intake Manifold Absolute Pressure
+8,2,unit,kPa
+8,2,brand,Seat
+8,2,model,Leon
+8,2,from_city,RT
+8,2,to_city,S
+8,2,condition,Normal
+8,2,experiment_id,experiment_4
+8,3,group_idx,0
+8,3,channel_idx,3
+8,3,channel_name,Engine RPM
+8,3,unit,RPM
+8,3,brand,Seat
+8,3,model,Leon
+8,3,from_city,RT
+8,3,to_city,S
+8,3,condition,Normal
+8,3,experiment_id,experiment_4
+8,4,group_idx,0
+8,4,channel_idx,4
+8,4,channel_name,Vehicle Speed Sensor
+8,4,unit,km/h
+8,4,brand,Seat
+8,4,model,Leon
+8,4,from_city,RT
+8,4,to_city,S
+8,4,condition,Normal
+8,4,experiment_id,experiment_4
+8,5,group_idx,0
+8,5,channel_idx,5
+8,5,channel_name,Intake Air Temperature
+8,5,unit,C
+8,5,brand,Seat
+8,5,model,Leon
+8,5,from_city,RT
+8,5,to_city,S
+8,5,condition,Normal
+8,5,experiment_id,experiment_4
+8,6,group_idx,0
+8,6,channel_idx,6
+8,6,channel_name,Air Flow Rate from Mass Flow Sensor
+8,6,unit,g/s
+8,6,brand,Seat
+8,6,model,Leon
+8,6,from_city,RT
+8,6,to_city,S
+8,6,condition,Normal
+8,6,experiment_id,experiment_4
+8,7,group_idx,0
+8,7,channel_idx,7
+8,7,channel_name,Absolute Throttle Position
+8,7,unit,%
+8,7,brand,Seat
+8,7,model,Leon
+8,7,from_city,RT
+8,7,to_city,S
+8,7,condition,Normal
+8,7,experiment_id,experiment_4
+8,8,group_idx,0
+8,8,channel_idx,8
+8,8,channel_name,Ambient Air Temperature
+8,8,unit,C
+8,8,brand,Seat
+8,8,model,Leon
+8,8,from_city,RT
+8,8,to_city,S
+8,8,condition,Normal
+8,8,experiment_id,experiment_4
+8,9,group_idx,0
+8,9,channel_idx,9
+8,9,channel_name,Accelerator Pedal Position D
+8,9,unit,%
+8,9,brand,Seat
+8,9,model,Leon
+8,9,from_city,RT
+8,9,to_city,S
+8,9,condition,Normal
+8,9,experiment_id,experiment_4
+8,10,group_idx,0
+8,10,channel_idx,10
+8,10,channel_name,Accelerator Pedal Position E
+8,10,unit,%
+8,10,brand,Seat
+8,10,model,Leon
+8,10,from_city,RT
+8,10,to_city,S
+8,10,condition,Normal
+8,10,experiment_id,experiment_4
+9,1,group_idx,0
+9,1,channel_idx,1
+9,1,channel_name,Engine Coolant Temperature
+9,1,unit,C
+9,1,brand,Seat
+9,1,model,Leon
+9,1,from_city,RT
+9,1,to_city,S
+9,1,condition,Normal
+9,1,experiment_id,experiment_4
+9,2,group_idx,0
+9,2,channel_idx,2
+9,2,channel_name,Intake Manifold Absolute Pressure
+9,2,unit,kPa
+9,2,brand,Seat
+9,2,model,Leon
+9,2,from_city,RT
+9,2,to_city,S
+9,2,condition,Normal
+9,2,experiment_id,experiment_4
+9,3,group_idx,0
+9,3,channel_idx,3
+9,3,channel_name,Engine RPM
+9,3,unit,RPM
+9,3,brand,Seat
+9,3,model,Leon
+9,3,from_city,RT
+9,3,to_city,S
+9,3,condition,Normal
+9,3,experiment_id,experiment_4
+9,4,group_idx,0
+9,4,channel_idx,4
+9,4,channel_name,Vehicle Speed Sensor
+9,4,unit,km/h
+9,4,brand,Seat
+9,4,model,Leon
+9,4,from_city,RT
+9,4,to_city,S
+9,4,condition,Normal
+9,4,experiment_id,experiment_4
+9,5,group_idx,0
+9,5,channel_idx,5
+9,5,channel_name,Intake Air Temperature
+9,5,unit,C
+9,5,brand,Seat
+9,5,model,Leon
+9,5,from_city,RT
+9,5,to_city,S
+9,5,condition,Normal
+9,5,experiment_id,experiment_4
+9,6,group_idx,0
+9,6,channel_idx,6
+9,6,channel_name,Air Flow Rate from Mass Flow Sensor
+9,6,unit,g/s
+9,6,brand,Seat
+9,6,model,Leon
+9,6,from_city,RT
+9,6,to_city,S
+9,6,condition,Normal
+9,6,experiment_id,experiment_4
+9,7,group_idx,0
+9,7,channel_idx,7
+9,7,channel_name,Absolute Throttle Position
+9,7,unit,%
+9,7,brand,Seat
+9,7,model,Leon
+9,7,from_city,RT
+9,7,to_city,S
+9,7,condition,Normal
+9,7,experiment_id,experiment_4
+9,8,group_idx,0
+9,8,channel_idx,8
+9,8,channel_name,Ambient Air Temperature
+9,8,unit,C
+9,8,brand,Seat
+9,8,model,Leon
+9,8,from_city,RT
+9,8,to_city,S
+9,8,condition,Normal
+9,8,experiment_id,experiment_4
+9,9,group_idx,0
+9,9,channel_idx,9
+9,9,channel_name,Accelerator Pedal Position D
+9,9,unit,%
+9,9,brand,Seat
+9,9,model,Leon
+9,9,from_city,RT
+9,9,to_city,S
+9,9,condition,Normal
+9,9,experiment_id,experiment_4
+9,10,group_idx,0
+9,10,channel_idx,10
+9,10,channel_name,Accelerator Pedal Position E
+9,10,unit,%
+9,10,brand,Seat
+9,10,model,Leon
+9,10,from_city,RT
+9,10,to_city,S
+9,10,condition,Normal
+9,10,experiment_id,experiment_4
+10,1,group_idx,0
+10,1,channel_idx,1
+10,1,channel_name,Engine Coolant Temperature
+10,1,unit,C
+10,1,brand,Seat
+10,1,model,Leon
+10,1,from_city,S
+10,1,to_city,S
+10,1,condition,Stau
+10,1,experiment_id,experiment_4
+10,2,group_idx,0
+10,2,channel_idx,2
+10,2,channel_name,Air Flow Rate from Mass Flow Sensor
+10,2,unit,g/s
+10,2,brand,Seat
+10,2,model,Leon
+10,2,from_city,S
+10,2,to_city,S
+10,2,condition,Stau
+10,2,experiment_id,experiment_4
+10,3,group_idx,1
+10,3,channel_idx,1
+10,3,channel_name,Intake Manifold Absolute Pressure
+10,3,unit,kPa
+10,3,brand,Seat
+10,3,model,Leon
+10,3,from_city,S
+10,3,to_city,S
+10,3,condition,Stau
+10,3,experiment_id,experiment_4
+10,4,group_idx,1
+10,4,channel_idx,2
+10,4,channel_name,Absolute Throttle Position
+10,4,unit,%
+10,4,brand,Seat
+10,4,model,Leon
+10,4,from_city,S
+10,4,to_city,S
+10,4,condition,Stau
+10,4,experiment_id,experiment_4
+10,5,group_idx,2
+10,5,channel_idx,1
+10,5,channel_name,Engine RPM
+10,5,unit,RPM
+10,5,brand,Seat
+10,5,model,Leon
+10,5,from_city,S
+10,5,to_city,S
+10,5,condition,Stau
+10,5,experiment_id,experiment_4
+10,6,group_idx,2
+10,6,channel_idx,2
+10,6,channel_name,Ambient Air Temperature
+10,6,unit,C
+10,6,brand,Seat
+10,6,model,Leon
+10,6,from_city,S
+10,6,to_city,S
+10,6,condition,Stau
+10,6,experiment_id,experiment_4
+10,7,group_idx,3
+10,7,channel_idx,1
+10,7,channel_name,Vehicle Speed Sensor
+10,7,unit,km/h
+10,7,brand,Seat
+10,7,model,Leon
+10,7,from_city,S
+10,7,to_city,S
+10,7,condition,Stau
+10,7,experiment_id,experiment_4
+10,8,group_idx,3
+10,8,channel_idx,2
+10,8,channel_name,Accelerator Pedal Position D
+10,8,unit,%
+10,8,brand,Seat
+10,8,model,Leon
+10,8,from_city,S
+10,8,to_city,S
+10,8,condition,Stau
+10,8,experiment_id,experiment_4
+10,9,group_idx,4
+10,9,channel_idx,1
+10,9,channel_name,Intake Air Temperature
+10,9,unit,C
+10,9,brand,Seat
+10,9,model,Leon
+10,9,from_city,S
+10,9,to_city,S
+10,9,condition,Stau
+10,9,experiment_id,experiment_4
+10,10,group_idx,4
+10,10,channel_idx,2
+10,10,channel_name,Accelerator Pedal Position E
+10,10,unit,%
+10,10,brand,Seat
+10,10,model,Leon
+10,10,from_city,S
+10,10,to_city,S
+10,10,condition,Stau
+10,10,experiment_id,experiment_4
+11,1,group_idx,0
+11,1,channel_idx,1
+11,1,channel_name,Engine Coolant Temperature
+11,1,unit,C
+11,1,brand,Seat
+11,1,model,Leon
+11,1,from_city,KA
+11,1,to_city,KA
+11,1,condition,Normal
+11,1,experiment_id,experiment_4
+11,2,group_idx,0
+11,2,channel_idx,2
+11,2,channel_name,Accelerator Pedal Position E
+11,2,unit,%
+11,2,brand,Seat
+11,2,model,Leon
+11,2,from_city,KA
+11,2,to_city,KA
+11,2,condition,Normal
+11,2,experiment_id,experiment_4
+11,3,group_idx,1
+11,3,channel_idx,1
+11,3,channel_name,Intake Manifold Absolute Pressure
+11,3,unit,kPa
+11,3,brand,Seat
+11,3,model,Leon
+11,3,from_city,KA
+11,3,to_city,KA
+11,3,condition,Normal
+11,3,experiment_id,experiment_4
+11,4,group_idx,2
+11,4,channel_idx,1
+11,4,channel_name,Engine RPM
+11,4,unit,RPM
+11,4,brand,Seat
+11,4,model,Leon
+11,4,from_city,KA
+11,4,to_city,KA
+11,4,condition,Normal
+11,4,experiment_id,experiment_4
+11,5,group_idx,3
+11,5,channel_idx,1
+11,5,channel_name,Vehicle Speed Sensor
+11,5,unit,km/h
+11,5,brand,Seat
+11,5,model,Leon
+11,5,from_city,KA
+11,5,to_city,KA
+11,5,condition,Normal
+11,5,experiment_id,experiment_4
+11,6,group_idx,4
+11,6,channel_idx,1
+11,6,channel_name,Intake Air Temperature
+11,6,unit,C
+11,6,brand,Seat
+11,6,model,Leon
+11,6,from_city,KA
+11,6,to_city,KA
+11,6,condition,Normal
+11,6,experiment_id,experiment_4
+11,7,group_idx,5
+11,7,channel_idx,1
+11,7,channel_name,Air Flow Rate from Mass Flow Sensor
+11,7,unit,g/s
+11,7,brand,Seat
+11,7,model,Leon
+11,7,from_city,KA
+11,7,to_city,KA
+11,7,condition,Normal
+11,7,experiment_id,experiment_4
+11,8,group_idx,6
+11,8,channel_idx,1
+11,8,channel_name,Absolute Throttle Position
+11,8,unit,%
+11,8,brand,Seat
+11,8,model,Leon
+11,8,from_city,KA
+11,8,to_city,KA
+11,8,condition,Normal
+11,8,experiment_id,experiment_4
+11,9,group_idx,7
+11,9,channel_idx,1
+11,9,channel_name,Ambient Air Temperature
+11,9,unit,C
+11,9,brand,Seat
+11,9,model,Leon
+11,9,from_city,KA
+11,9,to_city,KA
+11,9,condition,Normal
+11,9,experiment_id,experiment_4
+11,10,group_idx,8
+11,10,channel_idx,1
+11,10,channel_name,Accelerator Pedal Position D
+11,10,unit,%
+11,10,brand,Seat
+11,10,model,Leon
+11,10,from_city,KA
+11,10,to_city,KA
+11,10,condition,Normal
+11,10,experiment_id,experiment_4
+12,1,group_idx,0
+12,1,channel_idx,1
+12,1,channel_name,Engine Coolant Temperature
+12,1,unit,C
+12,1,brand,Seat
+12,1,model,Leon
+12,1,from_city,S
+12,1,to_city,RT
+12,1,condition,Normal
+12,1,experiment_id,experiment_4
+12,2,group_idx,0
+12,2,channel_idx,2
+12,2,channel_name,Intake Air Temperature
+12,2,unit,C
+12,2,brand,Seat
+12,2,model,Leon
+12,2,from_city,S
+12,2,to_city,RT
+12,2,condition,Normal
+12,2,experiment_id,experiment_4
+12,3,group_idx,0
+12,3,channel_idx,3
+12,3,channel_name,Accelerator Pedal Position D
+12,3,unit,%
+12,3,brand,Seat
+12,3,model,Leon
+12,3,from_city,S
+12,3,to_city,RT
+12,3,condition,Normal
+12,3,experiment_id,experiment_4
+12,4,group_idx,1
+12,4,channel_idx,1
+12,4,channel_name,Intake Manifold Absolute Pressure
+12,4,unit,kPa
+12,4,brand,Seat
+12,4,model,Leon
+12,4,from_city,S
+12,4,to_city,RT
+12,4,condition,Normal
+12,4,experiment_id,experiment_4
+12,5,group_idx,1
+12,5,channel_idx,2
+12,5,channel_name,Air Flow Rate from Mass Flow Sensor
+12,5,unit,g/s
+12,5,brand,Seat
+12,5,model,Leon
+12,5,from_city,S
+12,5,to_city,RT
+12,5,condition,Normal
+12,5,experiment_id,experiment_4
+12,6,group_idx,1
+12,6,channel_idx,3
+12,6,channel_name,Accelerator Pedal Position E
+12,6,unit,%
+12,6,brand,Seat
+12,6,model,Leon
+12,6,from_city,S
+12,6,to_city,RT
+12,6,condition,Normal
+12,6,experiment_id,experiment_4
+12,7,group_idx,2
+12,7,channel_idx,1
+12,7,channel_name,Engine RPM
+12,7,unit,RPM
+12,7,brand,Seat
+12,7,model,Leon
+12,7,from_city,S
+12,7,to_city,RT
+12,7,condition,Normal
+12,7,experiment_id,experiment_4
+12,8,group_idx,2
+12,8,channel_idx,2
+12,8,channel_name,Absolute Throttle Position
+12,8,unit,%
+12,8,brand,Seat
+12,8,model,Leon
+12,8,from_city,S
+12,8,to_city,RT
+12,8,condition,Normal
+12,8,experiment_id,experiment_4
+12,9,group_idx,3
+12,9,channel_idx,1
+12,9,channel_name,Vehicle Speed Sensor
+12,9,unit,km/h
+12,9,brand,Seat
+12,9,model,Leon
+12,9,from_city,S
+12,9,to_city,RT
+12,9,condition,Normal
+12,9,experiment_id,experiment_4
+12,10,group_idx,3
+12,10,channel_idx,2
+12,10,channel_name,Ambient Air Temperature
+12,10,unit,C
+12,10,brand,Seat
+12,10,model,Leon
+12,10,from_city,S
+12,10,to_city,RT
+12,10,condition,Normal
+12,10,experiment_id,experiment_4
+13,1,group_idx,0
+13,1,channel_idx,1
+13,1,channel_name,Engine Coolant Temperature
+13,1,unit,C
+13,1,brand,Seat
+13,1,model,Leon
+13,1,from_city,RT
+13,1,to_city,RT
+13,1,condition,Frei
+13,1,experiment_id,experiment_4
+13,2,group_idx,0
+13,2,channel_idx,2
+13,2,channel_name,Ambient Air Temperature
+13,2,unit,C
+13,2,brand,Seat
+13,2,model,Leon
+13,2,from_city,RT
+13,2,to_city,RT
+13,2,condition,Frei
+13,2,experiment_id,experiment_4
+13,3,group_idx,1
+13,3,channel_idx,1
+13,3,channel_name,Intake Manifold Absolute Pressure
+13,3,unit,kPa
+13,3,brand,Seat
+13,3,model,Leon
+13,3,from_city,RT
+13,3,to_city,RT
+13,3,condition,Frei
+13,3,experiment_id,experiment_4
+13,4,group_idx,1
+13,4,channel_idx,2
+13,4,channel_name,Accelerator Pedal Position D
+13,4,unit,%
+13,4,brand,Seat
+13,4,model,Leon
+13,4,from_city,RT
+13,4,to_city,RT
+13,4,condition,Frei
+13,4,experiment_id,experiment_4
+13,5,group_idx,2
+13,5,channel_idx,1
+13,5,channel_name,Engine RPM
+13,5,unit,RPM
+13,5,brand,Seat
+13,5,model,Leon
+13,5,from_city,RT
+13,5,to_city,RT
+13,5,condition,Frei
+13,5,experiment_id,experiment_4
+13,6,group_idx,2
+13,6,channel_idx,2
+13,6,channel_name,Accelerator Pedal Position E
+13,6,unit,%
+13,6,brand,Seat
+13,6,model,Leon
+13,6,from_city,RT
+13,6,to_city,RT
+13,6,condition,Frei
+13,6,experiment_id,experiment_4
+13,7,group_idx,3
+13,7,channel_idx,1
+13,7,channel_name,Vehicle Speed Sensor
+13,7,unit,km/h
+13,7,brand,Seat
+13,7,model,Leon
+13,7,from_city,RT
+13,7,to_city,RT
+13,7,condition,Frei
+13,7,experiment_id,experiment_4
+13,8,group_idx,4
+13,8,channel_idx,1
+13,8,channel_name,Intake Air Temperature
+13,8,unit,C
+13,8,brand,Seat
+13,8,model,Leon
+13,8,from_city,RT
+13,8,to_city,RT
+13,8,condition,Frei
+13,8,experiment_id,experiment_4
+13,9,group_idx,5
+13,9,channel_idx,1
+13,9,channel_name,Air Flow Rate from Mass Flow Sensor
+13,9,unit,g/s
+13,9,brand,Seat
+13,9,model,Leon
+13,9,from_city,RT
+13,9,to_city,RT
+13,9,condition,Frei
+13,9,experiment_id,experiment_4
+13,10,group_idx,6
+13,10,channel_idx,1
+13,10,channel_name,Absolute Throttle Position
+13,10,unit,%
+13,10,brand,Seat
+13,10,model,Leon
+13,10,from_city,RT
+13,10,to_city,RT
+13,10,condition,Frei
+13,10,experiment_id,experiment_4
+14,1,group_idx,0
+14,1,channel_idx,1
+14,1,channel_name,Engine Coolant Temperature
+14,1,unit,C
+14,1,brand,Seat
+14,1,model,Leon
+14,1,from_city,KA
+14,1,to_city,KA
+14,1,condition,Frei
+14,1,experiment_id,experiment_4
+14,2,group_idx,0
+14,2,channel_idx,2
+14,2,channel_name,Engine RPM
+14,2,unit,RPM
+14,2,brand,Seat
+14,2,model,Leon
+14,2,from_city,KA
+14,2,to_city,KA
+14,2,condition,Frei
+14,2,experiment_id,experiment_4
+14,3,group_idx,0
+14,3,channel_idx,3
+14,3,channel_name,Intake Air Temperature
+14,3,unit,C
+14,3,brand,Seat
+14,3,model,Leon
+14,3,from_city,KA
+14,3,to_city,KA
+14,3,condition,Frei
+14,3,experiment_id,experiment_4
+14,4,group_idx,0
+14,4,channel_idx,4
+14,4,channel_name,Absolute Throttle Position
+14,4,unit,%
+14,4,brand,Seat
+14,4,model,Leon
+14,4,from_city,KA
+14,4,to_city,KA
+14,4,condition,Frei
+14,4,experiment_id,experiment_4
+14,5,group_idx,0
+14,5,channel_idx,5
+14,5,channel_name,Accelerator Pedal Position D
+14,5,unit,%
+14,5,brand,Seat
+14,5,model,Leon
+14,5,from_city,KA
+14,5,to_city,KA
+14,5,condition,Frei
+14,5,experiment_id,experiment_4
+14,6,group_idx,1
+14,6,channel_idx,1
+14,6,channel_name,Intake Manifold Absolute Pressure
+14,6,unit,kPa
+14,6,brand,Seat
+14,6,model,Leon
+14,6,from_city,KA
+14,6,to_city,KA
+14,6,condition,Frei
+14,6,experiment_id,experiment_4
+14,7,group_idx,1
+14,7,channel_idx,2
+14,7,channel_name,Vehicle Speed Sensor
+14,7,unit,km/h
+14,7,brand,Seat
+14,7,model,Leon
+14,7,from_city,KA
+14,7,to_city,KA
+14,7,condition,Frei
+14,7,experiment_id,experiment_4
+14,8,group_idx,1
+14,8,channel_idx,3
+14,8,channel_name,Air Flow Rate from Mass Flow Sensor
+14,8,unit,g/s
+14,8,brand,Seat
+14,8,model,Leon
+14,8,from_city,KA
+14,8,to_city,KA
+14,8,condition,Frei
+14,8,experiment_id,experiment_4
+14,9,group_idx,1
+14,9,channel_idx,4
+14,9,channel_name,Ambient Air Temperature
+14,9,unit,C
+14,9,brand,Seat
+14,9,model,Leon
+14,9,from_city,KA
+14,9,to_city,KA
+14,9,condition,Frei
+14,9,experiment_id,experiment_4
+14,10,group_idx,1
+14,10,channel_idx,5
+14,10,channel_name,Accelerator Pedal Position E
+14,10,unit,%
+14,10,brand,Seat
+14,10,model,Leon
+14,10,from_city,KA
+14,10,to_city,KA
+14,10,condition,Frei
+14,10,experiment_id,experiment_4
+15,1,group_idx,0
+15,1,channel_idx,1
+15,1,channel_name,Engine Coolant Temperature
+15,1,unit,C
+15,1,brand,Seat
+15,1,model,Leon
+15,1,from_city,RT
+15,1,to_city,RT
+15,1,condition,Frei
+15,1,experiment_id,experiment_4
+15,2,group_idx,0
+15,2,channel_idx,2
+15,2,channel_name,Intake Manifold Absolute Pressure
+15,2,unit,kPa
+15,2,brand,Seat
+15,2,model,Leon
+15,2,from_city,RT
+15,2,to_city,RT
+15,2,condition,Frei
+15,2,experiment_id,experiment_4
+15,3,group_idx,0
+15,3,channel_idx,3
+15,3,channel_name,Engine RPM
+15,3,unit,RPM
+15,3,brand,Seat
+15,3,model,Leon
+15,3,from_city,RT
+15,3,to_city,RT
+15,3,condition,Frei
+15,3,experiment_id,experiment_4
+15,4,group_idx,0
+15,4,channel_idx,4
+15,4,channel_name,Vehicle Speed Sensor
+15,4,unit,km/h
+15,4,brand,Seat
+15,4,model,Leon
+15,4,from_city,RT
+15,4,to_city,RT
+15,4,condition,Frei
+15,4,experiment_id,experiment_4
+15,5,group_idx,0
+15,5,channel_idx,5
+15,5,channel_name,Intake Air Temperature
+15,5,unit,C
+15,5,brand,Seat
+15,5,model,Leon
+15,5,from_city,RT
+15,5,to_city,RT
+15,5,condition,Frei
+15,5,experiment_id,experiment_4
+15,6,group_idx,0
+15,6,channel_idx,6
+15,6,channel_name,Air Flow Rate from Mass Flow Sensor
+15,6,unit,g/s
+15,6,brand,Seat
+15,6,model,Leon
+15,6,from_city,RT
+15,6,to_city,RT
+15,6,condition,Frei
+15,6,experiment_id,experiment_4
+15,7,group_idx,0
+15,7,channel_idx,7
+15,7,channel_name,Absolute Throttle Position
+15,7,unit,%
+15,7,brand,Seat
+15,7,model,Leon
+15,7,from_city,RT
+15,7,to_city,RT
+15,7,condition,Frei
+15,7,experiment_id,experiment_4
+15,8,group_idx,0
+15,8,channel_idx,8
+15,8,channel_name,Ambient Air Temperature
+15,8,unit,C
+15,8,brand,Seat
+15,8,model,Leon
+15,8,from_city,RT
+15,8,to_city,RT
+15,8,condition,Frei
+15,8,experiment_id,experiment_4
+15,9,group_idx,0
+15,9,channel_idx,9
+15,9,channel_name,Accelerator Pedal Position D
+15,9,unit,%
+15,9,brand,Seat
+15,9,model,Leon
+15,9,from_city,RT
+15,9,to_city,RT
+15,9,condition,Frei
+15,9,experiment_id,experiment_4
+15,10,group_idx,0
+15,10,channel_idx,10
+15,10,channel_name,Accelerator Pedal Position E
+15,10,unit,%
+15,10,brand,Seat
+15,10,model,Leon
+15,10,from_city,RT
+15,10,to_city,RT
+15,10,condition,Frei
+15,10,experiment_id,experiment_4
+16,1,group_idx,0
+16,1,channel_idx,1
+16,1,channel_name,Engine Coolant Temperature
+16,1,unit,C
+16,1,brand,Seat
+16,1,model,Leon
+16,1,from_city,RT
+16,1,to_city,KA
+16,1,condition,Normal
+16,1,experiment_id,experiment_2
+16,2,group_idx,0
+16,2,channel_idx,2
+16,2,channel_name,Accelerator Pedal Position E
+16,2,unit,%
+16,2,brand,Seat
+16,2,model,Leon
+16,2,from_city,RT
+16,2,to_city,KA
+16,2,condition,Normal
+16,2,experiment_id,experiment_2
+16,3,group_idx,1
+16,3,channel_idx,1
+16,3,channel_name,Intake Manifold Absolute Pressure
+16,3,unit,kPa
+16,3,brand,Seat
+16,3,model,Leon
+16,3,from_city,RT
+16,3,to_city,KA
+16,3,condition,Normal
+16,3,experiment_id,experiment_2
+16,4,group_idx,2
+16,4,channel_idx,1
+16,4,channel_name,Engine RPM
+16,4,unit,RPM
+16,4,brand,Seat
+16,4,model,Leon
+16,4,from_city,RT
+16,4,to_city,KA
+16,4,condition,Normal
+16,4,experiment_id,experiment_2
+16,5,group_idx,3
+16,5,channel_idx,1
+16,5,channel_name,Vehicle Speed Sensor
+16,5,unit,km/h
+16,5,brand,Seat
+16,5,model,Leon
+16,5,from_city,RT
+16,5,to_city,KA
+16,5,condition,Normal
+16,5,experiment_id,experiment_2
+16,6,group_idx,4
+16,6,channel_idx,1
+16,6,channel_name,Intake Air Temperature
+16,6,unit,C
+16,6,brand,Seat
+16,6,model,Leon
+16,6,from_city,RT
+16,6,to_city,KA
+16,6,condition,Normal
+16,6,experiment_id,experiment_2
+16,7,group_idx,5
+16,7,channel_idx,1
+16,7,channel_name,Air Flow Rate from Mass Flow Sensor
+16,7,unit,g/s
+16,7,brand,Seat
+16,7,model,Leon
+16,7,from_city,RT
+16,7,to_city,KA
+16,7,condition,Normal
+16,7,experiment_id,experiment_2
+16,8,group_idx,6
+16,8,channel_idx,1
+16,8,channel_name,Absolute Throttle Position
+16,8,unit,%
+16,8,brand,Seat
+16,8,model,Leon
+16,8,from_city,RT
+16,8,to_city,KA
+16,8,condition,Normal
+16,8,experiment_id,experiment_2
+16,9,group_idx,7
+16,9,channel_idx,1
+16,9,channel_name,Ambient Air Temperature
+16,9,unit,C
+16,9,brand,Seat
+16,9,model,Leon
+16,9,from_city,RT
+16,9,to_city,KA
+16,9,condition,Normal
+16,9,experiment_id,experiment_2
+16,10,group_idx,8
+16,10,channel_idx,1
+16,10,channel_name,Accelerator Pedal Position D
+16,10,unit,%
+16,10,brand,Seat
+16,10,model,Leon
+16,10,from_city,RT
+16,10,to_city,KA
+16,10,condition,Normal
+16,10,experiment_id,experiment_2
+17,1,group_idx,0
+17,1,channel_idx,1
+17,1,channel_name,Engine Coolant Temperature
+17,1,unit,C
+17,1,brand,Seat
+17,1,model,Leon
+17,1,from_city,RT
+17,1,to_city,KA
+17,1,condition,Normal
+17,1,experiment_id,experiment_2
+17,2,group_idx,0
+17,2,channel_idx,2
+17,2,channel_name,Ambient Air Temperature
+17,2,unit,C
+17,2,brand,Seat
+17,2,model,Leon
+17,2,from_city,RT
+17,2,to_city,KA
+17,2,condition,Normal
+17,2,experiment_id,experiment_2
+17,3,group_idx,1
+17,3,channel_idx,1
+17,3,channel_name,Intake Manifold Absolute Pressure
+17,3,unit,kPa
+17,3,brand,Seat
+17,3,model,Leon
+17,3,from_city,RT
+17,3,to_city,KA
+17,3,condition,Normal
+17,3,experiment_id,experiment_2
+17,4,group_idx,1
+17,4,channel_idx,2
+17,4,channel_name,Accelerator Pedal Position D
+17,4,unit,%
+17,4,brand,Seat
+17,4,model,Leon
+17,4,from_city,RT
+17,4,to_city,KA
+17,4,condition,Normal
+17,4,experiment_id,experiment_2
+17,5,group_idx,2
+17,5,channel_idx,1
+17,5,channel_name,Engine RPM
+17,5,unit,RPM
+17,5,brand,Seat
+17,5,model,Leon
+17,5,from_city,RT
+17,5,to_city,KA
+17,5,condition,Normal
+17,5,experiment_id,experiment_2
+17,6,group_idx,2
+17,6,channel_idx,2
+17,6,channel_name,Accelerator Pedal Position E
+17,6,unit,%
+17,6,brand,Seat
+17,6,model,Leon
+17,6,from_city,RT
+17,6,to_city,KA
+17,6,condition,Normal
+17,6,experiment_id,experiment_2
+17,7,group_idx,3
+17,7,channel_idx,1
+17,7,channel_name,Vehicle Speed Sensor
+17,7,unit,km/h
+17,7,brand,Seat
+17,7,model,Leon
+17,7,from_city,RT
+17,7,to_city,KA
+17,7,condition,Normal
+17,7,experiment_id,experiment_2
+17,8,group_idx,4
+17,8,channel_idx,1
+17,8,channel_name,Intake Air Temperature
+17,8,unit,C
+17,8,brand,Seat
+17,8,model,Leon
+17,8,from_city,RT
+17,8,to_city,KA
+17,8,condition,Normal
+17,8,experiment_id,experiment_2
+17,9,group_idx,5
+17,9,channel_idx,1
+17,9,channel_name,Air Flow Rate from Mass Flow Sensor
+17,9,unit,g/s
+17,9,brand,Seat
+17,9,model,Leon
+17,9,from_city,RT
+17,9,to_city,KA
+17,9,condition,Normal
+17,9,experiment_id,experiment_2
+17,10,group_idx,6
+17,10,channel_idx,1
+17,10,channel_name,Absolute Throttle Position
+17,10,unit,%
+17,10,brand,Seat
+17,10,model,Leon
+17,10,from_city,RT
+17,10,to_city,KA
+17,10,condition,Normal
+17,10,experiment_id,experiment_2
+18,1,group_idx,0
+18,1,channel_idx,1
+18,1,channel_name,Engine Coolant Temperature
+18,1,unit,C
+18,1,brand,Seat
+18,1,model,Leon
+18,1,from_city,KA
+18,1,to_city,RT
+18,1,condition,Stau
+18,1,experiment_id,experiment_2
+18,2,group_idx,0
+18,2,channel_idx,2
+18,2,channel_name,Vehicle Speed Sensor
+18,2,unit,km/h
+18,2,brand,Seat
+18,2,model,Leon
+18,2,from_city,KA
+18,2,to_city,RT
+18,2,condition,Stau
+18,2,experiment_id,experiment_2
+18,3,group_idx,0
+18,3,channel_idx,3
+18,3,channel_name,Absolute Throttle Position
+18,3,unit,%
+18,3,brand,Seat
+18,3,model,Leon
+18,3,from_city,KA
+18,3,to_city,RT
+18,3,condition,Stau
+18,3,experiment_id,experiment_2
+18,4,group_idx,0
+18,4,channel_idx,4
+18,4,channel_name,Accelerator Pedal Position E
+18,4,unit,%
+18,4,brand,Seat
+18,4,model,Leon
+18,4,from_city,KA
+18,4,to_city,RT
+18,4,condition,Stau
+18,4,experiment_id,experiment_2
+18,5,group_idx,1
+18,5,channel_idx,1
+18,5,channel_name,Intake Manifold Absolute Pressure
+18,5,unit,kPa
+18,5,brand,Seat
+18,5,model,Leon
+18,5,from_city,KA
+18,5,to_city,RT
+18,5,condition,Stau
+18,5,experiment_id,experiment_2
+18,6,group_idx,1
+18,6,channel_idx,2
+18,6,channel_name,Intake Air Temperature
+18,6,unit,C
+18,6,brand,Seat
+18,6,model,Leon
+18,6,from_city,KA
+18,6,to_city,RT
+18,6,condition,Stau
+18,6,experiment_id,experiment_2
+18,7,group_idx,1
+18,7,channel_idx,3
+18,7,channel_name,Ambient Air Temperature
+18,7,unit,C
+18,7,brand,Seat
+18,7,model,Leon
+18,7,from_city,KA
+18,7,to_city,RT
+18,7,condition,Stau
+18,7,experiment_id,experiment_2
+18,8,group_idx,2
+18,8,channel_idx,1
+18,8,channel_name,Engine RPM
+18,8,unit,RPM
+18,8,brand,Seat
+18,8,model,Leon
+18,8,from_city,KA
+18,8,to_city,RT
+18,8,condition,Stau
+18,8,experiment_id,experiment_2
+18,9,group_idx,2
+18,9,channel_idx,2
+18,9,channel_name,Air Flow Rate from Mass Flow Sensor
+18,9,unit,g/s
+18,9,brand,Seat
+18,9,model,Leon
+18,9,from_city,KA
+18,9,to_city,RT
+18,9,condition,Stau
+18,9,experiment_id,experiment_2
+18,10,group_idx,2
+18,10,channel_idx,3
+18,10,channel_name,Accelerator Pedal Position D
+18,10,unit,%
+18,10,brand,Seat
+18,10,model,Leon
+18,10,from_city,KA
+18,10,to_city,RT
+18,10,condition,Stau
+18,10,experiment_id,experiment_2
+19,1,group_idx,0
+19,1,channel_idx,1
+19,1,channel_name,Engine Coolant Temperature
+19,1,unit,C
+19,1,brand,Seat
+19,1,model,Leon
+19,1,from_city,RT
+19,1,to_city,S
+19,1,condition,Stau
+19,1,experiment_id,experiment_2
+19,2,group_idx,0
+19,2,channel_idx,2
+19,2,channel_name,Accelerator Pedal Position D
+19,2,unit,%
+19,2,brand,Seat
+19,2,model,Leon
+19,2,from_city,RT
+19,2,to_city,S
+19,2,condition,Stau
+19,2,experiment_id,experiment_2
+19,3,group_idx,1
+19,3,channel_idx,1
+19,3,channel_name,Intake Manifold Absolute Pressure
+19,3,unit,kPa
+19,3,brand,Seat
+19,3,model,Leon
+19,3,from_city,RT
+19,3,to_city,S
+19,3,condition,Stau
+19,3,experiment_id,experiment_2
+19,4,group_idx,1
+19,4,channel_idx,2
+19,4,channel_name,Accelerator Pedal Position E
+19,4,unit,%
+19,4,brand,Seat
+19,4,model,Leon
+19,4,from_city,RT
+19,4,to_city,S
+19,4,condition,Stau
+19,4,experiment_id,experiment_2
+19,5,group_idx,2
+19,5,channel_idx,1
+19,5,channel_name,Engine RPM
+19,5,unit,RPM
+19,5,brand,Seat
+19,5,model,Leon
+19,5,from_city,RT
+19,5,to_city,S
+19,5,condition,Stau
+19,5,experiment_id,experiment_2
+19,6,group_idx,3
+19,6,channel_idx,1
+19,6,channel_name,Vehicle Speed Sensor
+19,6,unit,km/h
+19,6,brand,Seat
+19,6,model,Leon
+19,6,from_city,RT
+19,6,to_city,S
+19,6,condition,Stau
+19,6,experiment_id,experiment_2
+19,7,group_idx,4
+19,7,channel_idx,1
+19,7,channel_name,Intake Air Temperature
+19,7,unit,C
+19,7,brand,Seat
+19,7,model,Leon
+19,7,from_city,RT
+19,7,to_city,S
+19,7,condition,Stau
+19,7,experiment_id,experiment_2
+19,8,group_idx,5
+19,8,channel_idx,1
+19,8,channel_name,Air Flow Rate from Mass Flow Sensor
+19,8,unit,g/s
+19,8,brand,Seat
+19,8,model,Leon
+19,8,from_city,RT
+19,8,to_city,S
+19,8,condition,Stau
+19,8,experiment_id,experiment_2
+19,9,group_idx,6
+19,9,channel_idx,1
+19,9,channel_name,Absolute Throttle Position
+19,9,unit,%
+19,9,brand,Seat
+19,9,model,Leon
+19,9,from_city,RT
+19,9,to_city,S
+19,9,condition,Stau
+19,9,experiment_id,experiment_2
+19,10,group_idx,7
+19,10,channel_idx,1
+19,10,channel_name,Ambient Air Temperature
+19,10,unit,C
+19,10,brand,Seat
+19,10,model,Leon
+19,10,from_city,RT
+19,10,to_city,S
+19,10,condition,Stau
+19,10,experiment_id,experiment_2
+20,1,group_idx,0
+20,1,channel_idx,1
+20,1,channel_name,Engine Coolant Temperature
+20,1,unit,C
+20,1,brand,Seat
+20,1,model,Leon
+20,1,from_city,KA
+20,1,to_city,RT
+20,1,condition,Normal
+20,1,experiment_id,experiment_2
+20,2,group_idx,0
+20,2,channel_idx,2
+20,2,channel_name,Ambient Air Temperature
+20,2,unit,C
+20,2,brand,Seat
+20,2,model,Leon
+20,2,from_city,KA
+20,2,to_city,RT
+20,2,condition,Normal
+20,2,experiment_id,experiment_2
+20,3,group_idx,1
+20,3,channel_idx,1
+20,3,channel_name,Intake Manifold Absolute Pressure
+20,3,unit,kPa
+20,3,brand,Seat
+20,3,model,Leon
+20,3,from_city,KA
+20,3,to_city,RT
+20,3,condition,Normal
+20,3,experiment_id,experiment_2
+20,4,group_idx,1
+20,4,channel_idx,2
+20,4,channel_name,Accelerator Pedal Position D
+20,4,unit,%
+20,4,brand,Seat
+20,4,model,Leon
+20,4,from_city,KA
+20,4,to_city,RT
+20,4,condition,Normal
+20,4,experiment_id,experiment_2
+20,5,group_idx,2
+20,5,channel_idx,1
+20,5,channel_name,Engine RPM
+20,5,unit,RPM
+20,5,brand,Seat
+20,5,model,Leon
+20,5,from_city,KA
+20,5,to_city,RT
+20,5,condition,Normal
+20,5,experiment_id,experiment_2
+20,6,group_idx,2
+20,6,channel_idx,2
+20,6,channel_name,Accelerator Pedal Position E
+20,6,unit,%
+20,6,brand,Seat
+20,6,model,Leon
+20,6,from_city,KA
+20,6,to_city,RT
+20,6,condition,Normal
+20,6,experiment_id,experiment_2
+20,7,group_idx,3
+20,7,channel_idx,1
+20,7,channel_name,Vehicle Speed Sensor
+20,7,unit,km/h
+20,7,brand,Seat
+20,7,model,Leon
+20,7,from_city,KA
+20,7,to_city,RT
+20,7,condition,Normal
+20,7,experiment_id,experiment_2
+20,8,group_idx,4
+20,8,channel_idx,1
+20,8,channel_name,Intake Air Temperature
+20,8,unit,C
+20,8,brand,Seat
+20,8,model,Leon
+20,8,from_city,KA
+20,8,to_city,RT
+20,8,condition,Normal
+20,8,experiment_id,experiment_2
+20,9,group_idx,5
+20,9,channel_idx,1
+20,9,channel_name,Air Flow Rate from Mass Flow Sensor
+20,9,unit,g/s
+20,9,brand,Seat
+20,9,model,Leon
+20,9,from_city,KA
+20,9,to_city,RT
+20,9,condition,Normal
+20,9,experiment_id,experiment_2
+20,10,group_idx,6
+20,10,channel_idx,1
+20,10,channel_name,Absolute Throttle Position
+20,10,unit,%
+20,10,brand,Seat
+20,10,model,Leon
+20,10,from_city,KA
+20,10,to_city,RT
+20,10,condition,Normal
+20,10,experiment_id,experiment_2
+21,1,group_idx,0
+21,1,channel_idx,1
+21,1,channel_name,Engine Coolant Temperature
+21,1,unit,C
+21,1,brand,Seat
+21,1,model,Leon
+21,1,from_city,KA
+21,1,to_city,RT
+21,1,condition,Normal
+21,1,experiment_id,experiment_2
+21,2,group_idx,0
+21,2,channel_idx,2
+21,2,channel_name,Engine RPM
+21,2,unit,RPM
+21,2,brand,Seat
+21,2,model,Leon
+21,2,from_city,KA
+21,2,to_city,RT
+21,2,condition,Normal
+21,2,experiment_id,experiment_2
+21,3,group_idx,0
+21,3,channel_idx,3
+21,3,channel_name,Intake Air Temperature
+21,3,unit,C
+21,3,brand,Seat
+21,3,model,Leon
+21,3,from_city,KA
+21,3,to_city,RT
+21,3,condition,Normal
+21,3,experiment_id,experiment_2
+21,4,group_idx,0
+21,4,channel_idx,4
+21,4,channel_name,Absolute Throttle Position
+21,4,unit,%
+21,4,brand,Seat
+21,4,model,Leon
+21,4,from_city,KA
+21,4,to_city,RT
+21,4,condition,Normal
+21,4,experiment_id,experiment_2
+21,5,group_idx,0
+21,5,channel_idx,5
+21,5,channel_name,Accelerator Pedal Position D
+21,5,unit,%
+21,5,brand,Seat
+21,5,model,Leon
+21,5,from_city,KA
+21,5,to_city,RT
+21,5,condition,Normal
+21,5,experiment_id,experiment_2
+21,6,group_idx,1
+21,6,channel_idx,1
+21,6,channel_name,Intake Manifold Absolute Pressure
+21,6,unit,kPa
+21,6,brand,Seat
+21,6,model,Leon
+21,6,from_city,KA
+21,6,to_city,RT
+21,6,condition,Normal
+21,6,experiment_id,experiment_2
+21,7,group_idx,1
+21,7,channel_idx,2
+21,7,channel_name,Vehicle Speed Sensor
+21,7,unit,km/h
+21,7,brand,Seat
+21,7,model,Leon
+21,7,from_city,KA
+21,7,to_city,RT
+21,7,condition,Normal
+21,7,experiment_id,experiment_2
+21,8,group_idx,1
+21,8,channel_idx,3
+21,8,channel_name,Air Flow Rate from Mass Flow Sensor
+21,8,unit,g/s
+21,8,brand,Seat
+21,8,model,Leon
+21,8,from_city,KA
+21,8,to_city,RT
+21,8,condition,Normal
+21,8,experiment_id,experiment_2
+21,9,group_idx,1
+21,9,channel_idx,4
+21,9,channel_name,Ambient Air Temperature
+21,9,unit,C
+21,9,brand,Seat
+21,9,model,Leon
+21,9,from_city,KA
+21,9,to_city,RT
+21,9,condition,Normal
+21,9,experiment_id,experiment_2
+21,10,group_idx,1
+21,10,channel_idx,5
+21,10,channel_name,Accelerator Pedal Position E
+21,10,unit,%
+21,10,brand,Seat
+21,10,model,Leon
+21,10,from_city,KA
+21,10,to_city,RT
+21,10,condition,Normal
+21,10,experiment_id,experiment_2
+22,1,group_idx,0
+22,1,channel_idx,1
+22,1,channel_name,Engine Coolant Temperature
+22,1,unit,C
+22,1,brand,Seat
+22,1,model,Leon
+22,1,from_city,S
+22,1,to_city,RT
+22,1,condition,Normal
+22,1,experiment_id,experiment_2
+22,2,group_idx,0
+22,2,channel_idx,2
+22,2,channel_name,Ambient Air Temperature
+22,2,unit,C
+22,2,brand,Seat
+22,2,model,Leon
+22,2,from_city,S
+22,2,to_city,RT
+22,2,condition,Normal
+22,2,experiment_id,experiment_2
+22,3,group_idx,1
+22,3,channel_idx,1
+22,3,channel_name,Intake Manifold Absolute Pressure
+22,3,unit,kPa
+22,3,brand,Seat
+22,3,model,Leon
+22,3,from_city,S
+22,3,to_city,RT
+22,3,condition,Normal
+22,3,experiment_id,experiment_2
+22,4,group_idx,1
+22,4,channel_idx,2
+22,4,channel_name,Accelerator Pedal Position D
+22,4,unit,%
+22,4,brand,Seat
+22,4,model,Leon
+22,4,from_city,S
+22,4,to_city,RT
+22,4,condition,Normal
+22,4,experiment_id,experiment_2
+22,5,group_idx,2
+22,5,channel_idx,1
+22,5,channel_name,Engine RPM
+22,5,unit,RPM
+22,5,brand,Seat
+22,5,model,Leon
+22,5,from_city,S
+22,5,to_city,RT
+22,5,condition,Normal
+22,5,experiment_id,experiment_2
+22,6,group_idx,2
+22,6,channel_idx,2
+22,6,channel_name,Accelerator Pedal Position E
+22,6,unit,%
+22,6,brand,Seat
+22,6,model,Leon
+22,6,from_city,S
+22,6,to_city,RT
+22,6,condition,Normal
+22,6,experiment_id,experiment_2
+22,7,group_idx,3
+22,7,channel_idx,1
+22,7,channel_name,Vehicle Speed Sensor
+22,7,unit,km/h
+22,7,brand,Seat
+22,7,model,Leon
+22,7,from_city,S
+22,7,to_city,RT
+22,7,condition,Normal
+22,7,experiment_id,experiment_2
+22,8,group_idx,4
+22,8,channel_idx,1
+22,8,channel_name,Intake Air Temperature
+22,8,unit,C
+22,8,brand,Seat
+22,8,model,Leon
+22,8,from_city,S
+22,8,to_city,RT
+22,8,condition,Normal
+22,8,experiment_id,experiment_2
+22,9,group_idx,5
+22,9,channel_idx,1
+22,9,channel_name,Air Flow Rate from Mass Flow Sensor
+22,9,unit,g/s
+22,9,brand,Seat
+22,9,model,Leon
+22,9,from_city,S
+22,9,to_city,RT
+22,9,condition,Normal
+22,9,experiment_id,experiment_2
+22,10,group_idx,6
+22,10,channel_idx,1
+22,10,channel_name,Absolute Throttle Position
+22,10,unit,%
+22,10,brand,Seat
+22,10,model,Leon
+22,10,from_city,S
+22,10,to_city,RT
+22,10,condition,Normal
+22,10,experiment_id,experiment_2
+23,1,group_idx,0
+23,1,channel_idx,1
+23,1,channel_name,Engine Coolant Temperature
+23,1,unit,C
+23,1,brand,Seat
+23,1,model,Leon
+23,1,from_city,RT
+23,1,to_city,S
+23,1,condition,Normal
+23,1,experiment_id,experiment_2
+23,2,group_idx,0
+23,2,channel_idx,2
+23,2,channel_name,Intake Air Temperature
+23,2,unit,C
+23,2,brand,Seat
+23,2,model,Leon
+23,2,from_city,RT
+23,2,to_city,S
+23,2,condition,Normal
+23,2,experiment_id,experiment_2
+23,3,group_idx,0
+23,3,channel_idx,3
+23,3,channel_name,Accelerator Pedal Position D
+23,3,unit,%
+23,3,brand,Seat
+23,3,model,Leon
+23,3,from_city,RT
+23,3,to_city,S
+23,3,condition,Normal
+23,3,experiment_id,experiment_2
+23,4,group_idx,1
+23,4,channel_idx,1
+23,4,channel_name,Intake Manifold Absolute Pressure
+23,4,unit,kPa
+23,4,brand,Seat
+23,4,model,Leon
+23,4,from_city,RT
+23,4,to_city,S
+23,4,condition,Normal
+23,4,experiment_id,experiment_2
+23,5,group_idx,1
+23,5,channel_idx,2
+23,5,channel_name,Air Flow Rate from Mass Flow Sensor
+23,5,unit,g/s
+23,5,brand,Seat
+23,5,model,Leon
+23,5,from_city,RT
+23,5,to_city,S
+23,5,condition,Normal
+23,5,experiment_id,experiment_2
+23,6,group_idx,1
+23,6,channel_idx,3
+23,6,channel_name,Accelerator Pedal Position E
+23,6,unit,%
+23,6,brand,Seat
+23,6,model,Leon
+23,6,from_city,RT
+23,6,to_city,S
+23,6,condition,Normal
+23,6,experiment_id,experiment_2
+23,7,group_idx,2
+23,7,channel_idx,1
+23,7,channel_name,Engine RPM
+23,7,unit,RPM
+23,7,brand,Seat
+23,7,model,Leon
+23,7,from_city,RT
+23,7,to_city,S
+23,7,condition,Normal
+23,7,experiment_id,experiment_2
+23,8,group_idx,2
+23,8,channel_idx,2
+23,8,channel_name,Absolute Throttle Position
+23,8,unit,%
+23,8,brand,Seat
+23,8,model,Leon
+23,8,from_city,RT
+23,8,to_city,S
+23,8,condition,Normal
+23,8,experiment_id,experiment_2
+23,9,group_idx,3
+23,9,channel_idx,1
+23,9,channel_name,Vehicle Speed Sensor
+23,9,unit,km/h
+23,9,brand,Seat
+23,9,model,Leon
+23,9,from_city,RT
+23,9,to_city,S
+23,9,condition,Normal
+23,9,experiment_id,experiment_2
+23,10,group_idx,3
+23,10,channel_idx,2
+23,10,channel_name,Ambient Air Temperature
+23,10,unit,C
+23,10,brand,Seat
+23,10,model,Leon
+23,10,from_city,RT
+23,10,to_city,S
+23,10,condition,Normal
+23,10,experiment_id,experiment_2
+24,1,group_idx,0
+24,1,channel_idx,1
+24,1,channel_name,Engine Coolant Temperature
+24,1,unit,C
+24,1,brand,Seat
+24,1,model,Leon
+24,1,from_city,S
+24,1,to_city,CW
+24,1,condition,Normal
+24,1,experiment_id,experiment_2
+24,2,group_idx,0
+24,2,channel_idx,2
+24,2,channel_name,Air Flow Rate from Mass Flow Sensor
+24,2,unit,g/s
+24,2,brand,Seat
+24,2,model,Leon
+24,2,from_city,S
+24,2,to_city,CW
+24,2,condition,Normal
+24,2,experiment_id,experiment_2
+24,3,group_idx,1
+24,3,channel_idx,1
+24,3,channel_name,Intake Manifold Absolute Pressure
+24,3,unit,kPa
+24,3,brand,Seat
+24,3,model,Leon
+24,3,from_city,S
+24,3,to_city,CW
+24,3,condition,Normal
+24,3,experiment_id,experiment_2
+24,4,group_idx,1
+24,4,channel_idx,2
+24,4,channel_name,Absolute Throttle Position
+24,4,unit,%
+24,4,brand,Seat
+24,4,model,Leon
+24,4,from_city,S
+24,4,to_city,CW
+24,4,condition,Normal
+24,4,experiment_id,experiment_2
+24,5,group_idx,2
+24,5,channel_idx,1
+24,5,channel_name,Engine RPM
+24,5,unit,RPM
+24,5,brand,Seat
+24,5,model,Leon
+24,5,from_city,S
+24,5,to_city,CW
+24,5,condition,Normal
+24,5,experiment_id,experiment_2
+24,6,group_idx,2
+24,6,channel_idx,2
+24,6,channel_name,Ambient Air Temperature
+24,6,unit,C
+24,6,brand,Seat
+24,6,model,Leon
+24,6,from_city,S
+24,6,to_city,CW
+24,6,condition,Normal
+24,6,experiment_id,experiment_2
+24,7,group_idx,3
+24,7,channel_idx,1
+24,7,channel_name,Vehicle Speed Sensor
+24,7,unit,km/h
+24,7,brand,Seat
+24,7,model,Leon
+24,7,from_city,S
+24,7,to_city,CW
+24,7,condition,Normal
+24,7,experiment_id,experiment_2
+24,8,group_idx,3
+24,8,channel_idx,2
+24,8,channel_name,Accelerator Pedal Position D
+24,8,unit,%
+24,8,brand,Seat
+24,8,model,Leon
+24,8,from_city,S
+24,8,to_city,CW
+24,8,condition,Normal
+24,8,experiment_id,experiment_2
+24,9,group_idx,4
+24,9,channel_idx,1
+24,9,channel_name,Intake Air Temperature
+24,9,unit,C
+24,9,brand,Seat
+24,9,model,Leon
+24,9,from_city,S
+24,9,to_city,CW
+24,9,condition,Normal
+24,9,experiment_id,experiment_2
+24,10,group_idx,4
+24,10,channel_idx,2
+24,10,channel_name,Accelerator Pedal Position E
+24,10,unit,%
+24,10,brand,Seat
+24,10,model,Leon
+24,10,from_city,S
+24,10,to_city,CW
+24,10,condition,Normal
+24,10,experiment_id,experiment_2
+25,1,group_idx,0
+25,1,channel_idx,1
+25,1,channel_name,Engine Coolant Temperature
+25,1,unit,C
+25,1,brand,Seat
+25,1,model,Leon
+25,1,from_city,S
+25,1,to_city,KA
+25,1,condition,Normal
+25,1,experiment_id,experiment_2
+25,2,group_idx,0
+25,2,channel_idx,2
+25,2,channel_name,Absolute Throttle Position
+25,2,unit,%
+25,2,brand,Seat
+25,2,model,Leon
+25,2,from_city,S
+25,2,to_city,KA
+25,2,condition,Normal
+25,2,experiment_id,experiment_2
+25,3,group_idx,1
+25,3,channel_idx,1
+25,3,channel_name,Intake Manifold Absolute Pressure
+25,3,unit,kPa
+25,3,brand,Seat
+25,3,model,Leon
+25,3,from_city,S
+25,3,to_city,KA
+25,3,condition,Normal
+25,3,experiment_id,experiment_2
+25,4,group_idx,1
+25,4,channel_idx,2
+25,4,channel_name,Ambient Air Temperature
+25,4,unit,C
+25,4,brand,Seat
+25,4,model,Leon
+25,4,from_city,S
+25,4,to_city,KA
+25,4,condition,Normal
+25,4,experiment_id,experiment_2
+25,5,group_idx,2
+25,5,channel_idx,1
+25,5,channel_name,Engine RPM
+25,5,unit,RPM
+25,5,brand,Seat
+25,5,model,Leon
+25,5,from_city,S
+25,5,to_city,KA
+25,5,condition,Normal
+25,5,experiment_id,experiment_2
+25,6,group_idx,2
+25,6,channel_idx,2
+25,6,channel_name,Accelerator Pedal Position D
+25,6,unit,%
+25,6,brand,Seat
+25,6,model,Leon
+25,6,from_city,S
+25,6,to_city,KA
+25,6,condition,Normal
+25,6,experiment_id,experiment_2
+25,7,group_idx,3
+25,7,channel_idx,1
+25,7,channel_name,Vehicle Speed Sensor
+25,7,unit,km/h
+25,7,brand,Seat
+25,7,model,Leon
+25,7,from_city,S
+25,7,to_city,KA
+25,7,condition,Normal
+25,7,experiment_id,experiment_2
+25,8,group_idx,3
+25,8,channel_idx,2
+25,8,channel_name,Accelerator Pedal Position E
+25,8,unit,%
+25,8,brand,Seat
+25,8,model,Leon
+25,8,from_city,S
+25,8,to_city,KA
+25,8,condition,Normal
+25,8,experiment_id,experiment_2
+25,9,group_idx,4
+25,9,channel_idx,1
+25,9,channel_name,Intake Air Temperature
+25,9,unit,C
+25,9,brand,Seat
+25,9,model,Leon
+25,9,from_city,S
+25,9,to_city,KA
+25,9,condition,Normal
+25,9,experiment_id,experiment_2
+25,10,group_idx,5
+25,10,channel_idx,1
+25,10,channel_name,Air Flow Rate from Mass Flow Sensor
+25,10,unit,g/s
+25,10,brand,Seat
+25,10,model,Leon
+25,10,from_city,S
+25,10,to_city,KA
+25,10,condition,Normal
+25,10,experiment_id,experiment_2
+26,1,group_idx,0
+26,1,channel_idx,1
+26,1,channel_name,Engine Coolant Temperature
+26,1,unit,C
+26,1,brand,Seat
+26,1,model,Leon
+26,1,from_city,S
+26,1,to_city,RT
+26,1,condition,Normal
+26,1,experiment_id,experiment_2
+26,2,group_idx,0
+26,2,channel_idx,2
+26,2,channel_name,Engine RPM
+26,2,unit,RPM
+26,2,brand,Seat
+26,2,model,Leon
+26,2,from_city,S
+26,2,to_city,RT
+26,2,condition,Normal
+26,2,experiment_id,experiment_2
+26,3,group_idx,0
+26,3,channel_idx,3
+26,3,channel_name,Intake Air Temperature
+26,3,unit,C
+26,3,brand,Seat
+26,3,model,Leon
+26,3,from_city,S
+26,3,to_city,RT
+26,3,condition,Normal
+26,3,experiment_id,experiment_2
+26,4,group_idx,0
+26,4,channel_idx,4
+26,4,channel_name,Absolute Throttle Position
+26,4,unit,%
+26,4,brand,Seat
+26,4,model,Leon
+26,4,from_city,S
+26,4,to_city,RT
+26,4,condition,Normal
+26,4,experiment_id,experiment_2
+26,5,group_idx,0
+26,5,channel_idx,5
+26,5,channel_name,Accelerator Pedal Position D
+26,5,unit,%
+26,5,brand,Seat
+26,5,model,Leon
+26,5,from_city,S
+26,5,to_city,RT
+26,5,condition,Normal
+26,5,experiment_id,experiment_2
+26,6,group_idx,1
+26,6,channel_idx,1
+26,6,channel_name,Intake Manifold Absolute Pressure
+26,6,unit,kPa
+26,6,brand,Seat
+26,6,model,Leon
+26,6,from_city,S
+26,6,to_city,RT
+26,6,condition,Normal
+26,6,experiment_id,experiment_2
+26,7,group_idx,1
+26,7,channel_idx,2
+26,7,channel_name,Vehicle Speed Sensor
+26,7,unit,km/h
+26,7,brand,Seat
+26,7,model,Leon
+26,7,from_city,S
+26,7,to_city,RT
+26,7,condition,Normal
+26,7,experiment_id,experiment_2
+26,8,group_idx,1
+26,8,channel_idx,3
+26,8,channel_name,Air Flow Rate from Mass Flow Sensor
+26,8,unit,g/s
+26,8,brand,Seat
+26,8,model,Leon
+26,8,from_city,S
+26,8,to_city,RT
+26,8,condition,Normal
+26,8,experiment_id,experiment_2
+26,9,group_idx,1
+26,9,channel_idx,4
+26,9,channel_name,Ambient Air Temperature
+26,9,unit,C
+26,9,brand,Seat
+26,9,model,Leon
+26,9,from_city,S
+26,9,to_city,RT
+26,9,condition,Normal
+26,9,experiment_id,experiment_2
+26,10,group_idx,1
+26,10,channel_idx,5
+26,10,channel_name,Accelerator Pedal Position E
+26,10,unit,%
+26,10,brand,Seat
+26,10,model,Leon
+26,10,from_city,S
+26,10,to_city,RT
+26,10,condition,Normal
+26,10,experiment_id,experiment_2
+27,1,group_idx,0
+27,1,channel_idx,1
+27,1,channel_name,Engine Coolant Temperature
+27,1,unit,C
+27,1,brand,Seat
+27,1,model,Leon
+27,1,from_city,KA
+27,1,to_city,KA
+27,1,condition,2
+27,1,experiment_id,experiment_2
+27,2,group_idx,0
+27,2,channel_idx,2
+27,2,channel_name,Intake Air Temperature
+27,2,unit,C
+27,2,brand,Seat
+27,2,model,Leon
+27,2,from_city,KA
+27,2,to_city,KA
+27,2,condition,2
+27,2,experiment_id,experiment_2
+27,3,group_idx,0
+27,3,channel_idx,3
+27,3,channel_name,Accelerator Pedal Position D
+27,3,unit,%
+27,3,brand,Seat
+27,3,model,Leon
+27,3,from_city,KA
+27,3,to_city,KA
+27,3,condition,2
+27,3,experiment_id,experiment_2
+27,4,group_idx,1
+27,4,channel_idx,1
+27,4,channel_name,Intake Manifold Absolute Pressure
+27,4,unit,kPa
+27,4,brand,Seat
+27,4,model,Leon
+27,4,from_city,KA
+27,4,to_city,KA
+27,4,condition,2
+27,4,experiment_id,experiment_2
+27,5,group_idx,1
+27,5,channel_idx,2
+27,5,channel_name,Air Flow Rate from Mass Flow Sensor
+27,5,unit,g/s
+27,5,brand,Seat
+27,5,model,Leon
+27,5,from_city,KA
+27,5,to_city,KA
+27,5,condition,2
+27,5,experiment_id,experiment_2
+27,6,group_idx,1
+27,6,channel_idx,3
+27,6,channel_name,Accelerator Pedal Position E
+27,6,unit,%
+27,6,brand,Seat
+27,6,model,Leon
+27,6,from_city,KA
+27,6,to_city,KA
+27,6,condition,2
+27,6,experiment_id,experiment_2
+27,7,group_idx,2
+27,7,channel_idx,1
+27,7,channel_name,Engine RPM
+27,7,unit,RPM
+27,7,brand,Seat
+27,7,model,Leon
+27,7,from_city,KA
+27,7,to_city,KA
+27,7,condition,2
+27,7,experiment_id,experiment_2
+27,8,group_idx,2
+27,8,channel_idx,2
+27,8,channel_name,Absolute Throttle Position
+27,8,unit,%
+27,8,brand,Seat
+27,8,model,Leon
+27,8,from_city,KA
+27,8,to_city,KA
+27,8,condition,2
+27,8,experiment_id,experiment_2
+27,9,group_idx,3
+27,9,channel_idx,1
+27,9,channel_name,Vehicle Speed Sensor
+27,9,unit,km/h
+27,9,brand,Seat
+27,9,model,Leon
+27,9,from_city,KA
+27,9,to_city,KA
+27,9,condition,2
+27,9,experiment_id,experiment_2
+27,10,group_idx,3
+27,10,channel_idx,2
+27,10,channel_name,Ambient Air Temperature
+27,10,unit,C
+27,10,brand,Seat
+27,10,model,Leon
+27,10,from_city,KA
+27,10,to_city,KA
+27,10,condition,2
+27,10,experiment_id,experiment_2
+28,1,group_idx,0
+28,1,channel_idx,1
+28,1,channel_name,Engine Coolant Temperature
+28,1,unit,C
+28,1,brand,Seat
+28,1,model,Leon
+28,1,from_city,KA
+28,1,to_city,KA
+28,1,condition,Frei
+28,1,experiment_id,experiment_2
+28,2,group_idx,0
+28,2,channel_idx,2
+28,2,channel_name,Air Flow Rate from Mass Flow Sensor
+28,2,unit,g/s
+28,2,brand,Seat
+28,2,model,Leon
+28,2,from_city,KA
+28,2,to_city,KA
+28,2,condition,Frei
+28,2,experiment_id,experiment_2
+28,3,group_idx,1
+28,3,channel_idx,1
+28,3,channel_name,Intake Manifold Absolute Pressure
+28,3,unit,kPa
+28,3,brand,Seat
+28,3,model,Leon
+28,3,from_city,KA
+28,3,to_city,KA
+28,3,condition,Frei
+28,3,experiment_id,experiment_2
+28,4,group_idx,1
+28,4,channel_idx,2
+28,4,channel_name,Absolute Throttle Position
+28,4,unit,%
+28,4,brand,Seat
+28,4,model,Leon
+28,4,from_city,KA
+28,4,to_city,KA
+28,4,condition,Frei
+28,4,experiment_id,experiment_2
+28,5,group_idx,2
+28,5,channel_idx,1
+28,5,channel_name,Engine RPM
+28,5,unit,RPM
+28,5,brand,Seat
+28,5,model,Leon
+28,5,from_city,KA
+28,5,to_city,KA
+28,5,condition,Frei
+28,5,experiment_id,experiment_2
+28,6,group_idx,2
+28,6,channel_idx,2
+28,6,channel_name,Ambient Air Temperature
+28,6,unit,C
+28,6,brand,Seat
+28,6,model,Leon
+28,6,from_city,KA
+28,6,to_city,KA
+28,6,condition,Frei
+28,6,experiment_id,experiment_2
+28,7,group_idx,3
+28,7,channel_idx,1
+28,7,channel_name,Vehicle Speed Sensor
+28,7,unit,km/h
+28,7,brand,Seat
+28,7,model,Leon
+28,7,from_city,KA
+28,7,to_city,KA
+28,7,condition,Frei
+28,7,experiment_id,experiment_2
+28,8,group_idx,3
+28,8,channel_idx,2
+28,8,channel_name,Accelerator Pedal Position D
+28,8,unit,%
+28,8,brand,Seat
+28,8,model,Leon
+28,8,from_city,KA
+28,8,to_city,KA
+28,8,condition,Frei
+28,8,experiment_id,experiment_2
+28,9,group_idx,4
+28,9,channel_idx,1
+28,9,channel_name,Intake Air Temperature
+28,9,unit,C
+28,9,brand,Seat
+28,9,model,Leon
+28,9,from_city,KA
+28,9,to_city,KA
+28,9,condition,Frei
+28,9,experiment_id,experiment_2
+28,10,group_idx,4
+28,10,channel_idx,2
+28,10,channel_name,Accelerator Pedal Position E
+28,10,unit,%
+28,10,brand,Seat
+28,10,model,Leon
+28,10,from_city,KA
+28,10,to_city,KA
+28,10,condition,Frei
+28,10,experiment_id,experiment_2
+29,1,group_idx,0
+29,1,channel_idx,1
+29,1,channel_name,Engine Coolant Temperature
+29,1,unit,C
+29,1,brand,Seat
+29,1,model,Leon
+29,1,from_city,KA
+29,1,to_city,KA
+29,1,condition,Normal
+29,1,experiment_id,experiment_2
+29,2,group_idx,0
+29,2,channel_idx,2
+29,2,channel_name,Absolute Throttle Position
+29,2,unit,%
+29,2,brand,Seat
+29,2,model,Leon
+29,2,from_city,KA
+29,2,to_city,KA
+29,2,condition,Normal
+29,2,experiment_id,experiment_2
+29,3,group_idx,1
+29,3,channel_idx,1
+29,3,channel_name,Intake Manifold Absolute Pressure
+29,3,unit,kPa
+29,3,brand,Seat
+29,3,model,Leon
+29,3,from_city,KA
+29,3,to_city,KA
+29,3,condition,Normal
+29,3,experiment_id,experiment_2
+29,4,group_idx,1
+29,4,channel_idx,2
+29,4,channel_name,Ambient Air Temperature
+29,4,unit,C
+29,4,brand,Seat
+29,4,model,Leon
+29,4,from_city,KA
+29,4,to_city,KA
+29,4,condition,Normal
+29,4,experiment_id,experiment_2
+29,5,group_idx,2
+29,5,channel_idx,1
+29,5,channel_name,Engine RPM
+29,5,unit,RPM
+29,5,brand,Seat
+29,5,model,Leon
+29,5,from_city,KA
+29,5,to_city,KA
+29,5,condition,Normal
+29,5,experiment_id,experiment_2
+29,6,group_idx,2
+29,6,channel_idx,2
+29,6,channel_name,Accelerator Pedal Position D
+29,6,unit,%
+29,6,brand,Seat
+29,6,model,Leon
+29,6,from_city,KA
+29,6,to_city,KA
+29,6,condition,Normal
+29,6,experiment_id,experiment_2
+29,7,group_idx,3
+29,7,channel_idx,1
+29,7,channel_name,Vehicle Speed Sensor
+29,7,unit,km/h
+29,7,brand,Seat
+29,7,model,Leon
+29,7,from_city,KA
+29,7,to_city,KA
+29,7,condition,Normal
+29,7,experiment_id,experiment_2
+29,8,group_idx,3
+29,8,channel_idx,2
+29,8,channel_name,Accelerator Pedal Position E
+29,8,unit,%
+29,8,brand,Seat
+29,8,model,Leon
+29,8,from_city,KA
+29,8,to_city,KA
+29,8,condition,Normal
+29,8,experiment_id,experiment_2
+29,9,group_idx,4
+29,9,channel_idx,1
+29,9,channel_name,Intake Air Temperature
+29,9,unit,C
+29,9,brand,Seat
+29,9,model,Leon
+29,9,from_city,KA
+29,9,to_city,KA
+29,9,condition,Normal
+29,9,experiment_id,experiment_2
+29,10,group_idx,5
+29,10,channel_idx,1
+29,10,channel_name,Air Flow Rate from Mass Flow Sensor
+29,10,unit,g/s
+29,10,brand,Seat
+29,10,model,Leon
+29,10,from_city,KA
+29,10,to_city,KA
+29,10,condition,Normal
+29,10,experiment_id,experiment_2
+30,1,group_idx,0
+30,1,channel_idx,1
+30,1,channel_name,Engine Coolant Temperature
+30,1,unit,C
+30,1,brand,Seat
+30,1,model,Leon
+30,1,from_city,KA
+30,1,to_city,KA
+30,1,condition,Normal
+30,1,experiment_id,experiment_2
+30,2,group_idx,0
+30,2,channel_idx,2
+30,2,channel_name,Engine RPM
+30,2,unit,RPM
+30,2,brand,Seat
+30,2,model,Leon
+30,2,from_city,KA
+30,2,to_city,KA
+30,2,condition,Normal
+30,2,experiment_id,experiment_2
+30,3,group_idx,0
+30,3,channel_idx,3
+30,3,channel_name,Intake Air Temperature
+30,3,unit,C
+30,3,brand,Seat
+30,3,model,Leon
+30,3,from_city,KA
+30,3,to_city,KA
+30,3,condition,Normal
+30,3,experiment_id,experiment_2
+30,4,group_idx,0
+30,4,channel_idx,4
+30,4,channel_name,Absolute Throttle Position
+30,4,unit,%
+30,4,brand,Seat
+30,4,model,Leon
+30,4,from_city,KA
+30,4,to_city,KA
+30,4,condition,Normal
+30,4,experiment_id,experiment_2
+30,5,group_idx,0
+30,5,channel_idx,5
+30,5,channel_name,Accelerator Pedal Position D
+30,5,unit,%
+30,5,brand,Seat
+30,5,model,Leon
+30,5,from_city,KA
+30,5,to_city,KA
+30,5,condition,Normal
+30,5,experiment_id,experiment_2
+30,6,group_idx,1
+30,6,channel_idx,1
+30,6,channel_name,Intake Manifold Absolute Pressure
+30,6,unit,kPa
+30,6,brand,Seat
+30,6,model,Leon
+30,6,from_city,KA
+30,6,to_city,KA
+30,6,condition,Normal
+30,6,experiment_id,experiment_2
+30,7,group_idx,1
+30,7,channel_idx,2
+30,7,channel_name,Vehicle Speed Sensor
+30,7,unit,km/h
+30,7,brand,Seat
+30,7,model,Leon
+30,7,from_city,KA
+30,7,to_city,KA
+30,7,condition,Normal
+30,7,experiment_id,experiment_2
+30,8,group_idx,1
+30,8,channel_idx,3
+30,8,channel_name,Air Flow Rate from Mass Flow Sensor
+30,8,unit,g/s
+30,8,brand,Seat
+30,8,model,Leon
+30,8,from_city,KA
+30,8,to_city,KA
+30,8,condition,Normal
+30,8,experiment_id,experiment_2
+30,9,group_idx,1
+30,9,channel_idx,4
+30,9,channel_name,Ambient Air Temperature
+30,9,unit,C
+30,9,brand,Seat
+30,9,model,Leon
+30,9,from_city,KA
+30,9,to_city,KA
+30,9,condition,Normal
+30,9,experiment_id,experiment_2
+30,10,group_idx,1
+30,10,channel_idx,5
+30,10,channel_name,Accelerator Pedal Position E
+30,10,unit,%
+30,10,brand,Seat
+30,10,model,Leon
+30,10,from_city,KA
+30,10,to_city,KA
+30,10,condition,Normal
+30,10,experiment_id,experiment_2
+31,1,group_idx,0
+31,1,channel_idx,1
+31,1,channel_name,Engine Coolant Temperature
+31,1,unit,C
+31,1,brand,Seat
+31,1,model,Leon
+31,1,from_city,KA
+31,1,to_city,KA
+31,1,condition,Frei
+31,1,experiment_id,experiment_2
+31,2,group_idx,0
+31,2,channel_idx,2
+31,2,channel_name,Engine RPM
+31,2,unit,RPM
+31,2,brand,Seat
+31,2,model,Leon
+31,2,from_city,KA
+31,2,to_city,KA
+31,2,condition,Frei
+31,2,experiment_id,experiment_2
+31,3,group_idx,0
+31,3,channel_idx,3
+31,3,channel_name,Intake Air Temperature
+31,3,unit,C
+31,3,brand,Seat
+31,3,model,Leon
+31,3,from_city,KA
+31,3,to_city,KA
+31,3,condition,Frei
+31,3,experiment_id,experiment_2
+31,4,group_idx,0
+31,4,channel_idx,4
+31,4,channel_name,Absolute Throttle Position
+31,4,unit,%
+31,4,brand,Seat
+31,4,model,Leon
+31,4,from_city,KA
+31,4,to_city,KA
+31,4,condition,Frei
+31,4,experiment_id,experiment_2
+31,5,group_idx,0
+31,5,channel_idx,5
+31,5,channel_name,Accelerator Pedal Position D
+31,5,unit,%
+31,5,brand,Seat
+31,5,model,Leon
+31,5,from_city,KA
+31,5,to_city,KA
+31,5,condition,Frei
+31,5,experiment_id,experiment_2
+31,6,group_idx,1
+31,6,channel_idx,1
+31,6,channel_name,Intake Manifold Absolute Pressure
+31,6,unit,kPa
+31,6,brand,Seat
+31,6,model,Leon
+31,6,from_city,KA
+31,6,to_city,KA
+31,6,condition,Frei
+31,6,experiment_id,experiment_2
+31,7,group_idx,1
+31,7,channel_idx,2
+31,7,channel_name,Vehicle Speed Sensor
+31,7,unit,km/h
+31,7,brand,Seat
+31,7,model,Leon
+31,7,from_city,KA
+31,7,to_city,KA
+31,7,condition,Frei
+31,7,experiment_id,experiment_2
+31,8,group_idx,1
+31,8,channel_idx,3
+31,8,channel_name,Air Flow Rate from Mass Flow Sensor
+31,8,unit,g/s
+31,8,brand,Seat
+31,8,model,Leon
+31,8,from_city,KA
+31,8,to_city,KA
+31,8,condition,Frei
+31,8,experiment_id,experiment_2
+31,9,group_idx,1
+31,9,channel_idx,4
+31,9,channel_name,Ambient Air Temperature
+31,9,unit,C
+31,9,brand,Seat
+31,9,model,Leon
+31,9,from_city,KA
+31,9,to_city,KA
+31,9,condition,Frei
+31,9,experiment_id,experiment_2
+31,10,group_idx,1
+31,10,channel_idx,5
+31,10,channel_name,Accelerator Pedal Position E
+31,10,unit,%
+31,10,brand,Seat
+31,10,model,Leon
+31,10,from_city,KA
+31,10,to_city,KA
+31,10,condition,Frei
+31,10,experiment_id,experiment_2
+32,1,group_idx,0
+32,1,channel_idx,1
+32,1,channel_name,Engine Coolant Temperature
+32,1,unit,C
+32,1,brand,Seat
+32,1,model,Leon
+32,1,from_city,KA
+32,1,to_city,KA
+32,1,condition,Frei
+32,1,experiment_id,experiment_2
+32,2,group_idx,0
+32,2,channel_idx,2
+32,2,channel_name,Ambient Air Temperature
+32,2,unit,C
+32,2,brand,Seat
+32,2,model,Leon
+32,2,from_city,KA
+32,2,to_city,KA
+32,2,condition,Frei
+32,2,experiment_id,experiment_2
+32,3,group_idx,1
+32,3,channel_idx,1
+32,3,channel_name,Intake Manifold Absolute Pressure
+32,3,unit,kPa
+32,3,brand,Seat
+32,3,model,Leon
+32,3,from_city,KA
+32,3,to_city,KA
+32,3,condition,Frei
+32,3,experiment_id,experiment_2
+32,4,group_idx,1
+32,4,channel_idx,2
+32,4,channel_name,Accelerator Pedal Position D
+32,4,unit,%
+32,4,brand,Seat
+32,4,model,Leon
+32,4,from_city,KA
+32,4,to_city,KA
+32,4,condition,Frei
+32,4,experiment_id,experiment_2
+32,5,group_idx,2
+32,5,channel_idx,1
+32,5,channel_name,Engine RPM
+32,5,unit,RPM
+32,5,brand,Seat
+32,5,model,Leon
+32,5,from_city,KA
+32,5,to_city,KA
+32,5,condition,Frei
+32,5,experiment_id,experiment_2
+32,6,group_idx,2
+32,6,channel_idx,2
+32,6,channel_name,Accelerator Pedal Position E
+32,6,unit,%
+32,6,brand,Seat
+32,6,model,Leon
+32,6,from_city,KA
+32,6,to_city,KA
+32,6,condition,Frei
+32,6,experiment_id,experiment_2
+32,7,group_idx,3
+32,7,channel_idx,1
+32,7,channel_name,Vehicle Speed Sensor
+32,7,unit,km/h
+32,7,brand,Seat
+32,7,model,Leon
+32,7,from_city,KA
+32,7,to_city,KA
+32,7,condition,Frei
+32,7,experiment_id,experiment_2
+32,8,group_idx,4
+32,8,channel_idx,1
+32,8,channel_name,Intake Air Temperature
+32,8,unit,C
+32,8,brand,Seat
+32,8,model,Leon
+32,8,from_city,KA
+32,8,to_city,KA
+32,8,condition,Frei
+32,8,experiment_id,experiment_2
+32,9,group_idx,5
+32,9,channel_idx,1
+32,9,channel_name,Air Flow Rate from Mass Flow Sensor
+32,9,unit,g/s
+32,9,brand,Seat
+32,9,model,Leon
+32,9,from_city,KA
+32,9,to_city,KA
+32,9,condition,Frei
+32,9,experiment_id,experiment_2
+32,10,group_idx,6
+32,10,channel_idx,1
+32,10,channel_name,Absolute Throttle Position
+32,10,unit,%
+32,10,brand,Seat
+32,10,model,Leon
+32,10,from_city,KA
+32,10,to_city,KA
+32,10,condition,Frei
+32,10,experiment_id,experiment_2
+48,1,group_idx,0
+49,1,group_idx,0
+50,6,group_idx,2
+50,10,group_idx,4
+41,8,group_idx,6
+50,7,group_idx,3
+40,5,group_idx,0
+49,4,group_idx,1
+41,4,group_idx,2
+35,10,group_idx,2
+45,8,group_idx,3
+33,1,group_idx,0
+36,5,group_idx,2
+34,8,group_idx,2
+44,9,group_idx,7
+42,6,group_idx,1
+40,8,group_idx,0
+43,5,group_idx,2
+37,7,group_idx,3
+48,10,group_idx,0
+38,4,group_idx,1
+47,5,group_idx,0
+37,3,group_idx,1
+39,2,group_idx,0
+50,5,group_idx,2
+34,4,group_idx,1
+34,3,group_idx,0
+42,9,group_idx,1
+47,1,group_idx,0
+44,5,group_idx,3
+49,5,group_idx,1
+38,5,group_idx,2
+48,5,group_idx,0
+50,1,group_idx,0
+35,3,group_idx,0
+47,9,group_idx,1
+38,2,group_idx,0
+34,9,group_idx,3
+42,7,group_idx,1
+41,5,group_idx,3
+36,6,group_idx,3
+39,3,group_idx,1
+40,9,group_idx,0
+36,2,group_idx,0
+36,9,group_idx,6
+38,8,group_idx,5
+50,8,group_idx,3
+43,6,group_idx,2
+38,10,group_idx,7
+45,9,group_idx,4
+39,10,group_idx,6
+34,5,group_idx,1
+46,2,group_idx,0
+44,6,group_idx,4
+46,5,group_idx,0
+33,10,group_idx,2
+39,1,group_idx,0
+34,1,group_idx,0
+48,3,group_idx,0
+33,6,group_idx,1
+35,2,group_idx,0
+35,5,group_idx,1
+34,10,group_idx,3
+37,5,group_idx,2
+39,8,group_idx,4
+45,4,group_idx,1
+42,1,group_idx,0
+36,1,group_idx,0
+42,3,group_idx,0
+45,5,group_idx,2
+35,1,group_idx,0
+43,9,group_idx,4
+43,8,group_idx,3
+37,4,group_idx,1
+48,9,group_idx,0
+33,5,group_idx,1
+37,8,group_idx,4
+45,3,group_idx,1
+40,2,group_idx,0
+33,9,group_idx,2
+37,9,group_idx,5
+43,7,group_idx,3
+46,1,group_idx,0
+49,3,group_idx,0
+47,3,group_idx,0
+37,1,group_idx,0
+35,4,group_idx,0
+46,4,group_idx,0
+39,5,group_idx,2
+40,10,group_idx,0
+44,4,group_idx,2
+49,7,group_idx,2
+37,2,group_idx,0
+33,3,group_idx,0
+41,10,group_idx,8
+48,8,group_idx,0
+44,2,group_idx,0
+39,6,group_idx,2
+36,10,group_idx,7
+36,4,group_idx,1
+45,6,group_idx,2
+43,3,group_idx,1
+43,10,group_idx,4
+33,7,group_idx,1
+43,2,group_idx,0
+38,1,group_idx,0
+36,3,group_idx,1
+47,4,group_idx,0
+42,5,group_idx,0
+42,10,group_idx,1
+46,10,group_idx,1
+44,7,group_idx,5
+40,3,group_idx,0
+38,7,group_idx,4
+46,8,group_idx,1
+41,1,group_idx,0
+36,7,group_idx,4
+34,7,group_idx,2
+38,6,group_idx,3
+50,3,group_idx,1
+44,8,group_idx,6
+44,10,group_idx,8
+50,2,group_idx,0
+42,4,group_idx,0
+39,7,group_idx,3
+35,6,group_idx,1
+39,9,group_idx,5
+45,1,group_idx,0
+43,1,group_idx,0
+33,4,group_idx,0
+45,10,group_idx,4
+48,4,group_idx,0
+38,3,group_idx,1
+40,6,group_idx,0
+44,1,group_idx,0
+48,2,group_idx,0
+41,2,group_idx,0
+50,4,group_idx,1
+49,6,group_idx,1
+35,7,group_idx,1
+46,6,group_idx,1
+49,2,group_idx,0
+46,9,group_idx,1
+38,9,group_idx,6
+45,2,group_idx,0
+49,10,group_idx,3
+45,7,group_idx,3
+34,2,group_idx,0
+40,1,group_idx,0
+48,6,group_idx,0
+36,8,group_idx,5
+43,4,group_idx,1
+46,3,group_idx,0
+41,7,group_idx,5
+42,2,group_idx,0
+50,9,group_idx,4
+33,8,group_idx,2
+41,3,group_idx,1
+35,8,group_idx,2
+42,8,group_idx,1
+39,4,group_idx,1
+41,6,group_idx,4
+40,7,group_idx,0
+40,4,group_idx,0
+35,9,group_idx,2
+44,3,group_idx,1
+48,7,group_idx,0
+33,2,group_idx,0
+34,6,group_idx,1
+47,2,group_idx,0
+37,10,group_idx,6
+49,9,group_idx,3
+46,7,group_idx,1
+37,6,group_idx,2
+47,10,group_idx,1
+47,6,group_idx,1
+47,8,group_idx,1
+47,7,group_idx,1
+49,8,group_idx,2
+41,9,group_idx,7
+48,1,channel_idx,1
+49,1,channel_idx,1
+50,6,channel_idx,2
+50,10,channel_idx,2
+41,8,channel_idx,1
+50,7,channel_idx,1
+40,5,channel_idx,5
+49,4,channel_idx,1
+41,4,channel_idx,1
+35,10,channel_idx,3
+45,8,channel_idx,2
+33,1,channel_idx,1
+36,5,channel_idx,1
+34,8,channel_idx,2
+44,9,channel_idx,1
+42,6,channel_idx,1
+40,8,channel_idx,8
+43,5,channel_idx,1
+37,7,channel_idx,1
+48,10,channel_idx,10
+38,4,channel_idx,2
+47,5,channel_idx,5
+37,3,channel_idx,1
+39,2,channel_idx,2
+50,5,channel_idx,1
+34,4,channel_idx,1
+34,3,channel_idx,3
+42,9,channel_idx,4
+47,1,channel_idx,1
+44,5,channel_idx,1
+49,5,channel_idx,2
+38,5,channel_idx,1
+48,5,channel_idx,5
+50,1,channel_idx,1
+35,3,channel_idx,3
+47,9,channel_idx,4
+38,2,channel_idx,2
+34,9,channel_idx,1
+42,7,channel_idx,2
+41,5,channel_idx,1
+36,6,channel_idx,1
+39,3,channel_idx,1
+40,9,channel_idx,9
+36,2,channel_idx,2
+36,9,channel_idx,1
+38,8,channel_idx,1
+50,8,channel_idx,2
+43,6,channel_idx,2
+38,10,channel_idx,1
+45,9,channel_idx,1
+39,10,channel_idx,1
+34,5,channel_idx,2
+46,2,channel_idx,2
+44,6,channel_idx,1
+46,5,channel_idx,5
+33,10,channel_idx,3
+39,1,channel_idx,1
+34,1,channel_idx,1
+48,3,channel_idx,3
+33,6,channel_idx,2
+35,2,channel_idx,2
+35,5,channel_idx,1
+34,10,channel_idx,2
+37,5,channel_idx,1
+39,8,channel_idx,1
+45,4,channel_idx,2
+42,1,channel_idx,1
+36,1,channel_idx,1
+42,3,channel_idx,3
+45,5,channel_idx,1
+35,1,channel_idx,1
+43,9,channel_idx,1
+43,8,channel_idx,2
+37,4,channel_idx,2
+48,9,channel_idx,9
+33,5,channel_idx,1
+37,8,channel_idx,1
+45,3,channel_idx,1
+40,2,channel_idx,2
+33,9,channel_idx,2
+37,9,channel_idx,1
+43,7,channel_idx,1
+46,1,channel_idx,1
+49,3,channel_idx,3
+47,3,channel_idx,3
+37,1,channel_idx,1
+35,4,channel_idx,4
+46,4,channel_idx,4
+39,5,channel_idx,1
+40,10,channel_idx,10
+44,4,channel_idx,1
+49,7,channel_idx,1
+37,2,channel_idx,2
+33,3,channel_idx,3
+41,10,channel_idx,1
+48,8,channel_idx,8
+44,2,channel_idx,2
+39,6,channel_idx,2
+36,10,channel_idx,1
+36,4,channel_idx,2
+45,6,channel_idx,2
+43,3,channel_idx,1
+43,10,channel_idx,2
+33,7,channel_idx,3
+43,2,channel_idx,2
+38,1,channel_idx,1
+36,3,channel_idx,1
+47,4,channel_idx,4
+42,5,channel_idx,5
+42,10,channel_idx,5
+46,10,channel_idx,5
+44,7,channel_idx,1
+40,3,channel_idx,3
+38,7,channel_idx,1
+46,8,channel_idx,3
+41,1,channel_idx,1
+36,7,channel_idx,1
+34,7,channel_idx,1
+38,6,channel_idx,1
+50,3,channel_idx,1
+44,8,channel_idx,1
+44,10,channel_idx,1
+50,2,channel_idx,2
+42,4,channel_idx,4
+39,7,channel_idx,1
+35,6,channel_idx,2
+39,9,channel_idx,1
+45,1,channel_idx,1
+43,1,channel_idx,1
+33,4,channel_idx,4
+45,10,channel_idx,2
+48,4,channel_idx,4
+38,3,channel_idx,1
+40,6,channel_idx,6
+44,1,channel_idx,1
+48,2,channel_idx,2
+41,2,channel_idx,2
+50,4,channel_idx,2
+49,6,channel_idx,3
+35,7,channel_idx,3
+46,6,channel_idx,1
+49,2,channel_idx,2
+46,9,channel_idx,4
+38,9,channel_idx,1
+45,2,channel_idx,2
+49,10,channel_idx,2
+45,7,channel_idx,1
+34,2,channel_idx,2
+40,1,channel_idx,1
+48,6,channel_idx,6
+36,8,channel_idx,1
+43,4,channel_idx,2
+46,3,channel_idx,3
+41,7,channel_idx,1
+42,2,channel_idx,2
+50,9,channel_idx,1
+33,8,channel_idx,1
+41,3,channel_idx,1
+35,8,channel_idx,1
+42,8,channel_idx,3
+39,4,channel_idx,2
+41,6,channel_idx,1
+40,7,channel_idx,7
+40,4,channel_idx,4
+35,9,channel_idx,2
+44,3,channel_idx,1
+48,7,channel_idx,7
+33,2,channel_idx,2
+34,6,channel_idx,3
+47,2,channel_idx,2
+37,10,channel_idx,1
+49,9,channel_idx,1
+46,7,channel_idx,2
+37,6,channel_idx,2
+47,10,channel_idx,5
+47,6,channel_idx,1
+47,8,channel_idx,3
+47,7,channel_idx,2
+49,8,channel_idx,2
+41,9,channel_idx,1
+48,1,channel_name,Engine Coolant Temperature
+49,1,channel_name,Engine Coolant Temperature
+50,6,channel_name,Ambient Air Temperature
+50,10,channel_name,Accelerator Pedal Position E
+41,8,channel_name,Absolute Throttle Position
+50,7,channel_name,Vehicle Speed Sensor
+40,5,channel_name,Intake Air Temperature
+49,4,channel_name,Intake Manifold Absolute Pressure
+41,4,channel_name,Engine RPM
+35,10,channel_name,Accelerator Pedal Position D
+45,8,channel_name,Accelerator Pedal Position D
+33,1,channel_name,Engine Coolant Temperature
+36,5,channel_name,Engine RPM
+34,8,channel_name,Absolute Throttle Position
+44,9,channel_name,Ambient Air Temperature
+42,6,channel_name,Intake Manifold Absolute Pressure
+40,8,channel_name,Ambient Air Temperature
+43,5,channel_name,Engine RPM
+37,7,channel_name,Vehicle Speed Sensor
+48,10,channel_name,Accelerator Pedal Position E
+38,4,channel_name,Accelerator Pedal Position E
+47,5,channel_name,Accelerator Pedal Position D
+37,3,channel_name,Intake Manifold Absolute Pressure
+39,2,channel_name,Ambient Air Temperature
+50,5,channel_name,Engine RPM
+34,4,channel_name,Intake Manifold Absolute Pressure
+34,3,channel_name,Accelerator Pedal Position D
+42,9,channel_name,Ambient Air Temperature
+47,1,channel_name,Engine Coolant Temperature
+44,5,channel_name,Vehicle Speed Sensor
+49,5,channel_name,Air Flow Rate from Mass Flow Sensor
+38,5,channel_name,Engine RPM
+48,5,channel_name,Intake Air Temperature
+50,1,channel_name,Engine Coolant Temperature
+35,3,channel_name,Absolute Throttle Position
+47,9,channel_name,Ambient Air Temperature
+38,2,channel_name,Accelerator Pedal Position D
+34,9,channel_name,Vehicle Speed Sensor
+42,7,channel_name,Vehicle Speed Sensor
+41,5,channel_name,Vehicle Speed Sensor
+36,6,channel_name,Vehicle Speed Sensor
+39,3,channel_name,Intake Manifold Absolute Pressure
+40,9,channel_name,Accelerator Pedal Position D
+36,2,channel_name,Accelerator Pedal Position D
+36,9,channel_name,Absolute Throttle Position
+38,8,channel_name,Air Flow Rate from Mass Flow Sensor
+50,8,channel_name,Accelerator Pedal Position D
+43,6,channel_name,Ambient Air Temperature
+38,10,channel_name,Ambient Air Temperature
+45,9,channel_name,Intake Air Temperature
+39,10,channel_name,Absolute Throttle Position
+34,5,channel_name,Air Flow Rate from Mass Flow Sensor
+46,2,channel_name,Engine RPM
+44,6,channel_name,Intake Air Temperature
+46,5,channel_name,Accelerator Pedal Position D
+33,10,channel_name,Accelerator Pedal Position D
+39,1,channel_name,Engine Coolant Temperature
+34,1,channel_name,Engine Coolant Temperature
+48,3,channel_name,Engine RPM
+33,6,channel_name,Intake Air Temperature
+35,2,channel_name,Vehicle Speed Sensor
+35,5,channel_name,Intake Manifold Absolute Pressure
+34,10,channel_name,Ambient Air Temperature
+37,5,channel_name,Engine RPM
+39,8,channel_name,Intake Air Temperature
+45,4,channel_name,Absolute Throttle Position
+42,1,channel_name,Engine Coolant Temperature
+36,1,channel_name,Engine Coolant Temperature
+42,3,channel_name,Intake Air Temperature
+45,5,channel_name,Engine RPM
+35,1,channel_name,Engine Coolant Temperature
+43,9,channel_name,Intake Air Temperature
+43,8,channel_name,Accelerator Pedal Position D
+37,4,channel_name,Accelerator Pedal Position D
+48,9,channel_name,Accelerator Pedal Position D
+33,5,channel_name,Intake Manifold Absolute Pressure
+37,8,channel_name,Intake Air Temperature
+45,3,channel_name,Intake Manifold Absolute Pressure
+40,2,channel_name,Intake Manifold Absolute Pressure
+33,9,channel_name,Air Flow Rate from Mass Flow Sensor
+37,9,channel_name,Air Flow Rate from Mass Flow Sensor
+43,7,channel_name,Vehicle Speed Sensor
+46,1,channel_name,Engine Coolant Temperature
+49,3,channel_name,Accelerator Pedal Position D
+47,3,channel_name,Intake Air Temperature
+37,1,channel_name,Engine Coolant Temperature
+35,4,channel_name,Accelerator Pedal Position E
+46,4,channel_name,Absolute Throttle Position
+39,5,channel_name,Engine RPM
+40,10,channel_name,Accelerator Pedal Position E
+44,4,channel_name,Engine RPM
+49,7,channel_name,Engine RPM
+37,2,channel_name,Ambient Air Temperature
+33,3,channel_name,Absolute Throttle Position
+41,10,channel_name,Accelerator Pedal Position D
+48,8,channel_name,Ambient Air Temperature
+44,2,channel_name,Accelerator Pedal Position E
+39,6,channel_name,Accelerator Pedal Position E
+36,10,channel_name,Ambient Air Temperature
+36,4,channel_name,Accelerator Pedal Position E
+45,6,channel_name,Ambient Air Temperature
+43,3,channel_name,Intake Manifold Absolute Pressure
+43,10,channel_name,Accelerator Pedal Position E
+33,7,channel_name,Ambient Air Temperature
+43,2,channel_name,Air Flow Rate from Mass Flow Sensor
+38,1,channel_name,Engine Coolant Temperature
+36,3,channel_name,Intake Manifold Absolute Pressure
+47,4,channel_name,Absolute Throttle Position
+42,5,channel_name,Accelerator Pedal Position D
+42,10,channel_name,Accelerator Pedal Position E
+46,10,channel_name,Accelerator Pedal Position E
+44,7,channel_name,Air Flow Rate from Mass Flow Sensor
+40,3,channel_name,Engine RPM
+38,7,channel_name,Intake Air Temperature
+46,8,channel_name,Air Flow Rate from Mass Flow Sensor
+41,1,channel_name,Engine Coolant Temperature
+36,7,channel_name,Intake Air Temperature
+34,7,channel_name,Engine RPM
+38,6,channel_name,Vehicle Speed Sensor
+50,3,channel_name,Intake Manifold Absolute Pressure
+44,8,channel_name,Absolute Throttle Position
+44,10,channel_name,Accelerator Pedal Position D
+50,2,channel_name,Air Flow Rate from Mass Flow Sensor
+42,4,channel_name,Absolute Throttle Position
+39,7,channel_name,Vehicle Speed Sensor
+35,6,channel_name,Intake Air Temperature
+39,9,channel_name,Air Flow Rate from Mass Flow Sensor
+45,1,channel_name,Engine Coolant Temperature
+43,1,channel_name,Engine Coolant Temperature
+33,4,channel_name,Accelerator Pedal Position E
+45,10,channel_name,Accelerator Pedal Position E
+48,4,channel_name,Vehicle Speed Sensor
+38,3,channel_name,Intake Manifold Absolute Pressure
+40,6,channel_name,Air Flow Rate from Mass Flow Sensor
+44,1,channel_name,Engine Coolant Temperature
+48,2,channel_name,Intake Manifold Absolute Pressure
+41,2,channel_name,Accelerator Pedal Position E
+50,4,channel_name,Absolute Throttle Position
+49,6,channel_name,Accelerator Pedal Position E
+35,7,channel_name,Ambient Air Temperature
+46,6,channel_name,Intake Manifold Absolute Pressure
+49,2,channel_name,Intake Air Temperature
+46,9,channel_name,Ambient Air Temperature
+38,9,channel_name,Absolute Throttle Position
+45,2,channel_name,Air Flow Rate from Mass Flow Sensor
+49,10,channel_name,Ambient Air Temperature
+45,7,channel_name,Vehicle Speed Sensor
+34,2,channel_name,Intake Air Temperature
+40,1,channel_name,Engine Coolant Temperature
+48,6,channel_name,Air Flow Rate from Mass Flow Sensor
+36,8,channel_name,Air Flow Rate from Mass Flow Sensor
+43,4,channel_name,Absolute Throttle Position
+46,3,channel_name,Intake Air Temperature
+41,7,channel_name,Air Flow Rate from Mass Flow Sensor
+42,2,channel_name,Engine RPM
+50,9,channel_name,Intake Air Temperature
+33,8,channel_name,Engine RPM
+41,3,channel_name,Intake Manifold Absolute Pressure
+35,8,channel_name,Engine RPM
+42,8,channel_name,Air Flow Rate from Mass Flow Sensor
+39,4,channel_name,Accelerator Pedal Position D
+41,6,channel_name,Intake Air Temperature
+40,7,channel_name,Absolute Throttle Position
+40,4,channel_name,Vehicle Speed Sensor
+35,9,channel_name,Air Flow Rate from Mass Flow Sensor
+44,3,channel_name,Intake Manifold Absolute Pressure
+48,7,channel_name,Absolute Throttle Position
+33,2,channel_name,Vehicle Speed Sensor
+34,6,channel_name,Accelerator Pedal Position E
+47,2,channel_name,Engine RPM
+37,10,channel_name,Absolute Throttle Position
+49,9,channel_name,Vehicle Speed Sensor
+46,7,channel_name,Vehicle Speed Sensor
+37,6,channel_name,Accelerator Pedal Position E
+47,10,channel_name,Accelerator Pedal Position E
+47,6,channel_name,Intake Manifold Absolute Pressure
+47,8,channel_name,Air Flow Rate from Mass Flow Sensor
+47,7,channel_name,Vehicle Speed Sensor
+49,8,channel_name,Absolute Throttle Position
+41,9,channel_name,Ambient Air Temperature
+48,1,unit,C
+49,1,unit,C
+50,6,unit,C
+50,10,unit,%
+41,8,unit,%
+50,7,unit,km/h
+40,5,unit,C
+49,4,unit,kPa
+41,4,unit,RPM
+35,10,unit,%
+45,8,unit,%
+33,1,unit,C
+36,5,unit,RPM
+34,8,unit,%
+44,9,unit,C
+42,6,unit,kPa
+40,8,unit,C
+43,5,unit,RPM
+37,7,unit,km/h
+48,10,unit,%
+38,4,unit,%
+47,5,unit,%
+37,3,unit,kPa
+39,2,unit,C
+50,5,unit,RPM
+34,4,unit,kPa
+34,3,unit,%
+42,9,unit,C
+47,1,unit,C
+44,5,unit,km/h
+49,5,unit,g/s
+38,5,unit,RPM
+48,5,unit,C
+50,1,unit,C
+35,3,unit,%
+47,9,unit,C
+38,2,unit,%
+34,9,unit,km/h
+42,7,unit,km/h
+41,5,unit,km/h
+36,6,unit,km/h
+39,3,unit,kPa
+40,9,unit,%
+36,2,unit,%
+36,9,unit,%
+38,8,unit,g/s
+50,8,unit,%
+43,6,unit,C
+38,10,unit,C
+45,9,unit,C
+39,10,unit,%
+34,5,unit,g/s
+46,2,unit,RPM
+44,6,unit,C
+46,5,unit,%
+33,10,unit,%
+39,1,unit,C
+34,1,unit,C
+48,3,unit,RPM
+33,6,unit,C
+35,2,unit,km/h
+35,5,unit,kPa
+34,10,unit,C
+37,5,unit,RPM
+39,8,unit,C
+45,4,unit,%
+42,1,unit,C
+36,1,unit,C
+42,3,unit,C
+45,5,unit,RPM
+35,1,unit,C
+43,9,unit,C
+43,8,unit,%
+37,4,unit,%
+48,9,unit,%
+33,5,unit,kPa
+37,8,unit,C
+45,3,unit,kPa
+40,2,unit,kPa
+33,9,unit,g/s
+37,9,unit,g/s
+43,7,unit,km/h
+46,1,unit,C
+49,3,unit,%
+47,3,unit,C
+37,1,unit,C
+35,4,unit,%
+46,4,unit,%
+39,5,unit,RPM
+40,10,unit,%
+44,4,unit,RPM
+49,7,unit,RPM
+37,2,unit,C
+33,3,unit,%
+41,10,unit,%
+48,8,unit,C
+44,2,unit,%
+39,6,unit,%
+36,10,unit,C
+36,4,unit,%
+45,6,unit,C
+43,3,unit,kPa
+43,10,unit,%
+33,7,unit,C
+43,2,unit,g/s
+38,1,unit,C
+36,3,unit,kPa
+47,4,unit,%
+42,5,unit,%
+42,10,unit,%
+46,10,unit,%
+44,7,unit,g/s
+40,3,unit,RPM
+38,7,unit,C
+46,8,unit,g/s
+41,1,unit,C
+36,7,unit,C
+34,7,unit,RPM
+38,6,unit,km/h
+50,3,unit,kPa
+44,8,unit,%
+44,10,unit,%
+50,2,unit,g/s
+42,4,unit,%
+39,7,unit,km/h
+35,6,unit,C
+39,9,unit,g/s
+45,1,unit,C
+43,1,unit,C
+33,4,unit,%
+45,10,unit,%
+48,4,unit,km/h
+38,3,unit,kPa
+40,6,unit,g/s
+44,1,unit,C
+48,2,unit,kPa
+41,2,unit,%
+50,4,unit,%
+49,6,unit,%
+35,7,unit,C
+46,6,unit,kPa
+49,2,unit,C
+46,9,unit,C
+38,9,unit,%
+45,2,unit,g/s
+49,10,unit,C
+45,7,unit,km/h
+34,2,unit,C
+40,1,unit,C
+48,6,unit,g/s
+36,8,unit,g/s
+43,4,unit,%
+46,3,unit,C
+41,7,unit,g/s
+42,2,unit,RPM
+50,9,unit,C
+33,8,unit,RPM
+41,3,unit,kPa
+35,8,unit,RPM
+42,8,unit,g/s
+39,4,unit,%
+41,6,unit,C
+40,7,unit,%
+40,4,unit,km/h
+35,9,unit,g/s
+44,3,unit,kPa
+48,7,unit,%
+33,2,unit,km/h
+34,6,unit,%
+47,2,unit,RPM
+37,10,unit,%
+49,9,unit,km/h
+46,7,unit,km/h
+37,6,unit,%
+47,10,unit,%
+47,6,unit,kPa
+47,8,unit,g/s
+47,7,unit,km/h
+49,8,unit,%
+41,9,unit,C
+48,1,brand,Seat
+49,1,brand,Seat
+50,6,brand,Seat
+50,10,brand,Seat
+41,8,brand,Seat
+50,7,brand,Seat
+40,5,brand,Seat
+49,4,brand,Seat
+41,4,brand,Seat
+35,10,brand,Seat
+45,8,brand,Seat
+33,1,brand,Seat
+36,5,brand,Seat
+34,8,brand,Seat
+44,9,brand,Seat
+42,6,brand,Seat
+40,8,brand,Seat
+43,5,brand,Seat
+37,7,brand,Seat
+48,10,brand,Seat
+38,4,brand,Seat
+47,5,brand,Seat
+37,3,brand,Seat
+39,2,brand,Seat
+50,5,brand,Seat
+34,4,brand,Seat
+34,3,brand,Seat
+42,9,brand,Seat
+47,1,brand,Seat
+44,5,brand,Seat
+49,5,brand,Seat
+38,5,brand,Seat
+48,5,brand,Seat
+50,1,brand,Seat
+35,3,brand,Seat
+47,9,brand,Seat
+38,2,brand,Seat
+34,9,brand,Seat
+42,7,brand,Seat
+41,5,brand,Seat
+36,6,brand,Seat
+39,3,brand,Seat
+40,9,brand,Seat
+36,2,brand,Seat
+36,9,brand,Seat
+38,8,brand,Seat
+50,8,brand,Seat
+43,6,brand,Seat
+38,10,brand,Seat
+45,9,brand,Seat
+39,10,brand,Seat
+34,5,brand,Seat
+46,2,brand,Seat
+44,6,brand,Seat
+46,5,brand,Seat
+33,10,brand,Seat
+39,1,brand,Seat
+34,1,brand,Seat
+48,3,brand,Seat
+33,6,brand,Seat
+35,2,brand,Seat
+35,5,brand,Seat
+34,10,brand,Seat
+37,5,brand,Seat
+39,8,brand,Seat
+45,4,brand,Seat
+42,1,brand,Seat
+36,1,brand,Seat
+42,3,brand,Seat
+45,5,brand,Seat
+35,1,brand,Seat
+43,9,brand,Seat
+43,8,brand,Seat
+37,4,brand,Seat
+48,9,brand,Seat
+33,5,brand,Seat
+37,8,brand,Seat
+45,3,brand,Seat
+40,2,brand,Seat
+33,9,brand,Seat
+37,9,brand,Seat
+43,7,brand,Seat
+46,1,brand,Seat
+49,3,brand,Seat
+47,3,brand,Seat
+37,1,brand,Seat
+35,4,brand,Seat
+46,4,brand,Seat
+39,5,brand,Seat
+40,10,brand,Seat
+44,4,brand,Seat
+49,7,brand,Seat
+37,2,brand,Seat
+33,3,brand,Seat
+41,10,brand,Seat
+48,8,brand,Seat
+44,2,brand,Seat
+39,6,brand,Seat
+36,10,brand,Seat
+36,4,brand,Seat
+45,6,brand,Seat
+43,3,brand,Seat
+43,10,brand,Seat
+33,7,brand,Seat
+43,2,brand,Seat
+38,1,brand,Seat
+36,3,brand,Seat
+47,4,brand,Seat
+42,5,brand,Seat
+42,10,brand,Seat
+46,10,brand,Seat
+44,7,brand,Seat
+40,3,brand,Seat
+38,7,brand,Seat
+46,8,brand,Seat
+41,1,brand,Seat
+36,7,brand,Seat
+34,7,brand,Seat
+38,6,brand,Seat
+50,3,brand,Seat
+44,8,brand,Seat
+44,10,brand,Seat
+50,2,brand,Seat
+42,4,brand,Seat
+39,7,brand,Seat
+35,6,brand,Seat
+39,9,brand,Seat
+45,1,brand,Seat
+43,1,brand,Seat
+33,4,brand,Seat
+45,10,brand,Seat
+48,4,brand,Seat
+38,3,brand,Seat
+40,6,brand,Seat
+44,1,brand,Seat
+48,2,brand,Seat
+41,2,brand,Seat
+50,4,brand,Seat
+49,6,brand,Seat
+35,7,brand,Seat
+46,6,brand,Seat
+49,2,brand,Seat
+46,9,brand,Seat
+38,9,brand,Seat
+45,2,brand,Seat
+49,10,brand,Seat
+45,7,brand,Seat
+34,2,brand,Seat
+40,1,brand,Seat
+48,6,brand,Seat
+36,8,brand,Seat
+43,4,brand,Seat
+46,3,brand,Seat
+41,7,brand,Seat
+42,2,brand,Seat
+50,9,brand,Seat
+33,8,brand,Seat
+41,3,brand,Seat
+35,8,brand,Seat
+42,8,brand,Seat
+39,4,brand,Seat
+41,6,brand,Seat
+40,7,brand,Seat
+40,4,brand,Seat
+35,9,brand,Seat
+44,3,brand,Seat
+48,7,brand,Seat
+33,2,brand,Seat
+34,6,brand,Seat
+47,2,brand,Seat
+37,10,brand,Seat
+49,9,brand,Seat
+46,7,brand,Seat
+37,6,brand,Seat
+47,10,brand,Seat
+47,6,brand,Seat
+47,8,brand,Seat
+47,7,brand,Seat
+49,8,brand,Seat
+41,9,brand,Seat
+48,1,model,Leon
+49,1,model,Leon
+50,6,model,Leon
+50,10,model,Leon
+41,8,model,Leon
+50,7,model,Leon
+40,5,model,Leon
+49,4,model,Leon
+41,4,model,Leon
+35,10,model,Leon
+45,8,model,Leon
+33,1,model,Leon
+36,5,model,Leon
+34,8,model,Leon
+44,9,model,Leon
+42,6,model,Leon
+40,8,model,Leon
+43,5,model,Leon
+37,7,model,Leon
+48,10,model,Leon
+38,4,model,Leon
+47,5,model,Leon
+37,3,model,Leon
+39,2,model,Leon
+50,5,model,Leon
+34,4,model,Leon
+34,3,model,Leon
+42,9,model,Leon
+47,1,model,Leon
+44,5,model,Leon
+49,5,model,Leon
+38,5,model,Leon
+48,5,model,Leon
+50,1,model,Leon
+35,3,model,Leon
+47,9,model,Leon
+38,2,model,Leon
+34,9,model,Leon
+42,7,model,Leon
+41,5,model,Leon
+36,6,model,Leon
+39,3,model,Leon
+40,9,model,Leon
+36,2,model,Leon
+36,9,model,Leon
+38,8,model,Leon
+50,8,model,Leon
+43,6,model,Leon
+38,10,model,Leon
+45,9,model,Leon
+39,10,model,Leon
+34,5,model,Leon
+46,2,model,Leon
+44,6,model,Leon
+46,5,model,Leon
+33,10,model,Leon
+39,1,model,Leon
+34,1,model,Leon
+48,3,model,Leon
+33,6,model,Leon
+35,2,model,Leon
+35,5,model,Leon
+34,10,model,Leon
+37,5,model,Leon
+39,8,model,Leon
+45,4,model,Leon
+42,1,model,Leon
+36,1,model,Leon
+42,3,model,Leon
+45,5,model,Leon
+35,1,model,Leon
+43,9,model,Leon
+43,8,model,Leon
+37,4,model,Leon
+48,9,model,Leon
+33,5,model,Leon
+37,8,model,Leon
+45,3,model,Leon
+40,2,model,Leon
+33,9,model,Leon
+37,9,model,Leon
+43,7,model,Leon
+46,1,model,Leon
+49,3,model,Leon
+47,3,model,Leon
+37,1,model,Leon
+35,4,model,Leon
+46,4,model,Leon
+39,5,model,Leon
+40,10,model,Leon
+44,4,model,Leon
+49,7,model,Leon
+37,2,model,Leon
+33,3,model,Leon
+41,10,model,Leon
+48,8,model,Leon
+44,2,model,Leon
+39,6,model,Leon
+36,10,model,Leon
+36,4,model,Leon
+45,6,model,Leon
+43,3,model,Leon
+43,10,model,Leon
+33,7,model,Leon
+43,2,model,Leon
+38,1,model,Leon
+36,3,model,Leon
+47,4,model,Leon
+42,5,model,Leon
+42,10,model,Leon
+46,10,model,Leon
+44,7,model,Leon
+40,3,model,Leon
+38,7,model,Leon
+46,8,model,Leon
+41,1,model,Leon
+36,7,model,Leon
+34,7,model,Leon
+38,6,model,Leon
+50,3,model,Leon
+44,8,model,Leon
+44,10,model,Leon
+50,2,model,Leon
+42,4,model,Leon
+39,7,model,Leon
+35,6,model,Leon
+39,9,model,Leon
+45,1,model,Leon
+43,1,model,Leon
+33,4,model,Leon
+45,10,model,Leon
+48,4,model,Leon
+38,3,model,Leon
+40,6,model,Leon
+44,1,model,Leon
+48,2,model,Leon
+41,2,model,Leon
+50,4,model,Leon
+49,6,model,Leon
+35,7,model,Leon
+46,6,model,Leon
+49,2,model,Leon
+46,9,model,Leon
+38,9,model,Leon
+45,2,model,Leon
+49,10,model,Leon
+45,7,model,Leon
+34,2,model,Leon
+40,1,model,Leon
+48,6,model,Leon
+36,8,model,Leon
+43,4,model,Leon
+46,3,model,Leon
+41,7,model,Leon
+42,2,model,Leon
+50,9,model,Leon
+33,8,model,Leon
+41,3,model,Leon
+35,8,model,Leon
+42,8,model,Leon
+39,4,model,Leon
+41,6,model,Leon
+40,7,model,Leon
+40,4,model,Leon
+35,9,model,Leon
+44,3,model,Leon
+48,7,model,Leon
+33,2,model,Leon
+34,6,model,Leon
+47,2,model,Leon
+37,10,model,Leon
+49,9,model,Leon
+46,7,model,Leon
+37,6,model,Leon
+47,10,model,Leon
+47,6,model,Leon
+47,8,model,Leon
+47,7,model,Leon
+49,8,model,Leon
+41,9,model,Leon
+48,1,from_city,BB
+49,1,from_city,KA
+50,6,from_city,KA
+50,10,from_city,KA
+41,8,from_city,S
+50,7,from_city,KA
+40,5,from_city,KA
+49,4,from_city,KA
+41,4,from_city,S
+35,10,from_city,BB
+45,8,from_city,RT
+33,1,from_city,RT
+36,5,from_city,RT
+34,8,from_city,RT
+44,9,from_city,S
+42,6,from_city,RT
+40,8,from_city,KA
+43,5,from_city,KA
+37,7,from_city,RT
+48,10,from_city,BB
+38,4,from_city,S
+47,5,from_city,S
+37,3,from_city,RT
+39,2,from_city,RT
+50,5,from_city,KA
+34,4,from_city,RT
+34,3,from_city,RT
+42,9,from_city,RT
+47,1,from_city,S
+44,5,from_city,S
+49,5,from_city,KA
+38,5,from_city,S
+48,5,from_city,BB
+50,1,from_city,KA
+35,3,from_city,BB
+47,9,from_city,S
+38,2,from_city,S
+34,9,from_city,RT
+42,7,from_city,RT
+41,5,from_city,S
+36,6,from_city,RT
+39,3,from_city,RT
+40,9,from_city,KA
+36,2,from_city,RT
+36,9,from_city,RT
+38,8,from_city,S
+50,8,from_city,KA
+43,6,from_city,KA
+38,10,from_city,S
+45,9,from_city,RT
+39,10,from_city,RT
+34,5,from_city,RT
+46,2,from_city,S
+44,6,from_city,S
+46,5,from_city,S
+33,10,from_city,RT
+39,1,from_city,RT
+34,1,from_city,RT
+48,3,from_city,BB
+33,6,from_city,RT
+35,2,from_city,BB
+35,5,from_city,BB
+34,10,from_city,RT
+37,5,from_city,RT
+39,8,from_city,RT
+45,4,from_city,RT
+42,1,from_city,RT
+36,1,from_city,RT
+42,3,from_city,RT
+45,5,from_city,RT
+35,1,from_city,BB
+43,9,from_city,KA
+43,8,from_city,KA
+37,4,from_city,RT
+48,9,from_city,BB
+33,5,from_city,RT
+37,8,from_city,RT
+45,3,from_city,RT
+40,2,from_city,KA
+33,9,from_city,RT
+37,9,from_city,RT
+43,7,from_city,KA
+46,1,from_city,S
+49,3,from_city,KA
+47,3,from_city,S
+37,1,from_city,RT
+35,4,from_city,BB
+46,4,from_city,S
+39,5,from_city,RT
+40,10,from_city,KA
+44,4,from_city,S
+49,7,from_city,KA
+37,2,from_city,RT
+33,3,from_city,RT
+41,10,from_city,S
+48,8,from_city,BB
+44,2,from_city,S
+39,6,from_city,RT
+36,10,from_city,RT
+36,4,from_city,RT
+45,6,from_city,RT
+43,3,from_city,KA
+43,10,from_city,KA
+33,7,from_city,RT
+43,2,from_city,KA
+38,1,from_city,S
+36,3,from_city,RT
+47,4,from_city,S
+42,5,from_city,RT
+42,10,from_city,RT
+46,10,from_city,S
+44,7,from_city,S
+40,3,from_city,KA
+38,7,from_city,S
+46,8,from_city,S
+41,1,from_city,S
+36,7,from_city,RT
+34,7,from_city,RT
+38,6,from_city,S
+50,3,from_city,KA
+44,8,from_city,S
+44,10,from_city,S
+50,2,from_city,KA
+42,4,from_city,RT
+39,7,from_city,RT
+35,6,from_city,BB
+39,9,from_city,RT
+45,1,from_city,RT
+43,1,from_city,KA
+33,4,from_city,RT
+45,10,from_city,RT
+48,4,from_city,BB
+38,3,from_city,S
+40,6,from_city,KA
+44,1,from_city,S
+48,2,from_city,BB
+41,2,from_city,S
+50,4,from_city,KA
+49,6,from_city,KA
+35,7,from_city,BB
+46,6,from_city,S
+49,2,from_city,KA
+46,9,from_city,S
+38,9,from_city,S
+45,2,from_city,RT
+49,10,from_city,KA
+45,7,from_city,RT
+34,2,from_city,RT
+40,1,from_city,KA
+48,6,from_city,BB
+36,8,from_city,RT
+43,4,from_city,KA
+46,3,from_city,S
+41,7,from_city,S
+42,2,from_city,RT
+50,9,from_city,KA
+33,8,from_city,RT
+41,3,from_city,S
+35,8,from_city,BB
+42,8,from_city,RT
+39,4,from_city,RT
+41,6,from_city,S
+40,7,from_city,KA
+40,4,from_city,KA
+35,9,from_city,BB
+44,3,from_city,S
+48,7,from_city,BB
+33,2,from_city,RT
+34,6,from_city,RT
+47,2,from_city,S
+37,10,from_city,RT
+49,9,from_city,KA
+46,7,from_city,S
+37,6,from_city,RT
+47,10,from_city,S
+47,6,from_city,S
+47,8,from_city,S
+47,7,from_city,S
+49,8,from_city,KA
+41,9,from_city,S
+48,1,to_city,RT
+49,1,to_city,KA
+50,6,to_city,KA
+50,10,to_city,KA
+41,8,to_city,RT
+50,7,to_city,KA
+40,5,to_city,BB
+49,4,to_city,KA
+41,4,to_city,RT
+35,10,to_city,RT
+45,8,to_city,S
+33,1,to_city,KA
+36,5,to_city,S
+34,8,to_city,KA
+44,9,to_city,RT
+42,6,to_city,S
+40,8,to_city,BB
+43,5,to_city,RT
+37,7,to_city,S
+48,10,to_city,RT
+38,4,to_city,RT
+47,5,to_city,RT
+37,3,to_city,S
+39,2,to_city,BB
+50,5,to_city,KA
+34,4,to_city,KA
+34,3,to_city,KA
+42,9,to_city,S
+47,1,to_city,RT
+44,5,to_city,RT
+49,5,to_city,KA
+38,5,to_city,RT
+48,5,to_city,RT
+50,1,to_city,KA
+35,3,to_city,RT
+47,9,to_city,RT
+38,2,to_city,RT
+34,9,to_city,KA
+42,7,to_city,S
+41,5,to_city,RT
+36,6,to_city,S
+39,3,to_city,BB
+40,9,to_city,BB
+36,2,to_city,S
+36,9,to_city,S
+38,8,to_city,RT
+50,8,to_city,KA
+43,6,to_city,RT
+38,10,to_city,RT
+45,9,to_city,S
+39,10,to_city,BB
+34,5,to_city,KA
+46,2,to_city,RT
+44,6,to_city,RT
+46,5,to_city,RT
+33,10,to_city,KA
+39,1,to_city,BB
+34,1,to_city,KA
+48,3,to_city,RT
+33,6,to_city,KA
+35,2,to_city,RT
+35,5,to_city,RT
+34,10,to_city,KA
+37,5,to_city,S
+39,8,to_city,BB
+45,4,to_city,S
+42,1,to_city,S
+36,1,to_city,S
+42,3,to_city,S
+45,5,to_city,S
+35,1,to_city,RT
+43,9,to_city,RT
+43,8,to_city,RT
+37,4,to_city,S
+48,9,to_city,RT
+33,5,to_city,KA
+37,8,to_city,S
+45,3,to_city,S
+40,2,to_city,BB
+33,9,to_city,KA
+37,9,to_city,S
+43,7,to_city,RT
+46,1,to_city,RT
+49,3,to_city,KA
+47,3,to_city,RT
+37,1,to_city,S
+35,4,to_city,RT
+46,4,to_city,RT
+39,5,to_city,BB
+40,10,to_city,BB
+44,4,to_city,RT
+49,7,to_city,KA
+37,2,to_city,S
+33,3,to_city,KA
+41,10,to_city,RT
+48,8,to_city,RT
+44,2,to_city,RT
+39,6,to_city,BB
+36,10,to_city,S
+36,4,to_city,S
+45,6,to_city,S
+43,3,to_city,RT
+43,10,to_city,RT
+33,7,to_city,KA
+43,2,to_city,RT
+38,1,to_city,RT
+36,3,to_city,S
+47,4,to_city,RT
+42,5,to_city,S
+42,10,to_city,S
+46,10,to_city,RT
+44,7,to_city,RT
+40,3,to_city,BB
+38,7,to_city,RT
+46,8,to_city,RT
+41,1,to_city,RT
+36,7,to_city,S
+34,7,to_city,KA
+38,6,to_city,RT
+50,3,to_city,KA
+44,8,to_city,RT
+44,10,to_city,RT
+50,2,to_city,KA
+42,4,to_city,S
+39,7,to_city,BB
+35,6,to_city,RT
+39,9,to_city,BB
+45,1,to_city,S
+43,1,to_city,RT
+33,4,to_city,KA
+45,10,to_city,S
+48,4,to_city,RT
+38,3,to_city,RT
+40,6,to_city,BB
+44,1,to_city,RT
+48,2,to_city,RT
+41,2,to_city,RT
+50,4,to_city,KA
+49,6,to_city,KA
+35,7,to_city,RT
+46,6,to_city,RT
+49,2,to_city,KA
+46,9,to_city,RT
+38,9,to_city,RT
+45,2,to_city,S
+49,10,to_city,KA
+45,7,to_city,S
+34,2,to_city,KA
+40,1,to_city,BB
+48,6,to_city,RT
+36,8,to_city,S
+43,4,to_city,RT
+46,3,to_city,RT
+41,7,to_city,RT
+42,2,to_city,S
+50,9,to_city,KA
+33,8,to_city,KA
+41,3,to_city,RT
+35,8,to_city,RT
+42,8,to_city,S
+39,4,to_city,BB
+41,6,to_city,RT
+40,7,to_city,BB
+40,4,to_city,BB
+35,9,to_city,RT
+44,3,to_city,RT
+48,7,to_city,RT
+33,2,to_city,KA
+34,6,to_city,KA
+47,2,to_city,RT
+37,10,to_city,S
+49,9,to_city,KA
+46,7,to_city,RT
+37,6,to_city,S
+47,10,to_city,RT
+47,6,to_city,RT
+47,8,to_city,RT
+47,7,to_city,RT
+49,8,to_city,KA
+41,9,to_city,RT
+48,1,condition,Normal
+49,1,condition,Normal
+50,6,condition,Frei
+50,10,condition,Frei
+41,8,condition,Normal
+50,7,condition,Frei
+40,5,condition,Normal
+49,4,condition,Normal
+41,4,condition,Normal
+35,10,condition,Normal
+45,8,condition,Normal
+33,1,condition,Stau
+36,5,condition,Normal
+34,8,condition,Frei
+44,9,condition,Frei
+42,6,condition,Normal
+40,8,condition,Normal
+43,5,condition,Frei
+37,7,condition,Normal
+48,10,condition,Normal
+38,4,condition,Normal
+47,5,condition,Normal
+37,3,condition,Normal
+39,2,condition,Frei
+50,5,condition,Frei
+34,4,condition,Frei
+34,3,condition,Frei
+42,9,condition,Normal
+47,1,condition,Normal
+44,5,condition,Frei
+49,5,condition,Normal
+38,5,condition,Normal
+48,5,condition,Normal
+50,1,condition,Frei
+35,3,condition,Normal
+47,9,condition,Normal
+38,2,condition,Normal
+34,9,condition,Frei
+42,7,condition,Normal
+41,5,condition,Normal
+36,6,condition,Normal
+39,3,condition,Frei
+40,9,condition,Normal
+36,2,condition,Normal
+36,9,condition,Normal
+38,8,condition,Normal
+50,8,condition,Frei
+43,6,condition,Frei
+38,10,condition,Normal
+45,9,condition,Normal
+39,10,condition,Frei
+34,5,condition,Frei
+46,2,condition,Normal
+44,6,condition,Frei
+46,5,condition,Normal
+33,10,condition,Stau
+39,1,condition,Frei
+34,1,condition,Frei
+48,3,condition,Normal
+33,6,condition,Stau
+35,2,condition,Normal
+35,5,condition,Normal
+34,10,condition,Frei
+37,5,condition,Normal
+39,8,condition,Frei
+45,4,condition,Normal
+42,1,condition,Normal
+36,1,condition,Normal
+42,3,condition,Normal
+45,5,condition,Normal
+35,1,condition,Normal
+43,9,condition,Frei
+43,8,condition,Frei
+37,4,condition,Normal
+48,9,condition,Normal
+33,5,condition,Stau
+37,8,condition,Normal
+45,3,condition,Normal
+40,2,condition,Normal
+33,9,condition,Stau
+37,9,condition,Normal
+43,7,condition,Frei
+46,1,condition,Normal
+49,3,condition,Normal
+47,3,condition,Normal
+37,1,condition,Normal
+35,4,condition,Normal
+46,4,condition,Normal
+39,5,condition,Frei
+40,10,condition,Normal
+44,4,condition,Frei
+49,7,condition,Normal
+37,2,condition,Normal
+33,3,condition,Stau
+41,10,condition,Normal
+48,8,condition,Normal
+44,2,condition,Frei
+39,6,condition,Frei
+36,10,condition,Normal
+36,4,condition,Normal
+45,6,condition,Normal
+43,3,condition,Frei
+43,10,condition,Frei
+33,7,condition,Stau
+43,2,condition,Frei
+38,1,condition,Normal
+36,3,condition,Normal
+47,4,condition,Normal
+42,5,condition,Normal
+42,10,condition,Normal
+46,10,condition,Normal
+44,7,condition,Frei
+40,3,condition,Normal
+38,7,condition,Normal
+46,8,condition,Normal
+41,1,condition,Normal
+36,7,condition,Normal
+34,7,condition,Frei
+38,6,condition,Normal
+50,3,condition,Frei
+44,8,condition,Frei
+44,10,condition,Frei
+50,2,condition,Frei
+42,4,condition,Normal
+39,7,condition,Frei
+35,6,condition,Normal
+39,9,condition,Frei
+45,1,condition,Normal
+43,1,condition,Frei
+33,4,condition,Stau
+45,10,condition,Normal
+48,4,condition,Normal
+38,3,condition,Normal
+40,6,condition,Normal
+44,1,condition,Frei
+48,2,condition,Normal
+41,2,condition,Normal
+50,4,condition,Frei
+49,6,condition,Normal
+35,7,condition,Normal
+46,6,condition,Normal
+49,2,condition,Normal
+46,9,condition,Normal
+38,9,condition,Normal
+45,2,condition,Normal
+49,10,condition,Normal
+45,7,condition,Normal
+34,2,condition,Frei
+40,1,condition,Normal
+48,6,condition,Normal
+36,8,condition,Normal
+43,4,condition,Frei
+46,3,condition,Normal
+41,7,condition,Normal
+42,2,condition,Normal
+50,9,condition,Frei
+33,8,condition,Stau
+41,3,condition,Normal
+35,8,condition,Normal
+42,8,condition,Normal
+39,4,condition,Frei
+41,6,condition,Normal
+40,7,condition,Normal
+40,4,condition,Normal
+35,9,condition,Normal
+44,3,condition,Frei
+48,7,condition,Normal
+33,2,condition,Stau
+34,6,condition,Frei
+47,2,condition,Normal
+37,10,condition,Normal
+49,9,condition,Normal
+46,7,condition,Normal
+37,6,condition,Normal
+47,10,condition,Normal
+47,6,condition,Normal
+47,8,condition,Normal
+47,7,condition,Normal
+49,8,condition,Normal
+41,9,condition,Normal
+48,1,experiment_id,experiment_3
+49,1,experiment_id,experiment_3
+50,6,experiment_id,experiment_3
+50,10,experiment_id,experiment_3
+41,8,experiment_id,experiment_3
+50,7,experiment_id,experiment_3
+40,5,experiment_id,experiment_3
+49,4,experiment_id,experiment_3
+41,4,experiment_id,experiment_3
+35,10,experiment_id,experiment_3
+45,8,experiment_id,experiment_3
+33,1,experiment_id,experiment_3
+36,5,experiment_id,experiment_3
+34,8,experiment_id,experiment_3
+44,9,experiment_id,experiment_3
+42,6,experiment_id,experiment_3
+40,8,experiment_id,experiment_3
+43,5,experiment_id,experiment_3
+37,7,experiment_id,experiment_3
+48,10,experiment_id,experiment_3
+38,4,experiment_id,experiment_3
+47,5,experiment_id,experiment_3
+37,3,experiment_id,experiment_3
+39,2,experiment_id,experiment_3
+50,5,experiment_id,experiment_3
+34,4,experiment_id,experiment_3
+34,3,experiment_id,experiment_3
+42,9,experiment_id,experiment_3
+47,1,experiment_id,experiment_3
+44,5,experiment_id,experiment_3
+49,5,experiment_id,experiment_3
+38,5,experiment_id,experiment_3
+48,5,experiment_id,experiment_3
+50,1,experiment_id,experiment_3
+35,3,experiment_id,experiment_3
+47,9,experiment_id,experiment_3
+38,2,experiment_id,experiment_3
+34,9,experiment_id,experiment_3
+42,7,experiment_id,experiment_3
+41,5,experiment_id,experiment_3
+36,6,experiment_id,experiment_3
+39,3,experiment_id,experiment_3
+40,9,experiment_id,experiment_3
+36,2,experiment_id,experiment_3
+36,9,experiment_id,experiment_3
+38,8,experiment_id,experiment_3
+50,8,experiment_id,experiment_3
+43,6,experiment_id,experiment_3
+38,10,experiment_id,experiment_3
+45,9,experiment_id,experiment_3
+39,10,experiment_id,experiment_3
+34,5,experiment_id,experiment_3
+46,2,experiment_id,experiment_3
+44,6,experiment_id,experiment_3
+46,5,experiment_id,experiment_3
+33,10,experiment_id,experiment_3
+39,1,experiment_id,experiment_3
+34,1,experiment_id,experiment_3
+48,3,experiment_id,experiment_3
+33,6,experiment_id,experiment_3
+35,2,experiment_id,experiment_3
+35,5,experiment_id,experiment_3
+34,10,experiment_id,experiment_3
+37,5,experiment_id,experiment_3
+39,8,experiment_id,experiment_3
+45,4,experiment_id,experiment_3
+42,1,experiment_id,experiment_3
+36,1,experiment_id,experiment_3
+42,3,experiment_id,experiment_3
+45,5,experiment_id,experiment_3
+35,1,experiment_id,experiment_3
+43,9,experiment_id,experiment_3
+43,8,experiment_id,experiment_3
+37,4,experiment_id,experiment_3
+48,9,experiment_id,experiment_3
+33,5,experiment_id,experiment_3
+37,8,experiment_id,experiment_3
+45,3,experiment_id,experiment_3
+40,2,experiment_id,experiment_3
+33,9,experiment_id,experiment_3
+37,9,experiment_id,experiment_3
+43,7,experiment_id,experiment_3
+46,1,experiment_id,experiment_3
+49,3,experiment_id,experiment_3
+47,3,experiment_id,experiment_3
+37,1,experiment_id,experiment_3
+35,4,experiment_id,experiment_3
+46,4,experiment_id,experiment_3
+39,5,experiment_id,experiment_3
+40,10,experiment_id,experiment_3
+44,4,experiment_id,experiment_3
+49,7,experiment_id,experiment_3
+37,2,experiment_id,experiment_3
+33,3,experiment_id,experiment_3
+41,10,experiment_id,experiment_3
+48,8,experiment_id,experiment_3
+44,2,experiment_id,experiment_3
+39,6,experiment_id,experiment_3
+36,10,experiment_id,experiment_3
+36,4,experiment_id,experiment_3
+45,6,experiment_id,experiment_3
+43,3,experiment_id,experiment_3
+43,10,experiment_id,experiment_3
+33,7,experiment_id,experiment_3
+43,2,experiment_id,experiment_3
+38,1,experiment_id,experiment_3
+36,3,experiment_id,experiment_3
+47,4,experiment_id,experiment_3
+42,5,experiment_id,experiment_3
+42,10,experiment_id,experiment_3
+46,10,experiment_id,experiment_3
+44,7,experiment_id,experiment_3
+40,3,experiment_id,experiment_3
+38,7,experiment_id,experiment_3
+46,8,experiment_id,experiment_3
+41,1,experiment_id,experiment_3
+36,7,experiment_id,experiment_3
+34,7,experiment_id,experiment_3
+38,6,experiment_id,experiment_3
+50,3,experiment_id,experiment_3
+44,8,experiment_id,experiment_3
+44,10,experiment_id,experiment_3
+50,2,experiment_id,experiment_3
+42,4,experiment_id,experiment_3
+39,7,experiment_id,experiment_3
+35,6,experiment_id,experiment_3
+39,9,experiment_id,experiment_3
+45,1,experiment_id,experiment_3
+43,1,experiment_id,experiment_3
+33,4,experiment_id,experiment_3
+45,10,experiment_id,experiment_3
+48,4,experiment_id,experiment_3
+38,3,experiment_id,experiment_3
+40,6,experiment_id,experiment_3
+44,1,experiment_id,experiment_3
+48,2,experiment_id,experiment_3
+41,2,experiment_id,experiment_3
+50,4,experiment_id,experiment_3
+49,6,experiment_id,experiment_3
+35,7,experiment_id,experiment_3
+46,6,experiment_id,experiment_3
+49,2,experiment_id,experiment_3
+46,9,experiment_id,experiment_3
+38,9,experiment_id,experiment_3
+45,2,experiment_id,experiment_3
+49,10,experiment_id,experiment_3
+45,7,experiment_id,experiment_3
+34,2,experiment_id,experiment_3
+40,1,experiment_id,experiment_3
+48,6,experiment_id,experiment_3
+36,8,experiment_id,experiment_3
+43,4,experiment_id,experiment_3
+46,3,experiment_id,experiment_3
+41,7,experiment_id,experiment_3
+42,2,experiment_id,experiment_3
+50,9,experiment_id,experiment_3
+33,8,experiment_id,experiment_3
+41,3,experiment_id,experiment_3
+35,8,experiment_id,experiment_3
+42,8,experiment_id,experiment_3
+39,4,experiment_id,experiment_3
+41,6,experiment_id,experiment_3
+40,7,experiment_id,experiment_3
+40,4,experiment_id,experiment_3
+35,9,experiment_id,experiment_3
+44,3,experiment_id,experiment_3
+48,7,experiment_id,experiment_3
+33,2,experiment_id,experiment_3
+34,6,experiment_id,experiment_3
+47,2,experiment_id,experiment_3
+37,10,experiment_id,experiment_3
+49,9,experiment_id,experiment_3
+46,7,experiment_id,experiment_3
+37,6,experiment_id,experiment_3
+47,10,experiment_id,experiment_3
+47,6,experiment_id,experiment_3
+47,8,experiment_id,experiment_3
+47,7,experiment_id,experiment_3
+49,8,experiment_id,experiment_3
+41,9,experiment_id,experiment_3

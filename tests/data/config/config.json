@@ -1,0 +1,28 @@
+{
+  "source": {
+    "container_metrics_table": "spark_catalog.silver.container_metrics",
+    "channel_metrics_table": "spark_catalog.silver.channel_metrics",
+    "channels_uri": "spark_catalog.silver.channels"
+  },
+  "unity_sink": {
+    "catalog": "spark_catalog",
+    "schema": "gold",
+    "table_prefix": "evaluation"
+  },
+  "container_filters": {
+    "metric_filters": [
+      [
+        { "column_name": "vehicle_key", "comparator": "==", "value": "Seat_Leon" },
+        { "column_name": "start_dt",    "comparator": ">=", "value": "2023-01-01T00:00:00.000Z", "value_type": "timestamp" }
+      ]
+    ]
+  },
+  "query_engine": {
+    "solver": "BasicNarrowSolver"
+  },
+  "measurement_dimensions": [
+    "uut_id",
+    "file_name",
+    "source_file_path"
+  ]
+}

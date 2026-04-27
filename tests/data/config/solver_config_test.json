@@ -1,0 +1,17 @@
+{
+    "container_id_col": "measurement_id",
+    "channel_id_cols": [
+        "measurement_id",
+        "signal_id",
+        "channel_key"
+    ],
+    "channel_data_mapping": {
+        "tstart": "ts_start",
+        "tend": "ts_end",
+        "value": "signal_value"
+    },
+    "container_meta_data_mapping": {
+        "project_id": "proj_id"
+    },
+    "entity_id_col": "entity_ref_id"
+}

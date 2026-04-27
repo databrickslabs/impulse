@@ -1,0 +1,133 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mda-framework_v2"
+version = "0.0.4"
+description = "MDA Framework for query engine and reporting"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = {text = "Proprietary"}
+dependencies = [
+    "databricks-sdk",
+    "delta-spark==4.0.1",
+    "matplotlib==3.10.0",
+    "pyarrow==19.0.1",
+    "pyspark==4.0.0",
+    "pandas==2.2.3",
+    "lz4==4.4.5",
+    "scipy==1.15.1",
+    "nptyping~=2.5.0",
+    "pydantic==2.11.7"
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit~=4.1.0",
+    "pytest~=8.3.4",
+    "pytest-benchmark~=5.1.0",
+    "pytest-cov~=6.0.0",
+    "pytest-mock>=3.14.0",
+    "ruff~=0.9.3",
+    "setuptools~=75.8.0",
+    "black>=24.0.0"
+]
+
+# Setuptools options
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["src/*/demos"]
+
+# Pytest options
+[tool.pytest.ini_options]
+pythonpath = [".", "src/mda_reporting"]
+testpaths = ["tests"]
+addopts = "--junitxml=test-results.xml --cov=src --cov-report=html --cov-report=xml:coverage.xml --cov-report=term-missing"
+
+# Default dependency groups
+[tool.uv]
+default-groups = ["dev"]
+
+# Coverage options
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+omit = ["*/__init__.py"]
+
+[tool.ruff]
+line-length = 99
+exclude = [".git", ".venv", "venv", "__pycache__", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # flake8-bugbear
+    "B",
+    # isort
+    "I",
+    # flake8-simplify
+    "SIM",
+    # flake8-unused-arguments
+    "ARG",
+    # pyupgrade — modern type hints
+    "UP006",   # List[int] → list[int]
+    "UP007",   # Union[X, Y] → X | Y, Optional[X] → X | None
+    "UP035",   # deprecated typing imports → collections.abc
+]
+ignore = [
+    "E501",
+    "E712",
+    "E722",
+    "B008",
+    "F811",
+    "I001",   # Import block is un-sorted or un-formatted (isort)
+    "SIM118", # Use 'key in dict' instead of 'key in dict.keys()'
+    "SIM108", # Use ternary operator instead of if-else-block
+    "SIM114", # Combine if branches using logical 'or'
+    "SIM105", # Use contextlib.suppress instead of try-except-pass
+    "SIM300", # Yoda conditions (e.g., '1 == len(x)')
+    "ARG001", # Unused function argument
+    "ARG002", # Unused method argument
+    "ARG003", # Unused class method argument
+    "F821",   # Undefined name (use with caution)
+    "F841",   # Local variable assigned but never used
+    "F401",   # Unused imports
+    "B023",   # Function definition does not bind loop variable
+    "B027",   # Empty method in ABC without abstract decorator
+    "E402",   # Module level import not at top of file
+    "E731",   # Do not assign a lambda expression
+    "E711",   # Comparison to None (should use 'is None')
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.isort]
+known-first-party = ["mda_reporting", "bseries"]
+
+[tool.black]
+line-length = 99
+target-version = ['py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
