@@ -65,8 +65,7 @@ dbfs/
 spark-warehouse
 
 # Dependencies
-/node_modules
-docs-site/node_modules
+node_modules/
 # Production
 /build
 
