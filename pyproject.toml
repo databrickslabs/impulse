@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "databricks-impulse"
 version = "0.0.1"
-description = "MDA Framework for query engine and reporting"
+description = "Large-scale time-series measurement data analytics on Apache Spark"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = {file = "LICENSE.txt"}
