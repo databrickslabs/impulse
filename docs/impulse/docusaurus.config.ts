@@ -7,11 +7,11 @@ const config: Config = {
   tagline: 'Large-scale time-series measurement data analytics on Apache Spark.',
   favicon: 'img/impulse_icon.svg',
 
-  url: 'https://mda-framework-docs.azurewebsites.net',
-  baseUrl: '/',
+  url: 'https://databrickslabs.github.io',
+  baseUrl: '/impulse/',
 
-  organizationName: 'tombonfert',
-  projectName: 'mda_framework_v2',
+  organizationName: 'databrickslabs',
+  projectName: 'impulse',
 
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'throw',
@@ -58,7 +58,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           editUrl:
-            'https://github.com/tombonfert/mda_framework_v2/tree/main/docs-site/',
+            'https://github.com/databrickslabs/impulse/tree/main/docs/impulse/',
         },
         blog: false,
         theme: {
@@ -92,7 +92,7 @@ const config: Config = {
           position: 'right',
         },
         {
-          href: 'https://github.com/tombonfert/mda_framework_v2',
+          href: 'https://github.com/databrickslabs/impulse',
           position: 'right',
           className: 'header-github-link',
           'aria-label': 'GitHub repository',

@@ -3,12 +3,18 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mda-framework_v2"
-version = "0.0.4"
+name = "databricks-impulse"
+version = "0.0.1"
 description = "MDA Framework for query engine and reporting"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = {text = "Proprietary"}
+license = {file = "LICENSE.txt"}
+authors = [
+    {name = "Databricks Labs"}
+]
+maintainers = [
+    {name = "Databricks Labs"}
+]
 dependencies = [
     "databricks-sdk",
     "delta-spark==4.0.1",
@@ -21,6 +27,12 @@ dependencies = [
     "nptyping~=2.5.0",
     "pydantic==2.11.7"
 ]
+
+[project.urls]
+Homepage = "https://github.com/databrickslabs/impulse"
+Repository = "https://github.com/databrickslabs/impulse"
+Documentation = "https://databrickslabs.github.io/impulse"
+Issues = "https://github.com/databrickslabs/impulse/issues"
 
 [dependency-groups]
 dev = [
@@ -109,7 +121,7 @@ ignore = [
 convention = "numpy"
 
 [tool.ruff.lint.isort]
-known-first-party = ["mda_reporting", "bseries"]
+known-first-party = ["mda_query_engine", "mda_reporting"]
 
 [tool.black]
 line-length = 99

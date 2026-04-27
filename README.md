@@ -1,8 +1,8 @@
-# MDA Framework
+# Impulse
 
 ## Documentation
 
-The complete documentation is available at: https://mda-framework-docs.azurewebsites.net/
+The complete documentation is available at: https://databrickslabs.github.io/impulse
 
 ## Overview
 
@@ -113,13 +113,13 @@ The reporting component orchestrates the query engine to produce structured anal
 ## Project Structure
 
 ```
-mda_framework_v2/
+impulse/
 ├── src/
 │   ├── mda_query_engine/     # Query engine for time-series data
 │   └── mda_reporting/        # Reporting framework
 ├── tests/                    # Unit and integration tests
 ├── demos/                    # Example notebooks and configurations
-├── docs/                     # Documentation (ER diagrams, config guides)
+├── docs/impulse/             # Documentation (Docusaurus site)
 └── pyproject.toml            # Project configuration and dependencies
 ```
 
@@ -233,4 +233,10 @@ pre-commit run --all      # Run all pre-commit hooks
 
 ---
 
-*Copyright (c) MDA Framework Contributors*
+## Project Support
+
+Please note that this project is provided for your exploration only and is not formally supported by Databricks with Service Level Agreements (SLAs). It is provided AS-IS and we do not make any guarantees of any kind. Please do not submit a support ticket relating to any issues arising from the use of this project.
+
+Any issues discovered through the use of this project should be filed as GitHub Issues on this repository. They will be reviewed as time permits, but no formal SLAs for support exist.
+
+---
