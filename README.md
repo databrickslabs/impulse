@@ -6,7 +6,7 @@ The complete documentation is available at: https://databrickslabs.github.io/imp
 
 ## Overview
 
-The MDA (Measurement Data Analytics) Framework is a Python-based analytics library designed for processing large-scale time-series measurement data. Built on Apache Spark and Delta Lake, it enables distributed processing of petabyte-scale sensor data from automotive testing, industrial IoT, and other measurement-intensive domains.
+Impulse is a Python-based analytics library designed for processing large-scale time-series measurement data. Built on Apache Spark and Delta Lake, it enables distributed processing of petabyte-scale sensor data from automotive testing, industrial IoT, and other measurement-intensive domains.
 
 ### Main Components
 
@@ -16,12 +16,12 @@ flowchart LR
         DL[(Unity Catalog)]
     end
 
-    subgraph engine["MDA Query Engine"]
+    subgraph engine["Query Engine"]
         TSAL[TSAL Expressions]
         Solver[Solvers]
     end
 
-    subgraph reporting["MDA Reporting"]
+    subgraph reporting["Reporting"]
         Defs[Event & Aggregation Definitions]
         Report[Report Builder]
     end
@@ -37,7 +37,7 @@ flowchart LR
     Report -->|transform & persist| UC
 ```
 
-### MDA Query Engine
+### Query Engine
 
 The query engine provides access to time-series data and enables flexible data transformation.
 
@@ -47,7 +47,7 @@ The query engine provides access to time-series data and enables flexible data t
 - Executes queries through interchangeable solvers optimized for different silver layer data models or formats
 - Results are returned in a Spark Dataframe
 
-### MDA Reporting
+### Reporting
 
 The reporting component orchestrates the query engine to produce structured analytical outputs.
 
