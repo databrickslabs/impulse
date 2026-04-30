@@ -1,6 +1,13 @@
+from typing import List
+
+import pyspark.sql.functions as f
+from pyspark.sql import Row, SparkSession
+
 from mda_reporting.aggregations.aggregation import Aggregation
-from .page_header import PageHeader
+from mda_reporting.aggregations.histogram import Histogram
+
 from .page_footer import PageFooter
+from .page_header import PageHeader
 
 
 class Page:

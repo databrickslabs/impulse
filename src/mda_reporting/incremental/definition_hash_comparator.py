@@ -1,5 +1,7 @@
 """Definition hash comparator for incremental processing."""
 
+from typing import List, Tuple
+
 from pyspark.sql import SparkSession
 
 from mda_reporting.aggregations.aggregation import Aggregation

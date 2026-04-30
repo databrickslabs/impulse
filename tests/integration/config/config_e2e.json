@@ -1,0 +1,30 @@
+{
+    "source": {
+        "container_tags_table": "e2e.e2e_data_model.concept_entities",
+        "container_metrics_table": "e2e.bronze_e2e.container_metric",
+        "channel_metrics_table": "e2e.bronze_e2e.channel_metric",
+        "channels_uri": "e2e.bronze_e2e.channel_data"
+    },
+    "unity_sink": {
+        "catalog": "e2e",
+        "schema": "gold_e2e",
+        "table_prefix": "e2e"
+    },
+    "query_engine": {
+        "solver": "KeyValueStoreSolver",
+        "solver_config": {
+            "project_id": "e2e_data",
+            "container_tags": {
+                "column_name_mapping": {
+                    "entity_id": "container_id",
+                    "element_id": "key"
+                }
+            }
+        }
+    },
+    "measurement_dimensions": [
+        "container_id",
+        "uut_id",
+        "file_name"
+    ]
+}

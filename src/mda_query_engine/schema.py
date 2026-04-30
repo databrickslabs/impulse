@@ -61,12 +61,3 @@ CHANNELS_SCHEMA = T.StructType(
         T.StructField("value", T.DoubleType()),
     ]
 )
-
-CHANNELS_SCHEMA_WITHOUT_RLE = T.StructType(
-    [
-        T.StructField("container_id", T.LongType(), nullable=False),
-        T.StructField("channel_id", T.IntegerType(), nullable=False),
-        T.StructField("timestamp", T.LongType(), nullable=False),
-        T.StructField("value", T.DoubleType()),
-    ]
-)

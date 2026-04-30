@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from itertools import groupby
 
 import numpy as np
 import numpy.typing as npt
-
 import pyspark.sql.types as T
 
 

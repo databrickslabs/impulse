@@ -1,0 +1,2 @@
+container_id,channel_id,value_type,sample_count,nan_ratio,begin_s,end_s,duration_ms,original_sample_count,original_sr,min,max,mean,std,pz1,pz10,pz90,pz99
+1,1,numerical,1,1.0,0.0,100.0,1,1,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0

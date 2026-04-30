@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, List, Set, Union
 from collections.abc import Callable
+
 import abc
 import operator
+import zlib
 
 import pyspark.sql.types as T
 
@@ -20,7 +22,12 @@ class RequiresDeserialization:
 
 
 class TimeSeriesExpression(abc.ABC):
-    def __init__(self, alias: str = "", is_single_signal: bool = True, requires_udf: bool = False):
+    def __init__(
+        self,
+        alias: str = "",
+        is_single_signal: bool = True,
+        requires_udf: bool = False,
+    ):
         """
         Initialize a TimeSeriesExpression.
 
@@ -89,12 +96,6 @@ class TimeSeriesExpression(abc.ABC):
 
     def __rtruediv__(self, other: TimeSeriesExpression | float | int) -> TimeSeriesOp:
         return TimeSeriesOp(operator.truediv, "builtin", other, self)
-
-    def __mod__(self, other: TimeSeriesExpression | float | int) -> TimeSeriesOp:
-        return TimeSeriesOp(operator.mod, "builtin", self, other)
-
-    def __rmod__(self, other: TimeSeriesExpression | float | int) -> TimeSeriesOp:
-        return TimeSeriesOp(operator.mod, "builtin", other, self)
 
     def __eq__(self, other: TimeSeriesExpression | float | int) -> TimeSeriesOp:
         return TimeSeriesOp(operator.eq, "builtin", self, other)
@@ -176,6 +177,23 @@ class TimeSeriesExpression(abc.ABC):
         -------
         Any
             Selector expression.
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_selectors(self) -> List["TimeSeriesSelector"]:
+        """
+        Return all leaf :class:`TimeSeriesSelector` nodes reachable from
+        this expression.
+
+        The returned list may contain duplicates when the same selector
+        appears in multiple branches of the expression tree.
+        Callers are responsible for deduplication if needed.
+
+        Returns
+        -------
+        list of TimeSeriesSelector
+            Leaf selectors.
         """
         pass
 
@@ -315,7 +333,7 @@ class TimeSeriesExpression(abc.ABC):
         channel_interp_kind="previous",
         weights_interp_kind="previous",
         math_fct_for_weights=None,
-        math_fct_kwargs=None,
+        math_fct_kwargs={},
         weight_type=None,
     ):
         """
@@ -393,7 +411,7 @@ class TimeSeriesExpression(abc.ABC):
         channel_interp_kind="previous",
         weights_interp_kind="previous",
         math_fct_for_weights=None,
-        math_fct_kwargs=None,
+        math_fct_kwargs={},
         weight_type=None,
     ):
         """
@@ -512,7 +530,7 @@ class TimeSeriesExpression(abc.ABC):
 
 
 class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
-    def __init__(self, expr):
+    def __init__(self, expr, uses_alias: bool = False):
         """
         Initialize a TimeSeriesSelector.
 
@@ -522,7 +540,16 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             Tag expression to select.
         """
         self._expr = expr
+        self._uses_alias = uses_alias
         TimeSeriesExpression.__init__(self, is_single_signal=True)
+
+    @property
+    def uses_alias(self) -> bool:
+        return self._uses_alias
+
+    @property
+    def selector_id(self) -> int:
+        return zlib.crc32(str(self._expr).encode())
 
     def dtype(self):
         """
@@ -606,6 +633,9 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         """
         return self._expr.get_selector_expr()
 
+    def get_selectors(self) -> List["TimeSeriesSelector"]:
+        return [self]
+
     def with_alias(self, *args):
         """
         Create an alias selector.
@@ -645,6 +675,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         obj = TimeSeriesExpression.as_dict(self)
         obj["type"] = U.name_of(TimeSeriesSelector)
         obj["expr"] = self._expr.as_dict()
+        obj["uses_alias"] = self._uses_alias
         return obj
 
     @staticmethod
@@ -663,7 +694,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             Selector instance.
         """
         expr = TimeSeriesExpression.from_dict(obj["expr"])
-        m = TimeSeriesSelector(expr)
+        m = TimeSeriesSelector(expr, uses_alias=obj.get("uses_alias", False))
         if "alias" in obj and obj["alias"] is not None:
             m.alias(obj["alias"])
         return m
@@ -755,6 +786,12 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
             else:
                 expr = expr | alias.get_selector_expr()
         return expr
+
+    def get_selectors(self) -> List["TimeSeriesSelector"]:
+        result: List[TimeSeriesSelector] = []
+        for alias in self._aliases:
+            result.extend(alias.get_selectors())
+        return result
 
     def __str__(self):
         """
@@ -856,6 +893,16 @@ class TimeSeriesOp(TimeSeriesExpression):
                     expr = expr | kwarg_e
         return expr
 
+    def get_selectors(self) -> List["TimeSeriesSelector"]:
+        result: List[TimeSeriesSelector] = []
+        for arg in self.args:
+            if isinstance(arg, TimeSeriesExpression):
+                result.extend(arg.get_selectors())
+        for kwarg in self.kwargs.values():
+            if isinstance(kwarg, TimeSeriesExpression):
+                result.extend(kwarg.get_selectors())
+        return result
+
     def build(self, cache: SeriesCache):
         """
         Build the time series from cache.
@@ -895,7 +942,9 @@ class TimeSeriesOp(TimeSeriesExpression):
             String representation.
         """
         args_s = ", ".join([str(arg) for arg in self.args])
-        kwargs_s = ", ".join([str(key) + "=" + str(value) for key, value in self.kwargs])
+        kwargs_s = ", ".join(
+            [str(key) + "=" + str(value) for key, value in self.kwargs.items()]
+        )
         opname = self.operation if isinstance(self.operation, str) else self.operation.__name__
         if len(kwargs_s) == 0:
             return f"TimeSeriesOp<{opname}({args_s})>"
@@ -1009,7 +1058,7 @@ class TimeSeriesUDF(TimeSeriesOp):
             String representation.
         """
         args_s = ", ".join([str(arg) for arg in self.args])
-        kwargs_s = ", ".join([str(key) + "=" + str(value) for key, value in self.kwargs])
+        kwargs_s = ", ".join([str(key) + "=" + str(value) for key, value in self.kwargs.items()])
         opname = self.operation if isinstance(self.operation, str) else self.operation.__name__
         if len(kwargs_s) == 0:
             return f"TimeSeriesUDF<{opname}({args_s})>"

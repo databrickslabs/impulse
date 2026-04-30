@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+from typing import List, Tuple, Union
+from collections.abc import Iterable
+
+from itertools import groupby
 
 import numpy as np
 import numpy.typing as npt
+import pyspark.sql.types as T
 
 from .points_in_time import PointsInTime
-
-import pyspark.sql.types as T
 
 
 class Intervals:
     def __init__(
-        self, tstarts: npt.NDArray, tends: npt.NDArray, merge_overlaps=False, del_last_empty=False
+        self,
+        tstarts: npt.NDArray,
+        tends: npt.NDArray,
+        merge_overlaps=False,
+        del_last_empty=False,
     ):
         """
         Initialize the Intervals object.
@@ -38,7 +45,8 @@ class Intervals:
             non_empty_intervals = ~(self.tstarts >= self.tends)
         else:
             non_empty_intervals = np.append(
-                ~(self.tstarts[:-1] >= self.tends[:-1]), ~(self.tstarts[-1:] > self.tends[-1:])
+                ~(self.tstarts[:-1] >= self.tends[:-1]),
+                ~(self.tstarts[-1:] > self.tends[-1:]),
             )
         self.tstarts = self.tstarts[non_empty_intervals]
         self.tends = self.tends[non_empty_intervals]
@@ -191,14 +199,13 @@ class Intervals:
                 if gap < d:
                     # Within debounce tolerance → extend confirmed block
                     confirmed_end = self.tends[i]
-                else:
-                    # Gap too large
-                    if is_long:
-                        # Finalize current confirmed block, start a new one
-                        result_starts.append(confirmed_start)
-                        result_ends.append(confirmed_end)
-                        confirmed_start = self.tstarts[i]
-                        confirmed_end = self.tends[i]
+                # Gap too large
+                elif is_long:
+                    # Finalize current confirmed block, start a new one
+                    result_starts.append(confirmed_start)
+                    result_ends.append(confirmed_end)
+                    confirmed_start = self.tstarts[i]
+                    confirmed_end = self.tends[i]
                     # else: short interval beyond tolerance → discard
 
         # Finalize last confirmed block
@@ -406,7 +413,10 @@ class Intervals:
             New Intervals object with shrunk bounds.
         """
         return Intervals(
-            self.tstarts + width, self.tends - width, merge_overlaps=True, del_last_empty=True
+            self.tstarts + width,
+            self.tends - width,
+            merge_overlaps=True,
+            del_last_empty=True,
         )
 
     def __and__(self, other: Intervals | PointsInTime) -> Intervals | PointsInTime:
@@ -632,11 +642,11 @@ class Intervals:
                 return Intervals.__plane_sweep_pit(obj1, obj2)
             else:  # obj2 is PointsInTime
                 return obj1 & obj2
-        else:  # obj1 is Intervals
-            if isinstance(obj2, Intervals):
-                return Intervals.__plane_sweep_intervals(obj1, obj2)
-            else:  # obj2 is PointsInTime
-                return Intervals.__plane_sweep_pit(obj2, obj1, invert_order=True)
+        elif isinstance(obj2, Intervals):
+            return Intervals.__plane_sweep_intervals(obj1, obj2)
+        else:  # obj2 is PointsInTime
+            return Intervals.__plane_sweep_pit(obj2, obj1, invert_order=True)
+        raise NotImplementedError("Unexpected argument types. Should be Intervals or PointsInTime")
 
     @staticmethod
     def empty():

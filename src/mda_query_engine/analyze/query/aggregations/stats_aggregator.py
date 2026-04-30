@@ -1,16 +1,20 @@
 """StatsAggregator class for computing statistics within event intervals."""
 
+from typing import Any, Dict, List, Set, Tuple
+
 import numpy as np
 import pyspark.sql.types as T
 
+from mda_query_engine.analyze.query.aggregations.statistic_type import StatisticType
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
 from mda_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
+    TimeSeriesSelector,
 )
-from mda_query_engine.analyze.query.aggregations.statistic_type import StatisticType
 from mda_query_engine.analyze.query.solvers.series_cache import SeriesCache
 from mda_query_engine.model.series.intervals import Intervals
 from mda_query_engine.model.series.sample_series import SampleSeries
+
 from .aggregation import Aggregation
 
 # Define supported statistics and their types
@@ -183,13 +187,6 @@ class StatsAggregator(Aggregation):
         return (event_timestamps, numeric_values, string_values)
 
     def _calculate_aggregations(self, sample_series, t_start, t_end) -> dict[str, float]:
-        """
-        Compute the requested statistics on ``sample_series`` for the interval ``[t_start, t_end]``.
-
-        Samples that fall in ``[t_start, t_end]`` are expected to already lie inside
-        those bounds (clipped upstream by ``SampleSeries.where`` in ``build``, or
-        naturally within them when no event expression is set).
-        """
 
         mask = (sample_series.tends > t_start) & (sample_series.tstarts < t_end)
 
@@ -287,6 +284,14 @@ class StatsAggregator(Aggregation):
             else tag_exprs
         )
         return tag_exprs
+
+    def get_selectors(self) -> List[TimeSeriesSelector]:
+        result: List[TimeSeriesSelector] = []
+        for expr in self.input_expressions:
+            result.extend(expr.get_selectors())
+        if self.event_expression is not None:
+            result.extend(self.event_expression.get_selectors())
+        return result
 
     def weighted_median(self, durations, values):
         """Calculate duration-weighted median for RLE compressed data."""

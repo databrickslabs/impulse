@@ -1,13 +1,14 @@
+from datetime import datetime
+from typing import Annotated, Optional
+
 import re
-from enum import Enum, StrEnum
-from typing import Annotated
+from enum import Enum
 
 import pyspark.sql.functions as f
-from pydantic import BaseModel, AfterValidator, model_validator
+from pydantic import AfterValidator, BaseModel, model_validator
 from pyspark.sql import Column
-from datetime import datetime
 
-from mda_query_engine.analyze.query.solvers import SolverConfig
+from mda_query_engine.analyze.query.solvers.solver_config import SolverConfig
 
 
 def is_valid_table_name(table_name: str) -> str:
@@ -113,7 +114,6 @@ class MeasurementDimensions(Enum):
     CONTAINER_ID = "container_id"
     UUT_ID = "uut_id"
     PROJECT_ID = "project_id"  # todo not present currently
-    VEHICLE_KEY = "vehicle_key"
     UUT_NAME = "uut_name"  # todo not present currently
     FILE_NAME = "file_name"
     SOURCE_FILE_PATH = "source_file_path"
@@ -162,11 +162,6 @@ class MeasurementDimensions(Enum):
         return column_name
 
 
-class DataType(StrEnum):
-    RAW = "RAW"
-    RLE = "RLE"
-
-
 class Solvers(Enum):
     """
     Enumeration of available solver types for the query engine.
@@ -189,12 +184,18 @@ class Source(BaseModel):
 
     Attributes
     ----------
+    container_tags_table : str, optional
+        Full Unity Catalog path to the container tags table (narrow/EAV format).
+        Required when using KeyValueStoreSolver.
     container_metrics_table : str
         Full Unity Catalog path to the container metrics table.
     channel_metrics_table : str
         Full Unity Catalog path to the channel metrics table.
     channels_uri : str
         Full Unity Catalog path to the channels data table.
+    channel_mapping_table : str, optional
+        Full Unity Catalog path to the channel mapping table. Required when using
+        ``channel_with_alias()`` for logical alias resolution.
 
     Notes
     -----
@@ -202,11 +203,11 @@ class Source(BaseModel):
     'catalog.schema.table' format with valid characters only.
     """
 
-    container_tags_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
-    channel_tags_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
+    container_tags_table: Optional[Annotated[str, AfterValidator(is_valid_table_name)]] = None
     container_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channel_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channels_uri: Annotated[str, AfterValidator(is_valid_table_name)]
+    channel_mapping_table: Optional[Annotated[str, AfterValidator(is_valid_table_name)]] = None
 
 
 class UnitySink(BaseModel):
@@ -229,7 +230,10 @@ class UnitySink(BaseModel):
 
     catalog: Annotated[str, AfterValidator(is_valid_unity_entity_name)]
     schema: Annotated[str, AfterValidator(is_valid_unity_entity_name)]
-    table_prefix: Annotated[str, AfterValidator(is_valid_unity_entity_name)]
+    table_prefix: Annotated[
+        str,
+        AfterValidator(lambda v: v if v == "" else is_valid_unity_entity_name(v)),
+    ]
 
 
 class Comparator(str, Enum):
@@ -305,10 +309,10 @@ class TagFilter(BaseModel):
                 )
             try:
                 self.value = datetime.fromisoformat(v)
-            except ValueError as err:
+            except ValueError:
                 raise ValueError(
-                    f"cast_type 'timestamp' requires a valid ISO-format string, got '{v}'"
-                ) from err
+                    f"cast_type 'timestamp' requires a valid ISO-format string, " f"got '{v}'"
+                )
 
         return self
 
@@ -363,10 +367,10 @@ class MetricFilter(BaseModel):
                 )
             try:
                 self.value = datetime.fromisoformat(v)
-            except ValueError as err:
+            except ValueError:
                 raise ValueError(
-                    f"value_type 'timestamp' requires a valid ISO-format string, got '{v}'"
-                ) from err
+                    f"value_type 'timestamp' requires a valid ISO-format string, " f"got '{v}'"
+                )
 
         return self
 
@@ -398,63 +402,41 @@ class QueryEngine(BaseModel):
     ----------
     solver : Solvers, default=Solvers.BASIC_NARROW_SOLVER
         The solver type to use for query execution.
-    project_id : str, optional
-        The project ID for KeyValueStoreSolver. Required when solver
-        is KEY_VALUE_STORE_SOLVER.
-    parent_id : str, optional
-        The parent_id to filter entities by in concept_entities (e.g.
-        ``"uut_concept"``).  Default: ``None`` (no parent_id filter).
-    entity_maps_to : str, optional
-        How ``entity_id`` in concept_entities maps to the
-        container_metrics table.  ``"uut_id"`` (default) for
-        1-to-many vehicle→files mapping, ``"container_id"`` for
-        direct 1-to-1 file mapping.
+    solver_config : SolverConfig, optional
+        Per-table column name mappings and filter configuration for
+        the solver.  Use this when your silver-layer tables use
+        non-default column names or when you need project/toolbox
+        scoping.  Key sub-fields:
+
+        - ``project_id`` (str): Top-level project filter value applied
+          to container_tags and channel_mapping tables.
+        - Per-table sections (``container_tags``, ``channel_mapping``,
+          ``channels``, etc.) each with ``column_name_mapping`` and
+          ``filters`` dicts.
+
+        When omitted, all default column names are used and no
+        project/toolbox filtering is applied.
 
     Notes
     -----
     The default solver is set to ``Solvers.BASIC_NARROW_SOLVER``.
-    When using ``Solvers.KEY_VALUE_STORE_SOLVER``, ``project_id`` must
-    be provided.
-    - RLE channel data must contain 'container_id', 'channel_id', 'tstart', 'tend', 'value' columns
-    - RAW channel data must contain 'container_id', 'channel_id', 'timestamp', 'value' columns
     """
 
     solver: Solvers = Solvers.BASIC_NARROW_SOLVER
-    data_type: DataType = DataType.RLE
-    drop_implausible_data: bool = False
-
-    project_id: str | None = None
-    parent_id: str | None = None
-    entity_maps_to: str | None = "uut_id"
     solver_config: SolverConfig | None = None
+    batch_size: int = 500
 
     @model_validator(mode="after")
     def validate_project_id_for_key_value_store_solver(self):
         """Validate that project_id is provided when using KeyValueStoreSolver."""
-        if self.solver == Solvers.KEY_VALUE_STORE_SOLVER and self.project_id is None:
-            raise ValueError("project_id is required when using KeyValueStoreSolver")
-        if self.entity_maps_to not in ("uut_id", "container_id"):
-            raise ValueError(
-                f"entity_maps_to must be 'uut_id' or 'container_id', "
-                f"got '{self.entity_maps_to}'"
+        if self.solver == Solvers.KEY_VALUE_STORE_SOLVER:
+            has_project_id = (
+                self.solver_config is not None and self.solver_config.project_id is not None
             )
-        return self
-
-    @model_validator(mode="after")
-    def validate_drop_implausible_data_requires_raw(self):
-        """`drop_implausible_data=True` currently only takes effect with RAW data.
-
-        The filter is applied inside the RAW -> RLE conversion path in
-        ``IntervalEncoder.prepare_channels_df``. RLE input short-circuits that
-        path and the flag is silently ignored, so we reject the combination at
-        config validation time.
-        """
-        if self.drop_implausible_data and self.data_type is not DataType.RAW:
-            raise ValueError(
-                "drop_implausible_data=True requires data_type=RAW. "
-                "The implausible-data filter is only applied during the RAW -> RLE "
-                "conversion path; RLE input is passed through unchanged."
-            )
+            if not has_project_id:
+                raise ValueError(
+                    "project_id is required in solver_config " "when using KeyValueStoreSolver"
+                )
         return self
 
 
@@ -477,8 +459,6 @@ class IncrementalConfig(BaseModel):
     """
 
     enabled: bool = False
-    data_type: DataType = DataType.RLE
-    drop_implausible_data: bool = False  # todo check this was added?
     silver_last_modified_column: str = "timestamp"
     gold_last_modified_column: str = "_created_at"
 
@@ -505,12 +485,13 @@ class MdaConfig(BaseModel):
      --------
     >>> config_data = {
      ...     "source": {
-     ...         "container_metrics_table": "mda_demo.silver.container_metric",
-     ...         "channel_metrics_table": "mda_demo.silver.channel_metric",
-     ...         "channels_uri": "mda_demo.silver.channel_data"
+     ...         "container_metrics_table": "avl_databricks_mvp.silver.container_metric",
+     ...         "channel_metrics_table": "avl_databricks_mvp.silver.channel_metric",
+     ...         "channels_uri": "avl_databricks_mvp.silver.channel_data",
+     ...         "channel_mapping_table": "avl_meta.data_model.channel_mapping"
      ...     },
      ...     "unity_sink": {
-     ...         "catalog": "mda_demo",
+     ...         "catalog": "avl_databricks_mvp",
      ...         "schema": "silver_refactored",
      ...         "table_prefix": "evaluation"
      ...     },
@@ -526,13 +507,36 @@ class MdaConfig(BaseModel):
      ...                 {"column_name": "start_ts", "comparator": ">=", "value": "2025-04-27T05:20:54.000Z"}
      ...             ]
      ...         ]
+     ...     },
+     ...     "query_engine": {
+     ...         "solver": "KeyValueStoreSolver",
+     ...         "solver_config": {
+     ...             "project_id": "my_project",
+     ...             "container_tags": {
+     ...                 "column_name_mapping": {"entity_id": "container_id"},
+     ...                 "filters": {"parent_id": "my_parent_id"}
+     ...             },
+     ...             "container_metrics": {
+     ...                 "column_name_mapping": {}
+     ...             },
+     ...             "channel_metrics": {
+     ...                 "column_name_mapping": {}
+     ...             },
+     ...             "channel_mapping": {
+     ...                 "column_name_mapping": {},
+     ...                 "filters": {"toolbox_id": "my_toolbox"}
+     ...             },
+     ...             "channels": {
+     ...                 "column_name_mapping": {}
+     ...             }
+     ...         }
      ...     }
      ... }
      >>> config = MdaConfig.model_validate(config_data)
     """
 
     source: Source
-    unity_sink: UnitySink
+    unity_sink: UnitySink | None = None
     container_filters: ContainerFilters | None = None
     query_engine: QueryEngine = QueryEngine(solver=Solvers.BASIC_NARROW_SOLVER)
     incremental: IncrementalConfig | None = None

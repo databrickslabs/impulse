@@ -1,4 +1,6 @@
+from typing import Type, Union
 from collections.abc import Callable
+
 import importlib
 
 

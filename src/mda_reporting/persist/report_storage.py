@@ -1,5 +1,7 @@
-from abc import ABC, abstractmethod
+from typing import List
 from collections.abc import Callable
+
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import reduce
 
@@ -104,7 +106,11 @@ class UnitySinkConfig(SinkConfig):
         str
             The Unity Catalog URI for the fact table.
         """
-        uri = f"{self.catalog_name}.{self.schema_name}.{self.table_prefix}_{element.get_fact_table_name()}"
+        table_name = element.get_fact_table_name()
+        if self.table_prefix:
+            uri = f"{self.catalog_name}.{self.schema_name}.{self.table_prefix}_{table_name}"
+        else:
+            uri = f"{self.catalog_name}.{self.schema_name}.{table_name}"
         return uri
 
     def get_output_uri_dimension_table(self, element: AggregationType | EventType) -> str:
@@ -121,7 +127,11 @@ class UnitySinkConfig(SinkConfig):
         str
             The Unity Catalog URI for the dimension table.
         """
-        uri = f"{self.catalog_name}.{self.schema_name}.{self.table_prefix}_{element.get_dimension_table_name()}"
+        table_name = element.get_dimension_table_name()
+        if self.table_prefix:
+            uri = f"{self.catalog_name}.{self.schema_name}.{self.table_prefix}_{table_name}"
+        else:
+            uri = f"{self.catalog_name}.{self.schema_name}.{table_name}"
         return uri
 
     def get_output_uri_measurement_dimensions_table(self) -> str:
@@ -132,7 +142,10 @@ class UnitySinkConfig(SinkConfig):
         str
             The Unity Catalog URI for the measurement dimensions table.
         """
-        uri = f"{self.catalog_name}.{self.schema_name}.{self.table_prefix}_measurement_dimension"
+        if self.table_prefix:
+            uri = f"{self.catalog_name}.{self.schema_name}.{self.table_prefix}_measurement_dimension"
+        else:
+            uri = f"{self.catalog_name}.{self.schema_name}.measurement_dimension"
         return uri
 
 

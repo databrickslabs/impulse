@@ -1,5 +1,6 @@
-from .series_cache import SeriesCache
 from mda_query_engine.model.series.sample_series import SampleSeries
+
+from .series_cache import SeriesCache
 
 
 class EmptyTimeSeriesCache(SeriesCache):

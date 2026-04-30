@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import os
-
+from typing import List, Tuple, Union
 from collections.abc import Sized
+
+import os
 
 import numpy as np
 import numpy.typing as npt
@@ -14,7 +15,7 @@ from scipy.interpolate import interp1d
 from .intervals import Intervals
 from .points_in_time import PointsInTime
 
-FloatOrNaN = float | np.float64
+FloatOrNaN = Union[float, np.float64]
 
 import pyspark.sql.types as T
 
@@ -50,21 +51,7 @@ class SampleSeries:
         pyspark.sql.types.BinaryType
             Spark BinaryType for serialized SampleSeries.
         """
-
         return T.BinaryType()
-
-    def get_data(self) -> list:
-        """
-        Returns the series as a list of [tstart, tend, value] lists.
-
-        Returns
-        -------
-        list
-            List of [tstart, tend, value] triples.
-        """
-        if len(self) == 0:
-            return []
-        return np.column_stack([self.tstarts, self.tends, self.values]).tolist()
 
     def _get_continuous_interval_indices(self) -> list[(int, int)]:
         """
@@ -302,38 +289,6 @@ class SampleSeries:
             Resulting SampleSeries.
         """
         return self._apply_basic_rop(np.divide, other)
-
-    def __mod__(self, other: int | float | SampleSeries) -> Intervals:
-        """
-        Return the modulus of this series and another SampleSeries or scalar.
-
-        Parameters
-        ----------
-        other : int, float, or SampleSeries
-            Operand for modulus.
-
-        Returns
-        -------
-        SampleSeries
-            Resulting SampleSeries.
-        """
-        return self._apply_basic_op(np.mod, other)
-
-    def __rmod__(self, other: int | float | SampleSeries) -> Intervals:
-        """
-        Return the modulus of another SampleSeries or scalar and this series.
-
-        Parameters
-        ----------
-        other : int, float, or SampleSeries
-            Operand for modulus (reversed operands).
-
-        Returns
-        -------
-        SampleSeries
-            Resulting SampleSeries.
-        """
-        return self._apply_basic_rop(np.mod, other)
 
     def __apply_op(self, operation, other: SampleSeries | float) -> Intervals:
         """
@@ -653,52 +608,7 @@ class SampleSeries:
         """
         return self.falling_edges()
 
-    def intervals_between_falling_edges(self) -> Intervals:
-        """
-        Build intervals [tstart, tend] from falling edges of the series.
-
-        Processes each continuous interval of the series separately.
-        Within each continuous block, each interval starts at a falling
-        edge and ends at the timestamp before the next falling edge.
-        The first interval in a block starts at the block's first timestamp;
-        the last interval in a block ends at the block's last timestamp.
-        Blocks with no falling edges contribute no intervals.
-
-        Returns
-        -------
-        Intervals
-            Intervals between consecutive falling edges.
-        """
-        if len(self) == 0:
-            return Intervals.empty()
-
-        all_tstarts = []
-        all_tends = []
-
-        for start_index, stop_index in self.continuous_interval_indices:
-            block_tstarts = self.tstarts[start_index : stop_index + 1]
-            block_tends = self.tends[start_index : stop_index + 1]
-            block_values = self.values[start_index : stop_index + 1]
-
-            if len(block_values) < 2:
-                continue
-
-            mask = block_values[1:] < block_values[:-1]
-            fe_local = np.where(mask)[0] + 1  # indices within block
-
-            if len(fe_local) == 0:
-                continue
-
-            block_interval_tstarts = np.concatenate([[block_tstarts[0]], block_tstarts[fe_local]])
-            block_interval_tends = np.concatenate([block_tends[fe_local - 1], [block_tends[-1]]])
-            all_tstarts.extend(block_interval_tstarts)
-            all_tends.extend(block_interval_tends)
-
-        if len(all_tstarts) == 0:
-            return Intervals.empty()
-        return Intervals(np.array(all_tstarts), np.array(all_tends))
-
-    def diff(self) -> "SampleSeries":
+    def diff(self) -> SampleSeries:
         """
         Calculate the difference between consecutive values.
 
@@ -832,15 +742,14 @@ class SampleSeries:
         if weights is None:
             # x_ts, y_ts = self.synchronized(y_series)
             weights_vector = self.durations()
+        elif weight_type is None:
+            weights_vector = weights.values
+        elif weight_type == "time":
+            weights_vector = weights.values * weights.durations()
         else:
-            if weight_type is None:
-                weights_vector = weights.values
-            elif weight_type == "time":
-                weights_vector = weights.values * weights.durations()
-            else:
-                raise ValueError(
-                    f'weight_type options are: None, "time". {weight_type} is not supported'
-                )
+            raise ValueError(
+                f'weight_type options are: None, "time". {weight_type} is not supported'
+            )
 
         hist2d, x_bins, y_bins = np.histogram2d(
             x=self.values,
@@ -964,7 +873,10 @@ class SampleSeries:
         ends = [min(self.tends[i1], other.tends[i2]) for i1, i2 in pairs]
         values1 = [self.values[i1] for i1, _ in pairs]
         values2 = [other.values[i2] for _, i2 in pairs]
-        return (SampleSeries(starts, ends, values1), SampleSeries(starts, ends, values2))
+        return (
+            SampleSeries(starts, ends, values1),
+            SampleSeries(starts, ends, values2),
+        )
 
     def synchronized_all(self, others: list[SampleSeries]):
         """
@@ -1226,10 +1138,11 @@ class SampleSeries:
             Integrated value.
         """
         result = 0.0
+        _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
         for start_index, stop_index in self.continuous_interval_indices:
             tmp_values = self.values[start_index : stop_index + 1]
             tmp_starts = self.tstarts[start_index : stop_index + 1]
-            result = result + np.trapz(y=tmp_values, x=tmp_starts)
+            result = result + _trapz(y=tmp_values, x=tmp_starts)
         return result
 
     def cumtrapz(self) -> SampleSeries:
@@ -1286,6 +1199,7 @@ class SampleSeries:
             Compressed serialized data.
         """
         import pickle as pkl
+
         import lz4.frame as lz4f
 
         # make sure directory exists
@@ -1309,6 +1223,7 @@ class SampleSeries:
             Deserialized SampleSeries object.
         """
         import pickle as pkl
+
         import lz4.frame as lz4f
 
         pickled = lz4f.decompress(d)

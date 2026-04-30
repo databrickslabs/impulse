@@ -1,0 +1,51 @@
+{
+  "incremental": {
+    "enabled": true
+  },
+  "source": {
+    "container_metrics_table": "avl_databricks_mvp.silver_zstd.container_metric",
+    "channel_metrics_table": "avl_databricks_mvp.silver_zstd.channel_metric",
+    "channels_uri": "avl_databricks_mvp.silver_zstd.channel_data"
+  },
+  "unity_sink": {
+    "catalog": "development",
+    "schema": "gold_dev_2",
+    "table_prefix": "BNS"
+  },
+  "container_filters": {
+    "metric_filters": [
+      [
+        {
+          "column_name": "uut_id",
+          "comparator": "==",
+          "value": "AA080518"
+        },
+        {
+          "column_name": "start_ts",
+          "comparator": ">=",
+          "value": "2025-04-27T05:00:00.000Z",
+          "value_type": "timestamp"
+        },
+        {
+          "column_name": "start_ts",
+          "comparator": "<=",
+          "value": "2025-04-27T11:00:00.000Z",
+          "value_type": "timestamp"
+        }
+      ]
+    ]
+  },
+  "query_engine": {
+    "solver": "BasicNarrowSolver"
+  },
+  "measurement_dimensions": [
+    "container_id",
+    "uut_id",
+    "file_name",
+    "start_ts",
+    "stop_ts",
+    "project_id",
+    "environment",
+    "source_file_path"
+  ]
+}

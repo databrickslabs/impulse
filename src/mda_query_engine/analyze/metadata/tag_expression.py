@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import abc
 import operator
-
 import pandas as pd
-import pyspark.sql.functions as F
-from pyspark.sql import Column
-
 import mda_query_engine.util as U
+import pyspark.sql.functions as F
+
+from typing import Set
+from pyspark.sql import Column
 
 
 class TagExpression(abc.ABC):

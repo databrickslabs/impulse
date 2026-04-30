@@ -1,0 +1,38 @@
+{
+  "source": {
+    "container_metrics_table": "spark_catalog.silver.container_metrics",
+    "channel_metrics_table": "spark_catalog.silver.channel_metrics",
+    "channels_uri": "spark_catalog.silver.channels"
+  },
+  "incremental": {
+    "enabled": true,
+    "silver_last_modified_column": "timestamp",
+    "gold_last_modified_column": "last_modified"
+  },
+  "unity_sink": {
+    "catalog": "spark_catalog",
+    "schema": "gold",
+    "table_prefix": "evaluation"
+  },
+  "container_filters": {
+    "metric_filters": [
+      [
+        { "column_name": "vehicle_key", "comparator": "==", "value": "Seat_Leon" },
+        { "column_name": "start_dt", "comparator": ">=", "value": "2025-07-03T07:41:42.708Z", "value_type": "timestamp" }
+      ],
+      [
+        { "column_name": "vehicle_key", "comparator": "==", "value": "Seat_Leon" },
+        { "column_name": "start_dt", "comparator": ">=", "value": "2025-07-03T09:41:40.169Z", "value_type": "timestamp" },
+        { "column_name": "stop_dt", "comparator": "<=", "value": "2025-07-03T09:43:30.253Z", "value_type": "timestamp" }
+      ]
+    ]
+  },
+  "query_engine": {
+    "solver": "BasicNarrowSolver"
+  },
+  "measurement_dimensions": [
+    "uut_id",
+    "file_name",
+    "source_file_path"
+  ]
+}

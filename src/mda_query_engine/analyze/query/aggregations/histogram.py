@@ -1,12 +1,15 @@
-from typing import Any
+from typing import Any, Dict, List, Set
 
-import pandas as pd
 import numpy as np
-
+import pandas as pd
 import pyspark.sql.types as T
 
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
-from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
+from mda_query_engine.analyze.metadata.time_series_expression import (
+    TimeSeriesExpression,
+    TimeSeriesSelector,
+)
+
 from .aggregation import Aggregation
 
 
@@ -101,7 +104,12 @@ class HistogramDuration(Aggregation):
             raise Exception("nyi")
 
         return pd.DataFrame(
-            {"bin_start": bin_start, "bin_end": bin_end, "bin_center": bin_center, "value": values}
+            {
+                "bin_start": bin_start,
+                "bin_end": bin_end,
+                "bin_center": bin_center,
+                "value": values,
+            }
         )
 
     def required_tags(self):
@@ -137,6 +145,9 @@ class HistogramDuration(Aggregation):
         """
         return self.selection.get_required_tag_exprs()
 
+    def get_selectors(self) -> List[TimeSeriesSelector]:
+        return self.selection.get_selectors()
+
 
 class HistogramCustomWeights(Aggregation):
     def __init__(
@@ -148,7 +159,7 @@ class HistogramCustomWeights(Aggregation):
         channel_interp_kind: str = "previous",
         weights_interp_kind: str = "previous",
         math_fct_for_weights: str = None,
-        math_fct_kwargs: dict[str, Any] = None,
+        math_fct_kwargs: dict[str, Any] = {},
         weight_type: str = None,
     ):
         self.selection = selection
@@ -276,4 +287,9 @@ class HistogramCustomWeights(Aggregation):
         set of TagExpression
             Set of required tag expressions for the aggregation.
         """
-        return self.selection.get_required_tag_exprs().union(self.weights.get_required_tag_exprs())
+        return self.selection.get_required_tag_exprs().union(
+            self.weights.get_required_tag_exprs()
+        )
+
+    def get_selectors(self) -> List[TimeSeriesSelector]:
+        return self.selection.get_selectors() + self.weights.get_selectors()

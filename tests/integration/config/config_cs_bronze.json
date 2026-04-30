@@ -1,0 +1,37 @@
+{
+  "source": {
+    "container_tags_table": "avl_meta.data_model.concept_entities",
+    "container_metrics_table": "development.bronze_dev_2.container_metric",
+    "channel_metrics_table": "development.bronze_dev_2.channel_metric",
+    "channels_uri": "development.bronze_dev_2.channel_data"
+  },
+  "unity_sink": {
+    "catalog": "development",
+    "schema": "gold_dev_2",
+    "table_prefix": "dev_2"
+  },
+  "container_filters": {
+    "tag_filters": [
+      [
+        { "tag_name": "uut_id", "comparator": "==", "value": "AA080518", "cast_type": "string" }
+      ]
+    ]
+  },
+  "query_engine": {
+    "solver": "KeyValueStoreSolver",
+    "solver_config": {
+      "project_id": "dev_2",
+      "container_tags": {
+        "column_name_mapping": {
+          "entity_id": "container_id",
+          "element_id": "key"
+        }
+      }
+    }
+  },
+  "measurement_dimensions": [
+    "container_id",
+    "uut_id",
+    "file_name"
+  ]
+}

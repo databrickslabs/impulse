@@ -2,30 +2,38 @@
 
 from __future__ import annotations
 
-import hashlib
+from typing import List, Optional
 from collections.abc import Callable
 
-import pyspark.sql.functions as f
+import hashlib
 import zlib
+
+import pyspark.sql.functions as f
 from pyspark.sql import DataFrame, Row, SparkSession
 from pyspark.sql.types import (
+    ArrayType,
+    DoubleType,
+    IntegerType,
+    MapType,
     StringType,
+    StructField,
+    StructType,
 )
 
 from mda_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
-from mda_query_engine.analyze.query.aggregations.stats_aggregator import (
-    StatsAggregator as QueryEngineStatsAggregator,
-)
 from mda_query_engine.analyze.query.query_builder import QueryBuilder
 from mda_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from mda_reporting.aggregations.aggregation import Aggregation
 from mda_reporting.events.event import Event
-from mda_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
-from mda_reporting.persist.fact_schema import STATS_AGGREGATOR_FACT_SCHEMA
 from mda_reporting.util.event_instance_util import generate_event_instance_id_column
 from mda_reporting.util.report_entity_util import ReportEntityUtil
+from mda_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
+from mda_reporting.persist.fact_schema import STATS_AGGREGATOR_FACT_SCHEMA
+from mda_query_engine.analyze.query.aggregations.stats_aggregator import (
+    StatsAggregator as QueryEngineStatsAggregator,
+)
 
 
 class StatsAggregator(Aggregation):
@@ -205,9 +213,11 @@ class StatsAggregator(Aggregation):
     def determine_aggregations(
         cls,
         spark: SparkSession,
-        query: QueryBuilder,
-        solver: QuerySolver,
         aggregations: list[StatsAggregator],
+        *,
+        solved_df: DataFrame = None,
+        query: QueryBuilder = None,
+        solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
     ):
         """
@@ -217,30 +227,31 @@ class StatsAggregator(Aggregation):
         ----------
         spark : pyspark.sql.SparkSession
             Spark session to use for computation.
-        query : QueryBuilder
-            Query builder for constructing the query.
-        solver : QuerySolver
-            Solver for executing the query.
         aggregations : list of StatsAggregator
             List of StatsAggregator visual aggregations.
+        solved_df : DataFrame, optional
+            Pre-solved wide DataFrame from centralized batch solve. Required.
+        query : QueryBuilder, optional
+            Query builder (unused, kept for interface compatibility).
+        solver : QuerySolver, optional
+            Solver (unused, kept for interface compatibility).
+        pre_filtered_containers_df : DataFrame, optional
+            Pre-filtered containers (unused, kept for interface compatibility).
 
         Returns
         -------
         pyspark.sql.DataFrame
             DataFrame containing the processed stats aggregations.
         """
-        stats_expressions = []
-        stats_names = []
-        for stats_agg in aggregations:
-            stats_expressions.append(stats_agg.get_expression())
-            stats_names.append(stats_agg.get_name())
+        if solved_df is None:
+            raise ValueError(
+                "StatsAggregator.determine_aggregations requires solved_df. "
+                "Provide a pre-solved DataFrame from the centralized batch-solve flow."
+            )
 
-        stats_query = query.select(*stats_expressions)
-        result = stats_query.solve(
-            spark=spark,
-            solver=solver,
-            pre_filtered_containers_df=pre_filtered_containers_df,
-        )
+        stats_names = [stats_agg.get_name() for stats_agg in aggregations]
+
+        result = solved_df.select("container_id", *stats_names)
 
         df = (
             result.transform(StatsAggregator._unpivot_measurement_info(stats_names))
@@ -256,7 +267,7 @@ class StatsAggregator(Aggregation):
         return df
 
     @staticmethod
-    def _unpivot_measurement_info(stats_names: list[str]) -> Callable[..., "DataFrame"]:
+    def _unpivot_measurement_info(stats_names: list[str]) -> Callable[..., DataFrame]:
         """
         Unpivot the measurement info columns into long format.
 
@@ -305,7 +316,7 @@ class StatsAggregator(Aggregation):
     @staticmethod
     def _add_event_id_column(
         aggregations: list[StatsAggregator],
-    ) -> Callable[..., "DataFrame"]:
+    ) -> Callable[..., DataFrame]:
         """
         Add an event_id column to the DataFrame based on the provided visuals.
 
@@ -331,7 +342,7 @@ class StatsAggregator(Aggregation):
     @staticmethod
     def _add_event_name_column(
         aggregations: list[StatsAggregator],
-    ) -> Callable[..., "DataFrame"]:
+    ) -> Callable[..., DataFrame]:
         """
         Add an event_name column to the DataFrame based on the provided aggregations.
 
@@ -443,7 +454,7 @@ class StatsAggregator(Aggregation):
     @staticmethod
     def _add_channel_name_column(
         aggregations: list[StatsAggregator],
-    ) -> Callable[..., "DataFrame"]:
+    ) -> Callable[..., DataFrame]:
         """
         Add a channel_name column to the DataFrame based on signal_index and aggregation channel_names.
 
@@ -509,7 +520,7 @@ class StatsAggregator(Aggregation):
     @staticmethod
     def _add_visual_id_column(
         aggregations: list[StatsAggregator],
-    ) -> Callable[..., "DataFrame"]:
+    ) -> Callable[..., DataFrame]:
         """
         Add a visual_id column to the DataFrame based on the provided visuals.
 

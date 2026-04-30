@@ -29,7 +29,7 @@ class AggregationType(Enum):
     HISTOGRAM : Histogram
         Histogram aggregation type for bucketed data analysis.
     HISTOGRAM2D : HISTOGRAM2D
-        Bi-dimensional Histogram aggregation type for bucketed data analysis.
+        Bi-dimensional Histogram aggregation type fir bucketed data analysis.
     """
 
     HISTOGRAM = Histogram
@@ -82,7 +82,7 @@ class AggregationType(Enum):
             case AggregationType.STATS_AGGREGATOR:
                 return STATS_AGGREGATOR_FACT_SCHEMA
             case _:
-                raise ValueError(f"Unsupported aggregation type: {self}")
+                raise ValueError(f"Unsupported event type: {self}")
 
     def get_dimension_table_name(self) -> str:
         """

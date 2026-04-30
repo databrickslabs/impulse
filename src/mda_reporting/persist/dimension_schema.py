@@ -7,6 +7,7 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
+    MapType,
 )
 
 HISTOGRAM_DIMENSION_SCHEMA = StructType(

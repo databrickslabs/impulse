@@ -1,12 +1,13 @@
-from typing import Any
+from typing import Any, Dict, List, Set
 
 import numpy as np
 import pyspark.sql.types as T
 
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
-from .aggregation import Aggregation
+
+from ...metadata.time_series_expression import TimeSeriesExpression, TimeSeriesSelector
 from ..solvers.series_cache import SeriesCache
-from ...metadata.time_series_expression import TimeSeriesExpression
+from .aggregation import Aggregation
 
 
 class Histogram2DDuration(Aggregation):
@@ -129,6 +130,9 @@ class Histogram2DDuration(Aggregation):
             self.y_selection.get_required_tag_exprs()
         )
 
+    def get_selectors(self) -> List[TimeSeriesSelector]:
+        return self.x_selection.get_selectors() + self.y_selection.get_selectors()
+
 
 class Histogram2DCustomWeights(Aggregation):
     """Class representing a 2D histogram aggregation in a report with custom weights."""
@@ -143,7 +147,7 @@ class Histogram2DCustomWeights(Aggregation):
         channel_interp_kind: str = "previous",
         weights_interp_kind: str = "previous",
         math_fct_for_weights: str = None,
-        math_fct_kwargs: dict[str, Any] = None,
+        math_fct_kwargs: dict[str, Any] = {},
         weight_type: str = None,
     ):
         """
@@ -258,14 +262,18 @@ class Histogram2DCustomWeights(Aggregation):
 
     def required_tags(self) -> set[str]:
         """
-        Return the set of required tags for both time series.
+        Return the set of required tags for all time series (x, y, and weights).
 
         Returns
         -------
         set of str
             Set of required tags for the aggregation.
         """
-        return self.x_selection.required_tags().union(self.y_selection.required_tags())
+        return (
+            self.x_selection.required_tags()
+            .union(self.y_selection.required_tags())
+            .union(self.weights_expr.required_tags())
+        )
 
     def get_selector_expr(self):
         """
@@ -278,7 +286,8 @@ class Histogram2DCustomWeights(Aggregation):
         """
         x_selector_expr = self.x_selection.get_selector_expr()
         y_selector_expr = self.y_selection.get_selector_expr()
-        return x_selector_expr | y_selector_expr
+        w_selector_expr = self.weights_expr.get_selector_expr()
+        return x_selector_expr | y_selector_expr | w_selector_expr
 
     def get_required_tag_exprs(self) -> set[TagExpression]:
         """
@@ -289,6 +298,15 @@ class Histogram2DCustomWeights(Aggregation):
         set of TagExpression
             Set of required tag expressions for the aggregation.
         """
-        return self.x_selection.get_required_tag_exprs().union(
-            self.y_selection.get_required_tag_exprs()
+        return (
+            self.x_selection.get_required_tag_exprs()
+            .union(self.y_selection.get_required_tag_exprs())
+            .union(self.weights_expr.get_required_tag_exprs())
+        )
+
+    def get_selectors(self) -> List[TimeSeriesSelector]:
+        return (
+            self.x_selection.get_selectors()
+            + self.y_selection.get_selectors()
+            + self.weights_expr.get_selectors()
         )

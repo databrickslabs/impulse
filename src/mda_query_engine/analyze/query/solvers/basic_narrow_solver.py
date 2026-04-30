@@ -1,5 +1,7 @@
-from functools import partial
+from typing import Dict
 from collections.abc import Iterable
+
+from functools import partial
 
 import pandas as pd
 import pyspark.sql.functions as F
@@ -7,12 +9,14 @@ import pyspark.sql.types as T
 from pyspark.sql import DataFrame
 
 from mda_query_engine.analyze.metadata.metric_expression import MetricExpression
-from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
+from mda_query_engine.analyze.metadata.time_series_expression import (
+    TimeSeriesExpression,
+)
 from mda_query_engine.model.series.sample_series import SampleSeries
+
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
 from .solver_config import SolverConfig
-from .utils.interval_encoder import IntervalEncoder
 
 
 class BasicNarrowTimeSeriesCache(SeriesCache):
@@ -34,11 +38,8 @@ class BasicNarrowTimeSeriesCache(SeriesCache):
         self._te_col = col_map["te"]
         self._val_col = col_map["val"]
 
-        self.mdf = (
-            pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
-            .drop_duplicates()
-            .reset_index()
-        )
+        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
+        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
         self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
 
     def resolve(self, selection):
@@ -55,6 +56,11 @@ class BasicNarrowTimeSeriesCache(SeriesCache):
         pd.DataFrame
             DataFrame containing the resolved candidates.
         """
+        if "selector_ids" in self.mdf.columns:
+            idx = self.mdf["selector_ids"].apply(
+                lambda arr: arr is not None and selection.selector_id in arr
+            )
+            return self.mdf[idx]
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
 
@@ -79,13 +85,7 @@ class BasicNarrowTimeSeriesCache(SeriesCache):
 
 
 class BasicNarrowSolver(QuerySolver):
-    def __init__(
-        self,
-        spark,
-        config: SolverConfig = None,
-        is_raw_data: bool = False,
-        drop_implausible_data: bool = False,
-    ):
+    def __init__(self, spark, config: SolverConfig = None):
         """
         Initialize the BasicNarrowSolver.
 
@@ -96,25 +96,12 @@ class BasicNarrowSolver(QuerySolver):
         config : SolverConfig, optional
             Solver configuration.  When *None* a default :class:`SolverConfig`
             is used (backward-compatible column names).
-        is_raw_data : bool, optional
-            Whether the input data is raw point data (timestamp column)
-            rather than RLE format (tstart/tend columns).
-        drop_implausible_data : bool, optional
-            Whether to drop data points marked as implausible before
-            processing.  Requires an ``is_plausible`` column in the
-            silver layer.
         """
         super().__init__(config)
         self.spark = spark
-        self.is_raw_data = is_raw_data
-        self.drop_im_plausible_data: bool = drop_implausible_data
-        self.interval_encoder: IntervalEncoder = IntervalEncoder(
-            timestamp_col_name="timestamp",
-            drop_implausible_data_points=self.drop_im_plausible_data,
-        )
 
     @staticmethod
-    def _solve_udf(pdf, selections: Iterable, col_map: dict[str, str]) -> pd.DataFrame:
+    def _solve_udf(pdf, selections: Iterable, col_map: Dict[str, str]) -> pd.DataFrame:
         """
         UDF to solve for a single container by applying selections.
 
@@ -194,19 +181,21 @@ class BasicNarrowSolver(QuerySolver):
         for filt in query.filters:
             if isinstance(filt, MetricExpression):
                 filters.append(filt)
-        # Use pre-filtered containers if provided (incremental mode)
         if pre_filtered_containers_df is not None:
             metrics = pre_filtered_containers_df
         else:
             metrics = query.db.container_metrics(self.spark)
-        # apply filter
+        metrics = self._apply_column_mapping(
+            metrics,
+            self.config.container_metrics.column_name_mapping
+            ) 
         if len(filters) > 0:
             expr = self._build_expr(filters)
             return metrics.where(expr).dropDuplicates([self.config.container_id_col])
 
         return metrics.dropDuplicates([self.config.container_id_col])
 
-    def filter_channel_tags(self, spark, query, container_df) -> DataFrame:
+    def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
         """
         Pass through container DataFrame.
 
@@ -214,10 +203,12 @@ class BasicNarrowSolver(QuerySolver):
         ----------
         spark : SparkSession
             Spark session used for query execution.
-        query : QueryBuilder
-            Query object containing filters and db info.
+        db : MeasurementDB
+            Measurement database for table access.
         container_df : pyspark.sql.DataFrame
             DataFrame containing container information.
+        selectors : list[TimeSeriesSelector]
+            Non-aliased selectors (unused by this solver).
 
         Returns
         -------
@@ -226,7 +217,7 @@ class BasicNarrowSolver(QuerySolver):
         """
         return container_df
 
-    def filter_channel_metrics(self, spark, query, container_df) -> DataFrame:
+    def filter_channel_metrics(self, spark, db, container_df, selectors) -> DataFrame:
         """
         Filter channels by metrics and required tags.
 
@@ -234,41 +225,37 @@ class BasicNarrowSolver(QuerySolver):
         ----------
         spark : SparkSession
             Spark session used for query execution.
-        query : QueryBuilder
-            Query object containing filters and db info.
+        db : MeasurementDB
+            Measurement database for table access.
         container_df : pyspark.sql.DataFrame
             DataFrame containing container information.
+        selectors : list[TimeSeriesSelector]
+            Non-aliased (direct) selectors.
 
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame containing filtered channel information.
+            DataFrame with ``(container_id, channel_id, selector_ids)``.
         """
-        channel_metrics_df = query.db.channel_metrics(spark)
-        filters = []
-        required_tags = []
-        for selection in query.selections:
-            if not isinstance(selection, TimeSeriesExpression):
-                continue
-            filters.append(selection)
-            required_tags.extend(selection.required_tags())
-        required_tags = set(required_tags)
-        expr = self._build_expr(filters)
-        if len(filters) > 0:
-            channel_metrics_df = channel_metrics_df.where(expr)
+        container_id_col = self.config.container_id_col
+        channel_id_col = self.config.channel_id_col
+        channel_metrics_df = db.channel_metrics(spark)
+        channel_metrics_df = self._apply_column_mapping(
+            channel_metrics_df, self.config.channel_metrics.column_name_mapping
+        )
+        if len(selectors) == 0:
+            return self._empty_channel_match_df(spark)
+
+        channel_metrics_df = channel_metrics_df.where(self._build_expr(selectors))
         result = channel_metrics_df.join(
-            F.broadcast(container_df.select(self.config.container_id_col)),
-            on=[self.config.container_id_col],
+            F.broadcast(container_df.select(container_id_col)),
+            on=[container_id_col],
             how="inner",
         )
-        # ToDo: Determine a selector id for every selection and add it to the result
-        for tag in required_tags:
-            result = result.withColumnRenamed(tag, f"ct_{tag}")
-        return result.select(
-            self.config.container_id_col,
-            self.config.channel_id_col,
-            *[f"ct_{tag}" for tag in required_tags],
+        result = result.withColumn(
+            "selector_ids", F.array(self._build_selector_id_expr(selectors))
         )
+        return result.select(container_id_col, channel_id_col, "selector_ids")
 
     def solve(self, query, channels_df, selections, dtypes) -> DataFrame:
         """
@@ -293,10 +280,9 @@ class BasicNarrowSolver(QuerySolver):
         col_map = self.config.col_map
 
         q = query.db.channels(self.spark)
-
-        if self.is_raw_data:
-            # Calculate the tend info and prepare the data for the solving step.
-            q = self.interval_encoder.prepare_channels_df(q)
+        q = self._apply_column_mapping(
+            q, self.config.channels.column_name_mapping
+        )
 
         schema_entries = [T.StructField(self.config.container_id_col, T.LongType())]
         for s, dtype in zip(selections, dtypes, strict=False):

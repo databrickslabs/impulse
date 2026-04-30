@@ -1,8 +1,9 @@
+from typing import Any, Dict
+
 import pathlib
 import sys
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser
-from typing import Any
 
 import yaml
 from pyspark.sql import SparkSession
@@ -29,7 +30,7 @@ def get_dbutils(
     please note that this function is used in mocking by its name
     """
     try:
-        from pyspark.dbutils import DBUtils  # noqa
+        from pyspark.dbutils import DBUtils
 
         if "dbutils" not in locals():
             utils = DBUtils(spark)
@@ -172,7 +173,7 @@ class Task(ABC):
         Logger
             Logger object for the current class.
         """
-        log4j_logger = self.spark._jvm.org.apache.log4j  # noqa
+        log4j_logger = self.spark._jvm.org.apache.log4j
         return log4j_logger.LogManager.getLogger(self.__class__.__name__)
 
     def _log_conf(self):
