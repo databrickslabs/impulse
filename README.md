@@ -213,23 +213,10 @@ report.determine_report()
 report.persist_results()
 ```
 
-## Development
+## Contributing
 
-### Testing
-
-```bash
-pytest                    # Run tests
-pytest --cov              # Run tests with coverage
-pytest --benchmark        # Run benchmarks
-```
-
-### Code Quality
-
-```bash
-ruff check .              # Linting
-black .                   # Code formatting
-pre-commit run --all      # Run all pre-commit hooks
-```
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup,
+testing, code style, and the pull-request workflow.
 
 ---
 
