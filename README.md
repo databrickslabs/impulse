@@ -1,4 +1,4 @@
-# Impulse
+![Impulse — Time Series Analytics · Databricks Labs](docs/img/impulse_logo.svg)
 
 ## Documentation
 
@@ -8,120 +8,77 @@ The complete documentation is available at: https://databrickslabs.github.io/imp
 
 Impulse is a Python-based analytics library designed for processing large-scale time-series measurement data. Built on Apache Spark and Delta Lake, it enables distributed processing of petabyte-scale sensor data from automotive testing, industrial IoT, and other measurement-intensive domains.
 
-### Main Components
+## Architecture
 
-```mermaid
-flowchart LR
-    subgraph silver["Silver Layer"]
-        DL[(Unity Catalog)]
-    end
+<img src="docs/img/architecture.svg" alt="Impulse architecture" width="1180"/>
 
-    subgraph engine["Query Engine"]
-        TSAL[TSAL Expressions]
-        Solver[Solvers]
-    end
+Impulse sits between a governed silver layer and a gold-layer star schema in Unity Catalog and provides three components:
 
-    subgraph reporting["Reporting"]
-        Defs[Event & Aggregation Definitions]
-        Report[Report Builder]
-    end
+- **TSAL (Time Series Analytics Language)** — a declarative Python DSL for expressing signals, events, and aggregations in natural Python, without requiring Spark expertise.
+- **Query Engine** — pluggable and distributed; compiles TSAL expressions into Spark execution plans and adapts to any silver-layer layout via interchangeable solvers.
+- **Aggregations** — domain-aware physical aggregations, including duration- and distance-weighted 1D/2D histograms and event-scoped statistics.
 
-    subgraph gold["Gold Layer"]
-        UC[(Unity Catalog)]
-    end
+### Usage modes
 
-    DL --> Solver
-    TSAL --> Solver
-    Defs -.->|defines using| TSAL
-    Solver -->|Spark DataFrame| Report
-    Report -->|transform & persist| UC
-```
+The same TSAL core and query engine support three complementary usage modes:
 
-### Query Engine
-
-The query engine provides access to time-series data and enables flexible data transformation.
-
-- Connects to measurement data stored in Delta Lake / Unity Catalog
-- Provides a **Time Series Analytics Language (TSAL)** for defining signals and events using intuitive expressions
-- Supports **virtual signals** — computed channels derived from physical measurements (e.g., `power = voltage * current`)
-- Executes queries through interchangeable solvers optimized for different silver layer data models or formats
-- Results are returned in a Spark Dataframe
-
-### Reporting
-
-The reporting component orchestrates the query engine to produce structured analytical outputs.
-
-- Defines **events** and **aggregations** relevant for a analysis/report using TSAL of the query engine
-- Triggers computation of **aggregations** such as histograms and statistics over selected signals and events
-- Organizes results into **reports** with pages for logical grouping
-- Transforms & persists results to a **star-schema gold layer** in Unity Catalog for downstream analytics
-
-## Key Features
-
-### Time-Series Query Language
-- Select physical channels by tags (e.g., `channel_name='Engine RPM'`)
-- Create virtual signals via mathematical expressions
-- Filter by container/channel tags and metrics
-
-### Event Detection
-- Define events using boolean time-series expressions
-- Extract event instances with start/end timestamps
-- Determine aggregations in events only
-
-### Aggregations
-- 1D histograms with custom bin configurations
-- 2D histograms (heatmaps) for correlation analysis
-- Statistics (e.g. min, max, mean) within events
-
-### Data Persistence
-- Star schema (dimension/fact tables)
-- Gold layer storage in Unity Catalog
-- Fact tables: `histogram_fact`, `histogram2d_fact`, `stats_aggregator_fact`, `event_instance_fact`
-- Dimension tables: `histogram_dimension`, `histogram2d_dimension`, `stats_aggregator_dimension`, `event_dimension`, `measurement_dimension`
-
-### Spark Integration
-- Built on PySpark for distributed processing
-- Native Delta Lake and Unity Catalog support
-- Optimized for large-scale time-series data
+- **Reporting** — events and aggregations are executed in parallel across all matching recordings and persisted to the gold-layer star schema, ready for AI/BI Dashboards or Lakehouse Apps. Pipelines can be scheduled as Databricks Workflows.
+- **Ad-hoc analysis** — TSAL expressions are evaluated directly by the query engine and returned as Spark DataFrames for interactive exploration in notebooks, without writing to the gold layer.
+- **ML** — event-scoped statistics and histogram distributions are extracted as flat feature matrices that can be passed directly to MLflow, AutoML, or custom training pipelines.
 
 ## Data Architecture
 
-### Silver Layer (Input)
+The **silver layer** is a domain-specific data model for measurement data, organized around two concepts: a **container** groups a set of recordings (e.g. one test drive), and a **channel** is an individual sensor signal within a container. The time-series data itself lives in a very narrow table keyed by container and channel, complemented by `*_tags` and `*_metrics` tables that carry contextual metadata and statistics at both the container and channel level. The **gold layer** is a star schema with fact tables (`histogram_fact`, `histogram2d_fact`, `stats_aggregator_fact`, `event_instance_fact`) and matching dimension tables. See the [Impulse documentation](https://databrickslabs.github.io/impulse) for more details on the silver-layer and gold-layer model.
 
-| Table | Description |
-|-------|-------------|
-| `container_metrics` | Measurement metadata (start/stop times, duration) |
-| `container_tags` | Key-value tags for containers |
-| `channel_metrics` | Channel-level statistics (min, max, mean, sample_count) |
-| `channel_tags` | Key-value tags for channels |
-| `channels` | Time-series data (container_id, channel_id, timestamps, values) |
+## Quickstart
 
-### Gold Layer (Output)
+The example below demonstrates the **reporting** usage mode. Examples of the ad-hoc analysis and ML modes are available in the [documentation](https://databrickslabs.github.io/impulse) and the [demos/](demos/) folder.
 
-| Table | Description |
-|-------|-------------|
-| `measurement_dimension` | Measurement metadata |
-| `event_dimension` | Event definitions |
-| `event_instance_fact` | Event occurrences |
-| `histogram_dimension` | Histogram metadata |
-| `histogram_fact` | Histogram data |
-| `histogram2d_dimension` | 2D histogram metadata |
-| `histogram2d_fact` | 2D histogram data |
-| `stats_aggregator_dimension` | Statistics aggregation metadata |
-| `stats_aggregator_fact` | Statistics values per signal, event instance, and container |
+```python
+from databricks.sdk import WorkspaceClient
 
-## Project Structure
+from mda_reporting.core.report import Report
+from mda_reporting.core.page import Page
+from mda_reporting.events.basic_event import BasicEvent
+from mda_reporting.aggregations.histogram import HistogramDuration
 
+ws = WorkspaceClient()
+report = Report(name="battery_thermal", spark=spark, workspace_client=ws, config=my_config)
+
+# Select physical channels and define a virtual signal.
+query = report.get_db().query
+max_cell_temp = query.channel(channel_name="Battery_Cell_Temp_Max", platform="EV")
+min_cell_temp = query.channel(channel_name="Battery_Cell_Temp_Min", platform="EV")
+temp_delta = max_cell_temp - min_cell_temp
+
+# Define an event: max cell temp >= 60 °C OR cell-to-cell delta > 5 °C.
+thermal_risk = BasicEvent(name="thermal_runaway_risk",
+    expr=(max_cell_temp >= 60.0) | (temp_delta > 5.0),
+)
+report.add_event(thermal_risk)
+
+# Duration-weighted histogram of max cell temperature, scoped to the event.
+page = Page(page_number=1)
+page.add_aggregation(
+    HistogramDuration(
+        name="critical_temp_distribution",
+        base_expr=max_cell_temp,
+        bins=[float(i) for i in range(60, 100, 2)],
+        event=thermal_risk,
+        bins_unit="°C",
+        values_unit="s",
+    )
+)
+report.add_page(page)
+
+# Compute and persist to the Gold-layer star schema.
+report.determine_report()
+report.persist_results()
 ```
-impulse/
-├── src/
-│   ├── mda_query_engine/     # Query engine for time-series data
-│   └── mda_reporting/        # Reporting framework
-├── tests/                    # Unit and integration tests
-├── demos/                    # Example notebooks and configurations
-├── docs/impulse/             # Documentation (Docusaurus site)
-└── pyproject.toml            # Project configuration and dependencies
-```
+
+## Requirements
+
+Python 3.12, PySpark 4.0, Delta Lake 4.0. The full dependency list is in [pyproject.toml](pyproject.toml).
 
 ## Demo & Test Data
 
@@ -140,79 +97,6 @@ various driving routes. It is licensed under the
 The data has been restructured into the framework's silver-layer table schema
 (containers, channels, tags, and metrics) for use in tests and demos.
 
-## Requirements
-
-**Python Version:** `>= 3.12, < 3.13`
-
-### Core Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `pyspark` | 4.0.0 | Spark processing engine |
-| `delta-spark` | 4.0.1 | Delta Lake support |
-| `pyarrow` | 19.0.1 | Columnar data processing |
-| `pandas` | 2.2.3 | DataFrame operations |
-| `pydantic` | 2.11.7 | Configuration validation |
-| `scipy` | 1.15.1 | Scientific computing |
-| `matplotlib` | 3.10.0 | Visualization |
-| `lz4` | 4.4.5 | Compression (time-series encoding) |
-| `nptyping` | ~2.5.0 | NumPy type hints |
-
-## Usage
-
-### Basic Workflow
-
-1. Create a `Report` with configuration (JSON or dictionary)
-2. Define channels (physical or virtual) using the query builder
-3. Define events using time-series expressions
-4. Create aggregations (histograms, statistics) and add them to report pages
-5. Call `determine_report()` to compute results
-6. Call `persist_results()` to write to Unity Catalog
-
-### Example
-
-```python
-from databricks.sdk import WorkspaceClient
-
-from mda_reporting.core.report import Report
-from mda_reporting.core.page import Page
-from mda_reporting.events.basic_event import BasicEvent
-from mda_reporting.aggregations.histogram import HistogramDuration
-
-# Create the report. `workspace_client` is used for telemetry attribution;
-# `spark` is an active SparkSession available in Databricks notebooks.
-ws = WorkspaceClient()
-report = Report(name="my_report", spark=spark, workspace_client=ws, config=my_config)
-
-# Select a physical channel by its metadata tags.
-db = report.get_db()
-engine_rpm = db.query.channel(channel_name="Engine RPM")
-
-# Define an event (time windows where RPM > 5000) and register it with the report.
-high_rpm_event = BasicEvent(
-    name="high_rpm",
-    expr=(engine_rpm > 5000),
-    desc="Engine RPM above 5000",
-)
-report.add_event(high_rpm_event)
-
-# Create a page, attach a histogram scoped to the event, and add the page.
-page = Page(page_number=1)
-page.add_aggregation(
-    HistogramDuration(
-        name="rpm_distribution",
-        base_expr=engine_rpm,
-        bins=[float(i) for i in range(0, 8000, 160)],
-        event=high_rpm_event,
-    )
-)
-report.add_page(page)
-
-# Compute and persist.
-report.determine_report()
-report.persist_results()
-```
-
 ## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup,
@@ -225,5 +109,3 @@ testing, code style, and the pull-request workflow.
 Please note that this project is provided for your exploration only and is not formally supported by Databricks with Service Level Agreements (SLAs). It is provided AS-IS and we do not make any guarantees of any kind. Please do not submit a support ticket relating to any issues arising from the use of this project.
 
 Any issues discovered through the use of this project should be filed as GitHub Issues on this repository. They will be reviewed as time permits, but no formal SLAs for support exist.
-
----

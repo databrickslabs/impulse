@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="210 110 1180 455" width="1180" height="455" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif">
+  <defs>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="8" flood-color="#1A2332" flood-opacity="0.15"/>
+    </filter>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1A2332" flood-opacity="0.10"/>
+    </filter>
+    <linearGradient id="impulseHeader" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1A2332"/>
+      <stop offset="0.6" stop-color="#2C3E50"/>
+      <stop offset="1" stop-color="#34495E"/>
+    </linearGradient>
+    <linearGradient id="silverBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EBF5FB"/>
+      <stop offset="1" stop-color="#D6EAF8"/>
+    </linearGradient>
+    <linearGradient id="goldBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FEF5E7"/>
+      <stop offset="1" stop-color="#FAD7A0"/>
+    </linearGradient>
+    <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="10" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L10,3 z" fill="#34495E"/>
+    </marker>
+  </defs>
+
+  <!-- ============ Silver Layer (left, smaller) ============ -->
+  <g filter="url(#cardShadow)">
+    <rect x="230" y="250" width="140" height="180" rx="12" fill="url(#silverBg)" stroke="#5DADE2" stroke-width="1.5"/>
+  </g>
+  <g transform="translate(300, 285)">
+    <ellipse cx="0" cy="-7" rx="18" ry="5" fill="#5DADE2"/>
+    <path d="M-18 -7 L-18 10 Q-18 15 0 15 Q18 15 18 10 L18 -7 Q18 -2 0 -2 Q-18 -2 -18 -7 Z" fill="#85C1E2" opacity="0.85"/>
+    <ellipse cx="0" cy="-2" rx="18" ry="5" fill="none" stroke="#5DADE2" stroke-width="1"/>
+    <ellipse cx="0" cy="5" rx="18" ry="5" fill="none" stroke="#5DADE2" stroke-width="1"/>
+  </g>
+  <text x="300" y="325" font-size="18" font-weight="700" fill="#1A2332" text-anchor="middle">Silver Layer</text>
+  <text x="300" y="343" font-size="9" font-weight="600" fill="#5D6D7E" text-anchor="middle" letter-spacing="2">UNITY CATALOG</text>
+  <line x1="245" y1="358" x2="355" y2="358" stroke="#AED6F1" stroke-width="1"/>
+  <text x="300" y="380" font-size="11" font-weight="500" fill="#1A2332" text-anchor="middle">Containers · Channels</text>
+  <text x="300" y="398" font-size="11" font-weight="500" fill="#1A2332" text-anchor="middle">Tags · Metrics</text>
+  <text x="300" y="416" font-size="11" font-weight="500" fill="#1A2332" text-anchor="middle">Time-series data</text>
+
+  <!-- Arrow: Silver → Impulse -->
+  <line x1="375" y1="340" x2="425" y2="340" stroke="#34495E" stroke-width="2.5" marker-end="url(#arrowhead)"/>
+
+  <!-- ============ Impulse main card (UNCHANGED) ============ -->
+  <g filter="url(#cardShadow)">
+    <rect x="430" y="140" width="740" height="400" rx="20" fill="#FFFFFF" stroke="#1A2332" stroke-width="2"/>
+  </g>
+  <path d="M430 140 Q430 120 450 120 L1150 120 Q1170 120 1170 140 L1170 230 L430 230 Z" fill="url(#impulseHeader)"/>
+  <g transform="translate(465, 178)" stroke="#E74C3C" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M0 0 L6 0 L10 -16 L14 14 L18 -8 L22 4 L28 0 L36 0"/>
+  </g>
+  <text x="515" y="190" font-size="36" font-weight="700" fill="#FFFFFF" letter-spacing="-0.5">Impulse</text>
+  <text x="515" y="215" font-size="11" font-weight="600" fill="#A8B5C2" letter-spacing="2.5">DATABRICKS LABS · TIME-SERIES ANALYTICS</text>
+
+  <!-- Card 1: TSAL -->
+  <g filter="url(#softShadow)">
+    <rect x="455" y="260" width="220" height="260" rx="12" fill="#FFFFFF" stroke="#E0E6ED" stroke-width="1.5"/>
+  </g>
+  <path d="M455 260 Q455 248 467 248 L663 248 Q675 248 675 260 L675 268 L455 268 Z" fill="#3498DB"/>
+  <g transform="translate(565, 308)">
+    <circle cx="0" cy="0" r="32" fill="#EBF5FB"/>
+    <text x="0" y="9" font-family="Menlo, Monaco, Consolas, monospace" font-size="22" font-weight="700" fill="#3498DB" text-anchor="middle">&lt;/&gt;</text>
+  </g>
+  <text x="565" y="385" font-size="20" font-weight="700" fill="#1A2332" text-anchor="middle">TSAL</text>
+  <text x="565" y="406" font-size="11" font-weight="600" fill="#3498DB" text-anchor="middle" letter-spacing="0.5">TIME SERIES ANALYTICS LANGUAGE</text>
+  <line x1="490" y1="424" x2="640" y2="424" stroke="#E0E6ED" stroke-width="1"/>
+  <text x="565" y="448" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">Declarative Python DSL</text>
+  <text x="565" y="468" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">for signals, events,</text>
+  <text x="565" y="488" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">aggregations</text>
+
+  <!-- Card 2: Query Engine -->
+  <g filter="url(#softShadow)">
+    <rect x="690" y="260" width="220" height="260" rx="12" fill="#FFFFFF" stroke="#E0E6ED" stroke-width="1.5"/>
+  </g>
+  <path d="M690 260 Q690 248 702 248 L898 248 Q910 248 910 260 L910 268 L690 268 Z" fill="#27AE60"/>
+  <g transform="translate(800, 308)">
+    <circle cx="0" cy="0" r="32" fill="#D5F5E3"/>
+    <g fill="#27AE60">
+      <circle cx="0" cy="0" r="9" fill="none" stroke="#27AE60" stroke-width="3"/>
+      <rect x="-2.5" y="-19" width="5" height="6" rx="1"/>
+      <rect x="-2.5" y="13" width="5" height="6" rx="1"/>
+      <rect x="-19" y="-2.5" width="6" height="5" rx="1"/>
+      <rect x="13" y="-2.5" width="6" height="5" rx="1"/>
+    </g>
+    <g fill="#27AE60" transform="rotate(45)">
+      <rect x="-2.5" y="-19" width="5" height="6" rx="1"/>
+      <rect x="-2.5" y="13" width="5" height="6" rx="1"/>
+      <rect x="-19" y="-2.5" width="6" height="5" rx="1"/>
+      <rect x="13" y="-2.5" width="6" height="5" rx="1"/>
+    </g>
+  </g>
+  <text x="800" y="385" font-size="20" font-weight="700" fill="#1A2332" text-anchor="middle">Query Engine</text>
+  <text x="800" y="406" font-size="11" font-weight="600" fill="#27AE60" text-anchor="middle" letter-spacing="0.5">PLUGGABLE · DISTRIBUTED</text>
+  <line x1="725" y1="424" x2="875" y2="424" stroke="#E0E6ED" stroke-width="1"/>
+  <text x="800" y="448" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">Compiles TSAL into</text>
+  <text x="800" y="468" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">distributed Spark execution,</text>
+  <text x="800" y="488" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">adapting to any</text>
+  <text x="800" y="508" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">silver-layer layout</text>
+
+  <!-- Card 3: Aggregations -->
+  <g filter="url(#softShadow)">
+    <rect x="925" y="260" width="220" height="260" rx="12" fill="#FFFFFF" stroke="#E0E6ED" stroke-width="1.5"/>
+  </g>
+  <path d="M925 260 Q925 248 937 248 L1133 248 Q1145 248 1145 260 L1145 268 L925 268 Z" fill="#E74C3C"/>
+  <g transform="translate(1035, 308)">
+    <circle cx="0" cy="0" r="32" fill="#FADBD8"/>
+    <g fill="#E74C3C">
+      <rect x="-18" y="2" width="7" height="14" rx="1"/>
+      <rect x="-9" y="-6" width="7" height="22" rx="1"/>
+      <rect x="0" y="-14" width="7" height="30" rx="1"/>
+      <rect x="9" y="-2" width="7" height="18" rx="1"/>
+    </g>
+  </g>
+  <text x="1035" y="385" font-size="20" font-weight="700" fill="#1A2332" text-anchor="middle">Aggregations</text>
+  <text x="1035" y="406" font-size="11" font-weight="600" fill="#E74C3C" text-anchor="middle" letter-spacing="0.5">DOMAIN-AWARE · PHYSICAL</text>
+  <line x1="960" y1="424" x2="1110" y2="424" stroke="#E0E6ED" stroke-width="1"/>
+  <text x="1035" y="448" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">Duration- &amp; distance-</text>
+  <text x="1035" y="468" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">weighted histograms,</text>
+  <text x="1035" y="488" font-size="12" font-weight="400" fill="#566573" text-anchor="middle">event-scoped statistics</text>
+
+  <!-- Arrow: Impulse → Gold -->
+  <line x1="1175" y1="340" x2="1225" y2="340" stroke="#34495E" stroke-width="2.5" marker-end="url(#arrowhead)"/>
+
+  <!-- ============ Gold Layer (right, smaller) ============ -->
+  <g filter="url(#cardShadow)">
+    <rect x="1230" y="250" width="140" height="180" rx="12" fill="url(#goldBg)" stroke="#E67E22" stroke-width="1.5"/>
+  </g>
+  <g transform="translate(1300, 285)">
+    <ellipse cx="0" cy="-7" rx="18" ry="5" fill="#E67E22"/>
+    <path d="M-18 -7 L-18 10 Q-18 15 0 15 Q18 15 18 10 L18 -7 Q18 -2 0 -2 Q-18 -2 -18 -7 Z" fill="#F0B27A" opacity="0.85"/>
+    <ellipse cx="0" cy="-2" rx="18" ry="5" fill="none" stroke="#E67E22" stroke-width="1"/>
+    <ellipse cx="0" cy="5" rx="18" ry="5" fill="none" stroke="#E67E22" stroke-width="1"/>
+  </g>
+  <text x="1300" y="325" font-size="18" font-weight="700" fill="#1A2332" text-anchor="middle">Gold Layer</text>
+  <text x="1300" y="343" font-size="9" font-weight="600" fill="#5D6D7E" text-anchor="middle" letter-spacing="2">UNITY CATALOG</text>
+  <line x1="1245" y1="358" x2="1355" y2="358" stroke="#F5CBA7" stroke-width="1"/>
+  <text x="1300" y="380" font-family="Menlo, Monaco, Consolas, monospace" font-size="10" font-weight="500" fill="#1A2332" text-anchor="middle">histogram_fact</text>
+  <text x="1300" y="397" font-family="Menlo, Monaco, Consolas, monospace" font-size="10" font-weight="500" fill="#1A2332" text-anchor="middle">stats_fact</text>
+  <text x="1300" y="414" font-family="Menlo, Monaco, Consolas, monospace" font-size="10" font-weight="500" fill="#1A2332" text-anchor="middle">event_instance_fact</text>
+  <text x="1300" y="428" font-size="9" font-style="italic" font-weight="400" fill="#5D6D7E" text-anchor="middle">+ dimensions</text>
+
+</svg>
