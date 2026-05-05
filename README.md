@@ -28,7 +28,10 @@ The same TSAL core and query engine support three complementary usage modes:
 
 ## Data Architecture
 
-The **silver layer** is a domain-specific data model for measurement data, organized around two concepts: a **container** groups a set of recordings (e.g. one test drive), and a **channel** is an individual sensor signal within a container. The time-series data itself lives in a very narrow table keyed by container and channel, complemented by `*_tags` and `*_metrics` tables that carry contextual metadata and statistics at both the container and channel level. The **gold layer** is a star schema with fact tables (`histogram_fact`, `histogram2d_fact`, `stats_aggregator_fact`, `event_instance_fact`) and matching dimension tables. See the [Impulse documentation](https://databrickslabs.github.io/impulse) for more details on the silver-layer and gold-layer model.
+- The **silver layer** is a domain-specific data model for measurement data, organized around two concepts: A **container** groups a set of recordings (e.g. one test drive), and a **channel** is an individual sensor signal within a container.
+- The time-series data itself lives in a very narrow table keyed by container and channel, complemented by `*_tags` and `*_metrics` tables that carry contextual metadata and statistics at both the container and channel level.
+- The **gold layer** is a star schema with fact tables (`histogram_fact`, `histogram2d_fact`, `stats_aggregator_fact`, `event_instance_fact`) and matching dimension tables.
+- See the [Impulse documentation](https://databrickslabs.github.io/impulse) for more details on the silver-layer and gold-layer data models. A detailed explanation of the silver-layer model is also described in [this Databricks blog post](https://www.databricks.com/blog/revolutionizing-car-measurement-data-storage-and-analysis-mercedes-benzs-petabyte-scale).
 
 ## Quickstart
 
