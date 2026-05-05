@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "databricks-impulse"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Large-scale time-series measurement data analytics on Apache Spark"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -47,6 +47,9 @@ dev = [
 ]
 
 # Setuptools options
+[tool.setuptools.dynamic]
+version = {file = ["VERSION"]}
+
 [tool.setuptools.packages.find]
 where = ["src"]
 exclude = ["src/*/demos"]
