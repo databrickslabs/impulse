@@ -458,6 +458,7 @@ class Report:
                         break
         return agg_types
 
+    @telemetry_logger("report", "persist_results")
     def persist_results(self):
         """
         Persist report results using appropriate strategy based on definition changes.

@@ -5,4 +5,5 @@ try:
 except PackageNotFoundError:
     # Source-only mode (PYTHONPATH=src, no install): no dist-info, read VERSION directly.
     from pathlib import Path
+
     __version__ = (Path(__file__).resolve().parents[2] / "VERSION").read_text().strip()

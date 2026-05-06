@@ -229,6 +229,7 @@ class QueryBuilder:
             result_dtypes.append(dtype)
         return (result_objects, result_dtypes)
 
+    @telemetry_logger("query", "solve")
     def solve(
         self,
         spark,
