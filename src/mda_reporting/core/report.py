@@ -458,6 +458,39 @@ class Report:
                         break
         return agg_types
 
+    def _validate_aggregation_events(self) -> None:
+        """
+        Validate that all events used in aggregations are added to the report.
+
+        Raises
+        ------
+        ValueError
+            If an aggregation uses an event that was not added to the report via add_event().
+        """
+        registered_events = set(self.events)
+        registered_event_names = {event.get_name() for event in self.events}
+
+        missing_events = []
+
+        for page in self.pages:
+            for aggregation in page.aggregations:
+                event = aggregation.get_event()
+                if event is not None and event not in registered_events:
+                    event_name = event.get_name()
+                    if event_name not in registered_event_names:
+                        missing_events.append(
+                            f"Aggregation '{aggregation.get_name()}' uses event "
+                            f"'{event_name}' which was not added to the report."
+                        )
+
+        if missing_events:
+            error_message = (
+                "The following events are used in aggregations but were not added "
+                "to the report via add_event():\n"
+                + "\n".join(f"  - {msg}" for msg in missing_events)
+            )
+            raise ValueError(error_message)
+
     @telemetry_logger("report", "persist_results")
     def persist_results(self):
         """
@@ -829,6 +862,9 @@ class Report:
         -------
         None
         """
+        # Validate that every aggregation references a registered event
+        self._validate_aggregation_events()
+
         # Clean up temp tables from previous runs
         self._cleanup_temp_tables()
 
