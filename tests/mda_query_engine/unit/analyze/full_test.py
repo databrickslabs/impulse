@@ -1,5 +1,4 @@
-import pytest
-from pyspark.sql.types import ArrayType, BinaryType, DoubleType
+from pyspark.sql.types import BinaryType
 
 from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
 from mda_query_engine.analyze.query.solvers.delta_solver import DeltaSolver

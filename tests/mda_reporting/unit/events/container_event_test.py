@@ -1,9 +1,10 @@
 """Unit tests for ContainerEvent."""
 
+import pyspark.sql.functions as f
+
 from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
 from mda_reporting.events.container_event import ContainerEvent
 from tests.conftest import basic_narrow_db, spark
-import pyspark.sql.functions as f
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +150,9 @@ def test_determine_events(spark, basic_narrow_db):
 
     df = ContainerEvent.determine_events(
         spark,
-        basic_narrow_db.query,
-        BasicNarrowSolver(spark),
         [event],
+        query=basic_narrow_db.query,
+        solver=BasicNarrowSolver(spark),
     )
 
     assert df is not None

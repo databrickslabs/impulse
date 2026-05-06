@@ -1,0 +1,4 @@
+container_id,uut_id,project,file_name,file_path,vehicle_key,brand,model,start_ts,stop_ts,start_dt,stop_dt,duration_ms,num_channels,environment
+2,SEAT_LEON,SAMPLE_PROJECT,2017-07-06_Seat_Leon_KA_RT_Normal.mf4,dbfs://2017-07-06_Seat_Leon_KA_RT_Normal.mf4,Seat_Leon,Seat,Leon,1751528501483,1751528610235,2025-07-03T07:41:41.483Z,2025-07-03T07:43:30.235Z,0,11,test_environment
+1,SEAT_LEON,SAMPLE_PROJECT,2017-07-13_Seat_Leon_RT_KA_Stau_Messfehler.mf4,dbfs://2017-07-13_Seat_Leon_RT_KA_Stau_Messfehler.mf4,Seat_Leon,Seat,Leon,1751528502708,1751528610253,2025-07-03T07:41:42.708Z,2025-07-03T07:43:30.253Z,0,11,test_environment
+3,SEAT_LEON,SAMPLE_PROJECT,2017-07-05_Seat_Leon_RT_S_Stau.mf4,dbfs://2017-07-05_Seat_Leon_RT_S_Stau.mf4,Seat_Leon,Seat,Leon,1751528500169,1751528610252,2025-07-03T07:41:40.169Z,2025-07-03T07:43:30.252Z,0,11,test_environment

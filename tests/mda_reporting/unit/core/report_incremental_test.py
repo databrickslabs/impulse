@@ -147,72 +147,6 @@ class TestDetermineReportFullMode:
         assert report._changed_event_ids == {}
         assert report._changed_aggregation_ids == {}
 
-    def test_full_mode_passes_none_as_pre_filtered(self, spark):
-        """In full mode, pre_filtered_containers_df=None is passed to event/agg processing."""
-        report = _build_report(spark)
-
-        mock_event_cls = MagicMock()
-        mock_event_cls.determine_events.return_value = MagicMock(spec=DataFrame)
-        mock_event_cls.determine_metadata_df.return_value = MagicMock(spec=DataFrame)
-
-        mock_event1 = MagicMock()
-        mock_event1.__class__ = type(mock_event_cls)
-
-        events_by_type = {"BASIC_EVENT": [mock_event1]}
-
-        with (
-            patch.object(report, "_group_events_by_type", return_value=events_by_type),
-            patch.object(report, "_group_aggregations_by_type", return_value={}),
-            patch(
-                "mda_reporting.core.report.ContainerDimension.get_dimension",
-                return_value=None,
-            ),
-            patch.dict(
-                EventType._member_map_,
-                {"BASIC_EVENT": MagicMock(value=mock_event_cls, name="BASIC_EVENT")},
-            ),
-        ):
-            # Make isinstance check work
-            EventType._member_map_["BASIC_EVENT"].name = "BASIC_EVENT"
-
-            report.determine_report(is_incremental=False)
-
-            # Verify events were processed with pre_filtered_containers_df=None
-            mock_event_cls.determine_events.assert_called_once()
-            call_kwargs = mock_event_cls.determine_events.call_args
-            assert call_kwargs.kwargs.get("pre_filtered_containers_df") is None
-
-    def test_full_mode_events_stored_as_dataframe_not_dict(self, spark):
-        """In full mode, event_dfs values are DataFrames, not dicts."""
-        report = _build_report(spark)
-        mock_df = MagicMock(spec=DataFrame)
-
-        mock_event_cls = MagicMock()
-        mock_event_cls.determine_events.return_value = mock_df
-        mock_event_cls.determine_metadata_df.return_value = MagicMock(spec=DataFrame)
-
-        mock_event1 = MagicMock()
-
-        events_by_type = {"BASIC_EVENT": [mock_event1]}
-
-        with (
-            patch.object(report, "_group_events_by_type", return_value=events_by_type),
-            patch.object(report, "_group_aggregations_by_type", return_value={}),
-            patch(
-                "mda_reporting.core.report.ContainerDimension.get_dimension",
-                return_value=None,
-            ),
-            patch.dict(
-                EventType._member_map_,
-                {"BASIC_EVENT": MagicMock(value=mock_event_cls, name="BASIC_EVENT")},
-            ),
-        ):
-            EventType._member_map_["BASIC_EVENT"].name = "BASIC_EVENT"
-            report.determine_report(is_incremental=False)
-
-        assert "BASIC_EVENT" in report.event_dfs
-        assert not isinstance(report.event_dfs["BASIC_EVENT"]["changed"], dict)
-
     def test_full_mode_uses_config_default_when_none(self, spark):
         """When is_incremental=None and config.incremental.enabled=False, uses full mode."""
         report = _build_report(spark, INCREMENTAL_DISABLED_CONFIG)
@@ -285,39 +219,6 @@ class TestDetermineReportIncrementalMode:
             report.determine_report(is_incremental=True)
             assert report._is_incremental is True
 
-    def test_incremental_detect_returns_none_falls_back_to_full(self, spark):
-        """When _detect_upserted_containers returns None, falls back to full processing."""
-        report = _build_report(spark, INCREMENTAL_CONFIG)
-
-        mock_event_cls = MagicMock()
-        mock_event_cls.determine_events.return_value = MagicMock(spec=DataFrame)
-        mock_event_cls.determine_metadata_df.return_value = MagicMock(spec=DataFrame)
-
-        events_by_type = {"BASIC_EVENT": [MagicMock()]}
-
-        with (
-            patch.object(report, "_detect_upserted_containers", return_value=None),
-            patch.object(report, "_group_events_by_type", return_value=events_by_type),
-            patch.object(report, "_group_aggregations_by_type", return_value={}),
-            patch(
-                "mda_reporting.core.report.ContainerDimension.get_dimension",
-                return_value=None,
-            ),
-            patch.dict(
-                EventType._member_map_,
-                {"BASIC_EVENT": MagicMock(value=mock_event_cls, name="BASIC_EVENT")},
-            ),
-        ):
-            EventType._member_map_["BASIC_EVENT"].name = "BASIC_EVENT"
-            report.determine_report(is_incremental=True)
-
-            # With None (gold doesn't exist), hash_comparator is None, so simple mode
-            # pre_filtered_containers_df is None -> full processing
-            call_kwargs = mock_event_cls.determine_events.call_args
-            assert call_kwargs.kwargs.get("pre_filtered_containers_df") is None
-            # Stored as DataFrame, not dict (simple mode path)
-            assert not isinstance(report.event_dfs["BASIC_EVENT"]["changed"], dict)
-
     def test_incremental_with_hash_optimization_creates_comparator(self, spark):
         """When conditions are met, DefinitionHashComparator IS created."""
         report = _build_report(spark, INCREMENTAL_CONFIG)
@@ -336,199 +237,6 @@ class TestDetermineReportIncrementalMode:
             report.determine_report(is_incremental=True)
 
             mock_hash_cls.assert_called_once_with(spark)
-
-    def test_incremental_changed_events_processed_with_none(self, spark):
-        """Changed events are processed with pre_filtered_containers_df=None (full)."""
-        report = _build_report(spark, INCREMENTAL_CONFIG)
-        mock_upserted_df = MagicMock(spec=DataFrame)
-
-        mock_event_cls = MagicMock()
-        mock_event_cls.determine_events.return_value = MagicMock(spec=DataFrame)
-        mock_event_cls.determine_metadata_df.return_value = MagicMock(spec=DataFrame)
-
-        changed_event = MagicMock()
-        changed_event.get_id.return_value = 42
-
-        unchanged_event = MagicMock()
-        unchanged_event.get_id.return_value = 99
-
-        events_by_type = {"BASIC_EVENT": [changed_event, unchanged_event]}
-
-        # Mock hash comparator to split events
-        mock_comparator_instance = MagicMock()
-        mock_comparator_instance.group_events_by_hash_change.return_value = (
-            [changed_event],
-            [unchanged_event],
-        )
-
-        with (
-            patch.object(report, "_detect_upserted_containers", return_value=mock_upserted_df),
-            patch.object(report, "_group_events_by_type", return_value=events_by_type),
-            patch.object(report, "_group_aggregations_by_type", return_value={}),
-            patch(
-                "mda_reporting.core.report.ContainerDimension.get_dimension",
-                return_value=None,
-            ),
-            patch(
-                "mda_reporting.core.report.DefinitionHashComparator",
-                return_value=mock_comparator_instance,
-            ),
-            patch.dict(
-                EventType._member_map_,
-                {"BASIC_EVENT": MagicMock(value=mock_event_cls, name="BASIC_EVENT")},
-            ),
-        ):
-            EventType._member_map_["BASIC_EVENT"].name = "BASIC_EVENT"
-
-            # Mock get_output_uri_dimension_table
-            report.sink.config.get_output_uri_dimension_table.return_value = (
-                "spark_catalog.gold.evaluation_event_dimension"
-            )
-
-            report.determine_report(is_incremental=True)
-
-            # Should be called twice: once for changed (None), once for unchanged (incremental DF)
-            assert mock_event_cls.determine_events.call_count == 2
-
-            # First call: changed events with pre_filtered_containers_df=None
-            first_call = mock_event_cls.determine_events.call_args_list[0]
-            assert first_call.kwargs.get("pre_filtered_containers_df") is None
-            assert first_call.args[3] == [changed_event]
-
-            # Second call: unchanged events with pre_filtered_containers_df=mock_upserted_df
-            second_call = mock_event_cls.determine_events.call_args_list[1]
-            assert second_call.kwargs.get("pre_filtered_containers_df") is mock_upserted_df
-            assert second_call.args[3] == [unchanged_event]
-
-    def test_incremental_changed_event_ids_tracked(self, spark):
-        """Changed event IDs are tracked in _changed_event_ids for persistence."""
-        report = _build_report(spark, INCREMENTAL_CONFIG)
-        mock_upserted_df = MagicMock(spec=DataFrame)
-
-        mock_event_cls = MagicMock()
-        mock_event_cls.determine_events.return_value = MagicMock(spec=DataFrame)
-        mock_event_cls.determine_metadata_df.return_value = MagicMock(spec=DataFrame)
-
-        changed_event = MagicMock()
-        changed_event.get_id.return_value = 42
-
-        events_by_type = {"BASIC_EVENT": [changed_event]}
-
-        mock_comparator = MagicMock()
-        mock_comparator.group_events_by_hash_change.return_value = (
-            [changed_event],
-            [],
-        )
-
-        with (
-            patch.object(report, "_detect_upserted_containers", return_value=mock_upserted_df),
-            patch.object(report, "_group_events_by_type", return_value=events_by_type),
-            patch.object(report, "_group_aggregations_by_type", return_value={}),
-            patch(
-                "mda_reporting.core.report.ContainerDimension.get_dimension",
-                return_value=None,
-            ),
-            patch(
-                "mda_reporting.core.report.DefinitionHashComparator",
-                return_value=mock_comparator,
-            ),
-            patch.dict(
-                EventType._member_map_,
-                {"BASIC_EVENT": MagicMock(value=mock_event_cls, name="BASIC_EVENT")},
-            ),
-        ):
-            EventType._member_map_["BASIC_EVENT"].name = "BASIC_EVENT"
-            report.sink.config.get_output_uri_dimension_table.return_value = "tbl"
-            report.determine_report(is_incremental=True)
-
-        assert "BASIC_EVENT" in report._changed_event_ids
-        assert report._changed_event_ids["BASIC_EVENT"] == [42]
-
-    def test_incremental_changed_aggregation_ids_tracked(self, spark):
-        """Changed aggregation IDs are tracked in _changed_aggregation_ids."""
-        report = _build_report(spark, INCREMENTAL_CONFIG)
-        mock_upserted_df = MagicMock(spec=DataFrame)
-
-        mock_agg_cls = MagicMock()
-        mock_agg_cls.determine_aggregations.return_value = MagicMock(spec=DataFrame)
-        mock_agg_cls.determine_metadata_df.return_value = MagicMock(spec=DataFrame)
-
-        changed_agg = MagicMock()
-        changed_agg.get_id.return_value = 101
-
-        aggs_by_type = {"HISTOGRAM": [changed_agg]}
-
-        mock_comparator = MagicMock()
-        mock_comparator.group_aggregations_by_hash_change.return_value = (
-            [changed_agg],
-            [],
-        )
-
-        with (
-            patch.object(report, "_detect_upserted_containers", return_value=mock_upserted_df),
-            patch.object(report, "_group_events_by_type", return_value={}),
-            patch.object(report, "_group_aggregations_by_type", return_value=aggs_by_type),
-            patch(
-                "mda_reporting.core.report.ContainerDimension.get_dimension",
-                return_value=None,
-            ),
-            patch(
-                "mda_reporting.core.report.DefinitionHashComparator",
-                return_value=mock_comparator,
-            ),
-            patch.dict(
-                AggregationType._member_map_,
-                {"HISTOGRAM": MagicMock(value=mock_agg_cls, name="HISTOGRAM")},
-            ),
-        ):
-            AggregationType._member_map_["HISTOGRAM"].name = "HISTOGRAM"
-            report.sink.config.get_output_uri_dimension_table.return_value = "tbl"
-            report.determine_report(is_incremental=True)
-
-        assert "HISTOGRAM" in report._changed_aggregation_ids
-        assert report._changed_aggregation_ids["HISTOGRAM"] == [101]
-
-    def test_incremental_events_stored_as_dict(self, spark):
-        """In incremental hash mode, event_dfs values are dicts with 'changed'/'unchanged'."""
-        report = _build_report(spark, INCREMENTAL_CONFIG)
-        mock_upserted_df = MagicMock(spec=DataFrame)
-
-        mock_event_cls = MagicMock()
-        mock_event_cls.determine_events.return_value = MagicMock(spec=DataFrame)
-        mock_event_cls.determine_metadata_df.return_value = MagicMock(spec=DataFrame)
-
-        events_by_type = {"BASIC_EVENT": [MagicMock()]}
-
-        mock_comparator = MagicMock()
-        mock_comparator.group_events_by_hash_change.return_value = (
-            [MagicMock()],
-            [],
-        )
-
-        with (
-            patch.object(report, "_detect_upserted_containers", return_value=mock_upserted_df),
-            patch.object(report, "_group_events_by_type", return_value=events_by_type),
-            patch.object(report, "_group_aggregations_by_type", return_value={}),
-            patch(
-                "mda_reporting.core.report.ContainerDimension.get_dimension",
-                return_value=None,
-            ),
-            patch(
-                "mda_reporting.core.report.DefinitionHashComparator",
-                return_value=mock_comparator,
-            ),
-            patch.dict(
-                EventType._member_map_,
-                {"BASIC_EVENT": MagicMock(value=mock_event_cls, name="BASIC_EVENT")},
-            ),
-        ):
-            EventType._member_map_["BASIC_EVENT"].name = "BASIC_EVENT"
-            report.sink.config.get_output_uri_dimension_table.return_value = "tbl"
-            report.determine_report(is_incremental=True)
-
-        assert isinstance(report.event_dfs["BASIC_EVENT"], dict)
-        assert "changed" in report.event_dfs["BASIC_EVENT"]
-        assert "unchanged" in report.event_dfs["BASIC_EVENT"]
 
     def test_incremental_uses_config_when_mode_is_none(self, spark):
         """When is_incremental=None and config.incremental.enabled=True, uses incremental."""
@@ -551,58 +259,6 @@ class TestDetermineReportIncrementalMode:
             report.determine_report(is_incremental=None)
 
             mock_detect.assert_called_once()
-
-    def test_incremental_no_changed_events_all_unchanged(self, spark):
-        """When no events have changed definitions, all are processed incrementally."""
-        report = _build_report(spark, INCREMENTAL_CONFIG)
-        mock_upserted_df = MagicMock(spec=DataFrame)
-
-        mock_event_cls = MagicMock()
-        mock_event_cls.determine_events.return_value = MagicMock(spec=DataFrame)
-        mock_event_cls.determine_metadata_df.return_value = MagicMock(spec=DataFrame)
-
-        event = MagicMock()
-        events_by_type = {"BASIC_EVENT": [event]}
-
-        mock_comparator = MagicMock()
-        mock_comparator.group_events_by_hash_change.return_value = (
-            [],  # No changed events
-            [event],  # All unchanged
-        )
-
-        with (
-            patch.object(report, "_detect_upserted_containers", return_value=mock_upserted_df),
-            patch.object(report, "_group_events_by_type", return_value=events_by_type),
-            patch.object(report, "_group_aggregations_by_type", return_value={}),
-            patch(
-                "mda_reporting.core.report.ContainerDimension.get_dimension",
-                return_value=None,
-            ),
-            patch(
-                "mda_reporting.core.report.DefinitionHashComparator",
-                return_value=mock_comparator,
-            ),
-            patch.dict(
-                EventType._member_map_,
-                {"BASIC_EVENT": MagicMock(value=mock_event_cls, name="BASIC_EVENT")},
-            ),
-        ):
-            EventType._member_map_["BASIC_EVENT"].name = "BASIC_EVENT"
-            report.sink.config.get_output_uri_dimension_table.return_value = "tbl"
-            report.determine_report(is_incremental=True)
-
-            assert mock_event_cls.determine_events.call_count == 1
-            call_kwargs = mock_event_cls.determine_events.call_args
-            assert call_kwargs.kwargs.get("pre_filtered_containers_df") is mock_upserted_df
-
-        assert "BASIC_EVENT" not in report._changed_event_ids
-
-
-# ============================================================================
-# Tests: persist_results with is_incremental=False
-# ============================================================================
-class TestPersistResultsFullMode:
-    """Tests for persist_results when _is_incremental is False."""
 
     def test_persist_full_calls_persist_full_method(self, spark):
         """persist_results() calls _persist_full() when _is_incremental=False."""
@@ -1038,6 +694,59 @@ class TestPersistIncrementalDelegation:
             report.sink.upsert.assert_called_once()
             upsert_call = report.sink.upsert.call_args
             assert upsert_call.args[2] == ["container_id"]
+
+    def test_persist_incremental_cross_type_changed_events_combined(self, spark):
+        """When multiple event types share a fact table and both have changed
+        definitions, their DataFrames are combined into a single replace_by_ids
+        call so that earlier types' data is not overwritten by later ones."""
+        report = _build_report(spark)
+
+        mock_basic_changed_df = MagicMock(spec=DataFrame)
+        mock_seq_changed_df = MagicMock(spec=DataFrame)
+        mock_combined_df = MagicMock(spec=DataFrame)
+
+        report.aggregation_dfs = {}
+        report.aggregation_metadata_dfs = {}
+        report.event_dfs = {
+            "BASIC_EVENT": {"changed": mock_basic_changed_df, "unchanged": None},
+            "SEQUENCE_OF_EVENTS": {"changed": mock_seq_changed_df, "unchanged": None},
+        }
+        report.event_metadata_dfs = {}
+        report.container_dimension_df = None
+
+        with (
+            patch("mda_reporting.core.report.WriterFactory") as mock_factory_cls,
+            patch("mda_reporting.core.report.ReportEntityTransformer"),
+            patch.object(report, "_transform_for_persistence") as mock_transform,
+        ):
+            mock_writer = MagicMock()
+            mock_writer.extract_fact_schema_and_output_uri.return_value = (
+                MagicMock(),
+                "catalog.gold.event_instance_fact",
+            )
+            mock_factory_cls.return_value.create_writer.return_value = mock_writer
+
+            mock_transformed_basic = MagicMock(spec=DataFrame)
+            mock_transformed_basic.unionByName.return_value = mock_combined_df
+            mock_transformed_seq = MagicMock(spec=DataFrame)
+
+            mock_transform.side_effect = [mock_transformed_basic, mock_transformed_seq]
+
+            report._persist_incremental(
+                changed_aggregation_ids={},
+                changed_event_ids={
+                    "BASIC_EVENT": [10],
+                    "SEQUENCE_OF_EVENTS": [20],
+                },
+            )
+
+            report.sink.replace_by_ids.assert_called_once()
+            replace_call = report.sink.replace_by_ids.call_args
+            assert replace_call.kwargs["df"] is mock_combined_df
+            assert replace_call.kwargs["id_column"] == "event_id"
+            assert set(replace_call.kwargs["ids_to_replace"]) == {10, 20}
+
+            mock_transformed_basic.unionByName.assert_called_once_with(mock_transformed_seq)
 
 
 # ============================================================================

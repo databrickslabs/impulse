@@ -94,3 +94,36 @@ def test_histogram2d_custom_weights_str():
     assert callable(hist.get_selector_expr)
     selector_expr_result = hist.get_selector_expr()
     assert selector_expr_result is not None
+
+
+def test_histogram2d_custom_weights_get_selectors():
+    sel_x = TimeSeriesSelector(TagSelector("name") == "x")
+    sel_y = TimeSeriesSelector(TagSelector("name") == "y")
+    sel_w = TimeSeriesSelector(TagSelector("name") == "w")
+    hist = Histogram2DCustomWeights(
+        x_selection=sel_x,
+        y_selection=sel_y,
+        weights_expr=sel_w,
+        x_bins=[0.0, 1.0],
+        y_bins=[0.0, 1.0],
+    )
+    result = hist.get_selectors()
+    assert len(result) == 3
+    assert sel_x in result
+    assert sel_y in result
+    assert sel_w in result
+
+
+def test_histogram2d_duration_get_selectors():
+    sel_x = TimeSeriesSelector(TagSelector("name") == "x")
+    sel_y = TimeSeriesSelector(TagSelector("name") == "y")
+    hist = Histogram2DDuration(
+        x_selection=sel_x,
+        y_selection=sel_y,
+        x_bins=[0.0, 1.0],
+        y_bins=[0.0, 1.0],
+    )
+    result = hist.get_selectors()
+    assert len(result) == 2
+    assert sel_x in result
+    assert sel_y in result

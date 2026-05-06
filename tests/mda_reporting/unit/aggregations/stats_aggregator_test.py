@@ -390,11 +390,11 @@ def test_determine_aggregations(spark, basic_narrow_db):
     )
 
     solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(stats_agg.get_expression()).solve(spark, solver)
     df = StatsAggregator.determine_aggregations(
         spark=spark,
-        query=basic_narrow_db.query,
-        solver=solver,
         aggregations=[stats_agg],
+        solved_df=solved_df,
     )
 
     assert df.count() > 0  # Ensure that some data is returned
@@ -430,11 +430,13 @@ def test_determine_aggregations_multiple_stats(spark, basic_narrow_db):
     )
 
     solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(
+        stats_agg1.get_expression(), stats_agg2.get_expression()
+    ).solve(spark, solver)
     df = StatsAggregator.determine_aggregations(
         spark=spark,
-        query=basic_narrow_db.query,
-        solver=solver,
         aggregations=[stats_agg1, stats_agg2],
+        solved_df=solved_df,
     )
 
     assert df.count() > 0
@@ -561,11 +563,11 @@ def test_stats_aggregator_with_all_statistics(spark, basic_narrow_db):
     )
 
     solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(stats_agg.get_expression()).solve(spark, solver)
     df = StatsAggregator.determine_aggregations(
         spark=spark,
-        query=basic_narrow_db.query,
-        solver=solver,
         aggregations=[stats_agg],
+        solved_df=solved_df,
     )
 
     # Verify all statistics are present in results
@@ -592,11 +594,11 @@ def test_stats_aggregator_multiple_input_expressions(spark, basic_narrow_db):
     )
 
     solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(stats_agg.get_expression()).solve(spark, solver)
     df = StatsAggregator.determine_aggregations(
         spark=spark,
-        query=basic_narrow_db.query,
-        solver=solver,
         aggregations=[stats_agg],
+        solved_df=solved_df,
     )
 
     # Verify both signals are present in results
@@ -634,3 +636,16 @@ def test_report_id_and_page_number_assignment():
     stats_dict = stats_agg.as_dict()
     assert stats_dict["page_number"] == 5
     assert stats_dict["report_id"] == 123
+
+
+def test_determine_aggregations_requires_solved_df(spark):
+    stats_agg = StatsAggregator(
+        name="test_stats",
+        input_expressions=[TimeSeriesSelector(None)],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max", "mean"],
+        event=BasicEvent(name="test_event_1", expr=TimeSeriesSelector(None)),
+    )
+
+    with pytest.raises(ValueError, match="requires solved_df"):
+        StatsAggregator.determine_aggregations(spark=spark, aggregations=[stats_agg])

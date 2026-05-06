@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import zlib
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
 import pyspark.sql.functions as f
-import zlib
 from pyspark.sql import DataFrame, Row, SparkSession
 
 from mda_query_engine.analyze.metadata.time_series_expression import (
@@ -104,20 +104,6 @@ class Histogram2D(Aggregation, ABC):
             The event associated with the histogram2d aggregation.
         """
         return self.event
-
-    def _set_expression(self) -> TimeSeriesExpression:
-        """
-        Set the time series expression for the histogram2d aggregation and return histogram2d based on expression.
-        Returns
-        -------
-        TimeSeriesExpression
-            The histogram2d based on the time series expression.
-        """
-        event_expression = self.event.get_expression() if self.event else None
-        x_expression = self.x_expr.where(event_expression) if event_expression else self.x_expr
-        y_expression = self.y_expr.where(event_expression) if event_expression else self.y_expr
-
-        return x_expression.histogram2d(y_expression, self.x_bins, self.y_bins).alias(self.name)
 
     def get_expression(self) -> TimeSeriesExpression:
         """
@@ -230,9 +216,11 @@ class Histogram2D(Aggregation, ABC):
     def determine_aggregations(
         cls,
         spark: SparkSession,
-        query: QueryBuilder,
-        solver: QuerySolver,
         aggregations: list[Histogram2D],
+        *,
+        solved_df: DataFrame = None,
+        query: QueryBuilder = None,
+        solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
     ):
         """
@@ -242,32 +230,31 @@ class Histogram2D(Aggregation, ABC):
         ----------
         spark : pyspark.sql.SparkSession
             Spark session to use for computation.
-        query : QueryBuilder
-            Query builder for constructing the query.
-        solver : QuerySolver
-            Solver for executing the query.
         aggregations : list of Histogram2D
             List of Histogram2D visual aggregations.
+        solved_df : DataFrame, optional
+            Pre-solved wide DataFrame from centralized batch solve. Required.
+        query : QueryBuilder, optional
+            Query builder (unused, kept for interface compatibility).
+        solver : QuerySolver, optional
+            Solver (unused, kept for interface compatibility).
         pre_filtered_containers_df : DataFrame, optional
-            Pre-filtered containers for incremental processing.
+            Pre-filtered containers (unused, kept for interface compatibility).
 
         Returns
         -------
         pyspark.sql.DataFrame
             DataFrame containing the processed histogram2d aggregations.
         """
-        hist_expressions = []
-        hist_names = []
-        for hist in aggregations:
-            hist_expressions.append(hist.get_expression())
-            hist_names.append(hist.get_name())
+        if solved_df is None:
+            raise ValueError(
+                "Histogram2D.determine_aggregations requires solved_df. "
+                "Provide a pre-solved DataFrame from the centralized batch-solve flow."
+            )
 
-        hist_query = query.select(*hist_expressions)
-        result = hist_query.solve(
-            spark=spark,
-            solver=solver,
-            pre_filtered_containers_df=pre_filtered_containers_df,
-        )
+        hist_names = [hist.get_name() for hist in aggregations]
+
+        result = solved_df.select("container_id", *hist_names)
 
         df = (
             result.transform(Histogram2D._unpivot_measurement_info(hist_names))
@@ -283,7 +270,7 @@ class Histogram2D(Aggregation, ABC):
     @staticmethod
     def _add_visual_id_column(
         aggregations: list[Histogram2D],
-    ) -> Callable[..., "DataFrame"]:
+    ) -> Callable[..., DataFrame]:
         """
         Add a visual_id column to the DataFrame based on the provided visuals.
 
@@ -363,7 +350,7 @@ class Histogram2D(Aggregation, ABC):
     @staticmethod
     def _add_event_id_column(
         aggregations: list[Histogram2D],
-    ) -> Callable[..., "DataFrame"]:
+    ) -> Callable[..., DataFrame]:
         """
         Add an event_id column to the DataFrame based on the provided visuals.
 
@@ -408,7 +395,7 @@ class Histogram2D(Aggregation, ABC):
         )
 
     @staticmethod
-    def _unpivot_measurement_info(hist_names: list[str]) -> Callable[..., "DataFrame"]:
+    def _unpivot_measurement_info(hist_names: list[str]) -> Callable[..., DataFrame]:
         """
         Unpivot the measurement info columns into long format.
 

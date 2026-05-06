@@ -1,3 +1,5 @@
+import pytest
+
 from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
 from mda_reporting.events.basic_event import BasicEvent
@@ -90,9 +92,9 @@ def test_determine_events(spark, basic_narrow_db):
     event_expr = eng_rpm > 1000
     event = BasicEvent(name="test_event", expr=event_expr)
 
-    df = BasicEvent.determine_events(
-        spark, basic_narrow_db.query, BasicNarrowSolver(spark), [event]
-    )
+    solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(event.get_expression()).solve(spark, solver)
+    df = BasicEvent.determine_events(spark, [event], solved_df=solved_df)
 
     assert df is not None
     assert "container_id" in df.columns
@@ -109,9 +111,11 @@ def test_determine_events_several_events(spark, basic_narrow_db):
     event = BasicEvent(name="test_event_1", expr=eng_rpm > 1000)
     event2 = BasicEvent(name="test_event_2", expr=eng_rpm < 1000)
 
-    df = BasicEvent.determine_events(
-        spark, basic_narrow_db.query, BasicNarrowSolver(spark), [event, event2]
-    )
+    solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(
+        event.get_expression(), event2.get_expression()
+    ).solve(spark, solver)
+    df = BasicEvent.determine_events(spark, [event, event2], solved_df=solved_df)
 
     assert df is not None
     assert df.select("event_id").distinct().count() == 2  # Ensure both events are present
@@ -191,3 +195,9 @@ def test_definition_hash_ignores_required_channels():
     ev1 = BasicEvent(name="ev", expr=expr, required_channels=["ch1"])
     ev2 = BasicEvent(name="ev", expr=expr, required_channels=["ch1", "ch2"])
     assert ev1.determine_definition_hash() == ev2.determine_definition_hash()
+
+
+def test_determine_events_requires_solved_df(spark):
+    event = BasicEvent(name="test_event_1", expr=TimeSeriesSelector(None))
+    with pytest.raises(ValueError, match="requires solved_df"):
+        BasicEvent.determine_events(spark, [event])

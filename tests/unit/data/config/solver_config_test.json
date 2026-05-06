@@ -1,0 +1,26 @@
+{
+    "project_id": "TEST_PROJECT",
+    "container_tags": {
+        "column_name_mapping": {
+            "entity_ref_id": "container_id",
+            "proj_id": "project_id"
+        },
+        "filters": {
+            "parent_id": "test_concept"
+        }
+    },
+    "channel_mapping": {
+        "filters": {
+            "toolbox_id": "test_concept"
+        }
+    },
+    "channels": {
+        "column_name_mapping": {
+            "measurement_id": "container_id",
+            "channel_key": "channel_id",
+            "ts_start": "tstart",
+            "ts_end": "tend",
+            "signal_value": "value"
+        }
+    }
+}

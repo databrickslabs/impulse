@@ -580,3 +580,91 @@ def add_aggs_to_report_changed_bins_v2(my_report):
     hist2_bins = [float(i) for i in range(0, 300, 1)]
     hist2 = HistogramDuration(name=hist2_name, base_expr=c2, bins=hist2_bins)
     my_first_page.add_aggregation(hist2)
+
+
+def test_incremental_cross_type_event_definition_change(spark):
+    """When both a BasicEvent and a SequenceOfEvents have changed definitions,
+    both event types' fact data must survive in the shared event_instance_fact
+    table after incremental persistence."""
+    from mda_reporting.events.sequence_of_events import SequenceOfEvents
+
+    # --- Run 1: initial population with BasicEvent + SequenceOfEvents ---
+    report_1 = Report(
+        name="my_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(set_config("container_metrics_inc_1_2", False)),
+    )
+    query = report_1.get_db().query
+    c1 = query.channel(channel_name="Engine RPM")
+    c2 = query.channel(channel_name="Vehicle Speed Sensor")
+    page = Page(page_number=1)
+    report_1.add_page(page)
+
+    basic_event = BasicEvent(name="rpm_event", expr=c1 > 0)
+    seq_event = SequenceOfEvents(
+        name="rpm_then_speed",
+        expressions=[c1 > 0, c2 > 1],
+    )
+    report_1.add_event(basic_event)
+    report_1.add_event(seq_event)
+
+    hist = HistogramDuration(
+        "rpm_hist_p1", base_expr=c1, bins=[float(i) for i in range(0, 8000, 250)]
+    )
+    page.add_aggregation(hist)
+
+    report_1.determine_report()
+    report_1.persist_results()
+
+    event_fact_run1 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
+    basic_event_id = basic_event.get_id()
+    seq_event_id = seq_event.get_id()
+
+    basic_count_run1 = event_fact_run1.where(F.col("event_id") == basic_event_id).count()
+    seq_count_run1 = event_fact_run1.where(F.col("event_id") == seq_event_id).count()
+    assert basic_count_run1 > 0, "BasicEvent should have fact rows after run 1"
+    assert seq_count_run1 > 0, "SequenceOfEvents should have fact rows after run 1"
+
+    # --- Run 2: change both definitions ---
+    # BasicEvent: changed expression (c1 > 100 instead of c1 > 0)
+    # SequenceOfEvents: changed expressions (c1 > 100, c2 > 10 instead of c1 > 0, c2 > 1)
+    report_2 = Report(
+        name="my_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(set_config("container_metrics_inc_1_2", True)),
+    )
+    query2 = report_2.get_db().query
+    c1_v2 = query2.channel(channel_name="Engine RPM")
+    c2_v2 = query2.channel(channel_name="Vehicle Speed Sensor")
+    page2 = Page(page_number=1)
+    report_2.add_page(page2)
+
+    basic_event_v2 = BasicEvent(name="rpm_event", expr=c1_v2 > 100)
+    seq_event_v2 = SequenceOfEvents(
+        name="rpm_then_speed",
+        expressions=[c1_v2 > 100, c2_v2 > 10],
+    )
+    report_2.add_event(basic_event_v2)
+    report_2.add_event(seq_event_v2)
+
+    hist2 = HistogramDuration(
+        "rpm_hist_p1", base_expr=c1_v2, bins=[float(i) for i in range(0, 8000, 250)]
+    )
+    page2.add_aggregation(hist2)
+
+    report_2.determine_report()
+    report_2.persist_results()
+
+    event_fact_run2 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
+
+    basic_count_run2 = event_fact_run2.where(F.col("event_id") == basic_event_id).count()
+    seq_count_run2 = event_fact_run2.where(F.col("event_id") == seq_event_id).count()
+
+    assert (
+        basic_count_run2 > 0
+    ), "BasicEvent fact data must survive after cross-type incremental persistence"
+    assert (
+        seq_count_run2 > 0
+    ), "SequenceOfEvents fact data must survive after cross-type incremental persistence"

@@ -1,8 +1,17 @@
 """Configuration for solver column mappings.
 
-Provides a Pydantic model that maps silver-layer column names to the internal
+Provides Pydantic models that map silver-layer column names to the internal
 column names used by the solver classes, making the solvers independent
 of a specific data-layer naming convention.
+
+Each input table has its own :class:`TableConfig` section with an optional
+``column_name_mapping`` (physical column → internal name) and ``filters``
+(internal column → equality value).
+
+Solvers apply the ``column_name_mapping`` when reading a table to rename
+physical columns to internal names.  All subsequent processing — including
+filter application — uses the framework-internal column names exposed as
+properties on :class:`SolverConfig`.
 """
 
 import json
@@ -10,42 +19,61 @@ import json
 from pydantic import BaseModel
 
 
-class SolverConfig(BaseModel):
-    """
-    Configuration for solver column name mappings.
+class TableConfig(BaseModel):
+    """Per-table configuration for column renaming and equality filters.
 
     Attributes
     ----------
-    container_id_col : str
-        The column name used to identify a container (measurement).
-    channel_id_cols : List[str]
-        The column names that together uniquely identify a channel.
-    channel_data_mapping : Dict[str, str]
-        Mapping from internal (solver) column names to silver-layer column
-        names for channel data.  Keys are the internal names
-        (``"tstart"``, ``"tend"``, ``"value"``); values are the actual
-        column names in the source table.
-    container_meta_data_mapping : Dict[str, str]
-        Mapping from internal (solver) column names to silver-layer column
-        names for container metadata.  Keys are the internal names
-        (``"project_id"``); values are the actual column names.
-    entity_id_col : str
-        The column name used to identify an entity in concept-entity /
-        key-value-store tables (e.g. ``"entity_id"``).
+    column_name_mapping : dict[str, str]
+        Mapping from physical column names on the table to internal
+        names used by the solver.  An empty dict means no renaming
+        (physical names already match internal names).
+    filters : dict[str, str]
+        Equality filters applied to the table **after** column renaming.
+        Keys are internal column names; values are the literal values
+        to match.
     """
 
-    container_id_col: str = "container_id"
-    channel_id_cols: list[str] = ["container_id", "channel_id"]
-    channel_data_mapping: dict[str, str] = {
-        "tstart": "tstart",
-        "tend": "tend",
-        "value": "value",
-    }
-    container_meta_data_mapping: dict[str, str] = {
-        "project_id": "project_id",
-    }
-    entity_id_col: str = "entity_id"
-    parent_id_col: str = "parent_id"
+    column_name_mapping: dict[str, str] = {}
+    filters: dict[str, str] = {}
+
+
+class SolverConfig(BaseModel):
+    """Per-table configuration for solver column name mappings and filters.
+
+    The framework uses a fixed set of internal column names (e.g.
+    ``container_id``, ``channel_id``, ``tstart``, ``tend``, ``value``).
+    When a silver-layer table uses different physical column names, the
+    per-table ``column_name_mapping`` renames them to the internal names
+    so that solver code can always reference the same constants.
+
+    Attributes
+    ----------
+    project_id : str or None
+        Optional project identifier applied as a filter on relevant tables
+        (container_tags, channel_mapping) by solvers that support it.
+    container_tags : TableConfig
+        Column mappings and filters for the container tags (narrow/EAV) table.
+    container_metrics : TableConfig
+        Column mappings and filters for the container metrics table.
+    channel_tags : TableConfig
+        Column mappings and filters for the channel tags table.
+    channel_metrics : TableConfig
+        Column mappings and filters for the channel metrics table.
+    channel_mapping : TableConfig
+        Column mappings and filters for the channel mapping (alias) table.
+    channels : TableConfig
+        Column mappings and filters for the channel data table.
+    """
+
+    project_id: str | None = None
+
+    container_tags: TableConfig = TableConfig()
+    container_metrics: TableConfig = TableConfig()
+    channel_tags: TableConfig = TableConfig()
+    channel_metrics: TableConfig = TableConfig()
+    channel_mapping: TableConfig = TableConfig()
+    channels: TableConfig = TableConfig()
 
     # ------------------------------------------------------------------
     # Class methods
@@ -66,7 +94,7 @@ class SolverConfig(BaseModel):
         SolverConfig
             A new SolverConfig instance populated from the file.
         """
-        with open(json_path, "r") as f:
+        with open(json_path) as f:
             data = json.load(f)
         return cls.model_validate(data)
 
@@ -90,37 +118,67 @@ class SolverConfig(BaseModel):
         return cls.model_validate(data)
 
     # ------------------------------------------------------------------
-    # Convenience column-name helpers
+    # Framework-internal column names (constants)
     # ------------------------------------------------------------------
 
     @property
+    def container_id_col(self) -> str:
+        """Internal column name for the container identifier."""
+        return "container_id"
+
+    @property
     def channel_id_col(self) -> str:
-        """Return the simple channel-id column (last element of *channel_id_cols*)."""
-        return self.channel_id_cols[-1]
+        """Internal column name for the channel identifier."""
+        return "channel_id"
+
+    @property
+    def channel_id_cols(self) -> list[str]:
+        """Composite key ``[container_id, channel_id]``."""
+        return [self.container_id_col, self.channel_id_col]
 
     @property
     def tstart_col(self) -> str:
-        """Silver-layer column name for *tstart*."""
-        return self.channel_data_mapping.get("tstart", "tstart")
+        """Internal column name for the start timestamp."""
+        return "tstart"
 
     @property
     def tend_col(self) -> str:
-        """Silver-layer column name for *tend*."""
-        return self.channel_data_mapping.get("tend", "tend")
+        """Internal column name for the end timestamp."""
+        return "tend"
 
     @property
     def value_col(self) -> str:
-        """Silver-layer column name for *value*."""
-        return self.channel_data_mapping.get("value", "value")
+        """Internal column name for the signal value on the channels table."""
+        return "value"
+
+    @property
+    def tag_key_col(self) -> str:
+        """Internal column name for the attribute key on the container_tags (EAV) table."""
+        return "key"
+
+    @property
+    def tag_value_col(self) -> str:
+        """Internal column name for the attribute value on the container_tags (EAV) table."""
+        return "value"
+
+    @property
+    def alias_priority_col(self) -> str:
+        """Internal column name for the alias priority on the channel_mapping table."""
+        return "priority"
 
     @property
     def project_id_col(self) -> str:
-        """Silver-layer column name for *project_id*."""
-        return self.container_meta_data_mapping.get("project_id", "project_id")
+        """Internal column name for the project identifier."""
+        return "project_id"
+
+    @property
+    def parent_id_col(self) -> str:
+        """Internal column name for the parent/scope identifier."""
+        return "parent_id"
 
     @property
     def col_map(self) -> dict[str, str]:
-        """Short-key → actual-column-name mapping for UDFs and caches."""
+        """Short-key → internal-column-name mapping for UDFs and caches."""
         return {
             "cid": self.container_id_col,
             "ch": self.channel_id_col,

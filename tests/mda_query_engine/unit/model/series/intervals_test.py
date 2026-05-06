@@ -1,10 +1,9 @@
 """Tests for Intervals, including merge_intervals/merge_overlaps and sustaining
 debounce/filter TimeSeriesOp expressions."""
 
+# pylint: disable=missing-function-docstring
 import numpy as np
 import numpy.testing as nptest
-
-# pylint: disable=missing-function-docstring
 import pandas as pd
 import pytest
 

@@ -14,6 +14,7 @@ class MeasurementDBConfig:
         channel_tags_table=None,
         channel_metrics_table=None,
         channels_uri=None,
+        channel_mapping_table=None,
         table_locations: str = "external_locations",
     ):
         self.container_tags_table = container_tags_table
@@ -21,17 +22,23 @@ class MeasurementDBConfig:
         self.channel_tags_table = channel_tags_table
         self.channel_metrics_table = channel_metrics_table
         self.channels_uri = channels_uri
+        self.channel_mapping_table = channel_mapping_table
         self.table_locations = table_locations
         self.debug_tables = None
 
     @staticmethod
-    def for_unity_catalog(catalog_name: str, core_schema_name: str = "core"):
+    def for_unity_catalog(
+        catalog_name: str,
+        core_schema_name: str = "core",
+        channel_mapping_table: str | None = None,
+    ):
         return MeasurementDBConfig(
             container_tags_table=f"{catalog_name}.{core_schema_name}.container_tags",
             container_metrics_table=f"{catalog_name}.{core_schema_name}.container_metrics",
             channel_tags_table=f"{catalog_name}.{core_schema_name}.channel_tags",
             channel_metrics_table=f"{catalog_name}.{core_schema_name}.channel_metrics",
             channels_uri=f"{catalog_name}.{core_schema_name}.channels",
+            channel_mapping_table=channel_mapping_table,
             table_locations="unity_catalog",
         )
 
@@ -81,6 +88,11 @@ class MeasurementDB:
 
     def channels(self, spark) -> DataFrame:
         return self._read_table(spark, self.config.channels_uri)
+
+    def channel_mapping(self, spark) -> DataFrame:
+        if self.config.channel_mapping_table is None:
+            raise ValueError("channel_mapping_table is not configured")
+        return self._read_table(spark, self.config.channel_mapping_table)
 
     def channel_uri(self):
         return self.config.channels_uri

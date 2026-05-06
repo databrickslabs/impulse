@@ -1,17 +1,26 @@
 {
-    "container_id_col": "measurement_id",
-    "channel_id_cols": [
-        "measurement_id",
-        "signal_id",
-        "channel_key"
-    ],
-    "channel_data_mapping": {
-        "tstart": "ts_start",
-        "tend": "ts_end",
-        "value": "signal_value"
+    "project_id": "TEST_PROJECT",
+    "container_tags": {
+        "column_name_mapping": {
+            "entity_ref_id": "container_id",
+            "proj_id": "project_id"
+        },
+        "filters": {
+            "parent_id": "test_concept"
+        }
     },
-    "container_meta_data_mapping": {
-        "project_id": "proj_id"
+    "channel_mapping": {
+        "filters": {
+            "toolbox_id": "test_concept"
+        }
     },
-    "entity_id_col": "entity_ref_id"
+    "channels": {
+        "column_name_mapping": {
+            "measurement_id": "container_id",
+            "channel_key": "channel_id",
+            "ts_start": "tstart",
+            "ts_end": "tend",
+            "signal_value": "value"
+        }
+    }
 }

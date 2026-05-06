@@ -18,7 +18,10 @@ from mda_query_engine.analyze.query.solvers.basic_narrow_solver import (
     BasicNarrowSolver,
     BasicNarrowTimeSeriesCache,
 )
-from mda_query_engine.analyze.query.solvers.solver_config import SolverConfig
+from mda_query_engine.analyze.query.solvers.solver_config import (
+    SolverConfig,
+    TableConfig,
+)
 from mda_query_engine.measurement_db import MeasurementDB
 from tests.conftest import spark
 
@@ -212,14 +215,17 @@ class TestBasicNarrowSolverFilterMethods:
     def test_filter_channel_metrics_uses_config_cols(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB
     ):
-        """filter_channel_metrics result should contain config column names."""
+        """filter_channel_metrics result should contain (container_id, channel_id, selector_ids)."""
         solver = BasicNarrowSolver(spark)
-        query = basic_narrow_db.query
-        # build a container_df with the right column name
+        query = basic_narrow_db.query.select(
+            basic_narrow_db.query.channel(channel_name="Engine RPM")
+        )
         container_df = solver.filter_container_metrics(spark, query, None)
-        result = solver.filter_channel_metrics(spark, query, container_df)
+        selectors = query._collect_time_series_selectors(uses_alias=False)
+        result = solver.filter_channel_metrics(spark, basic_narrow_db, container_df, selectors)
         assert "container_id" in result.columns
         assert "channel_id" in result.columns
+        assert "selector_ids" in result.columns
 
 
 # ---------------------------------------------------------------------------
@@ -258,20 +264,6 @@ class TestBasicNarrowSolverEndToEnd:
         assert solver.config.container_id_col == "container_id"
         assert solver.config.tstart_col == "tstart"
 
-    def test_config_properties_accessible(self, spark: SparkSession):
-        """BasicNarrowSolver exposes column names via self.config properties."""
-        cfg = SolverConfig(
-            container_id_col="meas_id",
-            channel_id_cols=["meas_id", "sig_id"],
-            channel_data_mapping={"tstart": "t_start", "tend": "t_stop", "value": "val"},
-        )
-        solver = BasicNarrowSolver(spark, config=cfg)
-        assert solver.config.container_id_col == "meas_id"
-        assert solver.config.channel_id_col == "sig_id"
-        assert solver.config.tstart_col == "t_start"
-        assert solver.config.tend_col == "t_stop"
-        assert solver.config.value_col == "val"
-
     def test_no_redundant_instance_attrs(self, spark: SparkSession):
         """BasicNarrowSolver should NOT have cid_col/ch_col/ts_col/te_col/val_col attributes."""
         solver = BasicNarrowSolver(spark)
@@ -281,19 +273,45 @@ class TestBasicNarrowSolverEndToEnd:
         assert not hasattr(solver, "te_col")
         assert not hasattr(solver, "val_col")
 
-    def test_col_map_from_config(self, spark: SparkSession):
-        """col_map property on config returns correct mapping."""
+    def test_col_map_always_returns_internal_names(self, spark: SparkSession):
+        """col_map always returns the fixed internal-name mapping."""
         cfg = SolverConfig(
-            container_id_col="meas_id",
-            channel_id_cols=["meas_id", "sig_id"],
-            channel_data_mapping={"tstart": "t_start", "tend": "t_stop", "value": "val"},
+            channels=TableConfig(
+                column_name_mapping={
+                    "meas_id": "container_id",
+                    "sig_id": "channel_id",
+                    "t_start": "tstart",
+                    "t_stop": "tend",
+                    "val": "value",
+                }
+            )
         )
         solver = BasicNarrowSolver(spark, config=cfg)
         col_map = solver.config.col_map
         assert col_map == {
-            "cid": "meas_id",
-            "ch": "sig_id",
-            "ts": "t_start",
-            "te": "t_stop",
-            "val": "val",
+            "cid": "container_id",
+            "ch": "channel_id",
+            "ts": "tstart",
+            "te": "tend",
+            "val": "value",
         }
+
+    def test_config_properties_return_internal_names(self, spark: SparkSession):
+        """Properties always return fixed internal names regardless of mapping."""
+        cfg = SolverConfig(
+            channels=TableConfig(
+                column_name_mapping={
+                    "meas_id": "container_id",
+                    "sig_id": "channel_id",
+                    "t_start": "tstart",
+                    "t_stop": "tend",
+                    "val": "value",
+                }
+            )
+        )
+        solver = BasicNarrowSolver(spark, config=cfg)
+        assert solver.config.container_id_col == "container_id"
+        assert solver.config.channel_id_col == "channel_id"
+        assert solver.config.tstart_col == "tstart"
+        assert solver.config.tend_col == "tend"
+        assert solver.config.value_col == "value"

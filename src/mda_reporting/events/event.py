@@ -8,8 +8,8 @@ from pyspark.sql import DataFrame, Row, SparkSession
 from mda_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
+from mda_query_engine.analyze.query.query_builder import QueryBuilder
 from mda_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from mda_query_engine.measurement_db import MeasurementDB
 
 
 class Event(ABC):
@@ -152,9 +152,11 @@ class Event(ABC):
     def determine_events(
         cls,
         spark: SparkSession,
-        db: MeasurementDB,
-        solver: QuerySolver,
         events: list[Event],
+        *,
+        solved_df: DataFrame = None,
+        query: QueryBuilder = None,
+        solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
     ):
         """
@@ -164,12 +166,14 @@ class Event(ABC):
         ----------
         spark : SparkSession
             Spark session for data processing.
-        db : MeasurementDB
-            Measurement database instance.
-        solver : QuerySolver
-            Query solver for executing queries.
         events : list of Event
             List of Event objects to process.
+        solved_df : DataFrame, optional
+            Pre-solved wide DataFrame from centralized batch solve.
+        query : QueryBuilder, optional
+            Query builder for constructing event queries (ContainerEvent path).
+        solver : QuerySolver, optional
+            Query solver for executing queries (ContainerEvent path).
         pre_filtered_containers_df : DataFrame, optional
             Pre-filtered containers for incremental processing.
 

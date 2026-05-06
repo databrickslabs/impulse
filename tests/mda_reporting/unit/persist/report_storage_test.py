@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
 import pytest
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+from pyspark.sql.types import IntegerType, StringType, StructField, StructType
 
 from mda_reporting.aggregations.aggregation_types import AggregationType
 from mda_reporting.events.event_types import EventType

@@ -25,10 +25,10 @@ from mda_reporting.config.config_parser import (
     Source,
     UnitySink,
 )
+from mda_query_engine.analyze.query.solvers.solver_config import SolverConfig, TableConfig
 from mda_reporting.core.page import Page
 from mda_reporting.core.report import Report
 from mda_reporting.events.basic_event import BasicEvent
-from mda_reporting.events.container_event import ContainerEvent
 
 
 class ExtendedSource(Source):
@@ -769,8 +769,10 @@ def test_simple_report_key_value_store(spark, key_value_store_db):
         ),
         query_engine=QueryEngine(
             solver=Solvers.KEY_VALUE_STORE_SOLVER,
-            project_id="SAMPLE_PROJECT",
-            entity_maps_to="container_id",
+            solver_config=SolverConfig(
+                project_id="SAMPLE_PROJECT",
+                container_tags=TableConfig(column_name_mapping={"element_id": "key"}),
+            ),
         ),
         measurement_dimensions=[MeasurementDimensions.CONTAINER_ID],
     )

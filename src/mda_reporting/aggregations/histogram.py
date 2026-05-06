@@ -91,19 +91,6 @@ class Histogram(Aggregation, ABC):
 
         return self.event
 
-    def _set_expression(self) -> TimeSeriesExpression:
-        """
-        Set the time series expression for the histogram aggregation and return histogram based on expression.
-        Returns
-        -------
-        Histogram
-            The histogram based on the time series expression.
-
-        """
-        event_expression = self.event.get_expression() if self.event else None
-        expression = self.base_expr.where(event_expression) if event_expression else self.base_expr
-        return expression.histogram(self.bins).alias(self.name)
-
     def get_expression(self) -> TimeSeriesExpression:
         """
         Get the time series expression for the histogram aggregation.
@@ -203,9 +190,11 @@ class Histogram(Aggregation, ABC):
     def determine_aggregations(
         cls,
         spark: SparkSession,
-        query: QueryBuilder,
-        solver: QuerySolver,
         aggregations: list[Histogram],
+        *,
+        solved_df: "DataFrame" = None,
+        query: QueryBuilder = None,
+        solver: QuerySolver = None,
         pre_filtered_containers_df=None,
     ):
         """
@@ -215,35 +204,32 @@ class Histogram(Aggregation, ABC):
         ----------
         spark : SparkSession
             Spark session for data processing.
-        query : QueryBuilder
-            Query builder for constructing aggregation queries.
-        solver : QuerySolver
-            Query solver for executing queries.
         aggregations : list of Histogram
             List of Histogram objects to process.
+        solved_df : DataFrame, optional
+            Pre-solved wide DataFrame from centralized batch solve. Required.
+        query : QueryBuilder, optional
+            Query builder (unused, kept for interface compatibility).
+        solver : QuerySolver, optional
+            Query solver (unused, kept for interface compatibility).
         pre_filtered_containers_df : DataFrame, optional
-            Pre-filtered containers for incremental processing.
+            Pre-filtered containers (unused, kept for interface compatibility).
 
         Returns
         -------
         DataFrame
             Spark DataFrame containing histogram aggregation facts.
         """
+        if solved_df is None:
+            raise ValueError(
+                "Histogram.determine_aggregations requires solved_df. "
+                "Provide a pre-solved DataFrame from the centralized batch-solve flow."
+            )
 
-        hist_expressions = []
-        hist_names = []
-        for hist in aggregations:
-            hist_expressions.append(hist.get_expression())
-            hist_names.append(hist.get_name())
-
-        hist_query = query.select(*hist_expressions)
+        hist_names = [hist.get_name() for hist in aggregations]
 
         df = (
-            hist_query.solve(
-                spark=spark,
-                solver=solver,
-                pre_filtered_containers_df=pre_filtered_containers_df,
-            )
+            solved_df.select("container_id", *hist_names)
             .unpivot(
                 f.col("container_id"),
                 hist_names,

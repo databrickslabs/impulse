@@ -1,3 +1,5 @@
+import pytest
+
 from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
 from mda_reporting.aggregations.histogram import (
@@ -178,8 +180,9 @@ def test_determine_aggregations(spark, basic_narrow_db):
     event = BasicEvent(name="test_event_1", expr=eng_rpm > 1000)
     hist = HistogramDuration(name="test_hist", base_expr=eng_rpm, event=event, bins=[0.0, 10000.0])
     solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(hist.get_expression()).solve(spark, solver)
     df = HistogramDuration.determine_aggregations(
-        spark=spark, query=basic_narrow_db.query, solver=solver, aggregations=[hist]
+        spark=spark, aggregations=[hist], solved_df=solved_df
     )
     assert df.count() > 0  # Ensure that some data is returned
     assert "container_id" in df.columns
@@ -525,8 +528,9 @@ def test_histogram_custom_weights_determine_aggregations(spark, basic_narrow_db)
         bins=[0.0, 10000.0],
     )
     solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(hist.get_expression()).solve(spark, solver)
     df = HistogramCustomWeights.determine_aggregations(
-        spark=spark, query=basic_narrow_db.query, solver=solver, aggregations=[hist]
+        spark=spark, aggregations=[hist], solved_df=solved_df
     )
     assert df.count() > 0  # Ensure that some data is returned
     assert "container_id" in df.columns
@@ -909,8 +913,9 @@ def test_histogram_distance_determine_aggregations(spark, basic_narrow_db):
         bins=[0.0, 10000.0],
     )
     solver = BasicNarrowSolver(spark)
+    solved_df = basic_narrow_db.query.select(hist.get_expression()).solve(spark, solver)
     df = HistogramDistance.determine_aggregations(
-        spark=spark, query=basic_narrow_db.query, solver=solver, aggregations=[hist]
+        spark=spark, aggregations=[hist], solved_df=solved_df
     )
     assert df.count() > 0  # Ensure that some data is returned
     assert "container_id" in df.columns
@@ -1148,3 +1153,13 @@ def test_definition_hash_custom_weights_includes_weights():
     )
     # Duration and CustomWeights should differ because weights_expr is included
     assert hist_dur.determine_definition_hash() != hist_cw.determine_definition_hash()
+
+
+def test_determine_aggregations_requires_solved_df(spark):
+    hist = HistogramDuration(
+        name="test_hist",
+        base_expr=TimeSeriesSelector(None),
+        bins=[0.0, 10000.0],
+    )
+    with pytest.raises(ValueError, match="requires solved_df"):
+        HistogramDuration.determine_aggregations(spark=spark, aggregations=[hist])

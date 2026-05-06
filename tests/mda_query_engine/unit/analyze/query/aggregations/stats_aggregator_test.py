@@ -540,3 +540,41 @@ def test_has_required_methods():
 
     assert hasattr(stats_agg, "weighted_median")
     assert callable(stats_agg.weighted_median)
+
+
+def test_stats_aggregator_get_selectors():
+    sel_a = TimeSeriesSelector(TagSelector("name") == "a")
+    sel_b = TimeSeriesSelector(TagSelector("name") == "b")
+    agg = StatsAggregator(
+        input_expressions=[sel_a, sel_b],
+        statistics=["min", "max"],
+    )
+    result = agg.get_selectors()
+    assert len(result) == 2
+    assert sel_a in result
+    assert sel_b in result
+
+
+def test_stats_aggregator_get_selectors_no_event():
+    sel = TimeSeriesSelector(TagSelector("name") == "signal")
+    agg = StatsAggregator(
+        input_expressions=[sel],
+        event_expression=None,
+        statistics=["mean"],
+    )
+    result = agg.get_selectors()
+    assert result == [sel]
+
+
+def test_stats_aggregator_get_selectors_with_event():
+    sel = TimeSeriesSelector(TagSelector("name") == "signal")
+    evt = TimeSeriesSelector(TagSelector("name") == "event")
+    agg = StatsAggregator(
+        input_expressions=[sel],
+        event_expression=evt,
+        statistics=["mean"],
+    )
+    result = agg.get_selectors()
+    assert len(result) == 2
+    assert sel in result
+    assert evt in result

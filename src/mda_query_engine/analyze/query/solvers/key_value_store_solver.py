@@ -1,9 +1,17 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pyspark.sql.functions as F
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, Window
 
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
+
 from .basic_narrow_solver import BasicNarrowSolver
 from .solver_config import SolverConfig
+
+if TYPE_CHECKING:
+    from mda_query_engine.measurement_db import MeasurementDB
 
 
 class KeyValueStoreSolver(BasicNarrowSolver):
@@ -13,94 +21,24 @@ class KeyValueStoreSolver(BasicNarrowSolver):
     This solver reads container tags from a narrow-format table where each
     attribute is stored as a separate row (entity_id, element_id, value) and
     pivots it to wide format for filtering. It then filters the container_metrics
-    table by project_id and optionally joins with the key-value-store when
-    MetricExpression filters are present.
+    table and resolves channel aliases via the channel_mapping table.
 
-    Column names used throughout the solver are driven by a
-    :class:`SolverConfig` instance.  When no configuration is provided the
-    ``DEFAULT_CONFIG`` dictionary is used.
+    Physical column names that differ from the framework-internal names are
+    translated via per-table ``column_name_mapping`` entries at the point
+    where each table is read.  All subsequent processing uses the internal
+    column names exposed by :class:`SolverConfig`.
 
     Parameters
     ----------
     spark : SparkSession
         Spark session used for query execution.
-    project_id : str
-        The project ID to filter entities by.
-    parent_id : str, optional
-        When provided, the tags table is filtered to rows matching this
-        parent_id value.  When *None* (default) no parent_id filter is
-        applied.
-    config : str | dict | SolverConfig | None
-        Optional configuration.  Accepts a path to a JSON file (``str``),
-        a plain dictionary, or an already-constructed :class:`SolverConfig`.
-        When *None* the class-level ``DEFAULT_CONFIG`` is used.
+    config : SolverConfig or None
+        Optional configuration.  When *None* (default) no filtering by
+        project or toolbox is applied.
     """
 
-    DEFAULT_CONFIG: dict = {
-        "container_id_col": "container_id",
-        "channel_id_cols": ["container_id", "channel_id"],
-        "channel_data_mapping": {
-            "tstart": "tstart",
-            "tend": "tend",
-            "value": "value",
-        },
-        "container_meta_data_mapping": {
-            "project_id": "project_id",
-        },
-        "entity_id_col": "entity_id",
-    }
-
-    def __init__(self, spark, project_id: str, parent_id: str | None = None, config=None):
-        """
-        Initialize the KeyValueStoreSolver.
-
-        Parameters
-        ----------
-        spark : SparkSession
-            Spark session used for query execution.
-        project_id : str
-            The project ID to filter entities by.
-        parent_id : str, optional
-            When provided, the tags table is filtered to rows matching
-            this parent_id value.  When *None* (default) no parent_id
-            filter is applied.
-        config : str | dict | SolverConfig | None
-            Optional solver configuration. If a ``str`` is given it is
-            treated as a path to a JSON file.  If a ``dict`` is given it
-            is converted via :meth:`SolverConfig.from_dict`.  If *None*,
-            ``DEFAULT_CONFIG`` is used.
-        """
-        parsed_config = self._parse_config(config)
-        super().__init__(spark, config=parsed_config)
-        self.project_id = project_id
-        self.parent_id = parent_id
-
-    # ------------------------------------------------------------------
-    # Config parsing
-    # ------------------------------------------------------------------
-
-    def _parse_config(self, config: None | dict | str | SolverConfig) -> SolverConfig:
-        """
-        Parse the provided config into a :class:`SolverConfig`.
-
-        Parameters
-        ----------
-        config : None | dict | str | SolverConfig
-            Raw configuration value.
-
-        Returns
-        -------
-        SolverConfig
-        """
-        if config is None:
-            return SolverConfig.from_dict(self.DEFAULT_CONFIG)
-        if isinstance(config, SolverConfig):
-            return config
-        if isinstance(config, dict):
-            return SolverConfig.from_dict(config)
-        if isinstance(config, str):
-            return SolverConfig.from_json(config)
-        raise TypeError(f"config must be a str, dict, SolverConfig or None, got {type(config)}")
+    def __init__(self, spark, config: SolverConfig | None = None):
+        super().__init__(spark, config=config)
 
     # ------------------------------------------------------------------
     # Solver stages
@@ -110,8 +48,11 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         """
         Filter container tags from the key-value-store table (narrow/EAV format).
 
-        Reads the narrow-format key-value-store table, filters by project_id,
-        and pivots to wide format if tag filters are present.
+        Reads the narrow-format key-value-store table, applies the per-table
+        ``column_name_mapping`` to rename physical columns to internal names,
+        then applies the top-level ``project_id`` filter and any per-table
+        ``container_tags.filters``.  Pivots to wide format if tag filters
+        are present.
 
         Parameters
         ----------
@@ -123,16 +64,12 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         Returns
         -------
         DataFrame
-            A DataFrame containing the filtered entity_ids aliased as container_id.
-            If no tag filters are present, returns distinct entity_ids.
+            A DataFrame containing the filtered container_ids.
+            If no tag filters are present, returns distinct container_ids.
             Otherwise, returns pivoted data with filter expressions applied.
         """
         container_id_col = self.config.container_id_col
-        project_id_col = self.config.project_id_col
-        value_col = self.config.value_col
-        entity_id_col = self.config.entity_id_col
 
-        # Collect required element_ids from TagExpression filters
         filters = []
         required_elements = []
         for filt in query.filters:
@@ -141,28 +78,26 @@ class KeyValueStoreSolver(BasicNarrowSolver):
                 required_elements.extend(filt.required_tags())
         required_elements = set(required_elements)
 
-        # Read key-value-store table
         tags = query.db.container_tags(self.spark)
-        tags = tags.where(F.col(project_id_col) == self.project_id)
+        tags = self._apply_column_mapping(tags, self.config.container_tags.column_name_mapping)
 
-        if self.parent_id is not None:
-            tags = tags.where(F.col(self.config.parent_id_col) == self.parent_id)
+        if self.config.project_id is not None:
+            tags = tags.where(F.col(self.config.project_id_col) == self.config.project_id)
 
-        # If no tag filters, return distinct entity_ids as container_id
+        for col_name, value in self.config.container_tags.filters.items():
+            tags = tags.where(F.col(col_name) == value)
+
         if len(filters) == 0:
-            return tags.select(F.col(entity_id_col).alias(container_id_col)).distinct()
+            return tags.select(container_id_col).distinct()
 
-        # Filter rows to only required element_ids
-        tags = tags.where(F.col("element_id").isin(required_elements))
+        tag_key_col = self.config.tag_key_col
+        tags = tags.where(F.col(tag_key_col).isin(required_elements))
 
-        # Pivot narrow to wide format
-        tags = tags.groupBy(entity_id_col)
-        tags = tags.pivot("element_id", list(required_elements)).agg(F.first(value_col))
+        tags = tags.groupBy(container_id_col)
+        tags = tags.pivot(tag_key_col, list(required_elements)).agg(
+            F.first(self.config.tag_value_col)
+        )
 
-        # Rename entity_id to container_id
-        tags = tags.withColumnRenamed(entity_id_col, container_id_col)
-
-        # Apply filter expressions
         expr = self._build_expr(filters)
         tags = tags.where(expr)
 
@@ -172,11 +107,8 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         self, spark, query, container_df, pre_filtered_containers_df=None
     ) -> DataFrame:
         """
-        Filter containers by project_id and optionally by key-value-store tags.
-
-        Filters container_metrics by project_id. If MetricExpression filters
-        are present, joins with key-value-store via entity_id to apply tag-level
-        filtering.
+        Filter containers by joining container_metrics with the tag-filtered
+        container DataFrame.
 
         Parameters
         ----------
@@ -185,7 +117,7 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         query : QueryBuilder
             Query object containing filters and db info.
         container_df : pyspark.sql.DataFrame
-            DataFrame containing container information (unused).
+            DataFrame containing tag-filtered container IDs.
         pre_filtered_containers_df : pyspark.sql.DataFrame, optional
             DataFrame containing pre-filtered container information.
 
@@ -196,12 +128,120 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         """
         container_id_col = self.config.container_id_col
 
-        # Read container_metrics, join with tags DataFrame
-        # Use pre-filtered containers if provided (incremental mode)
         if pre_filtered_containers_df is not None:
             container_metrics = pre_filtered_containers_df
         else:
-            container_metrics = query.db.container_metrics(spark)
+            container_metrics = query.db.container_metrics(self.spark)
+        container_metrics = self._apply_column_mapping(
+            container_metrics, self.config.container_metrics.column_name_mapping
+        )
         return container_metrics.join(
             container_df, how="inner", on=container_id_col
-        ).dropDuplicates([self.config.container_id_col])
+        ).dropDuplicates([container_id_col])
+
+    def filter_aliased_channel_metrics(
+        self, spark, db: MeasurementDB, container_df, selectors
+    ) -> DataFrame:
+        """
+        Resolve aliased channel selections via the channel_mapping table.
+
+        Applies the per-table ``column_name_mapping`` to rename physical
+        columns, then applies the top-level ``project_id`` filter and any
+        per-table ``channel_mapping.filters``, and finally joins with
+        channel_metrics to resolve aliases.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        db : MeasurementDB
+            Measurement database for table access.
+        container_df : pyspark.sql.DataFrame
+            DataFrame containing tag-filtered container IDs.
+        selectors : list[TimeSeriesSelector]
+            Aliased selectors extracted from the query.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            DataFrame with ``(container_id, channel_id, selector_ids)``
+            where ``selector_ids`` is an array column.
+        """
+        container_id_col = self.config.container_id_col
+        channel_id_col = self.config.channel_id_col
+
+        if len(selectors) == 0:
+            return self._empty_channel_match_df(spark)
+
+        channel_mapping = db.channel_mapping(spark)
+        channel_mapping = self._apply_column_mapping(
+            channel_mapping, self.config.channel_mapping.column_name_mapping
+        )
+
+        if self.config.project_id is not None:
+            channel_mapping = channel_mapping.where(
+                F.col(self.config.project_id_col) == self.config.project_id
+            )
+
+        for col_name, value in self.config.channel_mapping.filters.items():
+            channel_mapping = channel_mapping.where(F.col(col_name) == value)
+
+        resolved_mapping = channel_mapping.where(self._build_expr(selectors))
+
+        channel_metrics = db.channel_metrics(spark).join(
+            F.broadcast(container_df.select(container_id_col)),
+            on=[container_id_col],
+            how="inner",
+        )
+        alias_priority_col = self.config.alias_priority_col
+
+        resolved = channel_metrics.join(
+            resolved_mapping.select(
+                F.col("source_channel").alias("_map_source_channel"),
+                F.col("data_key").alias("_map_data_key"),
+                F.col("channel_alias"),
+                F.col(alias_priority_col),
+            ),
+            on=[
+                channel_metrics["channel_name"] == F.col("_map_source_channel"),
+                channel_metrics["data_key"] == F.col("_map_data_key"),
+            ],
+            how="inner",
+        )
+
+        dedup_window = Window.partitionBy(container_id_col, "channel_alias").orderBy(
+            F.col(alias_priority_col).asc_nulls_last()
+        )
+        resolved = resolved.withColumn("_rank", F.row_number().over(dedup_window))
+        resolved = resolved.where(F.col("_rank") == 1).drop("_rank")
+
+        resolved = resolved.withColumn(
+            "selector_ids", F.array(self._build_selector_id_expr(selectors))
+        )
+        return resolved.select(container_id_col, channel_id_col, "selector_ids")
+
+    def resolve_channel_selections(
+        self, spark, channel_metrics_df, aliased_channel_metrics_df
+    ) -> DataFrame:
+        """
+        Union direct and aliased channel metrics, combining selector_ids.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        channel_metrics_df : pyspark.sql.DataFrame
+            Direct channel metrics with ``selector_ids`` array column.
+        aliased_channel_metrics_df : pyspark.sql.DataFrame
+            Aliased channel metrics with ``selector_ids`` array column.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
+        """
+        merged = channel_metrics_df.unionByName(aliased_channel_metrics_df)
+        return merged.groupBy(
+            self.config.container_id_col,
+            self.config.channel_id_col,
+        ).agg(F.flatten(F.collect_list("selector_ids")).alias("selector_ids"))
