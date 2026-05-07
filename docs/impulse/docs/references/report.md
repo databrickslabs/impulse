@@ -63,6 +63,12 @@ my_report.persist_results()
 `determine_report()` validates that every event referenced by an aggregation has been registered with `add_event()`
 before computation begins.
 
+### Sinkless mode
+
+If no `unity_sink` is configured, the report runs without persistence. `determine_report()` still computes events,
+aggregations, and dimensions and exposes them on the report object, but `persist_results()` becomes a no-op. This is
+useful for ad-hoc analysis, notebooks, and tests where writing to Unity Catalog is not desired.
+
 ---
 
 ## Configuration

@@ -12,6 +12,7 @@ It allows you to specify data sources, output sinks, container filters, and the 
     - `channels_uri` (str, required): Full Unity Catalog path for the channels table.
     - `container_tags_table` (str, optional): Full Unity Catalog path to the container tags table. Required when using `DeltaSolver` with tag filters or `KeyValueStoreSolver`.
     - `channel_tags_table` (str, optional): Full Unity Catalog path to the channel tags table. Used by `DeltaSolver` for tag-based channel selection.
+    - `channel_mapping_table` (str, optional): Full Unity Catalog path to the channel-alias mapping table. Required when using `QueryBuilder.channel_with_alias()` (currently supported by `KeyValueStoreSolver`).
 
 - **unity_sink** (`UnitySink`):
   Configuration for output data location.

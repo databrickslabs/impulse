@@ -111,6 +111,52 @@ container_event = ContainerEvent(
 
 ---
 
+## SequenceOfEvents
+
+A `SequenceOfEvents` event merges an ordered list of TSAL expressions into a single sequence by joining overlapping
+consecutive intervals. Each expression must yield `Intervals`. When the next expression's interval starts before the
+current one ends, the resulting sequence interval starts at the first interval's start and ends at the next interval's
+end:
+
+```
+time --->
+event_1: | ------------------- |
+event_2:             | ------------- |
+sequence:| ------------------------- |
+```
+
+```python
+from mda_reporting.events.sequence_of_events import SequenceOfEvents
+
+idle_to_drive = SequenceOfEvents(
+    name="idle_to_drive",
+    expressions=[veh_spd == 0, veh_spd > 0],
+    desc="Sequence: stationary followed by motion",
+    required_channels=["Vehicle Speed Sensor"],
+)
+```
+
+### Parameters
+
+| Parameter           | Type                          | Required | Description                                                                                                                                                                  |
+|---------------------|-------------------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `name`              | `str`                         | Yes      | Unique event name.                                                                                                                                                           |
+| `expressions`       | `list[TimeSeriesExpression]`  | Yes      | Ordered list of expressions. Each must resolve to `Intervals`.                                                                                                               |
+| `desc`              | `str`                         | No       | Human-readable description.                                                                                                                                                  |
+| `required_channels` | `list[str]`                   | No       | Channel names required for this event. Informational; stored in the event dimension table.                                                                                   |
+| `max_overlap`       | `float`                       | No       | Maximum allowed overlap between consecutive intervals. Sequences whose overlap exceeds this value are skipped. Expressed in the same time unit as the underlying timestamps. |
+| `attributes`        | `Mapping[str, str]`           | No       | Free-form key-value metadata stored in the event dimension table.                                                                                                            |
+
+### How it works
+
+1. Each expression in `expressions` is solved against the report's wide DataFrame.
+2. Consecutive intervals are joined: the output interval spans the start of the first expression's interval to the end
+   of the next expression's interval, when they overlap.
+3. If `max_overlap` is set, candidate sequences whose overlap exceeds the threshold are discarded.
+4. Each resulting interval is materialized as one event instance in the `event_instance_fact` table.
+
+---
+
 ## Event output schema
 
 ### event_dimension
@@ -121,7 +167,7 @@ Stores event definitions (one row per event per report).
 |---------------------|---------------------|-----------------------------------------------------------------------------|
 | `event_id`          | `int`               | Unique event identifier (CRC32 hash of name + expression).                  |
 | `report_id`         | `int`               | Report identifier.                                                          |
-| `event_type`        | `str`               | `"BASIC_EVENT"` or `"CONTAINER_EVENT"`.                                     |
+| `event_type`        | `str`               | `"BASIC_EVENT"`, `"CONTAINER_EVENT"`, or `"SEQUENCE_OF_EVENTS"`.             |
 | `event_name`        | `str`               | Event name.                                                                 |
 | `event_description` | `str`               | Event description.                                                          |
 | `required_channels` | `array[str]`        | Required channel names (null for `ContainerEvent`).                         |
@@ -143,10 +189,10 @@ Stores materialized event occurrences (one row per event instance per container)
 
 ---
 
-## Choosing between BasicEvent and ContainerEvent
+## Choosing between event types
 
-| Criterion                        | BasicEvent                                              | ContainerEvent                                    |
-|----------------------------------|---------------------------------------------------------|---------------------------------------------------|
-| Requires a TSAL expression       | Yes                                                     | No                                                |
-| Multiple instances per container | Yes (one per matching interval)                         | No (always one per container)                     |
-| Use case                         | Signal-based conditions, operating bands, distance bins | Full-run aggregations, container-level statistics |
+| Criterion                        | BasicEvent                                              | ContainerEvent                                    | SequenceOfEvents                                                          |
+|----------------------------------|---------------------------------------------------------|---------------------------------------------------|---------------------------------------------------------------------------|
+| Requires a TSAL expression       | Yes (one)                                               | No                                                | Yes (ordered list)                                                        |
+| Multiple instances per container | Yes (one per matching interval)                         | No (always one per container)                     | Yes (one per joined sequence)                                             |
+| Use case                         | Signal-based conditions, operating bands, distance bins | Full-run aggregations, container-level statistics | State transitions and multi-step patterns where consecutive states overlap |

@@ -106,6 +106,26 @@ timestamps and transforms data into a supported format before query execution.
 
 Consecutive rows for the same channel form a `SampleSeries`.
 
+### channel_mapping
+
+Optional alias-resolution table used by `KeyValueStoreSolver` when selectors are created via
+`QueryBuilder.channel_with_alias()`. Each row maps a logical channel name (and optional priority) to one or more
+physical channels keyed by `project_id` / `data_key`.
+
+| Column           | Type     | Nullable | Description                                                                 |
+|------------------|----------|----------|-----------------------------------------------------------------------------|
+| `project_id`     | `int`    | No       | Project identifier the mapping belongs to.                                  |
+| `concept_id`     | `int`    | No       | Concept identifier (foreign key to the concept table).                      |
+| `element_id`     | `int`    | No       | Element identifier (foreign key to the concept-elements table).             |
+| `project_name`   | `string` | Yes      | Human-readable project name.                                                |
+| `element_name`   | `string` | Yes      | Human-readable element name.                                                |
+| `channel_name`   | `string` | No       | Logical channel name to match against `channel_with_alias` selectors.       |
+| `data_key`       | `string` | No       | Physical lookup key joined to `channel_metrics`.                            |
+| `priority`       | `int`    | Yes      | Tie-breaker when multiple physical channels match a logical name.           |
+
+Configured via `source.channel_mapping_table` (see [Configuration](../config/configuration)). Joins to
+`channel_metrics` on `(project_id, data_key, channel_name)`.
+
 ---
 
 ## Gold layer (output)

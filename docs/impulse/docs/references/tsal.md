@@ -37,6 +37,20 @@ rpm = db.query.channel(channel_name='Engine RPM', brand='Seat').with_alias(
 
 The solver tries each alias in order and returns the first match.
 
+### Logical aliases via channel mapping
+
+For workflows where a stable logical name should resolve to one of many physical channels through a separately
+maintained mapping table, use `channel_with_alias()` instead. This is supported by `KeyValueStoreSolver` and requires
+a `channel_mapping_table` to be configured in `source` (see [Configuration](../config/configuration)).
+
+```python
+rpm = db.query.channel_with_alias(channel_name='Engine RPM')
+```
+
+Each keyword argument becomes a tag filter on the `channel_mapping` table; the solver joins the matched logical entries
+to the physical channels at read time. Use this when the consuming code should not need to know which physical signal
+backs a given logical name.
+
 ---
 
 ## Operators
