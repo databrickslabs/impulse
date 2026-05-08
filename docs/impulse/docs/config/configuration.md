@@ -99,14 +99,14 @@ Top-level fields on `SolverConfig`:
 
 Per-table sections (each a `TableConfig`):
 
-| Section            | Used by               | Typical mappings                                                  |
-|--------------------|-----------------------|-------------------------------------------------------------------|
-| `container_tags`   | All solvers           | `entity_id → container_id`, custom EAV `key`/`value` columns      |
-| `container_metrics`| All solvers           | Custom container_id column, custom timestamp columns              |
-| `channel_tags`     | DeltaSolver           | Tag key/value column renames                                      |
-| `channel_metrics`  | All solvers           | Custom channel_id column, custom value/timestamp columns          |
-| `channel_mapping`  | KeyValueStoreSolver   | Alias-table column renames; `priority` column                     |
-| `channels`         | BasicNarrow / KVS     | RLE column renames (`tstart`/`tend`/`value`)                      |
+| Section            | Used by                              | Typical mappings                                                  |
+|--------------------|--------------------------------------|-------------------------------------------------------------------|
+| `container_tags`   | DeltaSolver, KeyValueStoreSolver     | `entity_id → container_id`, custom EAV `key`/`value` columns      |
+| `container_metrics`| All solvers                          | Custom container_id column, custom timestamp columns              |
+| `channel_tags`     | DeltaSolver                          | Tag key/value column renames                                      |
+| `channel_metrics`  | All solvers                          | Custom channel_id column, custom value/timestamp columns          |
+| `channel_mapping`  | KeyValueStoreSolver                  | Alias-table column renames; `priority` column                     |
+| `channels`         | All solvers                          | RLE column renames (`tstart`/`tend`/`value`)                      |
 
 Internal column names that mappings can target:
 
