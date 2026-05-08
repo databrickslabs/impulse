@@ -313,7 +313,7 @@ class BasicNarrowSolver(QuerySolver):
             F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
         )
 
-        container_count = df.select(self.config.container_id_col).distinct().count()
+        container_count = channels_df.select(self.config.container_id_col).distinct().count()
         if container_count == 0:
             return self.spark.createDataFrame([], schema=schema)
         res = (
