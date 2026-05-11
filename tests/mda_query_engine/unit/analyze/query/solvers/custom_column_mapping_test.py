@@ -388,7 +388,9 @@ class TestCustomContainerIdMapping:
             container_tags=TableConfig(
                 column_name_mapping={"entity_id": "container_id", "element_id": "key"},
             ),
-            container_metrics=TableConfig(column_name_mapping={"meas_id": "container_id"}),
+            container_metrics=TableConfig(
+                column_name_mapping={"meas_id": "container_id", "project": "project_id"},
+            ),
             channel_metrics=TableConfig(column_name_mapping={"meas_id": "container_id"}),
             channels=TableConfig(column_name_mapping={"meas_id": "container_id"}),
         )
@@ -479,7 +481,9 @@ class TestFullyCustomEavMapping:
                     "element_id": "key",
                 },
             ),
-            container_metrics=TableConfig(column_name_mapping={"run_id": "container_id"}),
+            container_metrics=TableConfig(
+                column_name_mapping={"run_id": "container_id", "project": "project_id"},
+            ),
             channel_metrics=TableConfig(column_name_mapping={"run_id": "container_id"}),
             channels=TableConfig(
                 column_name_mapping={"run_id": "container_id", "attr_val": "value"},

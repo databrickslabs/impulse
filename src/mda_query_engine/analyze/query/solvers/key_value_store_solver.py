@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, Window
 
+from mda_query_engine.analyze.metadata.metric_expression import MetricExpression
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
 
 from .basic_narrow_solver import BasicNarrowSolver
@@ -107,8 +108,14 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         self, spark, query, container_df, pre_filtered_containers_df=None
     ) -> DataFrame:
         """
-        Filter containers by joining container_metrics with the tag-filtered
-        container DataFrame.
+        Filter container_metrics and join with tag-filtered container IDs.
+
+        Reads the ``container_metrics`` table, applies the per-table
+        ``column_name_mapping`` to rename physical columns to internal names,
+        applies the top-level ``project_id`` filter, any per-table
+        ``container_metrics.filters``, and any ``MetricExpression`` filters
+        extracted from the query.  Finally, inner-joins the result with the
+        tag-filtered container DataFrame.
 
         Parameters
         ----------
@@ -117,26 +124,48 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         query : QueryBuilder
             Query object containing filters and db info.
         container_df : pyspark.sql.DataFrame
-            DataFrame containing tag-filtered container IDs.
+            DataFrame containing tag-filtered container IDs (output of
+            :meth:`filter_container_tags`).
         pre_filtered_containers_df : pyspark.sql.DataFrame, optional
-            DataFrame containing pre-filtered container information.
+            Pre-filtered container_metrics DataFrame.  When provided, it
+            replaces the read from ``query.db.container_metrics``.
 
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame containing filtered container metrics.
+            Filtered container metrics with all original columns preserved.
+            Deduplicated by ``container_id``.
         """
         container_id_col = self.config.container_id_col
 
+        metric_filters = [
+            filt for filt in query.filters if isinstance(filt, MetricExpression)
+        ]
+
         if pre_filtered_containers_df is not None:
-            container_metrics = pre_filtered_containers_df
+            metrics = pre_filtered_containers_df
         else:
-            container_metrics = query.db.container_metrics(self.spark)
-        container_metrics = self._apply_column_mapping(
-            container_metrics, self.config.container_metrics.column_name_mapping
+            metrics = query.db.container_metrics(self.spark)
+
+        metrics = self._apply_column_mapping(
+            metrics, self.config.container_metrics.column_name_mapping
         )
-        return container_metrics.join(
-            container_df, how="inner", on=container_id_col
+
+        if self.config.project_id is not None:
+            metrics = metrics.where(
+                F.col(self.config.project_id_col) == self.config.project_id
+            )
+
+        for col_name, value in self.config.container_metrics.filters.items():
+            metrics = metrics.where(F.col(col_name) == value)
+
+        if len(metric_filters) > 0:
+            metrics = metrics.where(self._build_expr(metric_filters))
+
+        return metrics.join(
+            F.broadcast(container_df.select(container_id_col).distinct()),
+            on=container_id_col,
+            how="inner",
         ).dropDuplicates([container_id_col])
 
     def filter_aliased_channel_metrics(

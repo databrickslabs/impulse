@@ -30,6 +30,7 @@ class TestFilterAliasedChannelMetrics:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
@@ -50,6 +51,7 @@ class TestFilterAliasedChannelMetrics:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
@@ -77,6 +79,7 @@ class TestFilterAliasedChannelMetrics:
             spark,
             config=SolverConfig(
                 project_id="NON_EXISTENT_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
@@ -96,6 +99,7 @@ class TestFilterAliasedChannelMetrics:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "non_existent_toolbox"}),
             ),
         )
@@ -115,6 +119,7 @@ class TestFilterAliasedChannelMetrics:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
@@ -134,6 +139,7 @@ class TestFilterAliasedChannelMetrics:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
@@ -158,6 +164,7 @@ class TestChannelAliasEndToEnd:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
@@ -177,6 +184,7 @@ class TestChannelAliasEndToEnd:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
@@ -200,6 +208,7 @@ class TestChannelAliasEndToEnd:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
@@ -231,6 +240,7 @@ class TestChannelAliasEndToEnd:
             spark,
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )

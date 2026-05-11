@@ -225,7 +225,7 @@ class Report:
 
         Validates solver/filter compatibility before applying filters:
         - BasicNarrowSolver supports metric filters only (rejects tag filters).
-        - KeyValueStoreSolver supports tag filters only (rejects metric filters).
+        - KeyValueStoreSolver supports both tag and metric filters.
         - DeltaSolver supports both tag and metric filters.
 
         Parameters
@@ -249,18 +249,11 @@ class Report:
 
         if config.container_filters is not None:
             has_tag_filters = len(config.container_filters.tag_filters) > 0
-            has_metric_filters = len(config.container_filters.metric_filters) > 0
 
             if has_tag_filters and config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER:
                 raise ValueError(
                     "Tag filters are not supported with BasicNarrowSolver. "
                     "Use DeltaSolver or KeyValueStoreSolver for tag-based filtering."
-                )
-
-            if has_metric_filters and config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER:
-                raise ValueError(
-                    "Metric filters are not supported with KeyValueStoreSolver. "
-                    "Use DeltaSolver or BasicNarrowSolver for metric-based filtering."
                 )
 
             tag_filter_expr = ReportEntityUtil.generate_tag_filters(

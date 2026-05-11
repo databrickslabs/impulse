@@ -772,6 +772,9 @@ def test_simple_report_key_value_store(spark, key_value_store_db):
             solver_config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_tags=TableConfig(column_name_mapping={"element_id": "key"}),
+                container_metrics=TableConfig(
+                    column_name_mapping={"project": "project_id"},
+                ),
             ),
         ),
         measurement_dimensions=[MeasurementDimensions.CONTAINER_ID],

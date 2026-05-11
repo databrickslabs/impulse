@@ -14,6 +14,7 @@ Covers:
 - MetricExpression internal API tests
 """
 
+import pyspark.sql.functions as F
 import pytest
 from pyspark.sql import SparkSession
 
@@ -36,7 +37,16 @@ def _default_cfg(project_id: str = "SAMPLE_PROJECT", **table_overrides) -> Solve
         "container_tags",
         TableConfig(column_name_mapping={"element_id": "key"}),
     )
-    return SolverConfig(project_id=project_id, container_tags=container_tags, **table_overrides)
+    container_metrics = table_overrides.pop(
+        "container_metrics",
+        TableConfig(column_name_mapping={"project": "project_id"}),
+    )
+    return SolverConfig(
+        project_id=project_id,
+        container_tags=container_tags,
+        container_metrics=container_metrics,
+        **table_overrides,
+    )
 
 
 class TestKeyValueStoreSolverFilterContainerTags:
@@ -197,6 +207,103 @@ class TestKeyValueStoreSolverFilterContainerMetrics:
         result = solver.filter_container_metrics(spark, query, tags_df)
         container_ids = {row.container_id for row in result.collect()}
         assert len(container_ids) > 0
+
+    def test_metric_expression_narrows_results(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        """A MetricExpression filter on a container_metrics column should restrict results."""
+        solver = KeyValueStoreSolver(spark, config=_default_cfg())
+        query = key_value_store_db.query
+        query.where(MetricSelector("brand") == "Seat")
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        container_ids = {row.container_id for row in result.collect()}
+        assert container_ids == {1, 2, 3}
+
+    def test_non_matching_metric_expression_returns_empty(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        """A MetricExpression that matches no container_metrics rows yields zero."""
+        solver = KeyValueStoreSolver(spark, config=_default_cfg())
+        query = key_value_store_db.query
+        query.where(MetricSelector("brand") == "VW")
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        assert result.count() == 0
+
+    def test_config_container_metrics_filter_applied(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        """``config.container_metrics.filters`` should be applied to container_metrics."""
+        solver = KeyValueStoreSolver(
+            spark,
+            config=_default_cfg(
+                container_metrics=TableConfig(
+                    column_name_mapping={"project": "project_id"},
+                    filters={"brand": "Seat"},
+                ),
+            ),
+        )
+        query = key_value_store_db.query
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        container_ids = {row.container_id for row in result.collect()}
+        assert container_ids == {1, 2, 3}
+
+    def test_config_container_metrics_filter_excludes_all(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        """A non-matching ``container_metrics.filters`` value yields zero rows."""
+        solver = KeyValueStoreSolver(
+            spark,
+            config=_default_cfg(
+                container_metrics=TableConfig(
+                    column_name_mapping={"project": "project_id"},
+                    filters={"brand": "VW"},
+                ),
+            ),
+        )
+        query = key_value_store_db.query
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        assert result.count() == 0
+
+    def test_non_existent_project_returns_empty(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        """A non-existent project_id should yield zero container_metrics rows."""
+        solver = KeyValueStoreSolver(spark, config=_default_cfg("NON_EXISTENT_PROJECT"))
+        query = key_value_store_db.query
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        assert result.count() == 0
+
+    def test_pre_filtered_containers_df_short_circuits_read(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        """``pre_filtered_containers_df`` should replace the table read."""
+        solver = KeyValueStoreSolver(spark, config=_default_cfg())
+        query = key_value_store_db.query
+        full = query.db.container_metrics(spark)
+        pre = full.where(F.col("container_id") == 1)
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(
+            spark, query, tags_df, pre_filtered_containers_df=pre
+        )
+        container_ids = {row.container_id for row in result.collect()}
+        assert container_ids == {1}
+
+    def test_all_container_metrics_columns_preserved(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        """Result must keep all container_metrics columns (e.g. start_ts/stop_ts)."""
+        solver = KeyValueStoreSolver(spark, config=_default_cfg())
+        query = key_value_store_db.query
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        cols = set(result.columns)
+        # container_metrics CSV has start_ts/stop_ts plus dimensional columns
+        assert {"container_id", "start_ts", "stop_ts", "brand", "model"}.issubset(cols)
 
 
 class TestKeyValueStoreSolverEmptySelector:
