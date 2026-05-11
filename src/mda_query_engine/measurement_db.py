@@ -45,11 +45,18 @@ class MeasurementDBConfig:
     @staticmethod
     def for_debug(debug_tables):
         cfg = MeasurementDBConfig(
-            container_tags_table="container_tags",
-            container_metrics_table="container_metrics",
-            channel_tags_table="channel_tags",
-            channel_metrics_table="channel_metrics",
-            channels_uri="channels",
+            container_tags_table="container_tags" if "container_tags" in debug_tables else None,
+            container_metrics_table=(
+                "container_metrics" if "container_metrics" in debug_tables else None
+            ),
+            channel_tags_table="channel_tags" if "channel_tags" in debug_tables else None,
+            channel_metrics_table=(
+                "channel_metrics" if "channel_metrics" in debug_tables else None
+            ),
+            channels_uri="channels" if "channels" in debug_tables else None,
+            channel_mapping_table=(
+                "channel_mapping" if "channel_mapping" in debug_tables else None
+            ),
             table_locations="debug",
         )
         cfg.debug_tables = debug_tables

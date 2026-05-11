@@ -10,7 +10,6 @@ from mda_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from mda_query_engine.analyze.query.query_builder import QueryBuilder
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
 from mda_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
 from mda_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
@@ -223,10 +222,11 @@ class Report:
         """
         Create a query builder based on the provided configuration and set container filters.
 
-        Validates solver/filter compatibility before applying filters:
-        - BasicNarrowSolver supports metric filters only (rejects tag filters).
-        - KeyValueStoreSolver supports both tag and metric filters.
-        - DeltaSolver supports both tag and metric filters.
+        Validates that tag filters are only used when a
+        ``container_tags_table`` is configured in ``source``.  Both
+        KeyValueStoreSolver and DeltaSolver support tag and metric filters,
+        but tag filters require the narrow ``container_tags`` table to be
+        available.
 
         Parameters
         ----------
@@ -243,17 +243,19 @@ class Report:
         Raises
         ------
         ValueError
-            If the configured solver does not support the configured filter types.
+            If tag filters are configured but ``source.container_tags_table``
+            is not set.
         """
         query = db.query
 
         if config.container_filters is not None:
             has_tag_filters = len(config.container_filters.tag_filters) > 0
 
-            if has_tag_filters and config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER:
+            if has_tag_filters and config.source.container_tags_table is None:
                 raise ValueError(
-                    "Tag filters are not supported with BasicNarrowSolver. "
-                    "Use DeltaSolver or KeyValueStoreSolver for tag-based filtering."
+                    "Tag filters require a container_tags_table to be configured "
+                    "in `source`. Provide source.container_tags_table or remove "
+                    "the tag filters."
                 )
 
             tag_filter_expr = ReportEntityUtil.generate_tag_filters(
@@ -311,12 +313,6 @@ class Report:
             If the solver type is unknown.
         """
         match config.query_engine.solver:
-            case Solvers.BASIC_NARROW_SOLVER:
-                return BasicNarrowSolver(
-                    spark,
-                    is_raw_data=config.query_engine.data_type is DataType.RAW,
-                    drop_implausible_data=config.query_engine.drop_implausible_data,
-                )
             case Solvers.DELTA_SOLVER:
                 return DeltaSolver(
                     spark,
@@ -324,12 +320,16 @@ class Report:
                     drop_implausible_data=config.query_engine.drop_implausible_data,
                 )
             case Solvers.KEY_VALUE_STORE_SOLVER:
-                return KeyValueStoreSolver(spark, config=config.query_engine.solver_config)
+                return KeyValueStoreSolver(
+                    spark,
+                    config=config.query_engine.solver_config,
+                    is_raw_data=config.query_engine.data_type is DataType.RAW,
+                    drop_implausible_data=config.query_engine.drop_implausible_data,
+                )
             case _:
                 raise ValueError(
                     f"Unknown query engine, we currently only support "
-                    f"{Solvers.BASIC_NARROW_SOLVER}, {Solvers.DELTA_SOLVER}, "
-                    f"{Solvers.KEY_VALUE_STORE_SOLVER}"
+                    f"{Solvers.DELTA_SOLVER}, {Solvers.KEY_VALUE_STORE_SOLVER}"
                 )
 
     def get_sink_config(self) -> SinkConfig:

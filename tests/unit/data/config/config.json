@@ -28,7 +28,7 @@
     ]
   },
   "query_engine": {
-    "solver": "BasicNarrowSolver"
+    "solver": "KeyValueStoreSolver"
   },
   "measurement_dimensions": [
     "uut_id",

@@ -3,7 +3,7 @@
 import pytest
 
 from mda_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
+from mda_query_engine.analyze.query.solvers.key_value_store_solver import KeyValueStoreSolver
 
 
 def test_stats_case_check_numeric_values(spark, basic_narrow_db):
@@ -24,7 +24,7 @@ def test_stats_case_check_numeric_values(spark, basic_narrow_db):
     df = (
         query.where(filter_cond)
         .select(stats_aggregator.alias("my_stats"))
-        .solve(spark, solver=BasicNarrowSolver(spark))
+        .solve(spark, solver=KeyValueStoreSolver(spark))
     )
 
     base_stats = df.select("my_stats").collect()
@@ -83,7 +83,7 @@ def test_stats_aggregator_multiple_input_expressions(spark, basic_narrow_db):
     df = (
         query.where(filter_cond)
         .select(stats_aggregator.alias("multi_stats"))
-        .solve(spark, solver=BasicNarrowSolver(spark))
+        .solve(spark, solver=KeyValueStoreSolver(spark))
     )
 
     base_stats = df.select("multi_stats").collect()
@@ -123,7 +123,7 @@ def test_stats_aggregator_event_interval_filtering(spark, basic_narrow_db):
     df = (
         query.where(filter_cond)
         .select(stats_aggregator.alias("filtered_stats"))
-        .solve(spark, solver=BasicNarrowSolver(spark))
+        .solve(spark, solver=KeyValueStoreSolver(spark))
     )
 
     base_stats = df.select("filtered_stats").collect()
@@ -157,7 +157,7 @@ def test_stats_aggregator_statistics_computation_accuracy(spark, basic_narrow_db
     df = (
         query.where(filter_cond)
         .select(stats_aggregator.alias("accuracy_stats"))
-        .solve(spark, solver=BasicNarrowSolver(spark))
+        .solve(spark, solver=KeyValueStoreSolver(spark))
     )
 
     base_stats = df.select("accuracy_stats").collect()
@@ -196,7 +196,7 @@ def test_stats_aggregator_with_median(spark, basic_narrow_db):
     df = (
         query.where(filter_cond)
         .select(stats_aggregator.alias("median_stats"))
-        .solve(spark, solver=BasicNarrowSolver(spark))
+        .solve(spark, solver=KeyValueStoreSolver(spark))
     )
 
     base_stats = df.select("median_stats").collect()

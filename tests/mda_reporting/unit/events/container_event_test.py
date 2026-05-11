@@ -2,7 +2,7 @@
 
 import pyspark.sql.functions as f
 
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
+from mda_query_engine.analyze.query.solvers.key_value_store_solver import KeyValueStoreSolver
 from mda_reporting.events.container_event import ContainerEvent
 from tests.conftest import basic_narrow_db, spark
 
@@ -152,7 +152,7 @@ def test_determine_events(spark, basic_narrow_db):
         spark,
         [event],
         query=basic_narrow_db.query,
-        solver=BasicNarrowSolver(spark),
+        solver=KeyValueStoreSolver(spark),
     )
 
     assert df is not None

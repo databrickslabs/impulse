@@ -2,7 +2,7 @@ import pytest
 
 from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from mda_query_engine.analyze.query.events import SequenceOfEventsExpression
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
+from mda_query_engine.analyze.query.solvers.key_value_store_solver import KeyValueStoreSolver
 from mda_reporting.events.sequence_of_events import SequenceOfEvents
 from tests.conftest import basic_narrow_db, spark
 
@@ -149,7 +149,7 @@ def test_determine_events(spark, basic_narrow_db):
     event = SequenceOfEvents(name="test_soe", expressions=[expr1, expr2])
 
     solved_df = basic_narrow_db.query.select(event.get_expression()).solve(
-        spark=spark, solver=BasicNarrowSolver(spark)
+        spark=spark, solver=KeyValueStoreSolver(spark)
     )
 
     df = SequenceOfEvents.determine_events(

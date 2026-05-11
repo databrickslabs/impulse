@@ -28,7 +28,7 @@ from mda_query_engine.analyze.query.solvers.solver_config import (
     TableConfig,
 )
 from mda_query_engine.measurement_db import MeasurementDB
-from tests.conftest import key_value_store_db, spark
+from tests.conftest import basic_narrow_db, key_value_store_db, spark
 
 
 def _default_cfg(project_id: str = "SAMPLE_PROJECT", **table_overrides) -> SolverConfig:
@@ -304,6 +304,82 @@ class TestKeyValueStoreSolverFilterContainerMetrics:
         cols = set(result.columns)
         # container_metrics CSV has start_ts/stop_ts plus dimensional columns
         assert {"container_id", "start_ts", "stop_ts", "brand", "model"}.issubset(cols)
+
+
+class TestKeyValueStoreSolverWithoutContainerTags:
+    """Tests for the wide-only data model (no ``container_tags_table`` configured).
+
+    Uses the ``basic_narrow_db`` fixture, which loads only
+    ``container_metrics``/``channel_metrics``/``channels`` and therefore has
+    ``MeasurementDBConfig.container_tags_table is None``.
+    """
+
+    @staticmethod
+    def _wide_only_cfg() -> SolverConfig:
+        """SolverConfig with no project_id and no per-table mappings/filters."""
+        return SolverConfig()
+
+    def test_filter_container_tags_returns_empty_when_table_absent(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """Stage 1 is a no-op when no container_tags_table is configured."""
+        solver = KeyValueStoreSolver(spark, config=self._wide_only_cfg())
+        query = basic_narrow_db.query
+        result = solver.filter_container_tags(spark, query)
+        assert result.count() == 0
+
+    def test_filter_container_metrics_skips_join_when_no_tags(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """Stage 2 should return all container_metrics rows without joining."""
+        solver = KeyValueStoreSolver(spark, config=self._wide_only_cfg())
+        query = basic_narrow_db.query
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        container_ids = {row.container_id for row in result.collect()}
+        # basic_narrow fixture has 3 containers
+        assert container_ids == {1, 2, 3}
+
+    def test_metric_expression_still_applied(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """MetricExpression filters work without a container_tags_table."""
+        solver = KeyValueStoreSolver(spark, config=self._wide_only_cfg())
+        query = basic_narrow_db.query
+        query.where(MetricSelector("container_id") == 1)
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        container_ids = {row.container_id for row in result.collect()}
+        assert container_ids == {1}
+
+    def test_filter_container_metrics_accepts_none_container_df_when_no_tags(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """When no container_tags_table is configured, stage 2 short-circuits
+        before touching ``container_df`` and accepts ``None``."""
+        solver = KeyValueStoreSolver(spark, config=self._wide_only_cfg())
+        query = basic_narrow_db.query
+        result = solver.filter_container_metrics(spark, query, None)
+        assert "container_id" in result.columns
+        assert result.count() > 0
+
+    def test_tag_filter_silently_ignored_without_container_tags(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """Tag filters in the query are silently ignored at the solver level when
+        no ``container_tags_table`` is configured: stage 1 returns empty and
+        stage 2 skips the join, so all container_metrics rows come through.
+
+        The reporting layer guards against this misconfiguration at config time
+        (see ``Report.create_query_builder``); the solver itself is permissive.
+        """
+        solver = KeyValueStoreSolver(spark, config=self._wide_only_cfg())
+        query = basic_narrow_db.query
+        query.where(TagSelector("brand") == "Seat")
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+        container_ids = {row.container_id for row in result.collect()}
+        assert container_ids == {1, 2, 3}
 
 
 class TestKeyValueStoreSolverEmptySelector:

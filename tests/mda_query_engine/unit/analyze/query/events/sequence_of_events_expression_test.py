@@ -12,7 +12,7 @@ from mda_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
 from mda_query_engine.analyze.query.events import SequenceOfEventsExpression
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
+from mda_query_engine.analyze.query.solvers.key_value_store_solver import KeyValueStoreSolver
 from mda_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
 from mda_query_engine.model.series.intervals import Intervals
 
@@ -277,7 +277,7 @@ def test_sequence_query_overlapping_ranges_has_event_instance_for_container_1(
     df = (
         query.where(metric_container_id == 1)
         .select(seq_expr)
-        .solve(spark, solver=BasicNarrowSolver(spark))
+        .solve(spark, solver=KeyValueStoreSolver(spark))
     )
 
     rows = df.select("sequence_event").collect()
@@ -304,7 +304,7 @@ def test_sequence_query_nested_less_than_has_event_instance_for_container_1(
     df = (
         query.where(metric_container_id == 1)
         .select(seq_expr)
-        .solve(spark, solver=BasicNarrowSolver(spark))
+        .solve(spark, solver=KeyValueStoreSolver(spark))
     )
 
     rows = df.select("sequence_event").collect()

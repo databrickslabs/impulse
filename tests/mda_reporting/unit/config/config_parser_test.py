@@ -40,7 +40,7 @@ MDA_CONFIG_JSON = {
             ]
         ]
     },
-    "query_engine": {"solver": "BasicNarrowSolver"},
+    "query_engine": {"solver": "KeyValueStoreSolver"},
     "measurement_dimensions": [
         "uut_id",
         "file_name",
@@ -64,7 +64,7 @@ def test_mda_config_from_dict():
     assert len(config.container_filters.metric_filters[0]) == 2
     assert config.container_filters.metric_filters[0][0].column_name == "uut_id"
     assert config.container_filters.metric_filters[0][0].comparator == Comparator.EQ
-    assert config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER
+    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
 
     assert MeasurementDimensions.UUT_ID in config.measurement_dimensions
     assert MeasurementDimensions.FILE_NAME in config.measurement_dimensions
@@ -83,7 +83,7 @@ def test_mda_config_data_format_raw():
     config_json = {
         **MDA_CONFIG_JSON,
         "query_engine": {
-            "solver": "BasicNarrowSolver",
+            "solver": "KeyValueStoreSolver",
             "data_type": "RAW",
         },
     }
@@ -101,7 +101,7 @@ def test_mda_config_drop_implausible_data_enabled():
     config_json = {
         **MDA_CONFIG_JSON,
         "query_engine": {
-            "solver": "BasicNarrowSolver",
+            "solver": "KeyValueStoreSolver",
             "data_type": "RAW",
             "drop_implausible_data": True,
         },
@@ -120,7 +120,7 @@ def test_mda_config_drop_implausible_data_rejects_rle():
     config_json = {
         **MDA_CONFIG_JSON,
         "query_engine": {
-            "solver": "BasicNarrowSolver",
+            "solver": "KeyValueStoreSolver",
             "data_type": "RLE",
             "drop_implausible_data": True,
         },
@@ -134,7 +134,7 @@ def test_mda_config_from_dict_no_query_engine_provided():
     config_json = MDA_CONFIG_JSON.copy()
     config_json.pop("query_engine", None)
     config = MdaConfig.model_validate(config_json)
-    assert config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER
+    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
 
 
 def test_mda_config_from_dict_no_measurement_dim_provided():
@@ -254,21 +254,25 @@ def test_mda_config_key_value_store_solver_valid():
     assert config.query_engine.solver_config.project_id == "my_project"
 
 
-def test_mda_config_key_value_store_solver_missing_project_id():
-    """Test KeyValueStoreSolver config without project_id raises ValidationError."""
+def test_mda_config_key_value_store_solver_no_project_id_accepted():
+    """KeyValueStoreSolver accepts configs without project_id.
+
+    project_id is only applied when present (the solver also operates on
+    wide-only data models that don't need project scoping).
+    """
     config_json = MDA_CONFIG_JSON.copy()
     config_json["query_engine"] = {"solver": "KeyValueStoreSolver"}
-    with pytest.raises(ValidationError):
-        MdaConfig.model_validate(config_json)
+    config = MdaConfig.model_validate(config_json)
+    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
+    assert config.query_engine.solver_config is None
 
 
-def test_mda_config_basic_narrow_solver_no_project_id():
-    """BasicNarrowSolver doesn't require project_id; solver_config defaults to None."""
+def test_mda_config_basic_narrow_solver_rejected():
+    """BasicNarrowSolver has been removed; the string is no longer a valid enum value."""
     config_json = MDA_CONFIG_JSON.copy()
     config_json["query_engine"] = {"solver": "BasicNarrowSolver"}
-    config = MdaConfig.model_validate(config_json)
-    assert config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER
-    assert config.query_engine.solver_config is None
+    with pytest.raises(ValidationError):
+        MdaConfig.model_validate(config_json)
 
 
 def test_mda_config_solver_config_none_by_default():
@@ -872,8 +876,8 @@ def test_mda_config_delta_solver_valid():
     assert config.query_engine.solver_config is None
 
 
-def test_mda_config_key_value_store_solver_missing_container_tags_table():
-    """KVS without container_tags_table in source raises ValidationError."""
+def test_mda_config_key_value_store_solver_without_container_tags_table_accepted():
+    """KVS without container_tags_table in source is accepted (wide-only data model)."""
     config_json = MDA_CONFIG_JSON.copy()
     config_json["source"] = {
         k: v for k, v in MDA_CONFIG_JSON["source"].items() if k != "container_tags_table"
@@ -882,12 +886,13 @@ def test_mda_config_key_value_store_solver_missing_container_tags_table():
         "solver": "KeyValueStoreSolver",
         "solver_config": {"project_id": "proj"},
     }
-    with pytest.raises(ValidationError, match="container_tags_table is required"):
-        MdaConfig.model_validate(config_json)
+    config = MdaConfig.model_validate(config_json)
+    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
+    assert config.source.container_tags_table is None
 
 
-def test_mda_config_key_value_store_solver_missing_project_id_empty_config():
-    """KVS with empty solver_config (no project_id) raises ValidationError."""
+def test_mda_config_key_value_store_solver_empty_solver_config_accepted():
+    """KVS with empty solver_config (no project_id) is accepted."""
     config_json = MDA_CONFIG_JSON.copy()
     config_json["query_engine"] = {
         "solver": "KeyValueStoreSolver",
@@ -896,8 +901,8 @@ def test_mda_config_key_value_store_solver_missing_project_id_empty_config():
     config_json["source"][
         "container_tags_table"
     ] = "spark_catalog.silver_key_value_store.container_tags"
-    with pytest.raises(ValidationError, match="project_id is required"):
-        MdaConfig.model_validate(config_json)
+    config = MdaConfig.model_validate(config_json)
+    assert config.query_engine.solver_config.project_id is None
 
 
 def test_mda_config_solver_config_with_filters():

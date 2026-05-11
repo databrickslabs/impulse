@@ -3,7 +3,7 @@ import pytest
 from pyspark.errors import AnalysisException
 
 from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
+from mda_query_engine.analyze.query.solvers.key_value_store_solver import KeyValueStoreSolver
 from mda_reporting.aggregations.histogram import Histogram
 from mda_reporting.aggregations.histogram2d import (
     Histogram2DCustomWeights,
@@ -259,7 +259,7 @@ def test_determine_aggregations(spark, basic_narrow_db):
         x_bins=bins,
         y_bins=bins,
     )
-    solver = BasicNarrowSolver(spark)
+    solver = KeyValueStoreSolver(spark)
     solved_df = basic_narrow_db.query.select(hist.get_expression()).solve(spark, solver)
     df = Histogram2DDuration.determine_aggregations(
         spark=spark, aggregations=[hist], solved_df=solved_df

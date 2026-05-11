@@ -39,7 +39,7 @@ def _build_batched_report(spark: SparkSession) -> tuple[Report, dict[str, object
             table_prefix="evaluation",
         ),
         query_engine=QueryEngine(
-            solver=Solvers.BASIC_NARROW_SOLVER,
+            solver=Solvers.KEY_VALUE_STORE_SOLVER,
             batch_size=1,
         ),
     )

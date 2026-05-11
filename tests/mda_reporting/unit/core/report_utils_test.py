@@ -549,7 +549,7 @@ _SINK_CONFIG = {
         "schema": "gold",
         "table_prefix": "evaluation",
     },
-    "query_engine": {"solver": "BasicNarrowSolver"},
+    "query_engine": {"solver": "KeyValueStoreSolver"},
 }
 
 _SINKLESS_CONFIG = {
@@ -558,7 +558,7 @@ _SINKLESS_CONFIG = {
         "channel_metrics_table": "spark_catalog.silver.channel_metrics",
         "channels_uri": "spark_catalog.silver.channels",
     },
-    "query_engine": {"solver": "BasicNarrowSolver"},
+    "query_engine": {"solver": "KeyValueStoreSolver"},
 }
 
 

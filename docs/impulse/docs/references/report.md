@@ -139,10 +139,10 @@ Output tables are named `{table_prefix}_{entity}`, for example `my_report_histog
 
 | Field                   | Type           | Default               | Description                                                                                                                 |
 |-------------------------|----------------|-----------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `solver`                | `str`          | `"BasicNarrowSolver"` | `"BasicNarrowSolver"`, `"DeltaSolver"`, or `"KeyValueStoreSolver"`.                                                         |
+| `solver`                | `str`          | `"KeyValueStoreSolver"` | `"DeltaSolver"` or `"KeyValueStoreSolver"`.                                                                              |
 | `data_type`             | `str`          | `"RLE"`               | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to RLE before aggregation).                      |
 | `drop_implausible_data` | `bool`         | `false`               | When `true`, drops rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
-| `project_id`            | `str`          | `null`                | Required when `solver = "KeyValueStoreSolver"`.                                                                             |
+| `project_id`            | `str`          | `null`                | Optional. When set, the solver filters `container_tags`, `container_metrics`, and `channel_mapping` by this value (on `project_id_col`). Omit for wide-only data models that don't need project scoping. |
 | `parent_id`             | `str`          | `null`                | Optional parent-entity filter on the concept-entities table (KVS solver only), e.g. `"uut_concept"`.                        |
 | `entity_maps_to`        | `str`          | `"uut_id"`            | How `entity_id` in concept-entities maps to `container_metrics`: `"uut_id"` (1-to-many) or `"container_id"` (1-to-1).       |
 | `solver_config`         | `SolverConfig` | `null`                | Column-name overrides for custom silver schemas. See [SolverConfig](#solverconfig) below.                                   |

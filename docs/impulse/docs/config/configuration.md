@@ -42,13 +42,13 @@ It allows you to specify data sources, output sinks, container filters, and the 
 
 - **query_engine** (`QueryEngine`, optional):
   Query engine configuration.
-    - `solver` (`Solvers`): Solver type. Defaults to `BASIC_NARROW_SOLVER`. Accepted values: `BASIC_NARROW_SOLVER`, `DELTA_SOLVER`, `KEY_VALUE_STORE_SOLVER`.
+    - `solver` (`Solvers`): Solver type. Defaults to `KEY_VALUE_STORE_SOLVER`. Accepted values: `DELTA_SOLVER`, `KEY_VALUE_STORE_SOLVER`. `KEY_VALUE_STORE_SOLVER` works either against a narrow EAV `container_tags` table or, when `source.container_tags_table` is omitted, against a wide-only data model where container attributes live directly on `container_metrics`.
     - `data_type` (`DataType`, optional): The format of the channel data. Defaults to `RLE`. Accepted values:
         - `RLE`: Channel data is pre-encoded with Run-Length Encoding (intervals with `tstart`/`tend`).
         - `RAW`: Channel data contains raw timestamps (a `timestamp` column). The framework automatically converts it to RLE interval format before joins and aggregations.
     - `drop_implausible_data` (bool, optional): Whether to drop implausible data points before processing. Defaults to `false`. If `true`, data points marked as implausible (via the `is_plausible` column) will be dropped. **Only takes effect when `data_type = RAW`**: the filter is applied during the RAW -> RLE conversion path. Combining `drop_implausible_data=true` with `data_type=RLE` raises a validation error.
     - `batch_size` (int, optional): Maximum number of selectors solved per batch. Defaults to `500`.
-    - `solver_config` (`SolverConfig`, optional): Per-table column mappings, per-table equality filters, and project scoping. Required (`project_id` field) when `solver = KEY_VALUE_STORE_SOLVER`. See [Solver column mappings and filters](#solver-column-mappings-and-filters) below.
+    - `solver_config` (`SolverConfig`, optional): Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` when you want `KEY_VALUE_STORE_SOLVER` to scope reads by project; omit it for wide-only data models. See [Solver column mappings and filters](#solver-column-mappings-and-filters) below.
 
 - **incremental** (`IncrementalConfig`, optional):
   Incremental processing configuration. When `enabled` is `false` (default), every run reprocesses all matching containers in full. When `enabled` is `true`, `Report.determine_report()` reuses results from prior runs for unchanged definitions and only reprocesses containers that are new or have been updated in silver.
@@ -192,7 +192,7 @@ config_data = {
         ]
     },
     "query_engine": {
-        "solver": "BASIC_NARROW_SOLVER",
+        "solver": "KEY_VALUE_STORE_SOLVER",
         "data_type": "RAW"
     },
     "measurement_dimensions": [
@@ -204,5 +204,5 @@ config_data = {
 }
 ```
 
-If `query_engine` is omitted, it defaults to `BASIC_NARROW_SOLVER` with `data_type` set to `RLE`.
+If `query_engine` is omitted, it defaults to `KEY_VALUE_STORE_SOLVER` with `data_type` set to `RLE`.
 We support providing the configuration as a dictionary or as a JSON file path.

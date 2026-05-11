@@ -30,7 +30,7 @@ DUMMY_CONFIG = {
         "schema": "gold",
         "table_prefix": "evaluation",
     },
-    "query_engine": {"solver": "BasicNarrowSolver"},
+    "query_engine": {"solver": "KeyValueStoreSolver"},
 }
 
 INCREMENTAL_CONFIG = {

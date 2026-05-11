@@ -1,29 +1,29 @@
 # pylint: disable=missing-function-docstring
 """
-Tests for BasicNarrowTimeSeriesCache, BasicNarrowSolver, and SolverConfig.
+Tests for KVSTimeSeriesCache, KeyValueStoreSolver._solve_udf, and
+KeyValueStoreSolver's wide-only data model (no container_tags_table).
 
 Covers:
-- BasicNarrowTimeSeriesCache with default and custom column configs (via col_map)
-- BasicNarrowSolver._solve_udf with col_map
-- BasicNarrowSolver.filter_container_metrics / filter_channel_metrics with config
-- BasicNarrowSolver.solve end-to-end with config (custom column names)
-- SolverConfig entity_id_col field
-- Backward compatibility: default config identical to previous hardcoded behaviour
+- KVSTimeSeriesCache with default and custom column configs (via col_map)
+- KeyValueStoreSolver._solve_udf with col_map
+- KeyValueStoreSolver.filter_channel_metrics / solve end-to-end with
+  the wide-only data model via the basic_narrow_db fixture
+- SolverConfig col_map and property invariants
 """
 
 import pandas as pd
 from pyspark.sql import SparkSession
 
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import (
-    BasicNarrowSolver,
-    BasicNarrowTimeSeriesCache,
+from mda_query_engine.analyze.query.solvers.key_value_store_solver import (
+    KeyValueStoreSolver,
+    KVSTimeSeriesCache,
 )
 from mda_query_engine.analyze.query.solvers.solver_config import (
     SolverConfig,
     TableConfig,
 )
 from mda_query_engine.measurement_db import MeasurementDB
-from tests.conftest import spark
+from tests.conftest import basic_narrow_db, spark
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,17 +62,17 @@ def _make_channel_pdf(
 
 
 # ---------------------------------------------------------------------------
-# TestBasicNarrowTimeSeriesCache
+# TestKVSTimeSeriesCache
 # ---------------------------------------------------------------------------
 
 
-class TestBasicNarrowTimeSeriesCache:
-    """Unit tests for BasicNarrowTimeSeriesCache."""
+class TestKVSTimeSeriesCache:
+    """Unit tests for KVSTimeSeriesCache."""
 
     def test_default_config_load_blob(self):
         """load_blob works with default column names."""
         pdf = _make_channel_pdf()
-        cache = BasicNarrowTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        cache = KVSTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
         series = cache.load_blob(1, 10)
         assert list(series.tstarts) == [0, 100]
         assert list(series.values) == [1.0, 2.0]
@@ -82,7 +82,7 @@ class TestBasicNarrowTimeSeriesCache:
         pdf = _make_channel_pdf(
             cid_col="meas_id", ch_col="sig_id", ts_col="t_start", te_col="t_stop", val_col="val"
         )
-        cache = BasicNarrowTimeSeriesCache(pdf, col_map=CUSTOM_COL_MAP)
+        cache = KVSTimeSeriesCache(pdf, col_map=CUSTOM_COL_MAP)
         series = cache.load_blob(2, 20)
         assert list(series.tstarts) == [0, 200]
         assert list(series.values) == [3.0, 4.0]
@@ -90,7 +90,7 @@ class TestBasicNarrowTimeSeriesCache:
     def test_mdf_drops_data_columns(self):
         """mdf should not contain tstart/tend/value columns."""
         pdf = _make_channel_pdf()
-        cache = BasicNarrowTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        cache = KVSTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
         assert "tstart" not in cache.mdf.columns
         assert "tend" not in cache.mdf.columns
         assert "value" not in cache.mdf.columns
@@ -107,7 +107,7 @@ class TestBasicNarrowTimeSeriesCache:
             "te": "t_stop",
             "val": "val",
         }
-        cache = BasicNarrowTimeSeriesCache(pdf, col_map=col_map)
+        cache = KVSTimeSeriesCache(pdf, col_map=col_map)
         assert "t_start" not in cache.mdf.columns
         assert "t_stop" not in cache.mdf.columns
         assert "val" not in cache.mdf.columns
@@ -117,7 +117,7 @@ class TestBasicNarrowTimeSeriesCache:
         pdf = _make_channel_pdf()
         # Scramble order
         pdf = pdf.sample(frac=1, random_state=0).reset_index(drop=True)
-        cache = BasicNarrowTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        cache = KVSTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
         # Verify that for each (container_id, channel_id) group, tstarts are sorted
         for (cid, chid), group in cache.pdf.groupby([cache._cid_col, cache._ch_col]):
             ts_vals = list(group[cache._ts_col])
@@ -127,12 +127,12 @@ class TestBasicNarrowTimeSeriesCache:
 
 
 # ---------------------------------------------------------------------------
-# TestBasicNarrowSolverUDF
+# TestKeyValueStoreSolverUDF
 # ---------------------------------------------------------------------------
 
 
-class TestBasicNarrowSolverUDF:
-    """Unit tests for BasicNarrowSolver._solve_udf with col_map."""
+class TestKeyValueStoreSolverUDF:
+    """Unit tests for KeyValueStoreSolver._solve_udf with col_map."""
 
     def test_default_config_result_key(self):
         """UDF result DataFrame should have 'container_id' column with default col_map."""
@@ -151,7 +151,7 @@ class TestBasicNarrowSolverUDF:
             def serialize(self):
                 return self._v
 
-        result = BasicNarrowSolver._solve_udf(
+        result = KeyValueStoreSolver._solve_udf(
             pdf, selections=[_MockSelection()], col_map=DEFAULT_COL_MAP
         )
         assert "container_id" in result.columns
@@ -176,7 +176,7 @@ class TestBasicNarrowSolverUDF:
             def serialize(self):
                 return self._v
 
-        result = BasicNarrowSolver._solve_udf(
+        result = KeyValueStoreSolver._solve_udf(
             pdf, selections=[_MockSelection()], col_map=CUSTOM_COL_MAP
         )
         assert "meas_id" in result.columns
@@ -185,42 +185,23 @@ class TestBasicNarrowSolverUDF:
 
 
 # ---------------------------------------------------------------------------
-# TestBasicNarrowSolverFilterMethods
+# TestKeyValueStoreSolverFilterMethods (wide-only data model)
 # ---------------------------------------------------------------------------
 
 
-class TestBasicNarrowSolverFilterMethods:
-    """Unit tests for BasicNarrowSolver filter stage methods."""
-
-    def test_filter_container_metrics_uses_config_col(
-        self, spark: SparkSession, basic_narrow_db: MeasurementDB
-    ):
-        """filter_container_metrics should return a column named per config."""
-        solver = BasicNarrowSolver(spark)
-        query = basic_narrow_db.query
-        result = solver.filter_container_metrics(spark, query, None)
-        # Default config → column must be "container_id"
-        assert "container_id" in result.columns
-        assert result.count() > 0
-
-    def test_filter_container_tags_returns_empty_df(
-        self, spark: SparkSession, basic_narrow_db: MeasurementDB
-    ):
-        """BasicNarrowSolver.filter_container_tags always returns an empty DataFrame."""
-        solver = BasicNarrowSolver(spark)
-        query = basic_narrow_db.query
-        result = solver.filter_container_tags(spark, query)
-        assert result.count() == 0
+class TestKeyValueStoreSolverFilterMethodsWideOnly:
+    """Filter-stage tests against the wide-only fixture (no container_tags_table)."""
 
     def test_filter_channel_metrics_uses_config_cols(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB
     ):
         """filter_channel_metrics result should contain (container_id, channel_id, selector_ids)."""
-        solver = BasicNarrowSolver(spark)
+        solver = KeyValueStoreSolver(spark)
         query = basic_narrow_db.query.select(
             basic_narrow_db.query.channel(channel_name="Engine RPM")
         )
-        container_df = solver.filter_container_metrics(spark, query, None)
+        tags_df = solver.filter_container_tags(spark, query)
+        container_df = solver.filter_container_metrics(spark, query, tags_df)
         selectors = query._collect_time_series_selectors(uses_alias=False)
         result = solver.filter_channel_metrics(spark, basic_narrow_db, container_df, selectors)
         assert "container_id" in result.columns
@@ -229,26 +210,21 @@ class TestBasicNarrowSolverFilterMethods:
 
 
 # ---------------------------------------------------------------------------
-# TestBasicNarrowSolverEndToEnd
+# TestKeyValueStoreSolverEndToEnd (wide-only data model)
 # ---------------------------------------------------------------------------
 
 
-class TestBasicNarrowSolverEndToEnd:
-    """End-to-end tests: run a full query.solve() through BasicNarrowSolver."""
+class TestKeyValueStoreSolverEndToEndWideOnly:
+    """End-to-end tests using the wide-only fixture (no container_tags_table)."""
 
     def test_default_config_solve_produces_results(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB
     ):
-        """
-        Full solve() via query_builder.solve() with default config produces results.
-        Uses a TimeSeriesSelector (channel expression) as the selection — this is
-        what the query engine's select() accepts.
-        """
-        solver = BasicNarrowSolver(spark)
+        """Full solve() with default config produces results."""
+        solver = KeyValueStoreSolver(spark)
         query = basic_narrow_db.query
 
         # channel() returns a TimeSeriesSelector which has build() — the correct type.
-        # Only filter on channel_name; basic_narrow test data has no data_key column.
         ch_expr = basic_narrow_db.query.channel(channel_name="Vehicle Speed Sensor")
         query.select(ch_expr)
         result = query.solve(spark, solver=solver)
@@ -259,14 +235,14 @@ class TestBasicNarrowSolverEndToEnd:
     def test_backward_compat_no_config_arg(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB
     ):
-        """BasicNarrowSolver() without config arg works identically to before."""
-        solver = BasicNarrowSolver(spark)
+        """KeyValueStoreSolver(spark) without a config arg works."""
+        solver = KeyValueStoreSolver(spark)
         assert solver.config.container_id_col == "container_id"
         assert solver.config.tstart_col == "tstart"
 
     def test_no_redundant_instance_attrs(self, spark: SparkSession):
-        """BasicNarrowSolver should NOT have cid_col/ch_col/ts_col/te_col/val_col attributes."""
-        solver = BasicNarrowSolver(spark)
+        """KeyValueStoreSolver should NOT have cid_col/ch_col/ts_col/te_col/val_col attributes."""
+        solver = KeyValueStoreSolver(spark)
         assert not hasattr(solver, "cid_col")
         assert not hasattr(solver, "ch_col")
         assert not hasattr(solver, "ts_col")
@@ -286,7 +262,7 @@ class TestBasicNarrowSolverEndToEnd:
                 }
             )
         )
-        solver = BasicNarrowSolver(spark, config=cfg)
+        solver = KeyValueStoreSolver(spark, config=cfg)
         col_map = solver.config.col_map
         assert col_map == {
             "cid": "container_id",
@@ -309,7 +285,7 @@ class TestBasicNarrowSolverEndToEnd:
                 }
             )
         )
-        solver = BasicNarrowSolver(spark, config=cfg)
+        solver = KeyValueStoreSolver(spark, config=cfg)
         assert solver.config.container_id_col == "container_id"
         assert solver.config.channel_id_col == "channel_id"
         assert solver.config.tstart_col == "tstart"

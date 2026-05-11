@@ -1,21 +1,93 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from functools import partial
 from typing import TYPE_CHECKING
 
+import pandas as pd
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
 from pyspark.sql import DataFrame, Window
 
 from mda_query_engine.analyze.metadata.metric_expression import MetricExpression
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
+from mda_query_engine.model.series.sample_series import SampleSeries
 
-from .basic_narrow_solver import BasicNarrowSolver
+from .query_solver import QuerySolver
+from .series_cache import SeriesCache
 from .solver_config import SolverConfig
+from .utils.interval_encoder import IntervalEncoder
 
 if TYPE_CHECKING:
     from mda_query_engine.measurement_db import MeasurementDB
 
 
-class KeyValueStoreSolver(BasicNarrowSolver):
+class KVSTimeSeriesCache(SeriesCache):
+    def __init__(self, pdf, col_map: dict[str, str]):
+        """
+        Initialize the KVSTimeSeriesCache.
+
+        Parameters
+        ----------
+        pdf : pd.DataFrame
+            DataFrame containing time series data.
+        col_map : dict[str, str]
+            Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
+            ``"val"`` to the actual column names in *pdf*.
+        """
+        self._cid_col = col_map["cid"]
+        self._ch_col = col_map["ch"]
+        self._ts_col = col_map["ts"]
+        self._te_col = col_map["te"]
+        self._val_col = col_map["val"]
+
+        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
+        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
+        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
+
+    def resolve(self, selection):
+        """
+        Resolve selected tags/metrics to a list of candidates.
+
+        Parameters
+        ----------
+        selection : Any
+            The selection object specifying tags or metrics.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the resolved candidates.
+        """
+        if "selector_ids" in self.mdf.columns:
+            idx = self.mdf["selector_ids"].apply(
+                lambda arr: arr is not None and selection.selector_id in arr
+            )
+            return self.mdf[idx]
+        idx = selection._expr.build_pandas(self.mdf)
+        return self.mdf[idx]
+
+    def load_blob(self, mid, cid):
+        """
+        Load a time series blob from the DataFrame.
+
+        Parameters
+        ----------
+        mid : Any
+            Container or measurement ID.
+        cid : Any
+            Channel ID.
+
+        Returns
+        -------
+        SampleSeries
+            The loaded sample series object.
+        """
+        s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
+        return SampleSeries(s[self._ts_col], s[self._te_col], s[self._val_col])
+
+
+class KeyValueStoreSolver(QuerySolver):
     """
     Solver for querying container metadata from a narrow/EAV key-value-store table.
 
@@ -36,10 +108,30 @@ class KeyValueStoreSolver(BasicNarrowSolver):
     config : SolverConfig or None
         Optional configuration.  When *None* (default) no filtering by
         project or toolbox is applied.
+    is_raw_data : bool, optional
+        Whether the input data is raw point data (timestamp column)
+        rather than RLE format (tstart/tend columns).
+    drop_implausible_data : bool, optional
+        Whether to drop data points marked as implausible before
+        processing.  Requires an ``is_plausible`` column in the
+        silver layer.
     """
 
-    def __init__(self, spark, config: SolverConfig | None = None):
-        super().__init__(spark, config=config)
+    def __init__(
+        self,
+        spark,
+        config: SolverConfig | None = None,
+        is_raw_data: bool = False,
+        drop_implausible_data: bool = False,
+    ):
+        super().__init__(config=config)
+        self.spark = spark
+        self.is_raw_data = is_raw_data
+        self.drop_im_plausible_data: bool = drop_implausible_data
+        self.interval_encoder: IntervalEncoder = IntervalEncoder(
+            timestamp_col_name="timestamp",
+            drop_implausible_data_points=self.drop_im_plausible_data,
+        )
 
     # ------------------------------------------------------------------
     # Solver stages
@@ -49,11 +141,15 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         """
         Filter container tags from the key-value-store table (narrow/EAV format).
 
-        Reads the narrow-format key-value-store table, applies the per-table
-        ``column_name_mapping`` to rename physical columns to internal names,
-        then applies the top-level ``project_id`` filter and any per-table
-        ``container_tags.filters``.  Pivots to wide format if tag filters
-        are present.
+        If no ``container_tags_table`` is configured on the database, this
+        stage is a no-op and an empty DataFrame is returned: the solver is
+        operating on a wide-only data model (no narrow container_tags table).
+
+        Otherwise, reads the narrow-format key-value-store table, applies the
+        per-table ``column_name_mapping`` to rename physical columns to
+        internal names, then applies the top-level ``project_id`` filter
+        and any per-table ``container_tags.filters``.  Pivots to wide format
+        if tag filters are present.
 
         Parameters
         ----------
@@ -66,9 +162,13 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         -------
         DataFrame
             A DataFrame containing the filtered container_ids.
+            If no ``container_tags_table`` is configured, an empty DataFrame.
             If no tag filters are present, returns distinct container_ids.
             Otherwise, returns pivoted data with filter expressions applied.
         """
+        if query.db.config.container_tags_table is None:
+            return spark.createDataFrame([], schema=T.StructType([]))
+
         container_id_col = self.config.container_id_col
 
         filters = []
@@ -117,6 +217,10 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         extracted from the query.  Finally, inner-joins the result with the
         tag-filtered container DataFrame.
 
+        If no ``container_tags_table`` is configured on the database, the
+        join with ``container_df`` is skipped: stage 1 produced no
+        container IDs because no narrow tag table exists.
+
         Parameters
         ----------
         spark : SparkSession
@@ -162,11 +266,76 @@ class KeyValueStoreSolver(BasicNarrowSolver):
         if len(metric_filters) > 0:
             metrics = metrics.where(self._build_expr(metric_filters))
 
+        if query.db.config.container_tags_table is None:
+            return metrics.dropDuplicates([container_id_col])
+
         return metrics.join(
             F.broadcast(container_df.select(container_id_col).distinct()),
             on=container_id_col,
             how="inner",
         ).dropDuplicates([container_id_col])
+
+    def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
+        """
+        Pass through container DataFrame.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        db : MeasurementDB
+            Measurement database for table access.
+        container_df : pyspark.sql.DataFrame
+            DataFrame containing container information.
+        selectors : list[TimeSeriesSelector]
+            Non-aliased selectors (unused by this solver).
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            The input container DataFrame.
+        """
+        return container_df
+
+    def filter_channel_metrics(self, spark, db, container_df, selectors) -> DataFrame:
+        """
+        Filter channels by metrics and required tags.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        db : MeasurementDB
+            Measurement database for table access.
+        container_df : pyspark.sql.DataFrame
+            DataFrame containing container information.
+        selectors : list[TimeSeriesSelector]
+            Non-aliased (direct) selectors.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            DataFrame with ``(container_id, channel_id, selector_ids)``.
+        """
+        container_id_col = self.config.container_id_col
+        channel_id_col = self.config.channel_id_col
+        channel_metrics_df = db.channel_metrics(spark)
+        channel_metrics_df = self._apply_column_mapping(
+            channel_metrics_df, self.config.channel_metrics.column_name_mapping
+        )
+        if len(selectors) == 0:
+            return self._empty_channel_match_df(spark)
+
+        channel_metrics_df = channel_metrics_df.where(self._build_expr(selectors))
+        result = channel_metrics_df.join(
+            F.broadcast(container_df.select(container_id_col)),
+            on=[container_id_col],
+            how="inner",
+        )
+        result = result.withColumn(
+            "selector_ids", F.array(self._build_selector_id_expr(selectors))
+        )
+        return result.select(container_id_col, channel_id_col, "selector_ids")
 
     def filter_aliased_channel_metrics(
         self, spark, db: MeasurementDB, container_df, selectors
@@ -274,3 +443,89 @@ class KeyValueStoreSolver(BasicNarrowSolver):
             self.config.container_id_col,
             self.config.channel_id_col,
         ).agg(F.flatten(F.collect_list("selector_ids")).alias("selector_ids"))
+
+    # ------------------------------------------------------------------
+    # Solve
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _solve_udf(pdf, selections: Iterable, col_map: dict[str, str]) -> pd.DataFrame:
+        """
+        UDF to solve for a single container by applying selections.
+
+        Parameters
+        ----------
+        pdf : pd.DataFrame
+        selections : Iterable
+            List of selection expressions to apply.
+        col_map : dict[str, str]
+            Column name mapping for the cache.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing results for each selection.
+        """
+        cache = KVSTimeSeriesCache(pdf, col_map=col_map)
+        cid_col = col_map["cid"]
+        result = {cid_col: [pdf[cid_col].iloc[0]]}
+        for s in selections:
+            res = s.build(cache)
+            if hasattr(res, "serialize") and callable(res.serialize):
+                res = res.serialize()
+            elif hasattr(res, "get_data") and callable(res.get_data):
+                res = res.get_data()
+            result[s._alias] = [res]
+        return pd.DataFrame(result)
+
+    def solve(self, query, channels_df, selections, dtypes) -> DataFrame:
+        """
+        Solve the query by grouping channels and applying selections.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object containing database and filter information.
+        channels_df : pyspark.sql.DataFrame
+            DataFrame containing channel information.
+        selections : list
+            List of selection expressions to apply.
+        dtypes : list
+            List of data types for each selection.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            DataFrame containing results for each container.
+        """
+        col_map = self.config.col_map
+
+        q = query.db.channels(self.spark)
+        q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
+
+        if self.is_raw_data:
+            # Calculate the tend info and prepare the data for the solving step.
+            q = self.interval_encoder.prepare_channels_df(q)
+
+        schema_entries = [T.StructField(self.config.container_id_col, T.LongType())]
+        for s, dtype in zip(selections, dtypes, strict=False):
+            schema_entries.append(T.StructField(s._alias, dtype))
+        schema = T.StructType(schema_entries)
+        solve_udf = F.pandas_udf(
+            partial(KeyValueStoreSolver._solve_udf, selections=selections, col_map=col_map),
+            schema,
+            F.PandasUDFType.GROUPED_MAP,
+        )
+        df = q.join(
+            F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
+        )
+
+        container_count = channels_df.select(self.config.container_id_col).distinct().count()
+        if container_count == 0:
+            return self.spark.createDataFrame([], schema=schema)
+        res = (
+            df.repartition(container_count, self.config.container_id_col)
+            .groupBy(self.config.container_id_col)
+            .apply(solve_udf)
+        )
+        return res

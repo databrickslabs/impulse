@@ -68,7 +68,7 @@ def test_config_hashing(spark):
     schema = T.StructType([T.StructField(col, T.StringType(), True) for col in silver_columns])
     df = spark.createDataFrame([("test_vehicle",)], schema)
     result = df.transform(ContainerDimension._add_config_hash(mda_config))
-    expected_result = [Row(uut_id="test_vehicle", config_hash=106654060)]
+    expected_result = [Row(uut_id="test_vehicle", config_hash=1983688711)]
 
     assert expected_result == result.collect()
 

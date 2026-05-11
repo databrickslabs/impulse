@@ -1,7 +1,7 @@
 import pytest
 
 from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
+from mda_query_engine.analyze.query.solvers.key_value_store_solver import KeyValueStoreSolver
 from mda_reporting.events.basic_event import BasicEvent
 from tests.conftest import basic_narrow_db, spark
 
@@ -92,7 +92,7 @@ def test_determine_events(spark, basic_narrow_db):
     event_expr = eng_rpm > 1000
     event = BasicEvent(name="test_event", expr=event_expr)
 
-    solver = BasicNarrowSolver(spark)
+    solver = KeyValueStoreSolver(spark)
     solved_df = basic_narrow_db.query.select(event.get_expression()).solve(spark, solver)
     df = BasicEvent.determine_events(spark, [event], solved_df=solved_df)
 
@@ -111,7 +111,7 @@ def test_determine_events_several_events(spark, basic_narrow_db):
     event = BasicEvent(name="test_event_1", expr=eng_rpm > 1000)
     event2 = BasicEvent(name="test_event_2", expr=eng_rpm < 1000)
 
-    solver = BasicNarrowSolver(spark)
+    solver = KeyValueStoreSolver(spark)
     solved_df = basic_narrow_db.query.select(
         event.get_expression(), event2.get_expression()
     ).solve(spark, solver)
