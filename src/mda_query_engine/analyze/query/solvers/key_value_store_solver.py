@@ -163,7 +163,7 @@ class KeyValueStoreSolver(BasicNarrowSolver):
             metrics = metrics.where(self._build_expr(metric_filters))
 
         return metrics.join(
-            F.broadcast(container_df.select(container_id_col).distinct()),
+            F.broadcast(container_df.select(container_id_col)),
             on=container_id_col,
             how="inner",
         ).dropDuplicates([container_id_col])
