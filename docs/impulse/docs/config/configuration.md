@@ -129,15 +129,15 @@ Two independent filter families:
 
 ## query_engine (optional)
 
-| Field                   | Type           | Default               | Description                                                                                                                 |
-|-------------------------|----------------|-----------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `solver`                | `str`          | `"BasicNarrowSolver"` | One of `"BasicNarrowSolver"`, `"DeltaSolver"`, `"KeyValueStoreSolver"`.                                                     |
-| `data_type`             | `str`          | `"RLE"`               | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to RLE before aggregation).                      |
-| `drop_implausible_data` | `bool`         | `false`               | When `true`, drops `channels` rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
-| `batch_size`            | `int`          | `500`                 | Maximum number of selectors solved per batch.                                                                               |
-| `solver_config`         | `SolverConfig` | `null`                | Per-table column mappings, per-table equality filters, and project scoping. Required (`project_id` field) when `solver = "KeyValueStoreSolver"`. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
+| Field                   | Type           | Default                  | Description                                                                                                                 |
+|-------------------------|----------------|--------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `solver`                | `str`          | `"KeyValueStoreSolver"`  | One of `"DeltaSolver"`, `"KeyValueStoreSolver"`. `"KeyValueStoreSolver"` works either against a narrow EAV `container_tags` table or, when `source.container_tags_table` is omitted, against a wide-only data model where container attributes live directly on `container_metrics`. |
+| `data_type`             | `str`          | `"RLE"`                  | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to RLE before aggregation).                      |
+| `drop_implausible_data` | `bool`         | `false`                  | When `true`, drops `channels` rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
+| `batch_size`            | `int`          | `500`                    | Maximum number of selectors solved per batch.                                                                               |
+| `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` when you want `KeyValueStoreSolver` to scope reads by project; omit it for wide-only data models. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
 
-If `query_engine` is omitted, the default is `BasicNarrowSolver` with
+If `query_engine` is omitted, the default is `KeyValueStoreSolver` with
 `data_type = "RLE"`.
 
 ---
@@ -194,13 +194,13 @@ When a report is built from config (the standard `Report(config=...)` /
 `Report(config_path=...)` path), `solver_config` is read from
 `query_engine.solver_config` and **only passed to
 `KeyValueStoreSolver`**. The `Report` factory does not forward it to
-`BasicNarrowSolver` or `DeltaSolver`, so `solver_config` in your JSON
-config is silently ignored for those two solvers.
+`DeltaSolver`, so `solver_config` in your JSON config is silently
+ignored for that solver.
 
-`BasicNarrowSolver` and `DeltaSolver` themselves accept a `SolverConfig`
-in their constructors — but you have to instantiate them yourself and
-pass the solver instance into `query.solve(solver=...)` rather than
-relying on the config-driven factory.
+`DeltaSolver` itself accepts a `SolverConfig` in its constructor — but
+you have to instantiate it yourself and pass the solver instance into
+`query.solve(solver=...)` rather than relying on the config-driven
+factory.
 
 :::
 

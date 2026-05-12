@@ -135,10 +135,11 @@ def create_query_builder(db: MeasurementDB, config: MdaConfig) -> QueryBuilder
 
 Create a query builder based on the provided configuration and set container filters.
 
-Validates solver/filter compatibility before applying filters:
-- BasicNarrowSolver supports metric filters only (rejects tag filters).
-- KeyValueStoreSolver supports both tag and metric filters.
-- DeltaSolver supports both tag and metric filters.
+Validates that tag filters are only used when a
+``container_tags_table`` is configured in ``source``.  Both
+KeyValueStoreSolver and DeltaSolver support tag and metric filters,
+but tag filters require the narrow ``container_tags`` table to be
+available.
 
 **Arguments**:
 
@@ -147,7 +148,8 @@ Validates solver/filter compatibility before applying filters:
 
 **Raises**:
 
-- `ValueError`: If the configured solver does not support the configured filter types.
+- `ValueError`: If tag filters are configured but ``source.container_tags_table``
+is not set.
 
 **Returns**:
 

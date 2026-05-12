@@ -6,7 +6,7 @@ title: mda_query_engine.analyze.query.solvers.key_value_store_solver
 ## KeyValueStoreSolver
 
 ```python
-class KeyValueStoreSolver(BasicNarrowSolver)
+class KeyValueStoreSolver(QuerySolver)
 ```
 
 Solver for querying container metadata from a narrow/EAV key-value-store table.
@@ -26,6 +26,11 @@ column names exposed by :class:`SolverConfig`.
 - `spark` (`SparkSession`): Spark session used for query execution.
 - `config` (`SolverConfig or None`): Optional configuration.  When *None* (default) no filtering by
 project or toolbox is applied.
+- `is_raw_data` (`bool`): Whether the input data is raw point data (timestamp column)
+rather than RLE format (tstart/tend columns).
+- `drop_implausible_data` (`bool`): Whether to drop data points marked as implausible before
+processing.  Requires an ``is_plausible`` column in the
+silver layer.
 
 #### filter\_container\_tags
 
@@ -35,11 +40,15 @@ def filter_container_tags(spark, query) -> DataFrame
 
 Filter container tags from the key-value-store table (narrow/EAV format).
 
-Reads the narrow-format key-value-store table, applies the per-table
-``column_name_mapping`` to rename physical columns to internal names,
-then applies the top-level ``project_id`` filter and any per-table
-``container_tags.filters``.  Pivots to wide format if tag filters
-are present.
+If no ``container_tags_table`` is configured on the database, this
+stage is a no-op and an empty DataFrame is returned: the solver is
+operating on a wide-only data model (no narrow container_tags table).
+
+Otherwise, reads the narrow-format key-value-store table, applies the
+per-table ``column_name_mapping`` to rename physical columns to
+internal names, then applies the top-level ``project_id`` filter
+and any per-table ``container_tags.filters``.  Pivots to wide format
+if tag filters are present.
 
 **Arguments**:
 
@@ -49,6 +58,7 @@ are present.
 **Returns**:
 
 `DataFrame`: A DataFrame containing the filtered container_ids.
+If no ``container_tags_table`` is configured, an empty DataFrame.
 If no tag filters are present, returns distinct container_ids.
 Otherwise, returns pivoted data with filter expressions applied.
 
@@ -70,6 +80,10 @@ applies the top-level ``project_id`` filter, any per-table
 extracted from the query.  Finally, inner-joins the result with the
 tag-filtered container DataFrame.
 
+If no ``container_tags_table`` is configured on the database, the
+join with ``container_df`` is skipped: stage 1 produced no
+container IDs because no narrow tag table exists.
+
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
@@ -83,6 +97,44 @@ replaces the read from ``query.db.container_metrics``.
 
 `pyspark.sql.DataFrame`: Filtered container metrics with all original columns preserved.
 Deduplicated by ``container_id``.
+
+#### filter\_channel\_tags
+
+```python
+def filter_channel_tags(spark, db, container_df, selectors) -> DataFrame
+```
+
+Pass through container DataFrame.
+
+**Arguments**:
+
+- `spark` (`SparkSession`): Spark session used for query execution.
+- `db` (`MeasurementDB`): Measurement database for table access.
+- `container_df` (`pyspark.sql.DataFrame`): DataFrame containing container information.
+- `selectors` (`list[TimeSeriesSelector]`): Non-aliased selectors (unused by this solver).
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: The input container DataFrame.
+
+#### filter\_channel\_metrics
+
+```python
+def filter_channel_metrics(spark, db, container_df, selectors) -> DataFrame
+```
+
+Filter channels by metrics and required tags.
+
+**Arguments**:
+
+- `spark` (`SparkSession`): Spark session used for query execution.
+- `db` (`MeasurementDB`): Measurement database for table access.
+- `container_df` (`pyspark.sql.DataFrame`): DataFrame containing container information.
+- `selectors` (`list[TimeSeriesSelector]`): Non-aliased (direct) selectors.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: DataFrame with ``(container_id, channel_id, selector_ids)``.
 
 #### filter\_aliased\_channel\_metrics
 
@@ -128,4 +180,23 @@ Union direct and aliased channel metrics, combining selector_ids.
 **Returns**:
 
 `pyspark.sql.DataFrame`: Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
+
+#### solve
+
+```python
+def solve(query, channels_df, selections, dtypes) -> DataFrame
+```
+
+Solve the query by grouping channels and applying selections.
+
+**Arguments**:
+
+- `query` (`QueryBuilder`): Query object containing database and filter information.
+- `channels_df` (`pyspark.sql.DataFrame`): DataFrame containing channel information.
+- `selections` (`list`): List of selection expressions to apply.
+- `dtypes` (`list`): List of data types for each selection.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: DataFrame containing results for each container.
 

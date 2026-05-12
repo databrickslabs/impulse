@@ -7,10 +7,9 @@ title: Data Model
 :::caution Prerequisite
 
 The schema described on this page is what Impulse's **default solvers**
-(`DeltaSolver`, `BasicNarrowSolver`, `KeyValueStoreSolver`) expect from your
-silver layer. **Landing your data in this shape during ingest is the
-simplest and most maintainable path** — see the
-[Ingestion guide](ingestion.md).
+(`DeltaSolver`, `KeyValueStoreSolver`) expect from your silver layer.
+**Landing your data in this shape during ingest is the simplest and
+most maintainable path** — see the [Ingestion guide](ingestion.md).
 
 Advanced deployments with existing data layouts they cannot or do not want
 to reshape can adapt by passing a `SolverConfig` to remap column names, or

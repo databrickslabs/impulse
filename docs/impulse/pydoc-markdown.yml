@@ -17,7 +17,6 @@ loaders:
       - mda_query_engine.analyze.metadata.metric_expression
       - mda_query_engine.analyze.query.aggregations.statistic_type
       - mda_query_engine.analyze.query.solvers.delta_solver
-      - mda_query_engine.analyze.query.solvers.basic_narrow_solver
       - mda_query_engine.analyze.query.solvers.key_value_store_solver
       - mda_query_engine.analyze.query.solvers.solver_config
       - mda_query_engine.analyze.query.solvers.query_solver
@@ -27,7 +26,7 @@ loaders:
 
 processors:
   - type: filter
-    expression: "obj.__class__.__name__ != 'Indirection' and getattr(obj, 'name', None) not in ['Histogram', 'Histogram2D', 'TagExpression', 'MetricExpression', 'TimeSeriesExpression', 'DeltaTimeSeriesCache', 'BasicNarrowTimeSeriesCache', 'RequiresDeserialization'] and default()"
+    expression: "obj.__class__.__name__ != 'Indirection' and getattr(obj, 'name', None) not in ['Histogram', 'Histogram2D', 'TagExpression', 'MetricExpression', 'TimeSeriesExpression', 'DeltaTimeSeriesCache', 'KVSTimeSeriesCache', 'RequiresDeserialization'] and default()"
     documented_only: true
     exclude_private: true
     exclude_special: true

@@ -205,12 +205,12 @@ How it gets wired in depends on which solver you use:
 
 - **`KeyValueStoreSolver`** — set `query_engine.solver_config` in your
   report config. The `Report` factory passes it through automatically.
-- **`BasicNarrowSolver` / `DeltaSolver`** — both constructors accept a
-  `SolverConfig`, but the `Report` factory does **not** forward
-  `query_engine.solver_config` to them. If you need column-name remapping
-  for these solvers you have to instantiate them yourself and pass the
-  instance into `query.solve(solver=my_solver)` rather than going through
-  the config-driven `Report` path.
+- **`DeltaSolver`** — its constructor accepts a `SolverConfig`, but the
+  `Report` factory does **not** forward `query_engine.solver_config` to
+  it. If you need column-name remapping for `DeltaSolver` you have to
+  instantiate it yourself and pass the instance into
+  `query.solve(solver=my_solver)` rather than going through the
+  config-driven `Report` path.
 
 Trade-off either way: this gives you naming flexibility and per-table
 scoping filters without writing code, but the underlying tables must

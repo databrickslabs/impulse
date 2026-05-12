@@ -121,7 +121,6 @@ Enumeration of available solver types for the query engine.
 
 **Arguments**:
 
-- `BASIC_NARROW_SOLVER` (`str`): None
 - `DELTA_SOLVER` (`str`): None
 - `KEY_VALUE_STORE_SOLVER` (`str`): None
 
@@ -136,7 +135,9 @@ Configuration for data source tables in Unity Catalog.
 **Arguments**:
 
 - `container_tags_table` (`str`): Full Unity Catalog path to the container tags table (narrow/EAV format).
-Required when using KeyValueStoreSolver.
+Required when filtering by container tags or scoping by ``project_id``
+on the narrow/EAV data model. Omit for wide-only data models that
+carry container attributes as columns on ``container_metrics``.
 - `container_metrics_table` (`str`): Full Unity Catalog path to the container metrics table.
 - `channel_metrics_table` (`str`): Full Unity Catalog path to the channel metrics table.
 - `channels_uri` (`str`): Full Unity Catalog path to the channels data table.
@@ -233,29 +234,22 @@ Configuration for the query engine solver.
 
 **Arguments**:
 
-- `solver` (`Solvers, default=Solvers.BASIC_NARROW_SOLVER`): The solver type to use for query execution.
+- `solver` (`Solvers, default=Solvers.KEY_VALUE_STORE_SOLVER`): The solver type to use for query execution.
 - `solver_config` (`SolverConfig`): Per-table column name mappings and filter configuration for
 the solver.  Use this when your silver-layer tables use
 non-default column names or when you need project/toolbox
 scoping.  Key sub-fields:
 
 - ``project_id`` (str): Top-level project filter value applied
-  to container_tags and channel_mapping tables.
-- Per-table sections (``container_tags``, ``channel_mapping``,
-  ``channels``, etc.) each with ``column_name_mapping`` and
-  ``filters`` dicts.
+  to container_tags, container_metrics, and channel_mapping
+  tables when the corresponding columns exist after column
+  renaming.
+- Per-table sections (``container_tags``, ``container_metrics``,
+  ``channel_mapping``, ``channels``, etc.) each with
+  ``column_name_mapping`` and ``filters`` dicts.
 
 When omitted, all default column names are used and no
 project/toolbox filtering is applied.
-
-#### validate\_project\_id\_for\_key\_value\_store\_solver
-
-```python
-def validate_project_id_for_key_value_store_solver()
-```
-
-Validate that project_id is provided when using KeyValueStoreSolver.
-
 
 #### validate\_drop\_implausible\_data\_requires\_raw
 
@@ -302,7 +296,7 @@ Attributes
  container_filters : ContainerFilters, optional
      Optional container-level filters (tag-based and/or metric-based).
  query_engine : QueryEngine, optional
-     Optional query engine configuration. Defaults to Solvers.BASIC_NARROW_SOLVER.
+     Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
  incremental : IncrementalConfig, optional
      Optional incremental processing configuration. Defaults to IncrementalConfig().
  measurement_dimensions : list of MeasurementDimensions, optional
@@ -359,14 +353,5 @@ Attributes
  ...     }
  ... }
  >>> config = MdaConfig.model_validate(config_data)
-
-
-#### validate\_container\_tags\_for\_key\_value\_store\_solver
-
-```python
-def validate_container_tags_for_key_value_store_solver()
-```
-
-Validate that container_tags_table is provided when using KeyValueStoreSolver.
 
 

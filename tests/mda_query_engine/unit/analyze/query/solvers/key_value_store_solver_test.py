@@ -15,7 +15,6 @@ Covers:
 """
 
 import pyspark.sql.functions as F
-import pyspark.sql.functions as F
 import pytest
 from pyspark.sql import SparkSession
 
@@ -37,16 +36,6 @@ def _default_cfg(project_id: str = "SAMPLE_PROJECT", **table_overrides) -> Solve
     container_tags = table_overrides.pop(
         "container_tags",
         TableConfig(column_name_mapping={"element_id": "key"}),
-    )
-    container_metrics = table_overrides.pop(
-        "container_metrics",
-        TableConfig(column_name_mapping={"project": "project_id"}),
-    )
-    return SolverConfig(
-        project_id=project_id,
-        container_tags=container_tags,
-        container_metrics=container_metrics,
-        **table_overrides,
     )
     container_metrics = table_overrides.pop(
         "container_metrics",

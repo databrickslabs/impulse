@@ -11,7 +11,7 @@ tables (EAV key-value pairs) and metric tables (pre-computed statistics).
 
 The five tables and columns on this page describe the **typical
 default-solver shape** — what Impulse's default solvers
-(`DeltaSolver`, `BasicNarrowSolver`, `KeyValueStoreSolver`) expect when
+(`DeltaSolver`, `KeyValueStoreSolver`) expect when
 no [`SolverConfig`](../config/configuration.md#solver-column-mappings-and-filters)
 overrides are applied. The framework hard-requires only a small subset of this shape:
 

@@ -24,7 +24,6 @@
                 },
                 {
                   "items": [
-                    "references/api/mda_query_engine/analyze/query/solvers/basic_narrow_solver",
                     "references/api/mda_query_engine/analyze/query/solvers/delta_solver",
                     "references/api/mda_query_engine/analyze/query/solvers/key_value_store_solver",
                     "references/api/mda_query_engine/analyze/query/solvers/query_solver",
