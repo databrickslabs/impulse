@@ -135,9 +135,12 @@ Configuration for data source tables in Unity Catalog.
 **Arguments**:
 
 - `container_tags_table` (`str`): Full Unity Catalog path to the container tags table (narrow/EAV format).
-Required when filtering by container tags or scoping by ``project_id``
-on the narrow/EAV data model. Omit for wide-only data models that
-carry container attributes as columns on ``container_metrics``.
+Required when filtering by container tags. Omit for wide-only data
+models that carry container attributes as columns on
+``container_metrics``. ``project_id`` scoping is independent of this
+field — it works in both narrow EAV and wide-only data models because
+it is applied to ``container_metrics`` (and ``channel_mapping`` if
+configured) regardless of whether ``container_tags_table`` is set.
 - `container_metrics_table` (`str`): Full Unity Catalog path to the container metrics table.
 - `channel_metrics_table` (`str`): Full Unity Catalog path to the channel metrics table.
 - `channels_uri` (`str`): Full Unity Catalog path to the channels data table.

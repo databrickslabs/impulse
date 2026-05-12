@@ -257,8 +257,8 @@ def test_mda_config_key_value_store_solver_valid():
 def test_mda_config_key_value_store_solver_no_project_id_accepted():
     """KeyValueStoreSolver accepts configs without project_id.
 
-    project_id is only applied when present (the solver also operates on
-    wide-only data models that don't need project scoping).
+    project_id is optional in all data models; when present the solver
+    applies it as an equality filter, when absent it is simply not used.
     """
     config_json = MDA_CONFIG_JSON.copy()
     config_json["query_engine"] = {"solver": "KeyValueStoreSolver"}

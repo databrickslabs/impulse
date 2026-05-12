@@ -135,7 +135,7 @@ Two independent filter families:
 | `data_type`             | `str`          | `"RLE"`                  | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to RLE before aggregation).                      |
 | `drop_implausible_data` | `bool`         | `false`                  | When `true`, drops `channels` rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
 | `batch_size`            | `int`          | `500`                    | Maximum number of selectors solved per batch.                                                                               |
-| `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` when you want `KeyValueStoreSolver` to scope reads by project; omit it for wide-only data models. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
+| `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` to scope reads by project — it is applied to `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured), so it works in both narrow EAV and wide-only data models. Omit it when you don't need project scoping. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
 
 If `query_engine` is omitted, the default is `KeyValueStoreSolver` with
 `data_type = "RLE"`.
