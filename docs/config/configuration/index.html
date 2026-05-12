@@ -3,119 +3,492 @@
 <head>
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
-<title data-rh="true">Configuration | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/config/configuration"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Configuration | Impulse"><meta data-rh="true" name="description" content="MdaConfig allows you to configure the generated report by Impulse."><meta data-rh="true" property="og:description" content="MdaConfig allows you to configure the generated report by Impulse."><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/config/configuration"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/config/configuration" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/config/configuration" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Configuration","item":"https://databrickslabs.github.io/impulse/docs/config/configuration"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.98a9bbe2.css">
-<script src="/impulse/assets/js/runtime~main.11323728.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.950fcd8a.js" defer="defer"></script>
+<title data-rh="true">Configuration | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/config/configuration"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Configuration | Impulse"><meta data-rh="true" name="description" content="MdaConfig configures everything about a report: the silver-layer input"><meta data-rh="true" property="og:description" content="MdaConfig configures everything about a report: the silver-layer input"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/config/configuration"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/config/configuration" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/config/configuration" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Configuration","item":"https://databrickslabs.github.io/impulse/docs/config/configuration"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.af145ca1.css">
+<script src="/impulse/assets/js/runtime~main.34308f10.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.5140b4c5.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
 <symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
 </defs></svg>
-<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||"dark"),document.documentElement.setAttribute("data-theme-choice",t||"dark")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><link rel="preload" as="image" href="/impulse/img/impulse_icon.svg"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/impulse/"><div class="navbar__logo"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--light_NVdE"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--dark_xIcU"></div><b class="navbar__title text--truncate">Impulse</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/impulse/docs/motivation">Docs</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div><a href="https://github.com/databrickslabs/impulse" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link header-github-link" aria-label="GitHub repository"></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0"><div class="docsWrapper_hBAB"><button aria-label="Scroll back to top" class="clean-btn theme-back-to-top-button backToTopButton_sjWU" type="button"></button><div class="docRoot_UBD9"><aside class="theme-doc-sidebar-container docSidebarContainer_YfHR"><div class="sidebarViewport_aRkj"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/motivation"><span title="Motivation" class="linkLabel_WmDU">Motivation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/impulse/docs/config/configuration"><span title="Configuration" class="linkLabel_WmDU">Configuration</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/data_model/"><span title="Data Model" class="categoryLinkLabel_W154">Data Model</span></a><button aria-label="Expand sidebar category &#x27;Data Model&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/references/"><span title="Reference" class="categoryLinkLabel_W154">Reference</span></a><button aria-label="Expand sidebar category &#x27;Reference&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/demo"><span title="Demo" class="linkLabel_WmDU">Demo</span></a></li></ul></nav></div></div></aside><main class="docMainContainer_TBSr"><div class="container padding-top--md padding-bottom--lg"><div class="row"><div class="col docItemCol_VOVn"><div class="docItemContainer_Djhp"><article><nav class="theme-doc-breadcrumbs breadcrumbsContainer_Z_bl" aria-label="Breadcrumbs"><ul class="breadcrumbs"><li class="breadcrumbs__item"><a aria-label="Home page" class="breadcrumbs__link" href="/impulse/"><svg viewBox="0 0 24 24" class="breadcrumbHomeIcon_YNFT"><path d="M10 19v-5h4v5c0 .55.45 1 1 1h3c.55 0 1-.45 1-1v-7h1.7c.46 0 .68-.57.33-.87L12.67 3.6c-.38-.34-.96-.34-1.34 0l-8.36 7.53c-.34.3-.13.87.33.87H5v7c0 .55.45 1 1 1h3c.55 0 1-.45 1-1z" fill="currentColor"></path></svg></a></li><li class="breadcrumbs__item breadcrumbs__item--active"><span class="breadcrumbs__link">Configuration</span></li></ul></nav><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_ITEo"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><div class="theme-doc-markdown markdown"><header><h1>Configuration</h1></header>
-<p><code>MdaConfig</code> allows you to configure the generated report by Impulse.
-It allows you to specify data sources, output sinks, container filters, and the query engine solver.</p>
-<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="configuration-fields">Configuration Fields<a href="#configuration-fields" class="hash-link" aria-label="Direct link to Configuration Fields" title="Direct link to Configuration Fields" translate="no">​</a></h2>
-<ul>
-<li class="">
-<p><strong>source</strong> (<code>Source</code>):
-Configuration for input data tables.</p>
-<ul>
-<li class=""><code>container_metrics_table</code> (str, required): Full Unity Catalog path (e.g., <code>catalog.schema.table</code>).</li>
-<li class=""><code>channel_metrics_table</code> (str, required): Full Unity Catalog path.</li>
-<li class=""><code>channels_uri</code> (str, required): Full Unity Catalog path for the channels table.</li>
-<li class=""><code>container_tags_table</code> (str, optional): Full Unity Catalog path to the container tags table. Required when using <code>DeltaSolver</code> with tag filters or <code>KeyValueStoreSolver</code>.</li>
-<li class=""><code>channel_tags_table</code> (str, optional): Full Unity Catalog path to the channel tags table. Used by <code>DeltaSolver</code> for tag-based channel selection.</li>
-</ul>
-</li>
-<li class="">
-<p><strong>unity_sink</strong> (<code>UnitySink</code>):
-Configuration for output data location.</p>
-<ul>
-<li class=""><code>catalog</code> (str): Target catalog name.</li>
-<li class=""><code>schema</code> (str): Target schema name.</li>
-<li class=""><code>table_prefix</code> (str): Prefix for output tables.</li>
-</ul>
-</li>
-<li class="">
-<p><strong>container_filters</strong> (<code>ContainerFilters</code>, optional):
-Restricts the set of processed containers. Filters are expressed in <strong>disjunctive normal form</strong> (OR of ANDs): each inner list is AND-combined; the outer list is OR-combined.</p>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||"dark"),document.documentElement.setAttribute("data-theme-choice",t||"dark")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><link rel="preload" as="image" href="/impulse/img/impulse_icon.svg"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/impulse/"><div class="navbar__logo"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--light_NVdE"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--dark_xIcU"></div><b class="navbar__title text--truncate">Impulse</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/impulse/docs/motivation">Docs</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div><a href="https://github.com/databrickslabs/impulse" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link header-github-link" aria-label="GitHub repository"></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0"><div class="docsWrapper_hBAB"><button aria-label="Scroll back to top" class="clean-btn theme-back-to-top-button backToTopButton_sjWU" type="button"></button><div class="docRoot_UBD9"><aside class="theme-doc-sidebar-container docSidebarContainer_YfHR"><div class="sidebarViewport_aRkj"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/motivation"><span title="Motivation" class="linkLabel_WmDU">Motivation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/impulse/docs/config/configuration"><span title="Configuration" class="linkLabel_WmDU">Configuration</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/getting_started"><span title="Getting Started" class="linkLabel_WmDU">Getting Started</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/data_model/"><span title="Data Model" class="categoryLinkLabel_W154">Data Model</span></a><button aria-label="Expand sidebar category &#x27;Data Model&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/references/"><span title="Reference" class="categoryLinkLabel_W154">Reference</span></a><button aria-label="Expand sidebar category &#x27;Reference&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/tutorial"><span title="Tutorials" class="categoryLinkLabel_W154">Tutorials</span></a><button aria-label="Expand sidebar category &#x27;Tutorials&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li></ul></nav></div></div></aside><main class="docMainContainer_TBSr"><div class="container padding-top--md padding-bottom--lg"><div class="row"><div class="col docItemCol_VOVn"><div class="docItemContainer_Djhp"><article><nav class="theme-doc-breadcrumbs breadcrumbsContainer_Z_bl" aria-label="Breadcrumbs"><ul class="breadcrumbs"><li class="breadcrumbs__item"><a aria-label="Home page" class="breadcrumbs__link" href="/impulse/"><svg viewBox="0 0 24 24" class="breadcrumbHomeIcon_YNFT"><path d="M10 19v-5h4v5c0 .55.45 1 1 1h3c.55 0 1-.45 1-1v-7h1.7c.46 0 .68-.57.33-.87L12.67 3.6c-.38-.34-.96-.34-1.34 0l-8.36 7.53c-.34.3-.13.87.33.87H5v7c0 .55.45 1 1 1h3c.55 0 1-.45 1-1z" fill="currentColor"></path></svg></a></li><li class="breadcrumbs__item breadcrumbs__item--active"><span class="breadcrumbs__link">Configuration</span></li></ul></nav><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_ITEo"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><div class="theme-doc-markdown markdown"><header><h1>Configuration</h1></header>
+<p><code>MdaConfig</code> configures everything about a report: the silver-layer input
+tables, the gold-layer output location, container-level filters, the
+query-engine solver, incremental processing, and which container columns
+get surfaced into the gold-layer measurement dimension. Configuration is
+defined as JSON (or an equivalent Python dictionary) and validated using
+Pydantic models. The canonical schema lives in
+<a href="https://github.com/databrickslabs/impulse/blob/main/src/mda_reporting/config/config_parser.py" target="_blank" rel="noopener noreferrer" class=""><code>src/mda_reporting/config/config_parser.py</code></a>.</p>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="quick-example">Quick example<a href="#quick-example" class="hash-link" aria-label="Direct link to Quick example" title="Direct link to Quick example" translate="no">​</a></h2>
+<div class="language-json codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-json codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;source&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;container_metrics_table&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog.silver.container_metrics&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;channel_metrics_table&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog.silver.channel_metrics&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;channels_uri&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog.silver.channels&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;container_tags_table&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog.silver.container_tags&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;channel_tags_table&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog.silver.channel_tags&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;unity_sink&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;catalog&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;schema&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;gold&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;table_prefix&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_report&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;query_engine&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;solver&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;DeltaSolver&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;data_type&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;RAW&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;container_filters&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;tag_filters&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">      </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"> </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;tag_name&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;uut_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;comparator&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;==&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;value&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;ABC123&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;cast_type&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;string&quot;</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">      </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;metric_filters&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">      </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"> </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;column_name&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;start_dt&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;comparator&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;&gt;=&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;value&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;2025-04-27T05:20:54.000Z&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;value_type&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;timestamp&quot;</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">      </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token property" style="color:hsl(355, 65%, 65%)">&quot;measurement_dimensions&quot;</span><span class="token operator" style="color:hsl(207, 82%, 66%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;vehicle_key&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;start_ts&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;stop_ts&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain"></span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><br></span></code></pre></div></div>
+<p>A configuration is passed to <code>Report</code> either as a Python <code>dict</code>
+(<code>config=...</code>) or as a JSON file path (<code>config_path=...</code>). Sinkless
+mode is also supported — see <a href="#sinkless-reports" class="">Sinkless reports</a>.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="source">source<a href="#source" class="hash-link" aria-label="Direct link to source" title="Direct link to source" translate="no">​</a></h2>
+<p>Maps the silver-layer input tables.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>container_metrics_table</code></td><td><code>str</code></td><td>Yes</td><td>Full Unity Catalog path. Container metadata (timestamps, duration).</td></tr><tr><td><code>channel_metrics_table</code></td><td><code>str</code></td><td>Yes</td><td>Full Unity Catalog path. Channel-level statistics.</td></tr><tr><td><code>channels_uri</code></td><td><code>str</code></td><td>Yes</td><td>Full Unity Catalog path. Time-series sample data.</td></tr><tr><td><code>container_tags_table</code></td><td><code>str</code></td><td>No</td><td>Full Unity Catalog path. Container EAV tags.</td></tr><tr><td><code>channel_tags_table</code></td><td><code>str</code></td><td>No</td><td>Full Unity Catalog path. Channel EAV tags.</td></tr><tr><td><code>channel_mapping_table</code></td><td><code>str</code></td><td>No</td><td>Full Unity Catalog path. Logical-to-physical channel alias table. Required when using <code>QueryBuilder.channel_with_alias()</code> (currently supported by <code>KeyValueStoreSolver</code>).</td></tr></tbody></table>
+<p>Tag tables are required for solvers that consume tag-based filters
+(<code>DeltaSolver</code> with tag filters, <code>KeyValueStoreSolver</code>).</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="unity_sink">unity_sink<a href="#unity_sink" class="hash-link" aria-label="Direct link to unity_sink" title="Direct link to unity_sink" translate="no">​</a></h2>
+<p>Defines where gold-layer tables are written.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>catalog</code></td><td><code>str</code></td><td>Yes</td><td>Target catalog name.</td></tr><tr><td><code>schema</code></td><td><code>str</code></td><td>Yes</td><td>Target schema name.</td></tr><tr><td><code>table_prefix</code></td><td><code>str</code></td><td>Yes</td><td>Prefix for all generated table names.</td></tr></tbody></table>
+<p>Output tables are named <code>{table_prefix}_{entity}</code> (e.g.
+<code>my_report_histogram_fact</code>).</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="sinkless-reports">Sinkless reports<a href="#sinkless-reports" class="hash-link" aria-label="Direct link to Sinkless reports" title="Direct link to Sinkless reports" translate="no">​</a></h3>
+<p><code>unity_sink</code> is optional. When omitted, the report runs in <strong>sinkless
+mode</strong>: <code>determine_report()</code> still computes events, aggregations, and
+container dimensions and exposes them on the report object, but
+<code>persist_results()</code> becomes a no-op. Useful for ad-hoc analysis,
+notebooks, and tests where writing to Unity Catalog is not desired.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="container_filters-optional">container_filters (optional)<a href="#container_filters-optional" class="hash-link" aria-label="Direct link to container_filters (optional)" title="Direct link to container_filters (optional)" translate="no">​</a></h2>
+<p>Restricts the set of processed containers. Filters are expressed in
+<strong>disjunctive normal form</strong> (OR of ANDs): each inner list is AND-combined,
+the outer list is OR-combined.</p>
 <p>Two independent filter families:</p>
 <ul>
-<li class="">
-<p><code>tag_filters</code> (<code>list[list[TagFilter]]</code>): applied on <code>container_tags_table</code>.</p>
+<li class=""><code>tag_filters</code> — applied on <code>container_tags_table</code> (EAV key/value model).</li>
+<li class=""><code>metric_filters</code> — applied on <code>container_metrics_table</code> (columnar model).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>tag_filters</code></td><td><code>list[list[TagFilter]]</code></td><td><code>[]</code></td><td>Tag-based filter groups (DNF).</td></tr><tr><td><code>metric_filters</code></td><td><code>list[list[MetricFilter]]</code></td><td><code>[]</code></td><td>Metric-based filter groups (DNF).</td></tr></tbody></table>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="tagfilter">TagFilter<a href="#tagfilter" class="hash-link" aria-label="Direct link to TagFilter" title="Direct link to TagFilter" translate="no">​</a></h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>tag_name</code></td><td><code>str</code></td><td>Yes</td><td>Tag key to filter on.</td></tr><tr><td><code>comparator</code></td><td><code>str</code></td><td>Yes</td><td>One of <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>.</td></tr><tr><td><code>value</code></td><td>any</td><td>Yes</td><td>Expected value. Must match <code>cast_type</code>.</td></tr><tr><td><code>cast_type</code></td><td><code>str</code></td><td>No</td><td><code>string</code> (default), <code>int</code>, <code>double</code>, or <code>timestamp</code> (ISO-format string).</td></tr></tbody></table>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="metricfilter">MetricFilter<a href="#metricfilter" class="hash-link" aria-label="Direct link to MetricFilter" title="Direct link to MetricFilter" translate="no">​</a></h3>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code>column_name</code></td><td><code>str</code></td><td>Yes</td><td>Column on <code>container_metrics_table</code> to filter on (e.g. <code>start_dt</code>, <code>stop_dt</code>). When <code>solver_config.container_metrics.column_name_mapping</code> is set, this refers to the <strong>internal</strong> name (after renaming).</td></tr><tr><td><code>comparator</code></td><td><code>str</code></td><td>Yes</td><td>One of <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>.</td></tr><tr><td><code>value</code></td><td>any</td><td>Yes</td><td>Expected value. Must match <code>value_type</code> when provided.</td></tr><tr><td><code>value_type</code></td><td><code>str</code></td><td>No</td><td>When provided, validates/converts the value: <code>string</code>, <code>int</code>, <code>double</code>, <code>timestamp</code>.</td></tr></tbody></table>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="query_engine-optional">query_engine (optional)<a href="#query_engine-optional" class="hash-link" aria-label="Direct link to query_engine (optional)" title="Direct link to query_engine (optional)" translate="no">​</a></h2>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>solver</code></td><td><code>str</code></td><td><code>&quot;BasicNarrowSolver&quot;</code></td><td>One of <code>&quot;BasicNarrowSolver&quot;</code>, <code>&quot;DeltaSolver&quot;</code>, <code>&quot;KeyValueStoreSolver&quot;</code>.</td></tr><tr><td><code>data_type</code></td><td><code>str</code></td><td><code>&quot;RLE&quot;</code></td><td><code>&quot;RLE&quot;</code> (intervals <code>[tstart, tend)</code>) or <code>&quot;RAW&quot;</code> (raw timestamps; converted to RLE before aggregation).</td></tr><tr><td><code>drop_implausible_data</code></td><td><code>bool</code></td><td><code>false</code></td><td>When <code>true</code>, drops <code>channels</code> rows where <code>is_plausible = false</code>. Requires <code>data_type = &quot;RAW&quot;</code>; combining with <code>&quot;RLE&quot;</code> raises a validation error.</td></tr><tr><td><code>batch_size</code></td><td><code>int</code></td><td><code>500</code></td><td>Maximum number of selectors solved per batch.</td></tr><tr><td><code>solver_config</code></td><td><code>SolverConfig</code></td><td><code>null</code></td><td>Per-table column mappings, per-table equality filters, and project scoping. Required (<code>project_id</code> field) when <code>solver = &quot;KeyValueStoreSolver&quot;</code>. See <a href="#solver-column-mappings-and-filters" class="">Solver column mappings and filters</a>.</td></tr></tbody></table>
+<p>If <code>query_engine</code> is omitted, the default is <code>BasicNarrowSolver</code> with
+<code>data_type = &quot;RLE&quot;</code>.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="solver-column-mappings-and-filters">Solver column mappings and filters<a href="#solver-column-mappings-and-filters" class="hash-link" aria-label="Direct link to Solver column mappings and filters" title="Direct link to Solver column mappings and filters" translate="no">​</a></h2>
+<p>The framework references columns by a fixed set of <strong>internal names</strong> (e.g. <code>container_id</code>, <code>channel_id</code>,
+<code>tstart</code>, <code>tend</code>, <code>value</code>). When your silver-layer tables use different physical names, declare the mapping
+in <code>solver_config</code> so the solver renames each table&#x27;s columns at read time.</p>
+<p><code>SolverConfig</code> has one section per silver table. Each section is a <code>TableConfig</code> with two fields:</p>
 <ul>
-<li class=""><code>tag_name</code> (str): Tag key to filter on.</li>
-<li class=""><code>comparator</code> (str): One of <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>.</li>
-<li class=""><code>value</code> (str | int | float): Expected value; must match <code>cast_type</code>.</li>
-<li class=""><code>cast_type</code> (str, optional): <code>string</code> (default), <code>int</code>, <code>double</code>, or <code>timestamp</code> (ISO-format string).</li>
+<li class=""><code>column_name_mapping</code> (<code>dict[str, str]</code>): <code>{ &quot;physical_column&quot;: &quot;internal_column&quot; }</code>. The mapping is
+applied <strong>once</strong>, when the table is read. All downstream processing (filters, joins, aggregations) uses
+the internal names.</li>
+<li class=""><code>filters</code> (<code>dict[str, str]</code>): equality filters applied <strong>after</strong> renaming. Keys are internal column
+names; values are literals to match. Useful for project/toolbox scoping where a single value should
+always be enforced.</li>
 </ul>
-</li>
-<li class="">
-<p><code>metric_filters</code> (<code>list[list[MetricFilter]]</code>): applied on <code>container_metrics_table</code>.</p>
+<p>Top-level fields on <code>SolverConfig</code>:</p>
 <ul>
-<li class=""><code>column_name</code> (str): Column on <code>container_metrics_table</code> (e.g. <code>start_dt</code>, <code>stop_dt</code>, <code>uut_id</code>).</li>
-<li class=""><code>comparator</code> (str): One of <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>.</li>
-<li class=""><code>value</code> (str | int | float): Expected value.</li>
-<li class=""><code>value_type</code> (str, optional): <code>string</code>, <code>int</code>, <code>double</code>, or <code>timestamp</code> — when provided, validates/converts the value.</li>
+<li class=""><code>project_id</code> (str, optional): Required when <code>solver = &quot;KeyValueStoreSolver&quot;</code>. Applied as a filter
+on the <code>project_id</code> column of <code>container_tags</code> and <code>channel_mapping</code>.</li>
 </ul>
-</li>
-</ul>
-</li>
-<li class="">
-<p><strong>query_engine</strong> (<code>QueryEngine</code>, optional):
-Query engine configuration.</p>
+<p>Per-table sections (each a <code>TableConfig</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Section</th><th>Used by</th><th>Typical mappings</th></tr></thead><tbody><tr><td><code>container_tags</code></td><td>DeltaSolver, KeyValueStoreSolver</td><td><code>entity_id → container_id</code>, custom EAV <code>key</code>/<code>value</code> columns</td></tr><tr><td><code>container_metrics</code></td><td>All solvers</td><td>Custom container_id column, custom timestamp columns</td></tr><tr><td><code>channel_tags</code></td><td>DeltaSolver</td><td>Tag key/value column renames</td></tr><tr><td><code>channel_metrics</code></td><td>All solvers</td><td>Custom channel_id column, custom value/timestamp columns</td></tr><tr><td><code>channel_mapping</code></td><td>KeyValueStoreSolver</td><td>Alias-table column renames; <code>priority</code> column</td></tr><tr><td><code>channels</code></td><td>All solvers</td><td>RLE column renames (<code>tstart</code>/<code>tend</code>/<code>value</code>)</td></tr></tbody></table>
+<p>Internal column names that mappings can target:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Container identifier</td></tr><tr><td><code>channel_id</code></td><td>Channel identifier</td></tr><tr><td><code>tstart</code>, <code>tend</code></td><td>Sample interval start/end (RLE)</td></tr><tr><td><code>value</code></td><td>Sample value (or attribute value on the EAV tag table)</td></tr><tr><td><code>key</code></td><td>Attribute key on the EAV <code>container_tags</code> table</td></tr><tr><td><code>priority</code></td><td>Tie-breaker column on the <code>channel_mapping</code> table</td></tr><tr><td><code>project_id</code></td><td>Project scoping column</td></tr><tr><td><code>parent_id</code></td><td>Parent/scope identifier</td></tr></tbody></table>
+<div class="theme-admonition theme-admonition-caution admonition_xJq3 alert alert--warning"><div class="admonitionHeading_Gvgb"><span class="admonitionIcon_Rf37"><svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path></svg></span>Wiring caveat</div><div class="admonitionContent_BuS1"><p>When a report is built from config (the standard <code>Report(config=...)</code> /
+<code>Report(config_path=...)</code> path), <code>solver_config</code> is read from
+<code>query_engine.solver_config</code> and <strong>only passed to
+<code>KeyValueStoreSolver</code></strong>. The <code>Report</code> factory does not forward it to
+<code>BasicNarrowSolver</code> or <code>DeltaSolver</code>, so <code>solver_config</code> in your JSON
+config is silently ignored for those two solvers.</p><p><code>BasicNarrowSolver</code> and <code>DeltaSolver</code> themselves accept a <code>SolverConfig</code>
+in their constructors — but you have to instantiate them yourself and
+pass the solver instance into <code>query.solve(solver=...)</code> rather than
+relying on the config-driven factory.</p></div></div>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="example-keyvaluestoresolver-with-renamed-columns-and-per-table-filters">Example: KeyValueStoreSolver with renamed columns and per-table filters<a href="#example-keyvaluestoresolver-with-renamed-columns-and-per-table-filters" class="hash-link" aria-label="Direct link to Example: KeyValueStoreSolver with renamed columns and per-table filters" title="Direct link to Example: KeyValueStoreSolver with renamed columns and per-table filters" translate="no">​</a></h3>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;query_engine&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;solver&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;KeyValueStoreSolver&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;solver_config&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;project_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_project&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_tags&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;column_name_mapping&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;entity_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;filters&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;parent_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_parent_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_metrics&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;column_name_mapping&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;start_dt&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;tstart&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;stop_dt&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;tend&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;channel_metrics&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;column_name_mapping&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;channel_mapping&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;column_name_mapping&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;filters&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;toolbox_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_toolbox&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;channels&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;column_name_mapping&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain"></span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><br></span></code></pre></div></div>
+<p>Sections you don&#x27;t customize can be omitted; defaults are an empty mapping and no filters.</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="when-to-use-what">When to use what<a href="#when-to-use-what" class="hash-link" aria-label="Direct link to When to use what" title="Direct link to When to use what" translate="no">​</a></h3>
 <ul>
-<li class=""><code>solver</code> (<code>Solvers</code>): Solver type. Defaults to <code>BASIC_NARROW_SOLVER</code>. Accepted values: <code>BASIC_NARROW_SOLVER</code>, <code>DELTA_SOLVER</code>, <code>KEY_VALUE_STORE_SOLVER</code>.</li>
-<li class=""><code>data_type</code> (<code>DataType</code>, optional): The format of the channel data. Defaults to <code>RLE</code>. Accepted values:<!-- -->
-<ul>
-<li class=""><code>RLE</code>: Channel data is pre-encoded with Run-Length Encoding (intervals with <code>tstart</code>/<code>tend</code>).</li>
-<li class=""><code>RAW</code>: Channel data contains raw timestamps (a <code>timestamp</code> column). The framework automatically converts it to RLE interval format before joins and aggregations.</li>
+<li class=""><strong><code>solver_config.&lt;table&gt;.column_name_mapping</code></strong> — your silver-layer column is named differently from
+the framework&#x27;s internal name (e.g. <code>entity_id</code> instead of <code>container_id</code>).</li>
+<li class=""><strong><code>container_filters.tag_filters</code> / <code>metric_filters</code></strong> — choose which containers participate in this
+particular run (supports comparators, OR/AND combinations, and type casting). Refer to internal column
+names when <code>solver_config</code> rewrites them.</li>
 </ul>
-</li>
-<li class=""><code>drop_implausible_data</code> (bool, optional): Whether to drop implausible data points before processing. Defaults to <code>false</code>. If <code>true</code>, data points marked as implausible (via the <code>is_plausible</code> column) will be dropped. <strong>Only takes effect when <code>data_type = RAW</code></strong>: the filter is applied during the RAW -&gt; RLE conversion path. Combining <code>drop_implausible_data=true</code> with <code>data_type=RLE</code> raises a validation error.</li>
-<li class=""><code>project_id</code> (str, optional): Required when <code>solver = KEY_VALUE_STORE_SOLVER</code>. Used to isolate entities belonging to a specific project in concept-entities tables.</li>
-<li class=""><code>parent_id</code> (str, optional): Optional parent-entity filter on the concept-entities table (KVS solver only), e.g. <code>&quot;uut_concept&quot;</code>. Default <code>null</code>.</li>
-<li class=""><code>entity_maps_to</code> (str, optional): How <code>entity_id</code> in concept-entities maps to <code>container_metrics</code>. <code>&quot;uut_id&quot;</code> (default, 1-to-many vehicle→files) or <code>&quot;container_id&quot;</code> (1-to-1 file mapping).</li>
-<li class=""><code>solver_config</code> (<code>SolverConfig</code>, optional): Column-name overrides for custom silver schemas. Fields: <code>container_id_col</code>, <code>channel_id_cols</code>, <code>channel_data_mapping</code>, <code>container_meta_data_mapping</code>, <code>entity_id_col</code>, <code>parent_id_col</code>.</li>
-</ul>
-</li>
-<li class="">
-<p><strong>incremental</strong> (<code>IncrementalConfig</code>, optional):
-Incremental processing configuration. When <code>enabled</code> is <code>false</code> (default), every run reprocesses all matching containers in full. When <code>enabled</code> is <code>true</code>, <code>Report.determine_report()</code> reuses results from prior runs for unchanged definitions and only reprocesses containers that are new or have been updated in silver.</p>
-<ul>
-<li class=""><code>enabled</code> (bool): Whether incremental processing is on. Defaults to <code>false</code>.</li>
-<li class=""><code>silver_last_modified_column</code> (str): Silver-side column used to detect container updates. Defaults to <code>&quot;timestamp&quot;</code>.</li>
-<li class=""><code>gold_last_modified_column</code> (str): Gold-side column used to detect prior-run freshness. Defaults to <code>&quot;_created_at&quot;</code>.</li>
-</ul>
-</li>
-<li class="">
-<p><strong>measurement_dimensions</strong> (<code>list[str]</code>, optional):
-List of measurement dimension column names to include in the gold layer.
-Defaults to:</p>
-<ul>
-<li class=""><code>container_id</code></li>
-<li class=""><code>vehicle_key</code></li>
-<li class=""><code>start_ts</code></li>
-<li class=""><code>stop_ts</code></li>
-</ul>
-<p>Each entry should be a string matching a supported measurement dimension.
-Supported values:</p>
-<ul>
-<li class=""><code>container_id</code></li>
-<li class=""><code>uut_id</code></li>
-<li class=""><code>project_id</code></li>
-<li class=""><code>vehicle_key</code></li>
-<li class=""><code>file_name</code></li>
-<li class=""><code>source_file_path</code></li>
-<li class=""><code>start_ts</code></li>
-<li class=""><code>stop_ts</code></li>
-<li class=""><code>environment</code></li>
-</ul>
-</li>
-</ul>
-<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="example">Example<a href="#example" class="hash-link" aria-label="Direct link to Example" title="Direct link to Example" translate="no">​</a></h2>
-<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">config_data </span><span class="token operator" style="color:hsl(207, 82%, 66%)">=</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;source&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_metrics_table&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog.silver.container_metric&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;channel_metrics_table&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog.silver.channel_metric&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;channels_uri&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog.silver.channel_data&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;unity_sink&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;catalog&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;my_catalog&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;schema&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;silver_refactored&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;table_prefix&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;evaluation&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token comment" style="color:hsl(220, 10%, 40%)"># (uut_id == &quot;AA&quot; AND container_id &gt;= 100) OR uut_id == &quot;BB&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token comment" style="color:hsl(220, 10%, 40%)"># AND metric start_ts &gt;= 2025-01-01</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_filters&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;tag_filters&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">                </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;tag_name&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;uut_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;comparator&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;==&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;value&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;AA&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;cast_type&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;string&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">                </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;tag_name&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;comparator&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;&gt;=&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;value&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token number" style="color:hsl(29, 54%, 61%)">100</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;cast_type&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;int&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">                </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;tag_name&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;uut_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;comparator&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;==&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;value&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;BB&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;cast_type&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;string&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;metric_filters&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">                </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;column_name&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;start_ts&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;comparator&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;&gt;=&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;value&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;2025-01-01&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">            </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;query_engine&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;solver&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;BASIC_NARROW_SOLVER&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;data_type&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;RAW&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;measurement_dimensions&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;vehicle_key&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;start_ts&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">        </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;stop_ts&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain"></span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">}</span><br></span></code></pre></div></div>
-<p>If <code>query_engine</code> is omitted, it defaults to <code>BASIC_NARROW_SOLVER</code> with <code>data_type</code> set to <code>RLE</code>.
-We support providing the configuration as a dictionary or as a JSON file path.</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/config/configuration.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/motivation"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Motivation</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/data_model/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Data Model</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#configuration-fields" class="table-of-contents__link toc-highlight">Configuration Fields</a></li><li><a href="#example" class="table-of-contents__link toc-highlight">Example</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="incremental-optional">incremental (optional)<a href="#incremental-optional" class="hash-link" aria-label="Direct link to incremental (optional)" title="Direct link to incremental (optional)" translate="no">​</a></h2>
+<p>Incremental processing reuses results from prior runs for unchanged
+definitions and reprocesses only containers that are new or have been
+updated in silver. See the
+<a class="" href="/impulse/docs/references/report#incremental-processing">Report reference</a> for
+mode-resolution rules and what counts as a definition change.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>enabled</code></td><td><code>bool</code></td><td><code>false</code></td><td>Turns incremental processing on.</td></tr><tr><td><code>silver_last_modified_column</code></td><td><code>str</code></td><td><code>&quot;timestamp&quot;</code></td><td>Silver-side column used to detect container updates.</td></tr><tr><td><code>gold_last_modified_column</code></td><td><code>str</code></td><td><code>&quot;_created_at&quot;</code></td><td>Gold-side column used to detect prior-run freshness.</td></tr></tbody></table>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="measurement_dimensions-optional">measurement_dimensions (optional)<a href="#measurement_dimensions-optional" class="hash-link" aria-label="Direct link to measurement_dimensions (optional)" title="Direct link to measurement_dimensions (optional)" translate="no">​</a></h2>
+<p>List of <code>container_metrics</code> columns to surface into the gold-layer
+<code>measurement_dimension</code> table.</p>
+<p><strong>Allowed values:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Value</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Container identifier.</td></tr><tr><td><code>uut_id</code></td><td>Unit-under-test identifier.</td></tr><tr><td><code>project_id</code></td><td>Project identifier.</td></tr><tr><td><code>vehicle_key</code></td><td>Vehicle identifier.</td></tr><tr><td><code>file_name</code></td><td>Source measurement file name.</td></tr><tr><td><code>source_file_path</code></td><td>Full path to the source file.</td></tr><tr><td><code>start_ts</code></td><td>Measurement start timestamp.</td></tr><tr><td><code>stop_ts</code></td><td>Measurement stop timestamp.</td></tr><tr><td><code>environment</code></td><td>Recording environment (e.g. PUMA, datalogger).</td></tr></tbody></table>
+<p><strong>Default:</strong></p>
+<div class="language-json codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-json codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token punctuation" style="color:hsl(220, 14%, 71%)">[</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;container_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;uut_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;file_name&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;source_file_path&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;start_ts&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;stop_ts&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;project_id&quot;</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;environment&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain"></span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">]</span><br></span></code></pre></div></div>
+<p>Pick the entries that match the columns actually present in your
+<code>container_metrics_table</code>. Columns referenced here must exist in your
+silver schema; columns that don&#x27;t appear here are ignored even if they
+exist in silver.</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/config/configuration.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/motivation"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Motivation</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/getting_started"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Getting Started</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#quick-example" class="table-of-contents__link toc-highlight">Quick example</a></li><li><a href="#source" class="table-of-contents__link toc-highlight">source</a></li><li><a href="#unity_sink" class="table-of-contents__link toc-highlight">unity_sink</a><ul><li><a href="#sinkless-reports" class="table-of-contents__link toc-highlight">Sinkless reports</a></li></ul></li><li><a href="#container_filters-optional" class="table-of-contents__link toc-highlight">container_filters (optional)</a><ul><li><a href="#tagfilter" class="table-of-contents__link toc-highlight">TagFilter</a></li><li><a href="#metricfilter" class="table-of-contents__link toc-highlight">MetricFilter</a></li></ul></li><li><a href="#query_engine-optional" class="table-of-contents__link toc-highlight">query_engine (optional)</a></li><li><a href="#solver-column-mappings-and-filters" class="table-of-contents__link toc-highlight">Solver column mappings and filters</a><ul><li><a href="#example-keyvaluestoresolver-with-renamed-columns-and-per-table-filters" class="table-of-contents__link toc-highlight">Example: KeyValueStoreSolver with renamed columns and per-table filters</a></li><li><a href="#when-to-use-what" class="table-of-contents__link toc-highlight">When to use what</a></li></ul></li><li><a href="#incremental-optional" class="table-of-contents__link toc-highlight">incremental (optional)</a></li><li><a href="#measurement_dimensions-optional" class="table-of-contents__link toc-highlight">measurement_dimensions (optional)</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="docs-wrapper plugin-docs plugin-id-default docs-version-current docs-doc-page docs-doc-id-getting_started" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.9.2">
+<title data-rh="true">Getting Started | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/getting_started"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Getting Started | Impulse"><meta data-rh="true" name="description" content="Clone the Impulse repository into your Databricks workspace, open the"><meta data-rh="true" property="og:description" content="Clone the Impulse repository into your Databricks workspace, open the"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/getting_started"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/getting_started" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/getting_started" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Getting Started","item":"https://databrickslabs.github.io/impulse/docs/getting_started"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.af145ca1.css">
+<script src="/impulse/assets/js/runtime~main.34308f10.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.5140b4c5.js" defer="defer"></script>
+</head>
+<body class="navigation-with-keyboard">
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||"dark"),document.documentElement.setAttribute("data-theme-choice",t||"dark")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><link rel="preload" as="image" href="/impulse/img/impulse_icon.svg"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/impulse/"><div class="navbar__logo"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--light_NVdE"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--dark_xIcU"></div><b class="navbar__title text--truncate">Impulse</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/impulse/docs/motivation">Docs</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div><a href="https://github.com/databrickslabs/impulse" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link header-github-link" aria-label="GitHub repository"></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0"><div class="docsWrapper_hBAB"><button aria-label="Scroll back to top" class="clean-btn theme-back-to-top-button backToTopButton_sjWU" type="button"></button><div class="docRoot_UBD9"><aside class="theme-doc-sidebar-container docSidebarContainer_YfHR"><div class="sidebarViewport_aRkj"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/motivation"><span title="Motivation" class="linkLabel_WmDU">Motivation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/config/configuration"><span title="Configuration" class="linkLabel_WmDU">Configuration</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/impulse/docs/getting_started"><span title="Getting Started" class="linkLabel_WmDU">Getting Started</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/data_model/"><span title="Data Model" class="categoryLinkLabel_W154">Data Model</span></a><button aria-label="Expand sidebar category &#x27;Data Model&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/references/"><span title="Reference" class="categoryLinkLabel_W154">Reference</span></a><button aria-label="Expand sidebar category &#x27;Reference&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/tutorial"><span title="Tutorials" class="categoryLinkLabel_W154">Tutorials</span></a><button aria-label="Expand sidebar category &#x27;Tutorials&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li></ul></nav></div></div></aside><main class="docMainContainer_TBSr"><div class="container padding-top--md padding-bottom--lg"><div class="row"><div class="col docItemCol_VOVn"><div class="docItemContainer_Djhp"><article><nav class="theme-doc-breadcrumbs breadcrumbsContainer_Z_bl" aria-label="Breadcrumbs"><ul class="breadcrumbs"><li class="breadcrumbs__item"><a aria-label="Home page" class="breadcrumbs__link" href="/impulse/"><svg viewBox="0 0 24 24" class="breadcrumbHomeIcon_YNFT"><path d="M10 19v-5h4v5c0 .55.45 1 1 1h3c.55 0 1-.45 1-1v-7h1.7c.46 0 .68-.57.33-.87L12.67 3.6c-.38-.34-.96-.34-1.34 0l-8.36 7.53c-.34.3-.13.87.33.87H5v7c0 .55.45 1 1 1h3c.55 0 1-.45 1-1z" fill="currentColor"></path></svg></a></li><li class="breadcrumbs__item breadcrumbs__item--active"><span class="breadcrumbs__link">Getting Started</span></li></ul></nav><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_ITEo"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><div class="theme-doc-markdown markdown"><header><h1>Getting Started</h1></header>
+<p>Clone the Impulse repository into your Databricks workspace, open the
+<code>demos/getting_started.ipynb</code> notebook, fill in three widgets, and run
+a one-event, one-histogram report end-to-end in about five minutes.</p>
+<p>For a deeper walkthrough that uses three events, both 1D and 2D histograms,
+and multiple statistics aggregators, continue with the
+<a class="" href="/impulse/docs/tutorial/demo">Tutorial</a> after finishing this page.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="prerequisites">Prerequisites<a href="#prerequisites" class="hash-link" aria-label="Direct link to Prerequisites" title="Direct link to Prerequisites" translate="no">​</a></h2>
+<ul>
+<li class="">A <strong>Databricks workspace</strong> with <strong>serverless compute</strong> enabled.</li>
+<li class="">Permission to create a schema in a catalog you can write to (or an
+existing catalog/schema with write access).</li>
+</ul>
+<p>This demo uses pre-shaped data; no ingestion work is required.
+For your own data, see <a class="" href="/impulse/docs/data_model/ingestion">Ingestion</a> — Impulse&#x27;s
+default solvers expect a specific
+<a class="" href="/impulse/docs/data_model/">silver-layer shape</a>, and matching that shape during
+ingest is the simplest path.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="step-1--clone-the-impulse-repository-into-a-git-folder">Step 1 — Clone the Impulse repository into a Git Folder<a href="#step-1--clone-the-impulse-repository-into-a-git-folder" class="hash-link" aria-label="Direct link to Step 1 — Clone the Impulse repository into a Git Folder" title="Direct link to Step 1 — Clone the Impulse repository into a Git Folder" translate="no">​</a></h2>
+<p>In the Databricks workspace UI:</p>
+<ol>
+<li class=""><strong>Workspace</strong> → <strong>Create</strong> → <strong>Git folder</strong>.</li>
+<li class=""><strong>Git repository URL:</strong> <code>https://github.com/databrickslabs/impulse</code></li>
+<li class=""><strong>Git folder name:</strong> <code>impulse</code> (or whatever you prefer).</li>
+</ol>
+<p>Databricks pulls the source, the demo data, and the demo notebooks into
+your workspace at <code>/Workspace/Users/&lt;you&gt;/impulse</code>. See the
+<a href="https://docs.databricks.com/aws/en/repos/" target="_blank" rel="noopener noreferrer" class="">Databricks Git folders docs</a>
+if you have not used the feature before.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="step-2--open-the-getting-started-notebook">Step 2 — Open the Getting Started notebook<a href="#step-2--open-the-getting-started-notebook" class="hash-link" aria-label="Direct link to Step 2 — Open the Getting Started notebook" title="Direct link to Step 2 — Open the Getting Started notebook" translate="no">​</a></h2>
+<p>In the Git folder you just cloned, open
+<code>demos/getting_started.ipynb</code>. Attach it to a <strong>Serverless</strong> cluster
+running <strong>Environment Version 2 or higher</strong> (Python 3.12+) — the
+default Environment Version 1 ships Python 3.10 and the notebook&#x27;s
+first import will fail with <code>ImportError: cannot import name &#x27;Self&#x27; from &#x27;typing&#x27;</code>.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="step-3--configure-the-run">Step 3 — Configure the run<a href="#step-3--configure-the-run" class="hash-link" aria-label="Direct link to Step 3 — Configure the run" title="Direct link to Step 3 — Configure the run" translate="no">​</a></h2>
+<p>Run cell 1 (widget declaration). After it executes, three text widgets
+appear at the top of the notebook:</p>
+<ul>
+<li class=""><strong>Catalog</strong> — any Unity Catalog you have <code>CREATE SCHEMA</code> and
+<code>CREATE TABLE</code> permissions on.</li>
+<li class=""><strong>Schema</strong> — created if it does not already exist (e.g.
+<code>impulse_demo</code>).</li>
+<li class=""><strong>Table Prefix</strong> — applied to every silver and gold table the
+notebook creates so they are easy to identify and clean up later
+(e.g. <code>demo</code>).</li>
+</ul>
+<p>Fill all three in before running the remaining cells. The notebook
+auto-detects its own location in the workspace, so there is no path
+to edit.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="step-4--run-cells-24">Step 4 — Run cells 2–4<a href="#step-4--run-cells-24" class="hash-link" aria-label="Direct link to Step 4 — Run cells 2–4" title="Direct link to Step 4 — Run cells 2–4" translate="no">​</a></h2>
+<p>Below is what each remaining cell does and what to expect.</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="cell-2-load-the-demo-data-as-silver-layer-delta-tables">Cell 2: load the demo data as silver-layer Delta tables<a href="#cell-2-load-the-demo-data-as-silver-layer-delta-tables" class="hash-link" aria-label="Direct link to Cell 2: load the demo data as silver-layer Delta tables" title="Direct link to Cell 2: load the demo data as silver-layer Delta tables" translate="no">​</a></h3>
+<p>Reads the widget values, derives the repo path from the notebook&#x27;s own
+location, adds the source tree to <code>sys.path</code>, creates the schema, and
+turns each of the five demo CSVs into a Delta table named
+<code>&lt;CATALOG&gt;.&lt;SCHEMA&gt;.&lt;PREFIX&gt;_&lt;csv_name&gt;</code>. Together those five tables
+form the silver-layer input to Impulse — see
+<a class="" href="/impulse/docs/data_model/">Data Model</a> for the schema Impulse expects.</p>
+<p>You only need to run this cell once per workspace. It prints
+<code>Loaded 5 silver-layer tables under &lt;CATALOG&gt;.&lt;SCHEMA&gt;.&lt;PREFIX&gt;_*</code> on
+success.</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="cell-3-define-and-run-the-report">Cell 3: define and run the report<a href="#cell-3-define-and-run-the-report" class="hash-link" aria-label="Direct link to Cell 3: define and run the report" title="Direct link to Cell 3: define and run the report" translate="no">​</a></h3>
+<p>Imports <code>Report</code>, <code>Page</code>, <code>BasicEvent</code>, and <code>HistogramDuration</code> from the
+framework, builds a small config, and:</p>
+<ul>
+<li class="">Selects the <strong>Engine RPM</strong> channel from the demo data
+(Seat Leon recordings).</li>
+<li class="">Defines an event covering every interval where RPM &gt; 2000.</li>
+<li class="">Computes a duration-weighted histogram of RPM over those intervals,
+binned in 500-rpm steps from 0 to 5000.</li>
+<li class="">Persists the result to a gold-layer star schema using the prefix
+you entered in the Table Prefix widget.</li>
+</ul>
+<p>The <code>data_type: &quot;RAW&quot;</code> setting tells the solver that the <code>channels</code>
+table stores raw <code>(timestamp, value)</code> samples rather than pre-encoded
+<code>[tstart, tend)</code> intervals — see
+<a class="" href="/impulse/docs/data_model/silver_layer_schema">Silver Layer Schema</a> for the
+difference between the two formats.</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="cell-4-visualize-the-output">Cell 4: visualize the output<a href="#cell-4-visualize-the-output" class="hash-link" aria-label="Direct link to Cell 4: visualize the output" title="Direct link to Cell 4: visualize the output" translate="no">​</a></h3>
+<p>Reads the persisted gold-layer histogram fact table, sums durations
+across containers per bin, and hands the result to <code>display()</code>. The
+cell ships with a pre-configured bar chart — open the <strong>Histogram</strong> tab
+on the cell output (x = <code>bin_name</code>, y = <code>duration_us</code>).</p>
+<p>You should see ten bins. The four bins below 2000 rpm are at zero (the
+event filtered them out) and the bulk of the duration concentrates in
+the 2000-2500 rpm bin.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="where-to-next">Where to next<a href="#where-to-next" class="hash-link" aria-label="Direct link to Where to next" title="Direct link to Where to next" translate="no">​</a></h2>
+<ul>
+<li class=""><strong><a class="" href="/impulse/docs/tutorial/demo">Tutorial — Reporting walkthrough</a></strong> — the same workflow
+with multiple events, 1D and 2D histograms, and statistics
+aggregators.</li>
+<li class=""><strong><a class="" href="/impulse/docs/references/tsal">TSAL reference</a></strong> — the full DSL for
+selecting channels, building virtual signals, and expressing event
+conditions.</li>
+<li class=""><strong><a class="" href="/impulse/docs/data_model/">Data Model</a></strong> — the silver-layer schema
+Impulse expects, and how to land your own measurement data into it.</li>
+<li class=""><strong><a class="" href="/impulse/docs/config/configuration">Configuration reference</a></strong> — every
+config field including container filters, solver options, and
+incremental processing.</li>
+</ul></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/getting_started.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/config/configuration"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Configuration</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/data_model/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Data Model</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#prerequisites" class="table-of-contents__link toc-highlight">Prerequisites</a></li><li><a href="#step-1--clone-the-impulse-repository-into-a-git-folder" class="table-of-contents__link toc-highlight">Step 1 — Clone the Impulse repository into a Git Folder</a></li><li><a href="#step-2--open-the-getting-started-notebook" class="table-of-contents__link toc-highlight">Step 2 — Open the Getting Started notebook</a></li><li><a href="#step-3--configure-the-run" class="table-of-contents__link toc-highlight">Step 3 — Configure the run</a></li><li><a href="#step-4--run-cells-24" class="table-of-contents__link toc-highlight">Step 4 — Run cells 2–4</a><ul><li><a href="#cell-2-load-the-demo-data-as-silver-layer-delta-tables" class="table-of-contents__link toc-highlight">Cell 2: load the demo data as silver-layer Delta tables</a></li><li><a href="#cell-3-define-and-run-the-report" class="table-of-contents__link toc-highlight">Cell 3: define and run the report</a></li><li><a href="#cell-4-visualize-the-output" class="table-of-contents__link toc-highlight">Cell 4: visualize the output</a></li></ul></li><li><a href="#where-to-next" class="table-of-contents__link toc-highlight">Where to next</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

@@ -3,24 +3,518 @@
 <head>
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
-<title data-rh="true">Silver Layer - ER Diagram | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Silver Layer - ER Diagram | Impulse"><meta data-rh="true" name="description" content="The Silver layer stores measurement data in a tag-based normalized model. Core time-series data lives in channels,"><meta data-rh="true" property="og:description" content="The Silver layer stores measurement data in a tag-based normalized model. Core time-series data lives in channels,"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Silver Layer - ER Diagram","item":"https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.98a9bbe2.css">
-<script src="/impulse/assets/js/runtime~main.11323728.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.950fcd8a.js" defer="defer"></script>
+<title data-rh="true">Silver Layer Schema | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Silver Layer Schema | Impulse"><meta data-rh="true" name="description" content="The Silver layer stores measurement data in a normalized, tag-based model."><meta data-rh="true" property="og:description" content="The Silver layer stores measurement data in a normalized, tag-based model."><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Silver Layer Schema","item":"https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.af145ca1.css">
+<script src="/impulse/assets/js/runtime~main.34308f10.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.5140b4c5.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
 <symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
 </defs></svg>
-<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||"dark"),document.documentElement.setAttribute("data-theme-choice",t||"dark")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><link rel="preload" as="image" href="/impulse/img/impulse_icon.svg"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/impulse/"><div class="navbar__logo"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--light_NVdE"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--dark_xIcU"></div><b class="navbar__title text--truncate">Impulse</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/impulse/docs/motivation">Docs</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div><a href="https://github.com/databrickslabs/impulse" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link header-github-link" aria-label="GitHub repository"></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0"><div class="docsWrapper_hBAB"><button aria-label="Scroll back to top" class="clean-btn theme-back-to-top-button backToTopButton_sjWU" type="button"></button><div class="docRoot_UBD9"><aside class="theme-doc-sidebar-container docSidebarContainer_YfHR"><div class="sidebarViewport_aRkj"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/motivation"><span title="Motivation" class="linkLabel_WmDU">Motivation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/config/configuration"><span title="Configuration" class="linkLabel_WmDU">Configuration</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--active" href="/impulse/docs/data_model/"><span title="Data Model" class="categoryLinkLabel_W154">Data Model</span></a><button aria-label="Collapse sidebar category &#x27;Data Model&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/impulse/docs/data_model/gold_layer_event_normalized"><span title="Gold Layer - ER Diagram" class="linkLabel_WmDU">Gold Layer - ER Diagram</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/impulse/docs/data_model/silver_layer_schema"><span title="Silver Layer - ER Diagram" class="linkLabel_WmDU">Silver Layer - ER Diagram</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/references/"><span title="Reference" class="categoryLinkLabel_W154">Reference</span></a><button aria-label="Expand sidebar category &#x27;Reference&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/demo"><span title="Demo" class="linkLabel_WmDU">Demo</span></a></li></ul></nav></div></div></aside><main class="docMainContainer_TBSr"><div class="container padding-top--md padding-bottom--lg"><div class="row"><div class="col docItemCol_VOVn"><div class="docItemContainer_Djhp"><article><nav class="theme-doc-breadcrumbs breadcrumbsContainer_Z_bl" aria-label="Breadcrumbs"><ul class="breadcrumbs"><li class="breadcrumbs__item"><a aria-label="Home page" class="breadcrumbs__link" href="/impulse/"><svg viewBox="0 0 24 24" class="breadcrumbHomeIcon_YNFT"><path d="M10 19v-5h4v5c0 .55.45 1 1 1h3c.55 0 1-.45 1-1v-7h1.7c.46 0 .68-.57.33-.87L12.67 3.6c-.38-.34-.96-.34-1.34 0l-8.36 7.53c-.34.3-.13.87.33.87H5v7c0 .55.45 1 1 1h3c.55 0 1-.45 1-1z" fill="currentColor"></path></svg></a></li><li class="breadcrumbs__item"><a class="breadcrumbs__link" href="/impulse/docs/data_model/"><span>Data Model</span></a></li><li class="breadcrumbs__item breadcrumbs__item--active"><span class="breadcrumbs__link">Silver Layer - ER Diagram</span></li></ul></nav><div class="theme-doc-markdown markdown"><header><h1>Silver Layer - ER Diagram</h1></header>
-<p>The Silver layer stores measurement data in a tag-based normalized model. Core time-series data lives in <code>channels</code>,
-while metadata is split across tag tables (key-value pairs) and metric tables (pre-computed statistics).</p>
-<!-- -->
-<blockquote>
-<p><strong><code>channels</code> format variants:</strong></p>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||"dark"),document.documentElement.setAttribute("data-theme-choice",t||"dark")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><link rel="preload" as="image" href="/impulse/img/impulse_icon.svg"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/impulse/"><div class="navbar__logo"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--light_NVdE"><img src="/impulse/img/impulse_icon.svg" alt="Impulse Logo" class="themedComponent_mlkZ themedComponent--dark_xIcU"></div><b class="navbar__title text--truncate">Impulse</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/impulse/docs/motivation">Docs</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div><a href="https://github.com/databrickslabs/impulse" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link header-github-link" aria-label="GitHub repository"></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0"><div class="docsWrapper_hBAB"><button aria-label="Scroll back to top" class="clean-btn theme-back-to-top-button backToTopButton_sjWU" type="button"></button><div class="docRoot_UBD9"><aside class="theme-doc-sidebar-container docSidebarContainer_YfHR"><div class="sidebarViewport_aRkj"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/motivation"><span title="Motivation" class="linkLabel_WmDU">Motivation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/config/configuration"><span title="Configuration" class="linkLabel_WmDU">Configuration</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/impulse/docs/getting_started"><span title="Getting Started" class="linkLabel_WmDU">Getting Started</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--active" href="/impulse/docs/data_model/"><span title="Data Model" class="categoryLinkLabel_W154">Data Model</span></a><button aria-label="Collapse sidebar category &#x27;Data Model&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/impulse/docs/data_model/ingestion"><span title="Ingestion" class="linkLabel_WmDU">Ingestion</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/impulse/docs/data_model/silver_layer_schema"><span title="Silver Layer Schema" class="linkLabel_WmDU">Silver Layer Schema</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/impulse/docs/data_model/gold_layer_event_normalized"><span title="Gold Layer Schema" class="linkLabel_WmDU">Gold Layer Schema</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/references/"><span title="Reference" class="categoryLinkLabel_W154">Reference</span></a><button aria-label="Expand sidebar category &#x27;Reference&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/impulse/docs/tutorial"><span title="Tutorials" class="categoryLinkLabel_W154">Tutorials</span></a><button aria-label="Expand sidebar category &#x27;Tutorials&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li></ul></nav></div></div></aside><main class="docMainContainer_TBSr"><div class="container padding-top--md padding-bottom--lg"><div class="row"><div class="col docItemCol_VOVn"><div class="docItemContainer_Djhp"><article><nav class="theme-doc-breadcrumbs breadcrumbsContainer_Z_bl" aria-label="Breadcrumbs"><ul class="breadcrumbs"><li class="breadcrumbs__item"><a aria-label="Home page" class="breadcrumbs__link" href="/impulse/"><svg viewBox="0 0 24 24" class="breadcrumbHomeIcon_YNFT"><path d="M10 19v-5h4v5c0 .55.45 1 1 1h3c.55 0 1-.45 1-1v-7h1.7c.46 0 .68-.57.33-.87L12.67 3.6c-.38-.34-.96-.34-1.34 0l-8.36 7.53c-.34.3-.13.87.33.87H5v7c0 .55.45 1 1 1h3c.55 0 1-.45 1-1z" fill="currentColor"></path></svg></a></li><li class="breadcrumbs__item"><a class="breadcrumbs__link" href="/impulse/docs/data_model/"><span>Data Model</span></a></li><li class="breadcrumbs__item breadcrumbs__item--active"><span class="breadcrumbs__link">Silver Layer Schema</span></li></ul></nav><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_ITEo"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><div class="theme-doc-markdown markdown"><header><h1>Silver Layer Schema</h1></header>
+<p>The Silver layer stores measurement data in a normalized, tag-based model.
+Time-series samples live in <code>channels</code>; metadata is split across tag
+tables (EAV key-value pairs) and metric tables (pre-computed statistics).</p>
+<p>The five tables and columns on this page describe the <strong>typical
+default-solver shape</strong> — what Impulse&#x27;s default solvers
+(<code>DeltaSolver</code>, <code>BasicNarrowSolver</code>, <code>KeyValueStoreSolver</code>) expect when
+no <a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>SolverConfig</code></a>
+overrides are applied. The framework hard-requires only a small subset of this shape:</p>
 <ul>
-<li class=""><strong>RLE format</strong> -- both <code>start</code> and <code>end</code> are present (run-length encoded)</li>
-<li class=""><strong>Raw format</strong> -- only <code>start</code> is present (<code>end</code> is computed on-the-fly via the query engine)</li>
+<li class=""><code>container_id</code> on every silver table (engine join key);</li>
+<li class=""><code>(container_id, channel_id)</code> on the channel-side tables and <code>channels</code>;</li>
+<li class=""><code>key</code>, <code>value</code> columns on the tag tables (EAV layout);</li>
+<li class="">one of the two <code>channels</code> formats below (RLE with <code>tstart</code>/<code>tend</code> or
+raw with <code>timestamp</code>).</li>
 </ul>
-</blockquote></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/data_model/silver_layer_schema.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/data_model/gold_layer_event_normalized"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Gold Layer - ER Diagram</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/references/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Reference Documentation</div></a></nav></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
+<p>Any other column on <code>container_metrics</code> and <code>channel_metrics</code> is
+optional and only consulted when referenced by your config (e.g. via
+<a class="" href="/impulse/docs/config/configuration#measurement_dimensions-optional"><code>measurement_dimensions</code></a>
+or <code>metric_filters</code>). For physical layouts that diverge further, see
+<a class="" href="/impulse/docs/data_model/ingestion#adapting-to-existing-data-layouts">Adapting to existing data layouts</a>.</p>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="entity-relationship-diagram">Entity-relationship diagram<a href="#entity-relationship-diagram" class="hash-link" aria-label="Direct link to Entity-relationship diagram" title="Direct link to Entity-relationship diagram" translate="no">​</a></h2>
+<!-- -->
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="container_metrics">container_metrics<a href="#container_metrics" class="hash-link" aria-label="Direct link to container_metrics" title="Direct link to container_metrics" translate="no">​</a></h2>
+<p>One row per measurement container with timestamps, duration, and channel
+count.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Unique container identifier.</td></tr><tr><td><code>start_dt</code></td><td><code>timestamp</code></td><td>Yes</td><td>Container start datetime.</td></tr><tr><td><code>stop_dt</code></td><td><code>timestamp</code></td><td>Yes</td><td>Container stop datetime.</td></tr><tr><td><code>duration_ms</code></td><td><code>int</code></td><td>Yes</td><td>Total duration in milliseconds.</td></tr><tr><td><code>num_channels</code></td><td><code>int</code></td><td>Yes</td><td>Number of channels in the container.</td></tr></tbody></table>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="additional-columns-commonly-populated">Additional columns commonly populated<a href="#additional-columns-commonly-populated" class="hash-link" aria-label="Direct link to Additional columns commonly populated" title="Direct link to Additional columns commonly populated" translate="no">​</a></h3>
+<p><code>container_metrics</code> typically carries additional metadata columns that
+get surfaced into the gold-layer <code>measurement_dimension</code> table when
+listed in the report&#x27;s
+<a class="" href="/impulse/docs/config/configuration#measurement_dimensions-optional"><code>measurement_dimensions</code></a>
+config. The framework recognises the following names through the
+<code>MeasurementDimensions</code> enum — populate any subset that fits your
+data; none are required by the engine.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>uut_id</code></td><td><code>long</code></td><td>Unit-under-test identifier.</td></tr><tr><td><code>vehicle_key</code></td><td><code>string</code></td><td>Vehicle identifier.</td></tr><tr><td><code>project_id</code></td><td><code>long</code></td><td>Project identifier.</td></tr><tr><td><code>file_name</code></td><td><code>string</code></td><td>Source measurement file name.</td></tr><tr><td><code>source_file_path</code></td><td><code>string</code></td><td>Full path to the source file.</td></tr><tr><td><code>start_ts</code></td><td><code>long</code></td><td>Measurement start timestamp (epoch).</td></tr><tr><td><code>stop_ts</code></td><td><code>long</code></td><td>Measurement stop timestamp (epoch).</td></tr><tr><td><code>environment</code></td><td><code>string</code></td><td>Recording environment (e.g. PUMA, datalogger).</td></tr></tbody></table>
+<div class="theme-admonition theme-admonition-note admonition_xJq3 alert alert--secondary"><div class="admonitionHeading_Gvgb"><span class="admonitionIcon_Rf37"><svg viewBox="0 0 14 16"><path fill-rule="evenodd" d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path></svg></span>Two timestamp conventions</div><div class="admonitionContent_BuS1"><p><code>start_dt</code>/<code>stop_dt</code> (datetime, listed in the table at the top of this
+section) and <code>start_ts</code>/<code>stop_ts</code> (epoch long, listed here) are
+<strong>different columns</strong>, not naming variants. Real-world
+<code>container_metrics</code> tables typically carry both: <code>start_dt</code>/<code>stop_dt</code>
+for human-readable display, <code>start_ts</code>/<code>stop_ts</code> for the gold
+<code>measurement_dimension</code> because the corresponding
+<code>MeasurementDimensions</code> enum values map to the epoch-typed columns.
+Populate whichever your queries and <code>measurement_dimensions</code> config
+need.</p></div></div>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="container_tags">container_tags<a href="#container_tags" class="hash-link" aria-label="Direct link to container_tags" title="Direct link to container_tags" translate="no">​</a></h2>
+<p>Key-value metadata tags for measurement containers. Strict EAV layout —
+TSAL queries select recordings by tag key (e.g.
+<code>query.havingTag(vehicle_key=&quot;Seat_Leon&quot;)</code> looks up <code>value</code> where
+<code>key = &#x27;vehicle_key&#x27;</code>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Unique container identifier.</td></tr><tr><td><code>key</code></td><td><code>string</code></td><td>Yes</td><td>Tag key (e.g. <code>&quot;vehicle_key&quot;</code>, <code>&quot;project_id&quot;</code>).</td></tr><tr><td><code>value</code></td><td><code>string</code></td><td>Yes</td><td>Tag value.</td></tr></tbody></table>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_metrics">channel_metrics<a href="#channel_metrics" class="hash-link" aria-label="Direct link to channel_metrics" title="Direct link to channel_metrics" translate="no">​</a></h2>
+<p>Pre-computed statistics per channel. The percentile columns (<code>pz1</code>,
+<code>pz10</code>, <code>pz90</code>, <code>pz99</code>) and <code>nan_ratio</code> enable container/channel
+pre-filtering before scanning the much larger <code>channels</code> table.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Parent container identifier.</td></tr><tr><td><code>channel_id</code></td><td><code>int</code></td><td>No</td><td>Channel identifier.</td></tr><tr><td><code>value_type</code></td><td><code>string</code></td><td>Yes</td><td>Data type of channel values.</td></tr><tr><td><code>sample_count</code></td><td><code>int</code></td><td>Yes</td><td>Number of samples.</td></tr><tr><td><code>nan_ratio</code></td><td><code>float</code></td><td>Yes</td><td>Ratio of NaN values.</td></tr><tr><td><code>begin_s</code></td><td><code>float</code></td><td>Yes</td><td>Channel start time (seconds).</td></tr><tr><td><code>end_s</code></td><td><code>float</code></td><td>Yes</td><td>Channel end time (seconds).</td></tr><tr><td><code>duration_ms</code></td><td><code>int</code></td><td>Yes</td><td>Channel duration in milliseconds.</td></tr><tr><td><code>original_sample_count</code></td><td><code>int</code></td><td>Yes</td><td>Sample count before processing.</td></tr><tr><td><code>original_sr</code></td><td><code>float</code></td><td>Yes</td><td>Original sample rate.</td></tr><tr><td><code>min</code></td><td><code>float</code></td><td>Yes</td><td>Minimum value.</td></tr><tr><td><code>max</code></td><td><code>float</code></td><td>Yes</td><td>Maximum value.</td></tr><tr><td><code>mean</code></td><td><code>float</code></td><td>Yes</td><td>Mean value.</td></tr><tr><td><code>std</code></td><td><code>float</code></td><td>Yes</td><td>Standard deviation.</td></tr><tr><td><code>pz1</code></td><td><code>float</code></td><td>Yes</td><td>1st percentile.</td></tr><tr><td><code>pz10</code></td><td><code>float</code></td><td>Yes</td><td>10th percentile.</td></tr><tr><td><code>pz90</code></td><td><code>float</code></td><td>Yes</td><td>90th percentile.</td></tr><tr><td><code>pz99</code></td><td><code>float</code></td><td>Yes</td><td>99th percentile.</td></tr></tbody></table>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_tags">channel_tags<a href="#channel_tags" class="hash-link" aria-label="Direct link to channel_tags" title="Direct link to channel_tags" translate="no">​</a></h2>
+<p>Key-value metadata tags per channel. Strict EAV layout — TSAL channel
+selectors look up signals by tag key (e.g.
+<code>query.channel(channel_name=&quot;Engine_RPM&quot;)</code> looks up <code>value</code> where
+<code>key = &#x27;channel_name&#x27;</code>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Parent container identifier.</td></tr><tr><td><code>channel_id</code></td><td><code>int</code></td><td>No</td><td>Channel identifier within the container.</td></tr><tr><td><code>key</code></td><td><code>string</code></td><td>Yes</td><td>Tag key (e.g. <code>&quot;channel_name&quot;</code>, <code>&quot;brand&quot;</code>, <code>&quot;model&quot;</code>).</td></tr><tr><td><code>value</code></td><td><code>string</code></td><td>Yes</td><td>Tag value.</td></tr></tbody></table>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channels">channels<a href="#channels" class="hash-link" aria-label="Direct link to channels" title="Direct link to channels" translate="no">​</a></h2>
+<p>The actual time-series data. Two format variants are supported.</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="rle-format-default">RLE format (default)<a href="#rle-format-default" class="hash-link" aria-label="Direct link to RLE format (default)" title="Direct link to RLE format (default)" translate="no">​</a></h3>
+<p>Pre-encoded with run-length encoding. Each row represents one sample
+interval <code>[tstart, tend)</code> with a constant value. Used when
+<code>data_type</code> is omitted or set to <code>RLE</code> in the report config.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Parent container identifier.</td></tr><tr><td><code>channel_id</code></td><td><code>int</code></td><td>No</td><td>Channel identifier.</td></tr><tr><td><code>tstart</code></td><td><code>long</code></td><td>No</td><td>Sample start timestamp (microseconds).</td></tr><tr><td><code>tend</code></td><td><code>long</code></td><td>No</td><td>Sample end timestamp (microseconds).</td></tr><tr><td><code>value</code></td><td><code>double</code></td><td>Yes</td><td>Sample value.</td></tr></tbody></table>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="raw-format">Raw format<a href="#raw-format" class="hash-link" aria-label="Direct link to Raw format" title="Direct link to Raw format" translate="no">​</a></h3>
+<p>Raw timestamp-based data without RLE encoding — one row per sample. Used
+when <code>data_type: RAW</code> is set in the report config; the engine derives
+<code>tend</code> from subsequent timestamps and transforms the data into RLE before
+query execution.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Parent container identifier.</td></tr><tr><td><code>channel_id</code></td><td><code>int</code></td><td>No</td><td>Channel identifier.</td></tr><tr><td><code>timestamp</code></td><td><code>long</code></td><td>No</td><td>Sample timestamp (microseconds).</td></tr><tr><td><code>value</code></td><td><code>double</code></td><td>Yes</td><td>Sample value.</td></tr></tbody></table>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="optional-is_plausible-column">Optional <code>is_plausible</code> column<a href="#optional-is_plausible-column" class="hash-link" aria-label="Direct link to optional-is_plausible-column" title="Direct link to optional-is_plausible-column" translate="no">​</a></h3>
+<p>An optional <code>is_plausible: boolean</code> column may be present on <code>channels</code>
+in either format. It is <strong>only consulted</strong> when the solver is
+constructed with <code>drop_implausible_data=True</code> — in that mode, samples
+with <code>is_plausible = False</code> are filtered before RLE encoding. If the
+flag is <code>False</code> (the default), the column is ignored and may be omitted.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_mapping-optional">channel_mapping (optional)<a href="#channel_mapping-optional" class="hash-link" aria-label="Direct link to channel_mapping (optional)" title="Direct link to channel_mapping (optional)" translate="no">​</a></h2>
+<p>Alias-resolution table used by <code>KeyValueStoreSolver</code> when selectors are
+created via <code>QueryBuilder.channel_with_alias()</code>. Each row maps a logical
+channel name to one or more physical channels keyed by <code>project_id</code> /
+<code>data_key</code>, with an optional <code>priority</code> tie-breaker.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>project_id</code></td><td><code>int</code></td><td>No</td><td>Project identifier the mapping belongs to.</td></tr><tr><td><code>concept_id</code></td><td><code>int</code></td><td>No</td><td>Concept identifier (foreign key to the concept table).</td></tr><tr><td><code>element_id</code></td><td><code>int</code></td><td>No</td><td>Element identifier (foreign key to the concept-elements table).</td></tr><tr><td><code>project_name</code></td><td><code>string</code></td><td>Yes</td><td>Human-readable project name.</td></tr><tr><td><code>element_name</code></td><td><code>string</code></td><td>Yes</td><td>Human-readable element name.</td></tr><tr><td><code>channel_name</code></td><td><code>string</code></td><td>No</td><td>Logical channel name to match against <code>channel_with_alias</code> selectors.</td></tr><tr><td><code>data_key</code></td><td><code>string</code></td><td>No</td><td>Physical lookup key joined to <code>channel_metrics</code>.</td></tr><tr><td><code>priority</code></td><td><code>int</code></td><td>Yes</td><td>Tie-breaker when multiple physical channels match a logical name.</td></tr></tbody></table>
+<p>Configured via <code>source.channel_mapping_table</code> (see
+<a class="" href="/impulse/docs/config/configuration">Configuration</a>). Joins to <code>channel_metrics</code>
+on <code>(project_id, data_key, channel_name)</code>.</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/data_model/silver_layer_schema.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/data_model/ingestion"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Ingestion</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/data_model/gold_layer_event_normalized"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Gold Layer Schema</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#entity-relationship-diagram" class="table-of-contents__link toc-highlight">Entity-relationship diagram</a></li><li><a href="#container_metrics" class="table-of-contents__link toc-highlight">container_metrics</a><ul><li><a href="#additional-columns-commonly-populated" class="table-of-contents__link toc-highlight">Additional columns commonly populated</a></li></ul></li><li><a href="#container_tags" class="table-of-contents__link toc-highlight">container_tags</a></li><li><a href="#channel_metrics" class="table-of-contents__link toc-highlight">channel_metrics</a></li><li><a href="#channel_tags" class="table-of-contents__link toc-highlight">channel_tags</a></li><li><a href="#channels" class="table-of-contents__link toc-highlight">channels</a><ul><li><a href="#rle-format-default" class="table-of-contents__link toc-highlight">RLE format (default)</a></li><li><a href="#raw-format" class="table-of-contents__link toc-highlight">Raw format</a></li><li><a href="#optional-is_plausible-column" class="table-of-contents__link toc-highlight">Optional <code>is_plausible</code> column</a></li></ul></li><li><a href="#channel_mapping-optional" class="table-of-contents__link toc-highlight">channel_mapping (optional)</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>
