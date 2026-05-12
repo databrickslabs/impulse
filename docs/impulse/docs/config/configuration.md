@@ -48,7 +48,7 @@ It allows you to specify data sources, output sinks, container filters, and the 
         - `RAW`: Channel data contains raw timestamps (a `timestamp` column). The framework automatically converts it to RLE interval format before joins and aggregations.
     - `drop_implausible_data` (bool, optional): Whether to drop implausible data points before processing. Defaults to `false`. If `true`, data points marked as implausible (via the `is_plausible` column) will be dropped. **Only takes effect when `data_type = RAW`**: the filter is applied during the RAW -> RLE conversion path. Combining `drop_implausible_data=true` with `data_type=RLE` raises a validation error.
     - `batch_size` (int, optional): Maximum number of selectors solved per batch. Defaults to `500`.
-    - `solver_config` (`SolverConfig`, optional): Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` when you want `KEY_VALUE_STORE_SOLVER` to scope reads by project; omit it for wide-only data models. See [Solver column mappings and filters](#solver-column-mappings-and-filters) below.
+    - `solver_config` (`SolverConfig`, optional): Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` when you want to scope reads by project — the filter is applied to every read table that carries a `project_id` column (after column-name mapping), so it works with both narrow-EAV and wide-only data models. See [Solver column mappings and filters](#solver-column-mappings-and-filters) below.
 
 - **incremental** (`IncrementalConfig`, optional):
   Incremental processing configuration. When `enabled` is `false` (default), every run reprocesses all matching containers in full. When `enabled` is `true`, `Report.determine_report()` reuses results from prior runs for unchanged definitions and only reprocesses containers that are new or have been updated in silver.
@@ -94,8 +94,10 @@ in `solver_config` so the solver renames each table's columns at read time.
 
 Top-level fields on `SolverConfig`:
 
-- `project_id` (str, optional): Required when `solver = KEY_VALUE_STORE_SOLVER`. Applied as a filter
-  on the `project_id` column of `container_tags` and `channel_mapping`.
+- `project_id` (str, optional): Project scope. When set, the solver applies an equality filter on
+  the `project_id` column (after column-name mapping) of every table it reads that carries one —
+  `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured).
+  Omit it if you don't need project-level scoping; the solver does not require it.
 
 Per-table sections (each a `TableConfig`):
 
