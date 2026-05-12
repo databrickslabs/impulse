@@ -1,81 +1,146 @@
 # Configuration
 
-`MdaConfig` allows you to configure the generated report by Impulse.
-It allows you to specify data sources, output sinks, container filters, and the query engine solver.
+`MdaConfig` configures everything about a report: the silver-layer input
+tables, the gold-layer output location, container-level filters, the
+query-engine solver, incremental processing, and which container columns
+get surfaced into the gold-layer measurement dimension. Configuration is
+defined as JSON (or an equivalent Python dictionary) and validated using
+Pydantic models. The canonical schema lives in
+[`src/mda_reporting/config/config_parser.py`](https://github.com/databrickslabs/impulse/blob/main/src/mda_reporting/config/config_parser.py).
 
-## Configuration Fields
+## Quick example
 
-- **source** (`Source`):
-  Configuration for input data tables.
-    - `container_metrics_table` (str, required): Full Unity Catalog path (e.g., `catalog.schema.table`).
-    - `channel_metrics_table` (str, required): Full Unity Catalog path.
-    - `channels_uri` (str, required): Full Unity Catalog path for the channels table.
-    - `container_tags_table` (str, optional): Full Unity Catalog path to the container tags table. Required when using `DeltaSolver` with tag filters or `KeyValueStoreSolver`.
-    - `channel_tags_table` (str, optional): Full Unity Catalog path to the channel tags table. Used by `DeltaSolver` for tag-based channel selection.
-    - `channel_mapping_table` (str, optional): Full Unity Catalog path to the channel-alias mapping table. Required when using `QueryBuilder.channel_with_alias()` (currently supported by `KeyValueStoreSolver`).
+```json
+{
+  "source": {
+    "container_metrics_table": "my_catalog.silver.container_metrics",
+    "channel_metrics_table": "my_catalog.silver.channel_metrics",
+    "channels_uri": "my_catalog.silver.channels",
+    "container_tags_table": "my_catalog.silver.container_tags",
+    "channel_tags_table": "my_catalog.silver.channel_tags"
+  },
+  "unity_sink": {
+    "catalog": "my_catalog",
+    "schema": "gold",
+    "table_prefix": "my_report"
+  },
+  "query_engine": {
+    "solver": "DeltaSolver",
+    "data_type": "RAW"
+  },
+  "container_filters": {
+    "tag_filters": [
+      [
+        { "tag_name": "uut_id", "comparator": "==", "value": "ABC123", "cast_type": "string" }
+      ]
+    ],
+    "metric_filters": [
+      [
+        { "column_name": "start_dt", "comparator": ">=", "value": "2025-04-27T05:20:54.000Z", "value_type": "timestamp" }
+      ]
+    ]
+  },
+  "measurement_dimensions": ["container_id", "vehicle_key", "start_ts", "stop_ts"]
+}
+```
 
-- **unity_sink** (`UnitySink`):
-  Configuration for output data location.
-    - `catalog` (str): Target catalog name.
-    - `schema` (str): Target schema name.
-    - `table_prefix` (str): Prefix for output tables.
+A configuration is passed to `Report` either as a Python `dict`
+(`config=...`) or as a JSON file path (`config_path=...`). Sinkless
+mode is also supported — see [Sinkless reports](#sinkless-reports).
 
+---
 
-- **container_filters** (`ContainerFilters`, optional):
-  Restricts the set of processed containers. Filters are expressed in **disjunctive normal form** (OR of ANDs): each inner list is AND-combined; the outer list is OR-combined.
+## source
 
-  Two independent filter families:
+Maps the silver-layer input tables.
 
-    - `tag_filters` (`list[list[TagFilter]]`): applied on `container_tags_table`.
-        - `tag_name` (str): Tag key to filter on.
-        - `comparator` (str): One of `==`, `!=`, `>`, `>=`, `<`, `<=`.
-        - `value` (str | int | float): Expected value; must match `cast_type`.
-        - `cast_type` (str, optional): `string` (default), `int`, `double`, or `timestamp` (ISO-format string).
+| Field                     | Type  | Required | Description                                              |
+|---------------------------|-------|----------|----------------------------------------------------------|
+| `container_metrics_table` | `str` | Yes      | Full Unity Catalog path. Container metadata (timestamps, duration). |
+| `channel_metrics_table`   | `str` | Yes      | Full Unity Catalog path. Channel-level statistics.        |
+| `channels_uri`            | `str` | Yes      | Full Unity Catalog path. Time-series sample data.         |
+| `container_tags_table`    | `str` | No       | Full Unity Catalog path. Container EAV tags.              |
+| `channel_tags_table`      | `str` | No       | Full Unity Catalog path. Channel EAV tags.                |
+| `channel_mapping_table`   | `str` | No       | Full Unity Catalog path. Logical-to-physical channel alias table. Required when using `QueryBuilder.channel_with_alias()` (currently supported by `KeyValueStoreSolver`). |
 
-    - `metric_filters` (`list[list[MetricFilter]]`): applied on `container_metrics_table`.
-        - `column_name` (str): Column on `container_metrics_table` (e.g. `start_dt`, `stop_dt`, `uut_id`). When `solver_config.container_metrics.column_name_mapping` is set, this refers to the **internal** name (after renaming).
-        - `comparator` (str): One of `==`, `!=`, `>`, `>=`, `<`, `<=`.
-        - `value` (str | int | float): Expected value.
-        - `value_type` (str, optional): `string`, `int`, `double`, or `timestamp` — when provided, validates/converts the value.
+Tag tables are required for solvers that consume tag-based filters
+(`DeltaSolver` with tag filters, `KeyValueStoreSolver`).
 
+---
 
+## unity_sink
 
-- **query_engine** (`QueryEngine`, optional):
-  Query engine configuration.
-    - `solver` (`Solvers`): Solver type. Defaults to `KEY_VALUE_STORE_SOLVER`. Accepted values: `DELTA_SOLVER`, `KEY_VALUE_STORE_SOLVER`. `KEY_VALUE_STORE_SOLVER` works either against a narrow EAV `container_tags` table or, when `source.container_tags_table` is omitted, against a wide-only data model where container attributes live directly on `container_metrics`.
-    - `data_type` (`DataType`, optional): The format of the channel data. Defaults to `RLE`. Accepted values:
-        - `RLE`: Channel data is pre-encoded with Run-Length Encoding (intervals with `tstart`/`tend`).
-        - `RAW`: Channel data contains raw timestamps (a `timestamp` column). The framework automatically converts it to RLE interval format before joins and aggregations.
-    - `drop_implausible_data` (bool, optional): Whether to drop implausible data points before processing. Defaults to `false`. If `true`, data points marked as implausible (via the `is_plausible` column) will be dropped. **Only takes effect when `data_type = RAW`**: the filter is applied during the RAW -> RLE conversion path. Combining `drop_implausible_data=true` with `data_type=RLE` raises a validation error.
-    - `batch_size` (int, optional): Maximum number of selectors solved per batch. Defaults to `500`.
-    - `solver_config` (`SolverConfig`, optional): Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` when you want to scope reads by project — the filter is applied to every read table that carries a `project_id` column (after column-name mapping), so it works with both narrow-EAV and wide-only data models. See [Solver column mappings and filters](#solver-column-mappings-and-filters) below.
+Defines where gold-layer tables are written.
 
-- **incremental** (`IncrementalConfig`, optional):
-  Incremental processing configuration. When `enabled` is `false` (default), every run reprocesses all matching containers in full. When `enabled` is `true`, `Report.determine_report()` reuses results from prior runs for unchanged definitions and only reprocesses containers that are new or have been updated in silver.
-    - `enabled` (bool): Whether incremental processing is on. Defaults to `false`.
-    - `silver_last_modified_column` (str): Silver-side column used to detect container updates. Defaults to `"timestamp"`.
-    - `gold_last_modified_column` (str): Gold-side column used to detect prior-run freshness. Defaults to `"_created_at"`.
+| Field          | Type  | Required | Description                           |
+|----------------|-------|----------|---------------------------------------|
+| `catalog`      | `str` | Yes      | Target catalog name.                  |
+| `schema`       | `str` | Yes      | Target schema name.                   |
+| `table_prefix` | `str` | Yes      | Prefix for all generated table names. |
 
+Output tables are named `{table_prefix}_{entity}` (e.g.
+`my_report_histogram_fact`).
 
-- **measurement_dimensions** (`list[str]`, optional):
-  List of measurement dimension column names to include in the gold layer.
-  Defaults to:
-    - `container_id`
-    - `vehicle_key`
-    - `start_ts`
-    - `stop_ts`
+### Sinkless reports
 
-  Each entry should be a string matching a supported measurement dimension.
-  Supported values:
-    - `container_id`
-    - `uut_id`
-    - `project_id`
-    - `vehicle_key`
-    - `file_name`
-    - `source_file_path`
-    - `start_ts`
-    - `stop_ts`
-    - `environment`
+`unity_sink` is optional. When omitted, the report runs in **sinkless
+mode**: `determine_report()` still computes events, aggregations, and
+container dimensions and exposes them on the report object, but
+`persist_results()` becomes a no-op. Useful for ad-hoc analysis,
+notebooks, and tests where writing to Unity Catalog is not desired.
+
+---
+
+## container_filters (optional)
+
+Restricts the set of processed containers. Filters are expressed in
+**disjunctive normal form** (OR of ANDs): each inner list is AND-combined,
+the outer list is OR-combined.
+
+Two independent filter families:
+
+- `tag_filters` — applied on `container_tags_table` (EAV key/value model).
+- `metric_filters` — applied on `container_metrics_table` (columnar model).
+
+| Field            | Type                       | Default | Description                                |
+|------------------|----------------------------|---------|--------------------------------------------|
+| `tag_filters`    | `list[list[TagFilter]]`    | `[]`    | Tag-based filter groups (DNF).             |
+| `metric_filters` | `list[list[MetricFilter]]` | `[]`    | Metric-based filter groups (DNF).          |
+
+### TagFilter
+
+| Field        | Type  | Required | Description                                                                |
+|--------------|-------|----------|----------------------------------------------------------------------------|
+| `tag_name`   | `str` | Yes      | Tag key to filter on.                                                      |
+| `comparator` | `str` | Yes      | One of `==`, `!=`, `>`, `>=`, `<`, `<=`.                                   |
+| `value`      | any   | Yes      | Expected value. Must match `cast_type`.                                    |
+| `cast_type`  | `str` | No       | `string` (default), `int`, `double`, or `timestamp` (ISO-format string).   |
+
+### MetricFilter
+
+| Field         | Type  | Required | Description                                                                            |
+|---------------|-------|----------|----------------------------------------------------------------------------------------|
+| `column_name` | `str` | Yes      | Column on `container_metrics_table` to filter on (e.g. `start_dt`, `stop_dt`). When `solver_config.container_metrics.column_name_mapping` is set, this refers to the **internal** name (after renaming). |
+| `comparator`  | `str` | Yes      | One of `==`, `!=`, `>`, `>=`, `<`, `<=`.                                               |
+| `value`       | any   | Yes      | Expected value. Must match `value_type` when provided.                                 |
+| `value_type`  | `str` | No       | When provided, validates/converts the value: `string`, `int`, `double`, `timestamp`.   |
+
+---
+
+## query_engine (optional)
+
+| Field                   | Type           | Default               | Description                                                                                                                 |
+|-------------------------|----------------|-----------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `solver`                | `str`          | `"BasicNarrowSolver"` | One of `"BasicNarrowSolver"`, `"DeltaSolver"`, `"KeyValueStoreSolver"`.                                                     |
+| `data_type`             | `str`          | `"RLE"`               | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to RLE before aggregation).                      |
+| `drop_implausible_data` | `bool`         | `false`               | When `true`, drops `channels` rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
+| `batch_size`            | `int`          | `500`                 | Maximum number of selectors solved per batch.                                                                               |
+| `solver_config`         | `SolverConfig` | `null`                | Per-table column mappings, per-table equality filters, and project scoping. Required (`project_id` field) when `solver = "KeyValueStoreSolver"`. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
+
+If `query_engine` is omitted, the default is `BasicNarrowSolver` with
+`data_type = "RLE"`.
+
+---
 
 ## Solver column mappings and filters
 
@@ -123,11 +188,27 @@ Internal column names that mappings can target:
 | `project_id`    | Project scoping column                                   |
 | `parent_id`     | Parent/scope identifier                                  |
 
+:::caution Wiring caveat
+
+When a report is built from config (the standard `Report(config=...)` /
+`Report(config_path=...)` path), `solver_config` is read from
+`query_engine.solver_config` and **only passed to
+`KeyValueStoreSolver`**. The `Report` factory does not forward it to
+`BasicNarrowSolver` or `DeltaSolver`, so `solver_config` in your JSON
+config is silently ignored for those two solvers.
+
+`BasicNarrowSolver` and `DeltaSolver` themselves accept a `SolverConfig`
+in their constructors — but you have to instantiate them yourself and
+pass the solver instance into `query.solve(solver=...)` rather than
+relying on the config-driven factory.
+
+:::
+
 ### Example: KeyValueStoreSolver with renamed columns and per-table filters
 
 ```python
 "query_engine": {
-    "solver": "KEY_VALUE_STORE_SOLVER",
+    "solver": "KeyValueStoreSolver",
     "solver_config": {
         "project_id": "my_project",
         "container_tags": {
@@ -161,50 +242,59 @@ Sections you don't customize can be omitted; defaults are an empty mapping and n
   particular run (supports comparators, OR/AND combinations, and type casting). Refer to internal column
   names when `solver_config` rewrites them.
 
-## Example
+---
 
-```python
-config_data = {
-    "source": {
-        "container_metrics_table": "my_catalog.silver.container_metric",
-        "channel_metrics_table": "my_catalog.silver.channel_metric",
-        "channels_uri": "my_catalog.silver.channel_data"
-    },
-    "unity_sink": {
-        "catalog": "my_catalog",
-        "schema": "silver_refactored",
-        "table_prefix": "evaluation"
-    },
-    # (uut_id == "AA" AND container_id >= 100) OR uut_id == "BB"
-    # AND metric start_ts >= 2025-01-01
-    "container_filters": {
-        "tag_filters": [
-            [
-                {"tag_name": "uut_id", "comparator": "==", "value": "AA", "cast_type": "string"},
-                {"tag_name": "container_id", "comparator": ">=", "value": 100, "cast_type": "int"}
-            ],
-            [
-                {"tag_name": "uut_id", "comparator": "==", "value": "BB", "cast_type": "string"}
-            ]
-        ],
-        "metric_filters": [
-            [
-                {"column_name": "start_ts", "comparator": ">=", "value": "2025-01-01"}
-            ]
-        ]
-    },
-    "query_engine": {
-        "solver": "KEY_VALUE_STORE_SOLVER",
-        "data_type": "RAW"
-    },
-    "measurement_dimensions": [
-        "container_id",
-        "vehicle_key",
-        "start_ts",
-        "stop_ts"
-    ]
-}
+## incremental (optional)
+
+Incremental processing reuses results from prior runs for unchanged
+definitions and reprocesses only containers that are new or have been
+updated in silver. See the
+[Report reference](../references/report.md#incremental-processing) for
+mode-resolution rules and what counts as a definition change.
+
+| Field                         | Type   | Default         | Description                                                            |
+|-------------------------------|--------|-----------------|------------------------------------------------------------------------|
+| `enabled`                     | `bool` | `false`         | Turns incremental processing on.                                       |
+| `silver_last_modified_column` | `str`  | `"timestamp"`   | Silver-side column used to detect container updates.                   |
+| `gold_last_modified_column`   | `str`  | `"_created_at"` | Gold-side column used to detect prior-run freshness.                   |
+
+---
+
+## measurement_dimensions (optional)
+
+List of `container_metrics` columns to surface into the gold-layer
+`measurement_dimension` table.
+
+**Allowed values:**
+
+| Value              | Description                                  |
+|--------------------|----------------------------------------------|
+| `container_id`     | Container identifier.                        |
+| `uut_id`           | Unit-under-test identifier.                  |
+| `project_id`       | Project identifier.                          |
+| `vehicle_key`      | Vehicle identifier.                          |
+| `file_name`        | Source measurement file name.                |
+| `source_file_path` | Full path to the source file.                |
+| `start_ts`         | Measurement start timestamp.                 |
+| `stop_ts`          | Measurement stop timestamp.                  |
+| `environment`      | Recording environment (e.g. PUMA, datalogger). |
+
+**Default:**
+
+```json
+[
+  "container_id",
+  "uut_id",
+  "file_name",
+  "source_file_path",
+  "start_ts",
+  "stop_ts",
+  "project_id",
+  "environment"
+]
 ```
 
-If `query_engine` is omitted, it defaults to `KEY_VALUE_STORE_SOLVER` with `data_type` set to `RLE`.
-We support providing the configuration as a dictionary or as a JSON file path.
+Pick the entries that match the columns actually present in your
+`container_metrics_table`. Columns referenced here must exist in your
+silver schema; columns that don't appear here are ignored even if they
+exist in silver.

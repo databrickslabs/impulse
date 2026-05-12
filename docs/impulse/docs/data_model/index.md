@@ -4,9 +4,26 @@ title: Data Model
 
 # Data Model
 
+:::caution Prerequisite
+
+The schema described on this page is what Impulse's **default solvers**
+(`DeltaSolver`, `BasicNarrowSolver`, `KeyValueStoreSolver`) expect from your
+silver layer. **Landing your data in this shape during ingest is the
+simplest and most maintainable path** — see the
+[Ingestion guide](ingestion.md).
+
+Advanced deployments with existing data layouts they cannot or do not want
+to reshape can adapt by passing a `SolverConfig` to remap column names, or
+by implementing a custom solver for fundamentally different physical
+layouts. The ingestion guide's
+[last section](ingestion.md#adapting-to-existing-data-layouts) covers the
+tradeoffs.
+
+:::
+
 Impulse operates on Databricks Medallion Architecture.
 
-Bronze data conissts out of the raw measurement files ingested into the lakehouse, which are then processed and transformed into a normalized Silver layer.
+Raw measurement files are ingested into the lakehouse in the bronze layer. These are then processed and transformed into a normalized Silver layer.
 Gold Layer contains the final analytics results in a star schema optimized for querying and reporting.
 
 All layers are stored as Delta tables in Unity Catalog, which makes them easy to govern, secure, and queryable by various personas across the organization.
@@ -16,8 +33,7 @@ All layers are stored as Delta tables in Unity Catalog, which makes them easy to
 
 ## Silver Layer (Input)
 
-The Silver layer uses a **tag-based model** where metadata is separated from time-series data. Five tables
-represent measurement data:
+The Silver layer uses a **tag-based model** where metadata is separated from time-series data. Three tables are required (`container_metrics`, `channel_metrics`, `channels`); two optional tag tables (`container_tags`, `channel_tags`) carry contextual metadata used by the channel selection API.
 
 | Table               | Purpose                                                                                |
 |---------------------|----------------------------------------------------------------------------------------|
@@ -25,12 +41,13 @@ represent measurement data:
 | `container_tags`    | Key-value metadata tags for containers (e.g. `vehicle_key`, `project_id`).             |
 | `channel_metrics`   | Pre-computed statistics per channel (min, max, mean, percentiles, sample count).        |
 | `channel_tags`      | Key-value metadata tags per channel (e.g. `channel_name`, `brand`, `model`).           |
-| `channels`          | Time-series sample data stored as intervals `[tstart, tend)` with a constant value.    |
+| `channels`          | Time-series sample data, either as raw `(timestamp, value)` samples or as run-length-encoded intervals `[tstart, tend)`. |
 
 Channels are selected by querying `channel_tags` (e.g. `channel_name = "Engine RPM"`) rather than by fixed column names.
 This allows the same schema to support arbitrary signal sets across different projects.
 
 See the [Silver Layer ER Diagram](silver_layer_schema.md) for table relationships.
+For background on the design, see the [Databricks blog post on revolutionizing car measurement data storage and analysis](https://www.databricks.com/blog/revolutionizing-car-measurement-data-storage-and-analysis-mercedes-benzs-petabyte-scale).
 
 ---
 

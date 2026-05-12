@@ -316,7 +316,7 @@ class HistogramDuration(Histogram):
         desc : str, optional
             Description of the histogram duration.
         agg_type : str, optional
-            Type of aggregation, defaults to "NA".
+            Type of aggregation, defaults to "histogram_duration".
         channel_name : str, optional
             Name of the signal associated with the histogram duration.
         values_unit : str, optional
@@ -383,7 +383,7 @@ class HistogramCustomWeights(Histogram):
         desc : str, optional
             Description of the histogram.
         agg_type : str, optional
-            Type of aggregation, defaults to "histogram_custom_weight".
+            Type of aggregation, defaults to "histogram_custom_weights".
         channel_name : str, optional
             Name of the signal associated with the histogram.
         weights_channel_name : str, optional

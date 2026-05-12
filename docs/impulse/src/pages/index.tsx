@@ -15,26 +15,6 @@ import {
     Radio,
 } from 'lucide-react';
 
-const CallToAction = () => {
-    return (
-        <div className="flex flex-col justify-center h-screen items-center">
-            <h2 className="text-3xl md:text-4xl font-semibold text-center mb-6">
-                Start analyzing your measurement data
-            </h2>
-            <p className="text-center mb-6 text-pretty">
-                Follow our documentation to get up and running with Impulse in no time.
-            </p>
-            <Button
-                variant="primary"
-                link="/docs/motivation"
-                size="large"
-                label="Get Started"
-                className="w-full p-4 font-mono md:w-auto bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 transition-all duration-300"
-            />
-        </div>
-    );
-};
-
 const Capabilities = () => {
     const capabilities = [
 
@@ -106,20 +86,20 @@ const Capabilities = () => {
     ];
 
     return (
-        <div className="my-6 px-10">
+        <div className="mt-20 mb-6 px-10">
             <h2 className="text-3xl md:text-4xl font-semibold text-center mb-6">
                 Capabilities
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
                 {capabilities.map((capability, index) => {
                     const Icon = capability.icon;
                     return (
                         <div
                             key={index}
-                            className="bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6 text-center border border-gray-200 dark:border-gray-700 hover:shadow-xl transition-shadow"
+                            className="bg-white dark:bg-gray-800 shadow-lg rounded-lg p-4 text-center border border-gray-200 dark:border-gray-700 hover:shadow-xl transition-shadow"
                         >
-                            <Icon className="w-8 h-8 mx-auto mb-3 text-blue-500"/>
-                            <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-gray-100">
+                            <Icon className="w-7 h-7 mx-auto mb-2 text-blue-500"/>
+                            <h3 className="text-base font-semibold mb-2 text-gray-800 dark:text-gray-100">
                                 {capability.title}
                             </h3>
                             <p className="text-gray-600 dark:text-gray-400 text-sm">
@@ -138,7 +118,7 @@ const Hero = () => {
     const logoSrc = colorMode === 'dark' ? 'img/impulse_logo_labs_dark.svg' : 'img/impulse_logo_labs.svg';
 
     return (
-        <div className="px-4 md:px-10 min-h-screen flex flex-col justify-center items-center w-full">
+        <div className="px-4 md:px-10 pt-10 flex flex-col items-center w-full">
             <div className="m-2">
                 <img src={logoSrc} alt="Impulse Logo" className="w-[36rem] md:w-[48rem]"/>
             </div>
@@ -152,32 +132,31 @@ const Hero = () => {
             </p>
 
 
-            <div className="mt-12 flex flex-col space-y-4 md:flex-row md:space-y-0 md:space-x-4">
+            <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Button
                     variant="secondary"
                     outline={true}
                     link="/docs/motivation"
                     size="large"
                     label="Motivation"
-                    className="w-full md:w-auto"
+                    className="w-full"
                 />
                 <Button
                     variant="secondary"
                     outline={true}
-                    link="/docs/references"
+                    link="/docs/getting_started"
                     size="large"
-                    label="References"
-                    className="w-full md:w-auto"
+                    label="Get Started"
+                    className="w-full"
                 />
                 <Button
                     variant="secondary"
                     outline={true}
-                    link="/docs/demo"
+                    link="/docs/tutorial/demo"
                     size="large"
                     label="Demo"
-                    className="w-full md:w-auto"
+                    className="w-full"
                 />
-
             </div>
         </div>
     );
@@ -191,7 +170,6 @@ export default function Home(): JSX.Element {
                     <div className="max-w-screen-lg">
                         <Hero/>
                         <Capabilities/>
-                        <CallToAction/>
                     </div>
                 </div>
             </main>
