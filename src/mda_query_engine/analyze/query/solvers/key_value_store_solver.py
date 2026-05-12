@@ -230,7 +230,11 @@ class KeyValueStoreSolver(QuerySolver):
         container_df : pyspark.sql.DataFrame
             DataFrame containing tag-filtered container IDs (output of
             :meth:`filter_container_tags`).
+            DataFrame containing tag-filtered container IDs (output of
+            :meth:`filter_container_tags`).
         pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Pre-filtered container_metrics DataFrame.  When provided, it
+            replaces the read from ``query.db.container_metrics``.
             Pre-filtered container_metrics DataFrame.  When provided, it
             replaces the read from ``query.db.container_metrics``.
 
@@ -239,8 +243,14 @@ class KeyValueStoreSolver(QuerySolver):
         pyspark.sql.DataFrame
             Filtered container metrics with all original columns preserved.
             Deduplicated by ``container_id``.
+            Filtered container metrics with all original columns preserved.
+            Deduplicated by ``container_id``.
         """
         container_id_col = self.config.container_id_col
+
+        metric_filters = [
+            filt for filt in query.filters if isinstance(filt, MetricExpression)
+        ]
 
         metric_filters = [
             filt for filt in query.filters if isinstance(filt, MetricExpression)
