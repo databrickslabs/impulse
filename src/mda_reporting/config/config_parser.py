@@ -573,4 +573,3 @@ class MdaConfig(BaseModel):
         MeasurementDimensions.PROJECT_ID,
         MeasurementDimensions.ENVIRONMENT,
     ]
-

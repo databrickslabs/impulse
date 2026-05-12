@@ -39,8 +39,7 @@ def _kvs_cfg(
     """
     return SolverConfig(
         project_id=project_id,
-        container_tags=container_tags
-        or TableConfig(column_name_mapping={"element_id": "key"}),
+        container_tags=container_tags or TableConfig(column_name_mapping={"element_id": "key"}),
         container_metrics=container_metrics
         or TableConfig(column_name_mapping={"project": "project_id"}),
         channel_mapping=channel_mapping or TableConfig(),
@@ -58,9 +57,7 @@ class TestKeyValueStoreSolverIntegration:
         query = key_value_store_db.query
         eng_rpm = query.channel(channel_name="Engine RPM")
 
-        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(
-            spark=spark, solver=solver
-        )
+        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark=spark, solver=solver)
 
         container_ids = {row.container_id for row in result.collect()}
         assert container_ids == {1, 2, 3}
@@ -74,9 +71,7 @@ class TestKeyValueStoreSolverIntegration:
         eng_rpm = query.channel(channel_name="Engine RPM")
         query.where(TagSelector("brand") == "Seat")
 
-        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(
-            spark=spark, solver=solver
-        )
+        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark=spark, solver=solver)
         assert {row.container_id for row in result.collect()} == {1, 2, 3}
 
         query2 = key_value_store_db.query
@@ -95,9 +90,7 @@ class TestKeyValueStoreSolverIntegration:
         eng_rpm = query.channel(channel_name="Engine RPM")
         query.where(MetricSelector("brand") == "Seat")
 
-        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(
-            spark=spark, solver=solver
-        )
+        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark=spark, solver=solver)
         assert {row.container_id for row in result.collect()} == {1, 2, 3}
 
         query2 = key_value_store_db.query
@@ -117,9 +110,7 @@ class TestKeyValueStoreSolverIntegration:
         query.where(TagSelector("brand") == "Seat")
         query.where(MetricSelector("model") == "Leon")
 
-        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(
-            spark=spark, solver=solver
-        )
+        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark=spark, solver=solver)
         assert {row.container_id for row in result.collect()} == {1, 2, 3}
 
         # Tag matches, metric does not -> zero rows from stage 2
@@ -147,9 +138,7 @@ class TestKeyValueStoreSolverIntegration:
             event_expression=high_speed_event,
         )
 
-        result = query.select(stats_agg.alias("rpm_when_fast")).solve(
-            spark=spark, solver=solver
-        )
+        result = query.select(stats_agg.alias("rpm_when_fast")).solve(spark=spark, solver=solver)
 
         assert result.count() == 3
         for row in result.collect():
@@ -170,9 +159,7 @@ class TestKeyValueStoreSolverIntegration:
         query = key_value_store_db.query
         eng_rpm = query.channel(channel_name="Engine RPM")
 
-        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(
-            spark=spark, solver=solver
-        )
+        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark=spark, solver=solver)
         assert result.count() == 0
 
     def test_solve_with_matching_parent_id_filter(
@@ -189,9 +176,7 @@ class TestKeyValueStoreSolverIntegration:
         query = key_value_store_db.query
         eng_rpm = query.channel(channel_name="Engine RPM")
 
-        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(
-            spark=spark, solver=solver
-        )
+        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark=spark, solver=solver)
         assert {row.container_id for row in result.collect()} == {1, 2, 3}
 
     def test_solve_with_non_matching_parent_id_filter(
@@ -208,9 +193,7 @@ class TestKeyValueStoreSolverIntegration:
         query = key_value_store_db.query
         eng_rpm = query.channel(channel_name="Engine RPM")
 
-        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(
-            spark=spark, solver=solver
-        )
+        result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark=spark, solver=solver)
         assert result.count() == 0
 
     def test_solve_with_pre_filtered_containers(
