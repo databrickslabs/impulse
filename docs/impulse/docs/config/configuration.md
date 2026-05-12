@@ -188,19 +188,20 @@ Internal column names that mappings can target:
 | `project_id`    | Project scoping column                                   |
 | `parent_id`     | Parent/scope identifier                                  |
 
-:::caution Wiring caveat
+:::note Per-solver feature support
 
-When a report is built from config (the standard `Report(config=...)` /
-`Report(config_path=...)` path), `solver_config` is read from
-`query_engine.solver_config` and **only passed to
-`KeyValueStoreSolver`**. The `Report` factory does not forward it to
-`DeltaSolver`, so `solver_config` in your JSON config is silently
-ignored for that solver.
+`solver_config` in your JSON config is forwarded to **both**
+`KeyValueStoreSolver` and `DeltaSolver` by the `Report` factory.
+However, only the parts each solver supports are actually consumed:
 
-`DeltaSolver` itself accepts a `SolverConfig` in its constructor — but
-you have to instantiate it yourself and pass the solver instance into
-`query.solve(solver=...)` rather than relying on the config-driven
-factory.
+- `KeyValueStoreSolver` uses all sections: per-table
+  `column_name_mapping`, per-table `filters`, and top-level
+  `project_id`.
+- `DeltaSolver` uses only the per-table `column_name_mapping` entries
+  on `container_tags`, `container_metrics`, `channel_tags`,
+  `channel_metrics`, and `channels`. Per-table `filters`, top-level
+  `project_id`, and the `channel_mapping` section (alias resolution)
+  are **silently ignored** — the solver class does not read them.
 
 :::
 

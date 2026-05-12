@@ -203,14 +203,12 @@ for the full schema.
 
 How it gets wired in depends on which solver you use:
 
-- **`KeyValueStoreSolver`** — set `query_engine.solver_config` in your
-  report config. The `Report` factory passes it through automatically.
-- **`DeltaSolver`** — its constructor accepts a `SolverConfig`, but the
-  `Report` factory does **not** forward `query_engine.solver_config` to
-  it. If you need column-name remapping for `DeltaSolver` you have to
-  instantiate it yourself and pass the instance into
-  `query.solve(solver=my_solver)` rather than going through the
-  config-driven `Report` path.
+- **`KeyValueStoreSolver`** and **`DeltaSolver`** — set
+  `query_engine.solver_config` in your report config. The `Report`
+  factory forwards it to both solvers. `KeyValueStoreSolver` consumes
+  every section (column mappings, per-table `filters`, `project_id`,
+  `channel_mapping`); `DeltaSolver` consumes only the per-table
+  `column_name_mapping` entries and silently ignores the rest.
 
 Trade-off either way: this gives you naming flexibility and per-table
 scoping filters without writing code, but the underlying tables must

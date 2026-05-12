@@ -94,6 +94,65 @@ DUMMY_KEY_VALUE_STORE_CONFIG_WITH_SOLVER_CONFIG = {
     },
 }
 
+DUMMY_DELTA_CONFIG = {
+    "source": {
+        "container_tags_table": "mda_demo.silver.container_tags",
+        "container_metrics_table": "mda_demo.silver.container_metric",
+        "channel_tags_table": "mda_demo.silver.channel_tags",
+        "channel_metrics_table": "mda_demo.silver.channel_metric",
+        "channels_uri": "mda_demo.silver.channel_data",
+    },
+    "unity_sink": {
+        "catalog": "test_catalog",
+        "schema": "test_schema",
+        "table_prefix": "test_prefix",
+    },
+    "query_engine": {"solver": "DeltaSolver"},
+}
+
+DUMMY_DELTA_CONFIG_WITH_SOLVER_CONFIG = {
+    "source": {
+        "container_tags_table": "mda_demo.silver.container_tags",
+        "container_metrics_table": "mda_demo.silver.container_metric",
+        "channel_tags_table": "mda_demo.silver.channel_tags",
+        "channel_metrics_table": "mda_demo.silver.channel_metric",
+        "channels_uri": "mda_demo.silver.channel_data",
+    },
+    "unity_sink": {
+        "catalog": "test_catalog",
+        "schema": "test_schema",
+        "table_prefix": "test_prefix",
+    },
+    "query_engine": {
+        "solver": "DeltaSolver",
+        "solver_config": {
+            "container_tags": {"column_name_mapping": {"meas_id": "container_id"}},
+            "container_metrics": {"column_name_mapping": {"meas_id": "container_id"}},
+            "channel_tags": {
+                "column_name_mapping": {
+                    "meas_id": "container_id",
+                    "signal_id": "channel_id",
+                },
+            },
+            "channel_metrics": {
+                "column_name_mapping": {
+                    "meas_id": "container_id",
+                    "signal_id": "channel_id",
+                },
+            },
+            "channels": {
+                "column_name_mapping": {
+                    "meas_id": "container_id",
+                    "signal_id": "channel_id",
+                    "t_start": "tstart",
+                    "t_stop": "tend",
+                    "val": "value",
+                },
+            },
+        },
+    },
+}
+
 
 def test_report_init():
     """Test Report initialization"""
@@ -229,6 +288,67 @@ def test_create_solver_key_value_store_with_solver_config():
     assert solver.config.tend_col == "tend"
     assert solver.config.value_col == "value"
     assert solver.config.project_id_col == "project_id"
+
+
+def test_create_solver_delta_default_config():
+    """DeltaSolver created without solver_config gets a default SolverConfig (no renames)."""
+    from mda_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
+
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=DUMMY_DELTA_CONFIG,
+    )
+    solver = report.get_solver()
+
+    assert isinstance(solver, DeltaSolver)
+    assert solver.config is not None
+    # No column_name_mapping entries when solver_config is absent from config.
+    assert solver.config.container_tags.column_name_mapping == {}
+    assert solver.config.container_metrics.column_name_mapping == {}
+    assert solver.config.channel_tags.column_name_mapping == {}
+    assert solver.config.channel_metrics.column_name_mapping == {}
+    assert solver.config.channels.column_name_mapping == {}
+
+
+def test_create_solver_delta_with_solver_config():
+    """The Report factory forwards solver_config to DeltaSolver — column renames are visible."""
+    from mda_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
+
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=DUMMY_DELTA_CONFIG_WITH_SOLVER_CONFIG,
+    )
+    solver = report.get_solver()
+
+    assert isinstance(solver, DeltaSolver)
+    # Per-table column mappings come through from JSON config.
+    assert solver.config.container_tags.column_name_mapping == {"meas_id": "container_id"}
+    assert solver.config.container_metrics.column_name_mapping == {"meas_id": "container_id"}
+    assert solver.config.channel_tags.column_name_mapping == {
+        "meas_id": "container_id",
+        "signal_id": "channel_id",
+    }
+    assert solver.config.channel_metrics.column_name_mapping == {
+        "meas_id": "container_id",
+        "signal_id": "channel_id",
+    }
+    assert solver.config.channels.column_name_mapping == {
+        "meas_id": "container_id",
+        "signal_id": "channel_id",
+        "t_start": "tstart",
+        "t_stop": "tend",
+        "val": "value",
+    }
+    # Internal-name properties still resolve to the fixed framework names.
+    assert solver.config.container_id_col == "container_id"
+    assert solver.config.channel_id_col == "channel_id"
+    assert solver.config.tstart_col == "tstart"
+    assert solver.config.tend_col == "tend"
+    assert solver.config.value_col == "value"
 
 
 class TestValidateAggregationEvents:
