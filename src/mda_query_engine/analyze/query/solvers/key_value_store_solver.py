@@ -127,10 +127,10 @@ class KeyValueStoreSolver(QuerySolver):
         super().__init__(config=config)
         self.spark = spark
         self.is_raw_data = is_raw_data
-        self.drop_im_plausible_data: bool = drop_implausible_data
+        self.drop_implausible_data: bool = drop_implausible_data
         self.interval_encoder: IntervalEncoder = IntervalEncoder(
             timestamp_col_name="timestamp",
-            drop_implausible_data_points=self.drop_im_plausible_data,
+            drop_implausible_data_points=self.drop_implausible_data,
         )
 
     # ------------------------------------------------------------------
@@ -266,7 +266,7 @@ class KeyValueStoreSolver(QuerySolver):
             return metrics.dropDuplicates([container_id_col])
 
         return metrics.join(
-            F.broadcast(container_df.select(container_id_col).distinct()),
+            F.broadcast(container_df.select(container_id_col)),
             on=container_id_col,
             how="inner",
         ).dropDuplicates([container_id_col])

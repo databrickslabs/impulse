@@ -110,11 +110,11 @@ class DeltaSolver(QuerySolver):
         super().__init__(config)
         self.spark = spark
         self.is_raw_data: bool = is_raw_data
-        self.drop_im_plausible_data: bool = drop_implausible_data
+        self.drop_implausible_data: bool = drop_implausible_data
 
         self.interval_encoder: IntervalEncoder = IntervalEncoder(
             timestamp_col_name="timestamp",
-            drop_implausible_data_points=self.drop_im_plausible_data,
+            drop_implausible_data_points=self.drop_implausible_data,
         )
 
     def filter_container_tags(self, spark, query) -> DataFrame:
