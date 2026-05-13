@@ -57,8 +57,7 @@ ingesting your own data, four invariants matter most:
   - **Raw** — one row per sample: `(container_id, channel_id, timestamp,
     value)`.
   - **RLE** — one row per stable interval: `(container_id, channel_id,
-    tstart, tend, value)`. Pre-collapse during ingest if you want shorter
-    scan times.
+    tstart, tend, value)`. Run-length encoded data, where identical consecutive values are collapsed into intervals to significantly reduce processing time during analysis.
 
   An optional boolean `is_plausible` column lets the solver drop implausible
   samples when configured to (`drop_implausible_data=True` on `DeltaSolver`).
