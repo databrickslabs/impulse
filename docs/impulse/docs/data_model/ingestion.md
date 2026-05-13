@@ -55,8 +55,7 @@ ingesting your own data, four invariants matter most:
   If a key is not in the tag table, no expression can find it.
 - **`channels` supports two formats.** The query engine accepts either:
   - **Raw** — one row per sample: `(container_id, channel_id, timestamp,
-    value)`. The Delta solver collapses identical consecutive values into
-    intervals on read.
+    value)`.
   - **RLE** — one row per stable interval: `(container_id, channel_id,
     tstart, tend, value)`. Pre-collapse during ingest if you want shorter
     scan times.
