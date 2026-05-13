@@ -5,10 +5,11 @@ options and API documentation.
 
 ## Available References
 
-- [Aggregation](aggregation.md) - Aggregation methods and configurations
-- [Event](event.md) - Event detection and processing
 - [Report](report.md) - Report generation and output formats
+- [Query Engine](query_engine.md) - Solver overview and how to pick between `DeltaSolver` and `KeyValueStoreSolver`
 - [TSAL](tsal.md) - Time-Series Analysis Language syntax and usage
+- [Event](event.md) - Event detection and processing
+- [Aggregation](aggregation.md) - Aggregation methods and configurations
 - [Persist](persistence.md) - Storage and persistence options for reports and results
 - [API Reference](api/) - Auto-generated symbol-level API docs from source-code docstrings
 

@@ -5,10 +5,10 @@ title: Ingestion
 
 # Ingestion
 
-Impulse's default solvers read from a silver layer composed of a minimum of
-three tables: `container_metrics`, `channel_metrics`, and `channels`. Two
-additional tables, `container_tags` and `channel_tags`, are optional but
-strongly recommended. They carry the contextual metadata that the
+Impulse's [default solvers](../references/query_engine.md) read from a
+silver layer composed of a minimum of three tables: `container_metrics`,
+`channel_metrics`, and `channels`. Two additional tables, `container_tags`
+and `channel_tags`, are optional but strongly recommended. They carry the contextual metadata that the
 user-facing channel selection API (`query.channel(channel_name="Engine_RPM")`)
 and tag-based container filtering rely on. The full schema is on the
 [Silver Layer ER Diagram](silver_layer_schema.md). This page is for engineers

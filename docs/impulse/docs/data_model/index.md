@@ -6,15 +6,24 @@ title: Data Model
 
 :::caution Prerequisite
 
-The schema described on this page is what Impulse's **default solvers**
-(`DeltaSolver`, `KeyValueStoreSolver`) expect from your silver layer.
-**Landing your data in this shape during ingest is the simplest and
-most maintainable path** — see the [Ingestion guide](ingestion.md).
+The schema described on this page is the full silver-layer shape that
+Impulse's [**default solvers**](../references/query_engine.md)
+(`DeltaSolver`, `KeyValueStoreSolver`) recognise. **Landing your data in
+this shape during ingest is the simplest and most maintainable path** —
+see the [Ingestion guide](ingestion.md).
+
+The default solvers also run on a **subset** of this model.
+`KeyValueStoreSolver` needs only three of the five tables —
+`container_metrics`, `channel_metrics`, and `channels` — and treats
+`container_tags` and `channel_mapping` as optional add-ons. `DeltaSolver`
+is the one that requires all five. See
+[Which solver should I use?](../references/query_engine.md#which-solver-should-i-use)
+for the decision rule.
 
 Advanced deployments with existing data layouts they cannot or do not want
-to reshape can adapt by passing a `SolverConfig` to remap column names, or
-by implementing a custom solver for fundamentally different physical
-layouts. The ingestion guide's
+to reshape can adapt further by passing a `SolverConfig` to remap column
+names, or by implementing a custom solver for fundamentally different
+physical layouts. The ingestion guide's
 [last section](ingestion.md#adapting-to-existing-data-layouts) covers the
 tradeoffs.
 
