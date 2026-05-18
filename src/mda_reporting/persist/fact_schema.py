@@ -40,7 +40,7 @@ HISTOGRAM2D_FACT_SCHEMA = StructType(
 EVENT_INSTANCE_FACT_SCHEMA = StructType(
     [
         StructField("container_id", IntegerType(), False),
-        StructField("event_instance_id", LongType(), False),
+        StructField("event_instance_id", IntegerType(), False),
         StructField("event_id", IntegerType(), False),
         StructField("start_ts", LongType(), False),
         StructField("end_ts", LongType(), False),

@@ -6,7 +6,11 @@ import numpy as np
 import pyspark.sql.types as T
 
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
-from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
+from mda_query_engine.analyze.metadata.time_series_expression import (
+    TimeSeriesExpression,
+    TimeSeriesSelector,
+)
+
 from .aggregation import Aggregation
 
 
@@ -136,6 +140,9 @@ class HistogramDuration(Aggregation):
             Set of required tag expressions.
         """
         return self.selection.get_required_tag_exprs()
+
+    def get_selectors(self) -> list[TimeSeriesSelector]:
+        return self.selection.get_selectors()
 
 
 class HistogramCustomWeights(Aggregation):
@@ -277,3 +284,6 @@ class HistogramCustomWeights(Aggregation):
             Set of required tag expressions for the aggregation.
         """
         return self.selection.get_required_tag_exprs().union(self.weights.get_required_tag_exprs())
+
+    def get_selectors(self) -> list[TimeSeriesSelector]:
+        return self.selection.get_selectors() + self.weights.get_selectors()

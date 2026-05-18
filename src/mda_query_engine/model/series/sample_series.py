@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-
 from collections.abc import Sized
+from typing import Union
 
 import numpy as np
 import numpy.typing as npt
@@ -50,7 +50,6 @@ class SampleSeries:
         pyspark.sql.types.BinaryType
             Spark BinaryType for serialized SampleSeries.
         """
-
         return T.BinaryType()
 
     def get_data(self) -> list:
@@ -832,15 +831,14 @@ class SampleSeries:
         if weights is None:
             # x_ts, y_ts = self.synchronized(y_series)
             weights_vector = self.durations()
+        elif weight_type is None:
+            weights_vector = weights.values
+        elif weight_type == "time":
+            weights_vector = weights.values * weights.durations()
         else:
-            if weight_type is None:
-                weights_vector = weights.values
-            elif weight_type == "time":
-                weights_vector = weights.values * weights.durations()
-            else:
-                raise ValueError(
-                    f'weight_type options are: None, "time". {weight_type} is not supported'
-                )
+            raise ValueError(
+                f'weight_type options are: None, "time". {weight_type} is not supported'
+            )
 
         hist2d, x_bins, y_bins = np.histogram2d(
             x=self.values,
@@ -964,7 +962,10 @@ class SampleSeries:
         ends = [min(self.tends[i1], other.tends[i2]) for i1, i2 in pairs]
         values1 = [self.values[i1] for i1, _ in pairs]
         values2 = [other.values[i2] for _, i2 in pairs]
-        return (SampleSeries(starts, ends, values1), SampleSeries(starts, ends, values2))
+        return (
+            SampleSeries(starts, ends, values1),
+            SampleSeries(starts, ends, values2),
+        )
 
     def synchronized_all(self, others: list[SampleSeries]):
         """
@@ -1226,10 +1227,11 @@ class SampleSeries:
             Integrated value.
         """
         result = 0.0
+        _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
         for start_index, stop_index in self.continuous_interval_indices:
             tmp_values = self.values[start_index : stop_index + 1]
             tmp_starts = self.tstarts[start_index : stop_index + 1]
-            result = result + np.trapz(y=tmp_values, x=tmp_starts)
+            result = result + _trapz(y=tmp_values, x=tmp_starts)
         return result
 
     def cumtrapz(self) -> SampleSeries:
@@ -1286,6 +1288,7 @@ class SampleSeries:
             Compressed serialized data.
         """
         import pickle as pkl
+
         import lz4.frame as lz4f
 
         # make sure directory exists
@@ -1309,6 +1312,7 @@ class SampleSeries:
             Deserialized SampleSeries object.
         """
         import pickle as pkl
+
         import lz4.frame as lz4f
 
         pickled = lz4f.decompress(d)

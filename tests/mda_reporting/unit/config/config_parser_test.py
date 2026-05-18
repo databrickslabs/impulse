@@ -9,9 +9,9 @@ from mda_reporting.config.config_parser import (
     DataType,
     IncrementalConfig,
     MdaConfig,
-    Solvers,
     MeasurementDimensions,
     MetricFilter,
+    Solvers,
     TagFilter,
     is_valid_table_name,
     is_valid_unity_entity_name,
@@ -40,7 +40,7 @@ MDA_CONFIG_JSON = {
             ]
         ]
     },
-    "query_engine": {"solver": "BasicNarrowSolver"},
+    "query_engine": {"solver": "KeyValueStoreSolver"},
     "measurement_dimensions": [
         "uut_id",
         "file_name",
@@ -64,7 +64,7 @@ def test_mda_config_from_dict():
     assert len(config.container_filters.metric_filters[0]) == 2
     assert config.container_filters.metric_filters[0][0].column_name == "uut_id"
     assert config.container_filters.metric_filters[0][0].comparator == Comparator.EQ
-    assert config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER
+    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
 
     assert MeasurementDimensions.UUT_ID in config.measurement_dimensions
     assert MeasurementDimensions.FILE_NAME in config.measurement_dimensions
@@ -83,7 +83,7 @@ def test_mda_config_data_format_raw():
     config_json = {
         **MDA_CONFIG_JSON,
         "query_engine": {
-            "solver": "BasicNarrowSolver",
+            "solver": "KeyValueStoreSolver",
             "data_type": "RAW",
         },
     }
@@ -101,7 +101,7 @@ def test_mda_config_drop_implausible_data_enabled():
     config_json = {
         **MDA_CONFIG_JSON,
         "query_engine": {
-            "solver": "BasicNarrowSolver",
+            "solver": "KeyValueStoreSolver",
             "data_type": "RAW",
             "drop_implausible_data": True,
         },
@@ -120,7 +120,7 @@ def test_mda_config_drop_implausible_data_rejects_rle():
     config_json = {
         **MDA_CONFIG_JSON,
         "query_engine": {
-            "solver": "BasicNarrowSolver",
+            "solver": "KeyValueStoreSolver",
             "data_type": "RLE",
             "drop_implausible_data": True,
         },
@@ -134,7 +134,7 @@ def test_mda_config_from_dict_no_query_engine_provided():
     config_json = MDA_CONFIG_JSON.copy()
     config_json.pop("query_engine", None)
     config = MdaConfig.model_validate(config_json)
-    assert config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER
+    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
 
 
 def test_mda_config_from_dict_no_measurement_dim_provided():
@@ -224,23 +224,21 @@ def test_map_gold_name_to_silver():
 
 
 def test_tags_table():
-    """Test the `tags_table` fields in `MdaConfig`."""
+    """Test the `container_tags_table` field in `MdaConfig.source`."""
     config_json = MDA_CONFIG_JSON.copy()
 
     source = config_json["source"]
     source["container_tags_table"] = "mda_demo.silver.container_tags"
-    source["channel_tags_table"] = "mda_demo.silver.channel_tags"
     config = MdaConfig.model_validate(config_json)
     assert config.source.container_tags_table == "mda_demo.silver.container_tags"
-    assert config.source.channel_tags_table == "mda_demo.silver.channel_tags"
 
 
 def test_mda_config_key_value_store_solver_valid():
-    """Test KeyValueStoreSolver config with valid project_id."""
+    """Test KeyValueStoreSolver config with project_id inside solver_config."""
     config_json = MDA_CONFIG_JSON.copy()
     config_json["query_engine"] = {
         "solver": "KeyValueStoreSolver",
-        "project_id": "my_project",
+        "solver_config": {"project_id": "my_project"},
     }
     config_json["source"][
         "container_tags_table"
@@ -253,24 +251,28 @@ def test_mda_config_key_value_store_solver_valid():
     }
     config = MdaConfig.model_validate(config_json)
     assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
-    assert config.query_engine.project_id == "my_project"
+    assert config.query_engine.solver_config.project_id == "my_project"
 
 
-def test_mda_config_key_value_store_solver_missing_project_id():
-    """Test KeyValueStoreSolver config without project_id raises ValidationError."""
+def test_mda_config_key_value_store_solver_no_project_id_accepted():
+    """KeyValueStoreSolver accepts configs without project_id.
+
+    project_id is optional in all data models; when present the solver
+    applies it as an equality filter, when absent it is simply not used.
+    """
     config_json = MDA_CONFIG_JSON.copy()
     config_json["query_engine"] = {"solver": "KeyValueStoreSolver"}
-    with pytest.raises(ValidationError):
-        MdaConfig.model_validate(config_json)
+    config = MdaConfig.model_validate(config_json)
+    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
+    assert config.query_engine.solver_config is None
 
 
-def test_mda_config_basic_narrow_solver_no_project_id():
-    """Test BasicNarrowSolver config without project_id (backward compatible)."""
+def test_mda_config_basic_narrow_solver_rejected():
+    """BasicNarrowSolver has been removed; the string is no longer a valid enum value."""
     config_json = MDA_CONFIG_JSON.copy()
     config_json["query_engine"] = {"solver": "BasicNarrowSolver"}
-    config = MdaConfig.model_validate(config_json)
-    assert config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER
-    assert config.query_engine.project_id is None
+    with pytest.raises(ValidationError):
+        MdaConfig.model_validate(config_json)
 
 
 def test_mda_config_solver_config_none_by_default():
@@ -398,65 +400,6 @@ def test_is_valid_unity_entity_name_invalid_inputs():
     for entity_name in invalid_entity_names:
         with pytest.raises(ValueError):
             is_valid_unity_entity_name(entity_name)
-
-
-def test_mda_config_solver_config_dict():
-    """Test that solver_config accepts a dictionary with column mappings."""
-    config_json = MDA_CONFIG_JSON.copy()
-    config_json["query_engine"] = {
-        "solver": "KeyValueStoreSolver",
-        "project_id": "my_project",
-        "solver_config": {
-            "container_id_col": "measurement_id",
-            "channel_id_cols": ["measurement_id", "signal_id"],
-            "channel_data_mapping": {
-                "tstart": "t_start",
-                "tend": "t_stop",
-                "value": "val",
-            },
-            "container_meta_data_mapping": {
-                "project_id": "project",
-            },
-        },
-    }
-    config_json["source"][
-        "container_tags_table"
-    ] = "spark_catalog.silver_key_value_store.container_tags"
-    # KVS solver only supports tag filters
-    config_json["container_filters"] = {
-        "tag_filters": [
-            [{"tag_name": "uut_id", "comparator": "==", "value": "123", "cast_type": "string"}]
-        ]
-    }
-    config = MdaConfig.model_validate(config_json)
-    assert config.query_engine.solver_config is not None
-    assert config.query_engine.solver_config.container_id_col == "measurement_id"
-    assert config.query_engine.solver_config.tstart_col == "t_start"
-
-
-def test_mda_config_solver_config_partial():
-    """Test that solver_config accepts a partial dictionary (only some keys)."""
-    config_json = MDA_CONFIG_JSON.copy()
-    config_json["query_engine"] = {
-        "solver": "KeyValueStoreSolver",
-        "project_id": "my_project",
-        "solver_config": {
-            "container_id_col": "meas_id",
-        },
-    }
-    config_json["source"][
-        "container_tags_table"
-    ] = "spark_catalog.silver_key_value_store.container_tags"
-    # KVS solver only supports tag filters
-    config_json["container_filters"] = {
-        "tag_filters": [
-            [{"tag_name": "uut_id", "comparator": "==", "value": "123", "cast_type": "string"}]
-        ]
-    }
-    config = MdaConfig.model_validate(config_json)
-    assert config.query_engine.solver_config.container_id_col == "meas_id"
-    assert config.query_engine.solver_config.tstart_col == "tstart"
-    assert config.query_engine.solver_config.entity_id_col == "entity_id"
 
 
 # --- Container Filter Model Tests ---
@@ -922,3 +865,98 @@ def test_mda_config_with_incremental_disabled():
     config = MdaConfig.model_validate(config_json)
     assert config.incremental is not None
     assert config.incremental.enabled is False
+
+
+def test_mda_config_delta_solver_valid():
+    """DeltaSolver is accepted without project_id or solver_config."""
+    config_json = MDA_CONFIG_JSON.copy()
+    config_json["query_engine"] = {"solver": "DeltaSolver"}
+    config = MdaConfig.model_validate(config_json)
+    assert config.query_engine.solver == Solvers.DELTA_SOLVER
+    assert config.query_engine.solver_config is None
+
+
+def test_mda_config_key_value_store_solver_without_container_tags_table_accepted():
+    """KVS without container_tags_table in source is accepted (wide-only data model)."""
+    config_json = MDA_CONFIG_JSON.copy()
+    config_json["source"] = {
+        k: v for k, v in MDA_CONFIG_JSON["source"].items() if k != "container_tags_table"
+    }
+    config_json["query_engine"] = {
+        "solver": "KeyValueStoreSolver",
+        "solver_config": {"project_id": "proj"},
+    }
+    config = MdaConfig.model_validate(config_json)
+    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
+    assert config.source.container_tags_table is None
+
+
+def test_mda_config_key_value_store_solver_empty_solver_config_accepted():
+    """KVS with empty solver_config (no project_id) is accepted."""
+    config_json = MDA_CONFIG_JSON.copy()
+    config_json["query_engine"] = {
+        "solver": "KeyValueStoreSolver",
+        "solver_config": {},
+    }
+    config_json["source"][
+        "container_tags_table"
+    ] = "spark_catalog.silver_key_value_store.container_tags"
+    config = MdaConfig.model_validate(config_json)
+    assert config.query_engine.solver_config.project_id is None
+
+
+def test_mda_config_solver_config_with_filters():
+    """Per-table filters are parsed correctly in solver_config."""
+    config_json = MDA_CONFIG_JSON.copy()
+    config_json["query_engine"] = {
+        "solver": "KeyValueStoreSolver",
+        "solver_config": {
+            "project_id": "proj",
+            "container_tags": {
+                "filters": {"environment": "production"},
+            },
+            "channels": {
+                "column_name_mapping": {"meas_id": "container_id"},
+                "filters": {"source": "live"},
+            },
+        },
+    }
+    config_json["source"][
+        "container_tags_table"
+    ] = "spark_catalog.silver_key_value_store.container_tags"
+    config_json["container_filters"] = {
+        "tag_filters": [
+            [
+                {
+                    "tag_name": "uut_id",
+                    "comparator": "==",
+                    "value": "123",
+                    "cast_type": "string",
+                }
+            ]
+        ]
+    }
+    config = MdaConfig.model_validate(config_json)
+    sc = config.query_engine.solver_config
+    assert sc.container_tags.filters == {"environment": "production"}
+    assert sc.channels.filters == {"source": "live"}
+    assert sc.channels.column_name_mapping == {"meas_id": "container_id"}
+    assert sc.container_metrics.filters == {}
+
+
+def test_mda_config_source_accepts_channel_mapping_table():
+    """Test Source config accepts an optional channel_mapping_table."""
+    config_json = MDA_CONFIG_JSON.copy()
+    config_json["source"] = dict(MDA_CONFIG_JSON["source"])
+    config_json["source"]["channel_mapping_table"] = "avl_meta.data_model.channel_mapping"
+    config = MdaConfig.model_validate(config_json)
+    assert config.source.channel_mapping_table == "avl_meta.data_model.channel_mapping"
+
+
+def test_mda_config_source_rejects_invalid_channel_mapping_table():
+    """Test Source config validates channel_mapping_table naming."""
+    config_json = MDA_CONFIG_JSON.copy()
+    config_json["source"] = dict(MDA_CONFIG_JSON["source"])
+    config_json["source"]["channel_mapping_table"] = "invalid_table_name"
+    with pytest.raises(ValidationError):
+        MdaConfig.model_validate(config_json)

@@ -1,72 +1,17 @@
 import pyspark.sql.functions as f
 from pyspark.sql import Column
 from pyspark.sql.types import IntegerType
-from typing import TYPE_CHECKING
+
 from mda_query_engine.analyze.metadata.metric_expression import MetricExpression
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
 from mda_query_engine.analyze.query.query_builder import QueryBuilder
 from mda_reporting.aggregations.aggregation import Aggregation
-from mda_reporting.config.config_parser import Comparator, TagFilter, MetricFilter
+from mda_reporting.config.config_parser import Comparator, MetricFilter, TagFilter
 from mda_reporting.events.event import Event
-
-if TYPE_CHECKING:
-    from mda_reporting.events.basic_event import BasicEvent
-    from mda_reporting.events.container_event import ContainerEvent
 
 
 class ReportEntityUtil:
     """Utility class for report entities."""
-
-    @staticmethod
-    def get_event_instance_id_column(
-        event_type: "type[BasicEvent] | type[ContainerEvent]" = None,
-        container_id_col: str = "container_id",
-        event_name_col: str = "event_name",
-        start_ts_col: str = "start_ts",
-        end_ts_col: str = "end_ts",
-    ) -> Column:
-        """
-        Generate a Spark column expression for event_instance_id.
-
-        For BasicEvent, the event_instance_id is calculated as:
-        crc32(container_id::event_name::start_ts::end_ts)
-
-        For ContainerEvent, returns -1 as there is only one event instance per container.
-
-        Parameters
-        ----------
-        event_type : type[BasicEvent] or type[ContainerEvent]
-            The type of event (BasicEvent or ContainerEvent class)
-        container_id_col : str
-            Name of the container_id column
-        event_name_col : str
-            Name of the event_name column
-        start_ts_col : str
-            Name of the start timestamp column
-        end_ts_col : str
-            Name of the end timestamp column
-
-        Returns
-        -------
-        pyspark.sql.Column
-            Column expression for event_instance_id
-        """
-
-        from mda_reporting.events.basic_event import BasicEvent
-        from mda_reporting.events.container_event import ContainerEvent
-
-        if event_type is ContainerEvent:
-            return f.lit(-1)
-
-        return f.crc32(
-            f.concat_ws(
-                "::",
-                f.col(container_id_col),
-                f.col(event_name_col),
-                f.col(start_ts_col),
-                f.col(end_ts_col),
-            )
-        )
 
     @staticmethod
     def get_event_id_column(

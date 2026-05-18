@@ -8,9 +8,11 @@ from mda_query_engine.analyze.metadata.metric_expression import MetricSelector
 from mda_query_engine.analyze.metadata.tag_expression import TagSelector
 from mda_query_engine.analyze.metadata.time_series_expression import (
     RequiresDeserialization,
+    TimeSeriesExpression,
     TimeSeriesSelector,
 )
 from mda_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
+
 from .solvers.blob_solver import BlobSolver
 from .solvers.query_solver import QuerySolver
 from mda_query_engine.telemetry import telemetry_logger
@@ -25,7 +27,6 @@ class QueryBuilder:
         ----------
         db : mda_query_engine.analyze.MeasurementDB
             Measurement database object.
-
         """
         self.db = db
         self.ws = db.ws
@@ -144,6 +145,18 @@ class QueryBuilder:
                 expr = expr & (TagSelector(k) == str(arg))
         return TimeSeriesSelector(expr)
 
+    def channel_with_alias(self, **kwargs) -> TimeSeriesSelector:
+        if self.db.config.channel_mapping_table is None:
+            raise ValueError("channel_mapping_table is not configured")
+
+        expr = None
+        for k, arg in kwargs.items():
+            if not expr:
+                expr = TagSelector(k) == str(arg)
+            else:
+                expr = expr & (TagSelector(k) == str(arg))
+        return TimeSeriesSelector(expr, uses_alias=True)
+
     def select(self, *args) -> Self:
         """
         Set the selection expressions for the query.
@@ -161,31 +174,33 @@ class QueryBuilder:
         self.selections = list(args)
         return self
 
-    def _determine_result_dtypes(self, default_dtype: T = T.DoubleType()):
-        """
-        Determine result data types for the selections by building each
-        against an empty cache and inspecting the result's dtype.
+    def _collect_time_series_selectors(self, uses_alias=None) -> list[TimeSeriesSelector]:
+        """Collect deduplicated leaf selectors from this query's selections.
 
         Parameters
         ----------
-        default_dtype : pyspark.sql.types.DataType, optional
-            Default data type to use if not specified (default is DoubleType).
+        uses_alias : bool or None, optional
+            When ``True``, keep only alias selectors; when ``False``, keep
+            only direct selectors; when ``None`` (default), keep all.
 
         Returns
         -------
-        list
-            List of Spark data types for each selection.
+        list of TimeSeriesSelector
+            Deduplicated selectors in discovery order.
         """
-        result_dtypes = []
-        for s in self.selections:
-            result_object = s.build(EmptyTimeSeriesCache())
-            dtype = default_dtype
-            if hasattr(result_object, "dtype") and callable(result_object.dtype):
-                dtype = result_object.dtype()
-            elif hasattr(s, "dtype") and callable(s.dtype):
-                dtype = s.dtype()
-            result_dtypes.append(dtype)
-        return result_dtypes
+        selectors = []
+        seen_selector_ids = set()
+        for expression in self.selections:
+            if not isinstance(expression, TimeSeriesExpression):
+                continue
+            for selector in expression.get_selectors():
+                if uses_alias is not None and selector.uses_alias != uses_alias:
+                    continue
+                if selector.selector_id in seen_selector_ids:
+                    continue
+                seen_selector_ids.add(selector.selector_id)
+                selectors.append(selector)
+        return selectors
 
     def _determine_result_objects_dtypes(self, default_dtype: T = T.DoubleType()):
         """
@@ -245,13 +260,27 @@ class QueryBuilder:
             self.result_dtypes,
         ) = self._determine_result_objects_dtypes()
 
+        # extract selectors upfront
+        direct_selectors = self._collect_time_series_selectors(uses_alias=False)
+        aliased_selectors = self._collect_time_series_selectors(uses_alias=True)
+
         # create Query
         tags_df = solver.filter_container_tags(spark, self)
         metrics_df = solver.filter_container_metrics(
             spark, self, tags_df, pre_filtered_containers_df
         )
-        channel_tags_df = solver.filter_channel_tags(spark, self, metrics_df)
-        channel_metrics_df = solver.filter_channel_metrics(spark, self, channel_tags_df)
+        channel_tags_df = solver.filter_channel_tags(spark, self.db, metrics_df, direct_selectors)
+        channel_metrics_df = solver.filter_channel_metrics(
+            spark, self.db, channel_tags_df, direct_selectors
+        )
+
+        if len(aliased_selectors) > 0:
+            aliased_channel_metrics_df = solver.filter_aliased_channel_metrics(
+                spark, self.db, channel_tags_df, aliased_selectors
+            )
+            channel_metrics_df = solver.resolve_channel_selections(
+                spark, channel_metrics_df, aliased_channel_metrics_df
+            )
 
         return solver.solve(self, channel_metrics_df, self.selections, self.result_dtypes)
 

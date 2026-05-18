@@ -3,7 +3,7 @@
 import pytest
 
 from mda_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
+from mda_query_engine.analyze.query.solvers.key_value_store_solver import KeyValueStoreSolver
 
 
 class TestStatisticsAggregatorIntegration:
@@ -24,7 +24,7 @@ class TestStatisticsAggregatorIntegration:
 
         # Build query and solve
         stats_query = query.select(stats_agg.alias("engine_rpm_stats"))
-        result = stats_query.solve(spark=spark, solver=BasicNarrowSolver(spark))
+        result = stats_query.solve(spark=spark, solver=KeyValueStoreSolver(spark))
 
         # Should have results for each container (3 containers in test data)
         assert result.count() == 3
@@ -72,7 +72,7 @@ class TestStatisticsAggregatorIntegration:
 
         # Build query and solve
         stats_query = query.select(stats_agg.alias("multi_channel_stats"))
-        result = stats_query.solve(spark=spark, solver=BasicNarrowSolver(spark))
+        result = stats_query.solve(spark=spark, solver=KeyValueStoreSolver(spark))
 
         # Should have results for each container
         assert result.count() == 3
@@ -118,7 +118,7 @@ class TestStatisticsAggregatorIntegration:
 
         # Build query and solve
         stats_query = query.select(stats_agg.alias("high_speed_rpm_stats"))
-        result = stats_query.solve(spark=spark, solver=BasicNarrowSolver(spark))
+        result = stats_query.solve(spark=spark, solver=KeyValueStoreSolver(spark))
 
         # Should have results for each container
         assert result.count() == 3
@@ -157,7 +157,7 @@ class TestStatisticsAggregatorIntegration:
 
         # Build query and solve
         stats_query = query.select(stats_agg.alias("rpm_mean_only"))
-        result = stats_query.solve(spark=spark, solver=BasicNarrowSolver(spark))
+        result = stats_query.solve(spark=spark, solver=KeyValueStoreSolver(spark))
 
         # Collect results
         rows = result.collect()
@@ -193,7 +193,7 @@ class TestStatisticsAggregatorIntegration:
 
         # Build query and solve
         stats_query = query.select(stats_agg.alias("temp_during_driving"))
-        result = stats_query.solve(spark=spark, solver=BasicNarrowSolver(spark))
+        result = stats_query.solve(spark=spark, solver=KeyValueStoreSolver(spark))
 
         # Should have results for each container
         assert result.count() == 3
@@ -219,7 +219,7 @@ class TestStatisticsAggregatorIntegration:
         )
 
         stats_query = query.select(stats_agg.alias("rpm_stats"))
-        result = stats_query.solve(spark=spark, solver=BasicNarrowSolver(spark))
+        result = stats_query.solve(spark=spark, solver=KeyValueStoreSolver(spark))
 
         # Check schema of result
         schema = result.schema
@@ -252,7 +252,7 @@ class TestStatisticsAggregatorIntegration:
         stats_query = query.select(
             stats_agg.alias("agg_stats"), native_min, native_max, native_mean
         )
-        result = stats_query.solve(spark=spark, solver=BasicNarrowSolver(spark))
+        result = stats_query.solve(spark=spark, solver=KeyValueStoreSolver(spark))
 
         # Compare results
         rows = result.collect()
@@ -285,7 +285,7 @@ class TestStatisticsAggregatorIntegration:
         df = (
             query.where(filter_cond)
             .select(stats_agg.alias("my_stats"))
-            .solve(spark, solver=BasicNarrowSolver(spark))
+            .solve(spark, solver=KeyValueStoreSolver(spark))
         )
 
         assert df.count() == 1
@@ -330,7 +330,7 @@ class TestStatisticsAggregatorIntegration:
         df = (
             query.where(metric_container_id == 1)
             .select(stats_agg.alias("multi_stats"))
-            .solve(spark, solver=BasicNarrowSolver(spark))
+            .solve(spark, solver=KeyValueStoreSolver(spark))
         )
 
         assert df.count() == 1
@@ -363,7 +363,7 @@ class TestStatisticsAggregatorIntegration:
         df = (
             query.where(metric_container_id == 1)
             .select(stats_agg.alias("filtered_stats"))
-            .solve(spark, solver=BasicNarrowSolver(spark))
+            .solve(spark, solver=KeyValueStoreSolver(spark))
         )
 
         for row in df.collect():
@@ -390,7 +390,7 @@ class TestStatisticsAggregatorIntegration:
         df = (
             query.where(metric_container_id == 1)
             .select(stats_agg.alias("accuracy_stats"))
-            .solve(spark, solver=BasicNarrowSolver(spark))
+            .solve(spark, solver=KeyValueStoreSolver(spark))
         )
 
         for row in df.collect():
@@ -417,7 +417,7 @@ class TestStatisticsAggregatorIntegration:
         df = (
             query.where(metric_container_id == 1)
             .select(stats_agg.alias("median_stats"))
-            .solve(spark, solver=BasicNarrowSolver(spark))
+            .solve(spark, solver=KeyValueStoreSolver(spark))
         )
 
         for row in df.collect():

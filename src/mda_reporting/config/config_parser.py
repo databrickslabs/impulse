@@ -1,13 +1,13 @@
 import re
+from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated
 
 import pyspark.sql.functions as f
-from pydantic import BaseModel, AfterValidator, model_validator
+from pydantic import AfterValidator, BaseModel, model_validator
 from pyspark.sql import Column
-from datetime import datetime
 
-from mda_query_engine.analyze.query.solvers import SolverConfig
+from mda_query_engine.analyze.query.solvers.solver_config import SolverConfig
 
 
 def is_valid_table_name(table_name: str) -> str:
@@ -173,12 +173,10 @@ class Solvers(Enum):
 
     Attributes
     ----------
-    BASIC_NARROW_SOLVER : str
     DELTA_SOLVER : str
     KEY_VALUE_STORE_SOLVER : str
     """
 
-    BASIC_NARROW_SOLVER = "BasicNarrowSolver"
     DELTA_SOLVER = "DeltaSolver"
     KEY_VALUE_STORE_SOLVER = "KeyValueStoreSolver"
 
@@ -189,12 +187,23 @@ class Source(BaseModel):
 
     Attributes
     ----------
+    container_tags_table : str, optional
+        Full Unity Catalog path to the container tags table (narrow/EAV format).
+        Required when filtering by container tags. Omit for wide-only data
+        models that carry container attributes as columns on
+        ``container_metrics``. ``project_id`` scoping is independent of this
+        field — it works in both narrow EAV and wide-only data models because
+        it is applied to ``container_metrics`` (and ``channel_mapping`` if
+        configured) regardless of whether ``container_tags_table`` is set.
     container_metrics_table : str
         Full Unity Catalog path to the container metrics table.
     channel_metrics_table : str
         Full Unity Catalog path to the channel metrics table.
     channels_uri : str
         Full Unity Catalog path to the channels data table.
+    channel_mapping_table : str, optional
+        Full Unity Catalog path to the channel mapping table. Required when using
+        ``channel_with_alias()`` for logical alias resolution.
 
     Notes
     -----
@@ -207,6 +216,7 @@ class Source(BaseModel):
     container_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channel_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channels_uri: Annotated[str, AfterValidator(is_valid_table_name)]
+    channel_mapping_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
 
 
 class UnitySink(BaseModel):
@@ -229,7 +239,10 @@ class UnitySink(BaseModel):
 
     catalog: Annotated[str, AfterValidator(is_valid_unity_entity_name)]
     schema: Annotated[str, AfterValidator(is_valid_unity_entity_name)]
-    table_prefix: Annotated[str, AfterValidator(is_valid_unity_entity_name)]
+    table_prefix: Annotated[
+        str,
+        AfterValidator(lambda v: v if v == "" else is_valid_unity_entity_name(v)),
+    ]
 
 
 class Comparator(str, Enum):
@@ -396,49 +409,41 @@ class QueryEngine(BaseModel):
 
     Parameters
     ----------
-    solver : Solvers, default=Solvers.BASIC_NARROW_SOLVER
+    solver : Solvers, default=Solvers.KEY_VALUE_STORE_SOLVER
         The solver type to use for query execution.
-    project_id : str, optional
-        The project ID for KeyValueStoreSolver. Required when solver
-        is KEY_VALUE_STORE_SOLVER.
-    parent_id : str, optional
-        The parent_id to filter entities by in concept_entities (e.g.
-        ``"uut_concept"``).  Default: ``None`` (no parent_id filter).
-    entity_maps_to : str, optional
-        How ``entity_id`` in concept_entities maps to the
-        container_metrics table.  ``"uut_id"`` (default) for
-        1-to-many vehicle→files mapping, ``"container_id"`` for
-        direct 1-to-1 file mapping.
+    solver_config : SolverConfig, optional
+        Per-table column name mappings and filter configuration for
+        the solver.  Use this when your silver-layer tables use
+        non-default column names or when you need project/toolbox
+        scoping.  Key sub-fields:
+
+        - ``project_id`` (str): Top-level project filter value applied
+          to container_tags, container_metrics, and channel_mapping
+          tables when the corresponding columns exist after column
+          renaming.
+        - Per-table sections (``container_tags``, ``container_metrics``,
+          ``channel_mapping``, ``channels``, etc.) each with
+          ``column_name_mapping`` and ``filters`` dicts.
+
+        When omitted, all default column names are used and no
+        project/toolbox filtering is applied.
 
     Notes
     -----
-    The default solver is set to ``Solvers.BASIC_NARROW_SOLVER``.
-    When using ``Solvers.KEY_VALUE_STORE_SOLVER``, ``project_id`` must
-    be provided.
+    The default solver is ``Solvers.KEY_VALUE_STORE_SOLVER``, which
+    operates either with a narrow EAV ``container_tags`` table or in
+    a wide-only data model when ``source.container_tags_table`` is
+    not configured.
+
     - RLE channel data must contain 'container_id', 'channel_id', 'tstart', 'tend', 'value' columns
     - RAW channel data must contain 'container_id', 'channel_id', 'timestamp', 'value' columns
     """
 
-    solver: Solvers = Solvers.BASIC_NARROW_SOLVER
+    solver: Solvers = Solvers.KEY_VALUE_STORE_SOLVER
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
-
-    project_id: str | None = None
-    parent_id: str | None = None
-    entity_maps_to: str | None = "uut_id"
     solver_config: SolverConfig | None = None
-
-    @model_validator(mode="after")
-    def validate_project_id_for_key_value_store_solver(self):
-        """Validate that project_id is provided when using KeyValueStoreSolver."""
-        if self.solver == Solvers.KEY_VALUE_STORE_SOLVER and self.project_id is None:
-            raise ValueError("project_id is required when using KeyValueStoreSolver")
-        if self.entity_maps_to not in ("uut_id", "container_id"):
-            raise ValueError(
-                f"entity_maps_to must be 'uut_id' or 'container_id', "
-                f"got '{self.entity_maps_to}'"
-            )
-        return self
+    batch_size: int = 500
 
     @model_validator(mode="after")
     def validate_drop_implausible_data_requires_raw(self):
@@ -478,7 +483,7 @@ class IncrementalConfig(BaseModel):
 
     enabled: bool = False
     data_type: DataType = DataType.RLE
-    drop_implausible_data: bool = False  # todo check this was added?
+    drop_implausible_data: bool = False
     silver_last_modified_column: str = "timestamp"
     gold_last_modified_column: str = "_created_at"
 
@@ -496,7 +501,7 @@ class MdaConfig(BaseModel):
      container_filters : ContainerFilters, optional
          Optional container-level filters (tag-based and/or metric-based).
      query_engine : QueryEngine, optional
-         Optional query engine configuration. Defaults to Solvers.BASIC_NARROW_SOLVER.
+         Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
      incremental : IncrementalConfig, optional
          Optional incremental processing configuration. Defaults to IncrementalConfig().
      measurement_dimensions : list of MeasurementDimensions, optional
@@ -507,7 +512,8 @@ class MdaConfig(BaseModel):
      ...     "source": {
      ...         "container_metrics_table": "mda_demo.silver.container_metric",
      ...         "channel_metrics_table": "mda_demo.silver.channel_metric",
-     ...         "channels_uri": "mda_demo.silver.channel_data"
+     ...         "channels_uri": "mda_demo.silver.channel_data",
+     ...         "channel_mapping_table": "mda_demo.data_model.channel_mapping"
      ...     },
      ...     "unity_sink": {
      ...         "catalog": "mda_demo",
@@ -526,15 +532,38 @@ class MdaConfig(BaseModel):
      ...                 {"column_name": "start_ts", "comparator": ">=", "value": "2025-04-27T05:20:54.000Z"}
      ...             ]
      ...         ]
+     ...     },
+     ...     "query_engine": {
+     ...         "solver": "KeyValueStoreSolver",
+     ...         "solver_config": {
+     ...             "project_id": "my_project",
+     ...             "container_tags": {
+     ...                 "column_name_mapping": {"entity_id": "container_id"},
+     ...                 "filters": {"parent_id": "my_parent_id"}
+     ...             },
+     ...             "container_metrics": {
+     ...                 "column_name_mapping": {}
+     ...             },
+     ...             "channel_metrics": {
+     ...                 "column_name_mapping": {}
+     ...             },
+     ...             "channel_mapping": {
+     ...                 "column_name_mapping": {},
+     ...                 "filters": {"toolbox_id": "my_toolbox"}
+     ...             },
+     ...             "channels": {
+     ...                 "column_name_mapping": {}
+     ...             }
+     ...         }
      ...     }
      ... }
      >>> config = MdaConfig.model_validate(config_data)
     """
 
     source: Source
-    unity_sink: UnitySink
+    unity_sink: UnitySink | None = None
     container_filters: ContainerFilters | None = None
-    query_engine: QueryEngine = QueryEngine(solver=Solvers.BASIC_NARROW_SOLVER)
+    query_engine: QueryEngine = QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER)
     incremental: IncrementalConfig | None = None
 
     measurement_dimensions: list[MeasurementDimensions] | None = [
@@ -547,15 +576,3 @@ class MdaConfig(BaseModel):
         MeasurementDimensions.PROJECT_ID,
         MeasurementDimensions.ENVIRONMENT,
     ]
-
-    @model_validator(mode="after")
-    def validate_container_tags_for_key_value_store_solver(self):
-        """Validate that container_tags_table is provided when using KeyValueStoreSolver."""
-        if (
-            self.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
-            and self.source.container_tags_table is None
-        ):
-            raise ValueError(
-                "source.container_tags_table is required when using KeyValueStoreSolver"
-            )
-        return self

@@ -1,13 +1,15 @@
 import json
-from typing import Any
-
 import zlib
+from functools import reduce
+from typing import Any
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import StructType
 
+from mda_query_engine.analyze.metadata.time_series_expression import (
+    TimeSeriesExpression,
+)
 from mda_query_engine.analyze.query.query_builder import QueryBuilder
-from mda_query_engine.analyze.query.solvers.basic_narrow_solver import BasicNarrowSolver
 from mda_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
 from mda_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
@@ -21,6 +23,14 @@ from mda_reporting.config.config_parser import (
     DataType,
 )
 from mda_reporting.core.page import Page
+from mda_reporting.core.report_utils import (
+    cleanup_temp_tables,
+    collect_solvable_expressions,
+    dispatch_aggregations,
+    dispatch_events,
+    solve_expressions_batched,
+    split_by_hash_change,
+)
 from mda_reporting.events.container_event import ContainerEvent
 from mda_reporting.events.event import Event
 from mda_reporting.events.event_types import EventType
@@ -99,12 +109,17 @@ class Report:
         self.ws = self.db.ws
 
         self.query: QueryBuilder = Report.create_query_builder(self.db, self.config)
-        self.sink: Sink = Report.create_sink(self.config)
+        self.sink: Sink | None = (
+            Report.create_sink(self.config) if self.config.unity_sink else None
+        )
 
         self.solver = Report.create_solver(self.spark, self.config)
-
         log_telemetry(self.ws, "solver", self.config.query_engine.solver.name)
         log_telemetry(self.ws, "data_type", self.config.query_engine.data_type.value)
+
+    @property
+    def _has_sink(self) -> bool:
+        return self.sink is not None
 
     def get_id(self) -> int:
         """
@@ -153,7 +168,7 @@ class Report:
         UnitySinkConfig
             The loaded Unity sink configuration.
         """
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             data = json.load(f)
         return MdaConfig.model_validate(data)
 
@@ -207,10 +222,11 @@ class Report:
         """
         Create a query builder based on the provided configuration and set container filters.
 
-        Validates solver/filter compatibility before applying filters:
-        - BasicNarrowSolver supports metric filters only (rejects tag filters).
-        - KeyValueStoreSolver supports tag filters only (rejects metric filters).
-        - DeltaSolver supports both tag and metric filters.
+        Validates that tag filters are only used when a
+        ``container_tags_table`` is configured in ``source``.  Both
+        KeyValueStoreSolver and DeltaSolver support tag and metric filters,
+        but tag filters require the narrow ``container_tags`` table to be
+        available.
 
         Parameters
         ----------
@@ -227,24 +243,19 @@ class Report:
         Raises
         ------
         ValueError
-            If the configured solver does not support the configured filter types.
+            If tag filters are configured but ``source.container_tags_table``
+            is not set.
         """
         query = db.query
 
         if config.container_filters is not None:
             has_tag_filters = len(config.container_filters.tag_filters) > 0
-            has_metric_filters = len(config.container_filters.metric_filters) > 0
 
-            if has_tag_filters and config.query_engine.solver == Solvers.BASIC_NARROW_SOLVER:
+            if has_tag_filters and config.source.container_tags_table is None:
                 raise ValueError(
-                    "Tag filters are not supported with BasicNarrowSolver. "
-                    "Use DeltaSolver or KeyValueStoreSolver for tag-based filtering."
-                )
-
-            if has_metric_filters and config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER:
-                raise ValueError(
-                    "Metric filters are not supported with KeyValueStoreSolver. "
-                    "Use DeltaSolver or BasicNarrowSolver for metric-based filtering."
+                    "Tag filters require a container_tags_table to be configured "
+                    "in `source`. Provide source.container_tags_table or remove "
+                    "the tag filters."
                 )
 
             tag_filter_expr = ReportEntityUtil.generate_tag_filters(
@@ -302,30 +313,24 @@ class Report:
             If the solver type is unknown.
         """
         match config.query_engine.solver:
-            case Solvers.BASIC_NARROW_SOLVER:
-                return BasicNarrowSolver(
-                    spark,
-                    is_raw_data=config.query_engine.data_type is DataType.RAW,
-                    drop_implausible_data=config.query_engine.drop_implausible_data,
-                )
             case Solvers.DELTA_SOLVER:
                 return DeltaSolver(
                     spark,
+                    config=config.query_engine.solver_config,
                     is_raw_data=config.query_engine.data_type is DataType.RAW,
                     drop_implausible_data=config.query_engine.drop_implausible_data,
                 )
             case Solvers.KEY_VALUE_STORE_SOLVER:
                 return KeyValueStoreSolver(
                     spark,
-                    project_id=config.query_engine.project_id,
-                    parent_id=config.query_engine.parent_id,
                     config=config.query_engine.solver_config,
+                    is_raw_data=config.query_engine.data_type is DataType.RAW,
+                    drop_implausible_data=config.query_engine.drop_implausible_data,
                 )
             case _:
                 raise ValueError(
                     f"Unknown query engine, we currently only support "
-                    f"{Solvers.BASIC_NARROW_SOLVER}, {Solvers.DELTA_SOLVER}, "
-                    f"{Solvers.KEY_VALUE_STORE_SOLVER}"
+                    f"{Solvers.DELTA_SOLVER}, {Solvers.KEY_VALUE_STORE_SOLVER}"
                 )
 
     def get_sink_config(self) -> SinkConfig:
@@ -336,7 +341,14 @@ class Report:
         -------
         SinkConfig
            The sink configuration associated with this report.
+
+        Raises
+        ------
+        ValueError
+            If no sink is configured (sinkless mode).
         """
+        if not self._has_sink:
+            raise ValueError("No sink configured. Cannot retrieve sink config in sinkless mode.")
         return self.sink.config
 
     def add_page(self, page: Page):
@@ -449,11 +461,9 @@ class Report:
         ValueError
             If an aggregation uses an event that was not added to the report via add_event().
         """
-        # Get the set of events that have been added to the report
         registered_events = set(self.events)
         registered_event_names = {event.get_name() for event in self.events}
 
-        # Collect all events used in aggregations
         missing_events = []
 
         for page in self.pages:
@@ -488,6 +498,9 @@ class Report:
         -------
         None
         """
+        if not self._has_sink:
+            return
+
         # Use tracked state from determine_report
         changed_aggregation_ids = getattr(self, "_changed_aggregation_ids", {})
         changed_event_ids = getattr(self, "_changed_event_ids", {})
@@ -685,15 +698,17 @@ class Report:
             changed_dfs = event_fact_changed_by_table.get(table_name, [])
             changed_ids = event_changed_ids_by_table.get(table_name, [])
             if changed_dfs and changed_ids:
-                combined_changed = changed_dfs
-                for cdf in combined_changed:
-                    df_enriched = self._transform_for_persistence(cdf, schema, transformer)
-                    self.sink.replace_by_ids(
-                        df=df_enriched,
-                        uri=uri,
-                        id_column="event_id",
-                        ids_to_replace=changed_ids,
-                    )
+                transformed = [
+                    self._transform_for_persistence(cdf, schema, transformer)
+                    for cdf in changed_dfs
+                ]
+                combined_df = reduce(lambda a, b: a.unionByName(b), transformed)
+                self.sink.replace_by_ids(
+                    df=combined_df,
+                    uri=uri,
+                    id_column="event_id",
+                    ids_to_replace=changed_ids,
+                )
 
             # Unchanged definitions: MERGE
             unchanged_dfs = event_fact_unchanged_by_table.get(table_name, [])
@@ -783,6 +798,41 @@ class Report:
         }
         return merge_keys_map.get(agg_type, ["container_id", "visual_id"])
 
+    def _cleanup_temp_tables(self) -> None:
+        """Drop leftover ``__mda_temp_*`` Delta tables from previous runs.
+
+        Only applies when a sink is configured; in sinkless mode this is a no-op.
+        """
+        if not self._has_sink:
+            return
+
+        cleanup_temp_tables(
+            self.spark,
+            self.config.unity_sink.catalog,
+            self.config.unity_sink.schema,
+        )
+
+    def _solve_expressions_batched(
+        self,
+        expressions: list[TimeSeriesExpression],
+        pre_filtered_containers_df: DataFrame = None,
+    ) -> DataFrame | None:
+        """Solve all expressions in configurable batches and return a joined wide DataFrame.
+
+        Delegates to :func:`solve_expressions_batched` in ``report_utils``.
+        """
+        return solve_expressions_batched(
+            spark=self.spark,
+            expressions=expressions,
+            query=self.query,
+            solver=self.solver,
+            batch_size=self.config.query_engine.batch_size,
+            has_sink=self._has_sink,
+            catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
+            schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
+            pre_filtered_containers_df=pre_filtered_containers_df,
+        )
+
     @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
         """
@@ -806,6 +856,12 @@ class Report:
         -------
         None
         """
+        # Validate that every aggregation references a registered event
+        self._validate_aggregation_events()
+
+        # Clean up temp tables from previous runs
+        self._cleanup_temp_tables()
+
         # Determine processing mode: config overrides signature, gold must exist
         self._is_incremental = self._resolve_is_incremental(is_incremental)
 
@@ -816,108 +872,115 @@ class Report:
 
         hash_comparator = DefinitionHashComparator(self.spark)
 
-        # Track changed IDs for persistence strategy
-        self._changed_event_ids: dict[str, list[int]] = {}
-        self._changed_aggregation_ids: dict[str, list[int]] = {}
-
         # Group events and aggregations by type
         events_by_type = self._group_events_by_type()
         aggs_by_type = self._group_aggregations_by_type()
 
-        # Determine events
+        # Split changed/unchanged definitions
+        changed_events_by_type, unchanged_events_by_type, self._changed_event_ids = (
+            split_by_hash_change(
+                events_by_type, EventType, self.sink, self.spark, hash_comparator, is_event=True
+            )
+        )
+        changed_aggs_by_type, unchanged_aggs_by_type, self._changed_aggregation_ids = (
+            split_by_hash_change(
+                aggs_by_type,
+                AggregationType,
+                self.sink,
+                self.spark,
+                hash_comparator,
+                is_event=False,
+            )
+        )
+
+        # Collect all solvable expressions (exclude ContainerEvent)
+        all_changed_expressions = collect_solvable_expressions(
+            changed_events_by_type, EventType, exclude_cls=ContainerEvent
+        ) + collect_solvable_expressions(changed_aggs_by_type, AggregationType)
+        all_unchanged_expressions = collect_solvable_expressions(
+            unchanged_events_by_type, EventType, exclude_cls=ContainerEvent
+        ) + collect_solvable_expressions(unchanged_aggs_by_type, AggregationType)
+
+        # Centralized solve
+        changed_solved_df = self._solve_expressions_batched(
+            all_changed_expressions, pre_filtered_containers_df=None
+        )
+        unchanged_solved_df = self._solve_expressions_batched(
+            all_unchanged_expressions, pre_filtered_containers_df=pre_filtered_containers_df
+        )
+
+        # Dispatch events
+        changed_event_dfs = dispatch_events(
+            self.spark,
+            changed_events_by_type,
+            EventType,
+            changed_solved_df,
+            self.query,
+            self.solver,
+            None,
+            ContainerEvent,
+        )
+        unchanged_event_dfs = dispatch_events(
+            self.spark,
+            unchanged_events_by_type,
+            EventType,
+            unchanged_solved_df,
+            self.query,
+            self.solver,
+            pre_filtered_containers_df,
+            ContainerEvent,
+        )
+
+        # Merge event results into {type: {"changed": df, "unchanged": df}}
         event_dfs = {}
+        all_event_types = set(list(changed_event_dfs.keys()) + list(unchanged_event_dfs.keys()))
+        for t in all_event_types:
+            event_dfs[t] = {
+                "changed": changed_event_dfs.get(t),
+                "unchanged": unchanged_event_dfs.get(t),
+            }
+
+        # Metadata: merge from all events (changed + unchanged)
         event_metadata_dfs = {}
-        for event_name, events in events_by_type.items():
-            if not events:
+        for event_name, events_list in events_by_type.items():
+            if not events_list:
                 continue
             cls = EventType[event_name].value
-
-            # Definition-hash-based dual-mode processing
-            event_dim_table = self.sink.config.get_output_uri_dimension_table(
-                EventType[event_name]
-            )
-            changed_events, unchanged_events = hash_comparator.group_events_by_hash_change(
-                events, event_dim_table
-            )
-
-            # Track changed event IDs for replaceWhere persistence
-            if changed_events:
-                self._changed_event_ids[event_name] = [e.get_id() for e in changed_events]
-
-            event_dfs[event_name] = {"changed": None, "unchanged": None}
-
-            # Changed definitions -> full processing (all containers)
-            if changed_events:
-                event_dfs[event_name]["changed"] = cls.determine_events(
-                    self.spark,
-                    self.query,
-                    self.solver,
-                    changed_events,
-                    pre_filtered_containers_df=None,  # Full processing
-                )
-
-            # Unchanged definitions -> incremental processing (upserted containers only)
-            if unchanged_events:
-                event_dfs[event_name]["unchanged"] = cls.determine_events(
-                    self.spark,
-                    self.query,
-                    self.solver,
-                    unchanged_events,
-                    pre_filtered_containers_df=pre_filtered_containers_df,
-                )
-
-            # Metadata always includes all events
-            event_metadata_dfs[event_name] = cls.determine_metadata_df(self.spark, events)
+            event_metadata_dfs[event_name] = cls.determine_metadata_df(self.spark, events_list)
 
         self.event_dfs = event_dfs
         self.event_metadata_dfs = event_metadata_dfs
 
-        # Determine aggregations
+        # Dispatch aggregations
+        changed_agg_dfs = dispatch_aggregations(
+            self.spark,
+            changed_aggs_by_type,
+            AggregationType,
+            changed_solved_df,
+        )
+        unchanged_agg_dfs = dispatch_aggregations(
+            self.spark,
+            unchanged_aggs_by_type,
+            AggregationType,
+            unchanged_solved_df,
+        )
+
+        # Merge aggregation results
         aggregation_dfs = {}
+        all_agg_types = set(list(changed_agg_dfs.keys()) + list(unchanged_agg_dfs.keys()))
+        for t in all_agg_types:
+            aggregation_dfs[t] = {
+                "changed": changed_agg_dfs.get(t),
+                "unchanged": unchanged_agg_dfs.get(t),
+            }
+
+        # Metadata: merge from all aggregations
         aggregation_metadata_dfs = {}
-        for agg_name, aggregations in aggs_by_type.items():
-            if not aggregations:
+        for agg_name, agg_list in aggs_by_type.items():
+            if not agg_list:
                 continue
             cls = AggregationType[agg_name].value
-
-            # Definition-hash-based dual-mode processing
-            agg_dim_table = self.sink.config.get_output_uri_dimension_table(
-                AggregationType[agg_name]
-            )
-            changed_aggs, unchanged_aggs = hash_comparator.group_aggregations_by_hash_change(
-                aggregations, agg_dim_table
-            )
-
-            # Track changed aggregation IDs for replaceWhere persistence
-            if changed_aggs:
-                self._changed_aggregation_ids[agg_name] = [a.get_id() for a in changed_aggs]
-
-            aggregation_dfs[agg_name] = {"changed": None, "unchanged": None}
-
-            # Changed definitions -> full processing (all containers)
-            if changed_aggs:
-                aggregation_dfs[agg_name]["changed"] = cls.determine_aggregations(
-                    self.spark,
-                    self.query,
-                    self.solver,
-                    changed_aggs,
-                    pre_filtered_containers_df=None,  # Full processing
-                )
-
-            # Unchanged definitions -> incremental processing
-            if unchanged_aggs:
-                aggregation_dfs[agg_name]["unchanged"] = cls.determine_aggregations(
-                    self.spark,
-                    self.query,
-                    self.solver,
-                    unchanged_aggs,
-                    pre_filtered_containers_df=pre_filtered_containers_df,
-                )
-
-            # Metadata always includes all aggregations
-            aggregation_metadata_dfs[agg_name] = cls.determine_metadata_df(
-                self.spark, aggregations
-            )
+            aggregation_metadata_dfs[agg_name] = cls.determine_metadata_df(self.spark, agg_list)
 
         self.aggregation_dfs = aggregation_dfs
         self.aggregation_metadata_dfs = aggregation_metadata_dfs
@@ -966,7 +1029,8 @@ class Report:
         )
 
         if has_incremental_config:
-            return self.config.incremental.enabled
+            # enabled=True → incremental, enabled=False → FULL (processing_mode is not checked)
+            return bool(self.config.incremental.enabled)
 
         # No config: use signature parameter
         # Rule 4: is_incremental=True → incremental (gold exists)
@@ -988,6 +1052,8 @@ class Report:
         bool
             True if the gold measurement dimension table exists.
         """
+        if not self._has_sink:
+            return False
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
         return self.spark.catalog.tableExists(measurement_dim_table)
 
@@ -1000,7 +1066,8 @@ class Report:
         used for freshness comparison.  Falls back to ``"last_modified"``
         when no incremental config is present.
 
-        Returns None if gold layer doesn't exist (triggers full processing).
+        Returns None if gold layer doesn't exist (triggers full processing)
+        or if no sink is configured (sinkless mode).
 
         Returns
         -------
@@ -1008,6 +1075,8 @@ class Report:
             DataFrame containing containers to process, or None if gold table
             doesn't exist (indicating full processing is needed).
         """
+        if not self._has_sink:
+            return None
         detector = ContainerUpsertDetector(self.spark)
         silver_containers = self.db.container_metrics(self.spark)
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()

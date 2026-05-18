@@ -1,0 +1,12 @@
+{
+  "label": "Tutorials",
+  "position": 6,
+  "link": {
+    "type": "generated-index",
+    "title": "Tutorials",
+    "description": "Step-by-step walkthroughs of Impulse usage modes. Each tutorial builds on the Getting Started guide and demonstrates a specific workflow end-to-end.",
+    "slug": "/tutorial",
+    "keywords": ["tutorial", "walkthrough", "impulse"]
+  },
+  "collapsed": true
+}

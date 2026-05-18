@@ -1,25 +1,29 @@
-# Gold Layer - ER Diagram
+---
+sidebar_position: 4
+title: Gold Layer Schema
+---
 
-The Gold layer follows a star schema optimizing storage cost and query performance. 
-Each aggregation type (histogram, histogram2d, statistics) has its own fact/dimension pair linked by `visual_id`. 
+# Gold Layer Schema
 
-Fact tables join back to containers via `container_id` and to events via `event_id` or `event_instance_id`.
+The Gold layer follows a star schema optimizing storage cost and query
+performance. Each aggregation type (histogram, histogram2d, statistics)
+has its own fact/dimension pair linked by `visual_id`. Fact tables join
+back to containers via `container_id` and to events via `event_id` or
+`event_instance_id`.
+
+All gold-layer table names are prefixed with the configured
+`table_prefix` from the report's sink config (e.g. with
+`table_prefix: "my_report"` the histogram fact table becomes
+`my_report_histogram_fact`).
+
+## Entity-relationship diagram
 
 ```mermaid
 erDiagram
 
 measurement_dimension {
-    int container_id PK
-    int uut_id FK
-    int project_id FK
-    string uut_name
-    string project_name
-    string file_name
-    string source_file_path
-    long first_datapoint_ts
-    long last_datapoint_ts
-    double odo_start
-    double odo_stop
+    long container_id PK
+    long config_hash
     timestamp _created_at
 }
 
@@ -153,3 +157,32 @@ measurement_dimension ||--o{ stats_aggregator_fact : container_id
 
 event_instance_fact }o--|| event_dimension: event_id
 ```
+
+The `measurement_dimension` table also contains additional columns
+selected dynamically from
+[`config.measurement_dimensions`](../config/configuration.md#measurement_dimensions-optional)
+at run time — only `container_id`, `config_hash`, and `_created_at` are
+guaranteed.
+
+---
+
+## Fact tables
+
+| Table                            | Key columns                                                                            | Description                                                  |
+|----------------------------------|----------------------------------------------------------------------------------------|--------------------------------------------------------------|
+| `{prefix}_histogram_fact`        | `container_id`, `visual_id`, `event_id`, `bin_id`                                      | 1D histogram bin values per container.                       |
+| `{prefix}_histogram2d_fact`      | `container_id`, `visual_id`, `event_id`, `x_bin_id`, `y_bin_id`                        | 2D histogram bin values per container.                       |
+| `{prefix}_stats_aggregator_fact` | `container_id`, `visual_id`, `event_instance_id`, `channel_name`, `aggregation_label`  | Statistics values per signal, event instance, and container. |
+| `{prefix}_event_instance_fact`   | `container_id`, `event_id`, `event_instance_id`                                        | Materialized event occurrences with start/end timestamps.    |
+
+---
+
+## Dimension tables
+
+| Table                                 | Key columns              | Description                                                |
+|---------------------------------------|--------------------------|------------------------------------------------------------|
+| `{prefix}_histogram_dimension`        | `visual_id`, `report_id` | Histogram metadata (name, bins, signal info, units).       |
+| `{prefix}_histogram2d_dimension`      | `visual_id`, `report_id` | 2D histogram metadata (axes, bins, signal info, units).    |
+| `{prefix}_stats_aggregator_dimension` | `visual_id`, `report_id` | Statistics metadata (signals, aggregation labels).         |
+| `{prefix}_event_dimension`            | `event_id`, `report_id`  | Event definitions (name, expression, required channels).   |
+| `{prefix}_measurement_dimension`      | `container_id`           | Container metadata. Always carries `container_id`, `config_hash`, `_created_at`; additional columns are populated from [`config.measurement_dimensions`](../config/configuration.md#measurement_dimensions-optional). |

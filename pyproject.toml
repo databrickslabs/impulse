@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "databricks-impulse"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Large-scale time-series measurement data analytics on Apache Spark"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -16,16 +16,24 @@ maintainers = [
     {name = "Databricks Labs"}
 ]
 dependencies = [
-    "databricks-sdk",
     "delta-spark==4.0.1",
-    "matplotlib==3.10.0",
-    "pyarrow==19.0.1",
-    "pyspark==4.0.0",
-    "pandas==2.2.3",
     "lz4==4.4.5",
+    "nptyping==2.5.0",
+]
+
+# Pre-installed on Databricks Serverless env v4 (and DBR ML runtimes).
+# Declared as opt-in extras so the wheel installs cleanly on Databricks
+# without conflicting with pre-installed runtime versions. Local dev and
+# CI install these via `uv sync --all-extras`.
+[project.optional-dependencies]
+local-dev = [
+    "databricks-sdk==0.106.0",
+    "matplotlib==3.10.0",
+    "pandas==2.2.3",
+    "pyarrow==19.0.1",
+    "pydantic==2.11.7",
+    "pyspark==4.0.0",
     "scipy==1.15.1",
-    "nptyping~=2.5.0",
-    "pydantic==2.11.7"
 ]
 
 [project.urls]
@@ -36,17 +44,21 @@ Issues = "https://github.com/databrickslabs/impulse/issues"
 
 [dependency-groups]
 dev = [
-    "pre-commit~=4.1.0",
-    "pytest~=8.3.4",
-    "pytest-benchmark~=5.1.0",
-    "pytest-cov~=6.0.0",
-    "pytest-mock>=3.14.0",
-    "ruff~=0.9.3",
-    "setuptools~=75.8.0",
-    "black>=24.0.0"
+    "pre-commit==4.1.0",
+    "pydoc-markdown==4.8.2",
+    "pytest==8.3.5",
+    "pytest-benchmark==5.1.0",
+    "pytest-cov==6.0.0",
+    "pytest-mock==3.15.1",
+    "ruff==0.9.10",
+    "setuptools==75.8.2",
+    "black==26.3.1"
 ]
 
 # Setuptools options
+[tool.setuptools.dynamic]
+version = {file = ["VERSION"]}
+
 [tool.setuptools.packages.find]
 where = ["src"]
 exclude = ["src/*/demos"]
@@ -59,6 +71,7 @@ addopts = "--junitxml=test-results.xml --cov=src --cov-report=html --cov-report=
 
 # Default dependency groups
 [tool.uv]
+required-version = "~= 0.11.0"
 default-groups = ["dev"]
 
 # Coverage options

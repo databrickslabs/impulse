@@ -47,7 +47,10 @@ class ContainerEvent(Event):
         """
         super().__init__(name)
         self.description = desc
-        self.attributes = attributes if attributes is not None else {}
+        normalized_attributes: dict[str, str] = {}
+        if attributes is not None:
+            normalized_attributes = {str(k): str(v) for k, v in attributes.items()}
+        self.attributes = normalized_attributes
 
     # ------------------------------------------------------------------
     # Instance methods
@@ -61,10 +64,9 @@ class ContainerEvent(Event):
         int
             Positive 32-bit integer identifier.
         """
-        hash_input = f"{self.name}"
-        return zlib.crc32(hash_input.encode()) & 0x7FFFFFFF  # Ensures positive 32-bit int
+        return zlib.crc32(self.name.encode()) & 0x7FFFFFFF
 
-    def get_expression(self) -> "TimeSeriesExpression | None":
+    def get_expression(self) -> TimeSeriesExpression | None:
         """ContainerEvent has no time-series expression.
 
         Returns
@@ -136,9 +138,11 @@ class ContainerEvent(Event):
     def determine_events(
         cls,
         spark: SparkSession,
-        query: QueryBuilder,
-        solver: QuerySolver,
-        events: list["ContainerEvent"],
+        events: list[ContainerEvent],
+        *,
+        solved_df: DataFrame = None,
+        query: QueryBuilder = None,
+        solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
     ) -> DataFrame:
         """Determine event instances from container metadata.
@@ -150,12 +154,14 @@ class ContainerEvent(Event):
         ----------
         spark : SparkSession
             Active Spark session.
-        query : QueryBuilder
-            Query builder with filters applied.
-        solver : QuerySolver
-            Solver whose filter pipeline is used for container resolution.
         events : list of ContainerEvent
             List of ContainerEvent objects (only the first is used for naming).
+        solved_df : DataFrame, optional
+            Not used by ContainerEvent (kept for interface compatibility).
+        query : QueryBuilder, optional
+            Query builder with filters applied.
+        solver : QuerySolver, optional
+            Solver whose filter pipeline is used for container resolution.
         pre_filtered_containers_df : DataFrame, optional
             Pre-filtered containers for incremental processing.
 
@@ -202,9 +208,7 @@ class ContainerEvent(Event):
         return df.select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
 
     @classmethod
-    def determine_metadata_df(
-        cls, spark: SparkSession, events: list["ContainerEvent"]
-    ) -> DataFrame:
+    def determine_metadata_df(cls, spark: SparkSession, events: list[ContainerEvent]) -> DataFrame:
         """Create a Spark DataFrame containing event metadata.
 
         Parameters

@@ -18,7 +18,6 @@ env/
 .env/
 .venv/
 ENV/
-uv.lock
 
 # PyCharm files
 .idea/
@@ -52,7 +51,6 @@ logs/
 # Local development settings
 .env
 .env.local
-.python-version
 
 # macOS specific
 .DS_Store

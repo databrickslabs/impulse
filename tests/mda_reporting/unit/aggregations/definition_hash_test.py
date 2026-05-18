@@ -2,8 +2,8 @@
 
 from mda_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from mda_reporting.aggregations.histogram import (
-    HistogramDuration,
     HistogramDistance,
+    HistogramDuration,
 )
 from mda_reporting.aggregations.histogram2d import (
     Histogram2DDuration,

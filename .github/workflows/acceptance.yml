@@ -10,75 +10,71 @@ on:
       - main
 
 permissions:
-  id-token: write
   contents: read
-  pull-requests: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  fmt:
-    name: Format check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install UV
-        uses: astral-sh/setup-uv@v7
-
-      - name: Check formatting with Black
-        run: |
-          uv run black --check src/ tests/ --diff -v
-
   lint:
-    name: Lint check
-    runs-on: ubuntu-latest
+    name: Lint and format check
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    permissions:
+      id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          version: "0.11.2"
+          checksum: "7ac2ca0449c8d68dae9b99e635cd3bc9b22a4cb1de64b7c43716398447d42981"
+
+      - name: Setup for JFrog
+        uses: ./.github/actions/jfrog-auth
 
       - name: Install dependencies
-        run: uv sync
+        run: make dev
 
-      - name: Lint with Ruff
-        run: uv run ruff check src/ tests/
+      - name: Lint and format check
+        run: make lint
 
   test:
     name: Testing
-    runs-on: ubuntu-latest
-    needs: [ fmt, lint ]
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    needs: [ lint ]
+    permissions:
+      id-token: write
     strategy:
       matrix:
         python-version: [ '3.12' ]
 
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
         with:
           enable-cache: false
+          version: "0.11.2"
+          checksum: "7ac2ca0449c8d68dae9b99e635cd3bc9b22a4cb1de64b7c43716398447d42981"
 
-      - name: Set UV Python version
-        run: uv python pin ${{ matrix.python-version }}
+      - name: Setup for JFrog
+        uses: ./.github/actions/jfrog-auth
 
-      - name: Install package and dependencies
-        run: uv sync
+      - name: Install dependencies
+        run: make dev
 
       - name: Run unit tests with coverage
-        run: uv run pytest tests/ --cov=src --cov-branch --cov-report=xml
+        run: make test
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           use_oidc: true

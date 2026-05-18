@@ -144,9 +144,11 @@ class Aggregation(ABC):
     def determine_aggregations(
         cls,
         spark: SparkSession,
-        query: QueryBuilder,
-        solver: QuerySolver,
         aggregations: list[Aggregation],
+        *,
+        solved_df: DataFrame = None,
+        query: QueryBuilder = None,
+        solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
     ):
         """
@@ -156,12 +158,14 @@ class Aggregation(ABC):
         ----------
         spark : SparkSession
           Spark session for data processing.
-        query : QueryBuilder
-          Query builder for constructing aggregation queries.
-        solver : QuerySolver
-          Query solver for executing queries.
         aggregations : list of Aggregation
           List of Aggregation objects to process.
+        solved_df : DataFrame, optional
+          Pre-solved wide DataFrame from centralized batch solve.
+        query : QueryBuilder, optional
+          Query builder for constructing aggregation queries.
+        solver : QuerySolver, optional
+          Query solver for executing queries.
         pre_filtered_containers_df : DataFrame, optional
           Pre-filtered containers for incremental processing.
 

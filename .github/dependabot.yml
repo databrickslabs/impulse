@@ -1,11 +1,23 @@
 version: 2
 updates:
-  - package-ecosystem: "github-actions"
+  - package-ecosystem: "uv"
     directory: "/"
+    cooldown:
+      default-days: 7
+      exclude:
+        - "databricks*"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    groups:
-      actions-all:
-        patterns:
-          - "*"
+      interval: "daily"
+
+  - package-ecosystem: "npm"
+    directory: "/docs/impulse"
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: "daily"
+
+  # Disabled for now, pending guidance on how GHA-updates need to be handled.
+  #- package-ecosystem: "github-actions"
+  #  directory: "/"
+  #  schedule:
+  #    interval: "daily"

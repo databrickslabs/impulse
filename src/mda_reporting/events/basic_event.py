@@ -28,7 +28,7 @@ class BasicEvent(Event):
         expr: TimeSeriesExpression,
         desc: str = None,
         required_channels: list[str] = None,
-        attributes: Mapping[str, str] | None = None,
+        attributes: Mapping[str, str] = None,
     ):
         """
         Initialize a BasicEvent object.
@@ -145,9 +145,11 @@ class BasicEvent(Event):
     def determine_events(
         cls,
         spark: SparkSession,
-        query: QueryBuilder,
-        solver: QuerySolver,
         events: list[BasicEvent],
+        *,
+        solved_df: "DataFrame" = None,
+        query: QueryBuilder = None,
+        solver: QuerySolver = None,
         pre_filtered_containers_df=None,
     ):
         """
@@ -157,12 +159,14 @@ class BasicEvent(Event):
         ----------
         spark : SparkSession
             Spark session for data processing.
-        query : QueryBuilder
-            Query builder for constructing event queries.
-        solver : QuerySolver
-            Query solver for executing queries.
         events : list of BasicEvent
             List of BasicEvent objects to process.
+        solved_df : DataFrame, optional
+            Pre-solved wide DataFrame from centralized batch solve. Required.
+        query : QueryBuilder, optional
+            Query builder (unused, kept for interface compatibility).
+        solver : QuerySolver, optional
+            Query solver (unused, kept for interface compatibility).
         pre_filtered_containers_df : DataFrame, optional
             Pre-filtered containers for incremental processing.
 
@@ -171,20 +175,16 @@ class BasicEvent(Event):
         DataFrame
             Spark DataFrame containing event instance facts.
         """
-        event_expressions = []
-        event_names = []
-        for event in events:
-            event_expressions.append(event.get_expression())
-            event_names.append(event.get_name())
+        if solved_df is None:
+            raise ValueError(
+                "BasicEvent.determine_events requires solved_df. "
+                "Provide a pre-solved DataFrame from the centralized batch-solve flow."
+            )
 
-        event_query = query.select(*event_expressions)
+        event_names = [event.get_name() for event in events]
 
         df = (
-            event_query.solve(
-                spark=spark,
-                solver=solver,
-                pre_filtered_containers_df=pre_filtered_containers_df,
-            )
+            solved_df.select("container_id", *event_names)
             .unpivot(
                 f.col("container_id"),
                 event_names,

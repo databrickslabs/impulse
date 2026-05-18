@@ -82,7 +82,7 @@ class AggregationType(Enum):
             case AggregationType.STATS_AGGREGATOR:
                 return STATS_AGGREGATOR_FACT_SCHEMA
             case _:
-                raise ValueError(f"Unsupported aggregation type: {self}")
+                raise ValueError(f"Unsupported event type: {self}")
 
     def get_dimension_table_name(self) -> str:
         """

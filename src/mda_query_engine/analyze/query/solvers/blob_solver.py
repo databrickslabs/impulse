@@ -6,9 +6,9 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import DataFrame
 
-from .query_solver import QuerySolver
 from mda_query_engine.model.series.sample_series import SampleSeries
 
+from .query_solver import QuerySolver
 from .series_cache import SeriesCache
 
 
@@ -41,6 +41,11 @@ class TimeSeriesCache(SeriesCache):
         pd.DataFrame
             DataFrame containing the resolved candidates.
         """
+        if "selector_ids" in self.df.columns:
+            idx = self.df["selector_ids"].apply(
+                lambda arr: arr is not None and selection.selector_id in arr
+            )
+            return self.df[idx]
         idx = selection._expr.build_pandas(self.df)
         return self.df[idx]
 
@@ -83,11 +88,11 @@ class BlobSolver(QuerySolver):
         """Passthrough — returns container_df unchanged."""
         return container_df
 
-    def filter_channel_tags(self, spark, query, container_df) -> DataFrame:
+    def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
         """Passthrough — returns container_df unchanged."""
         return container_df
 
-    def filter_channel_metrics(self, spark, query, channel_df) -> DataFrame:
+    def filter_channel_metrics(self, spark, db, channel_df, selectors) -> DataFrame:
         """Passthrough — returns channel_df unchanged."""
         return channel_df
 

@@ -14,7 +14,10 @@ import pathlib
 
 import pytest
 
-from mda_query_engine.analyze.query.solvers.solver_config import SolverConfig
+from mda_query_engine.analyze.query.solvers.solver_config import (
+    SolverConfig,
+    TableConfig,
+)
 
 # ---------------------------------------------------------------------------
 # Fixture path
@@ -23,6 +26,16 @@ from mda_query_engine.analyze.query.solvers.solver_config import SolverConfig
 _CONFIG_PATH = (
     pathlib.Path(__file__).parents[5] / "data" / "config" / "solver_config_test.json"  # …/tests/
 )
+
+# Internal column-name constants the new SolverConfig always returns,
+# regardless of any per-table column_name_mapping.
+_EXPECTED_COL_MAP = {
+    "cid": "container_id",
+    "ch": "channel_id",
+    "ts": "tstart",
+    "te": "tend",
+    "val": "value",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -54,17 +67,28 @@ class TestSolverConfigFromJson:
     def test_json_file_exists(self):
         assert _CONFIG_PATH.exists(), f"Fixture not found: {_CONFIG_PATH}"
 
-    def test_container_id_col(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.container_id_col == raw_data["container_id_col"]
+    def test_channel_mapping_filters(self, cfg: SolverConfig, raw_data: dict):
+        assert cfg.channel_mapping.filters == raw_data["channel_mapping"]["filters"]
 
-    def test_channel_id_cols(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.channel_id_cols == raw_data["channel_id_cols"]
+    def test_channels_mapping(self, cfg: SolverConfig, raw_data: dict):
+        assert cfg.channels.column_name_mapping == raw_data["channels"]["column_name_mapping"]
 
-    def test_channel_data_mapping(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.channel_data_mapping == raw_data["channel_data_mapping"]
+    def test_container_tags_filters(self, cfg: SolverConfig, raw_data: dict):
+        assert cfg.container_tags.filters == raw_data["container_tags"]["filters"]
 
-    def test_container_meta_data_mapping(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.container_meta_data_mapping == raw_data["container_meta_data_mapping"]
+    def test_container_tags_mapping(self, cfg: SolverConfig, raw_data: dict):
+        assert (
+            cfg.container_tags.column_name_mapping
+            == raw_data["container_tags"]["column_name_mapping"]
+        )
+
+    def test_project_id(self, cfg: SolverConfig, raw_data: dict):
+        assert cfg.project_id == raw_data["project_id"]
+
+    def test_unconfigured_tables_use_defaults(self, cfg: SolverConfig):
+        assert cfg.container_metrics == TableConfig()
+        assert cfg.channel_tags == TableConfig()
+        assert cfg.channel_metrics == TableConfig()
 
 
 # ---------------------------------------------------------------------------
@@ -75,45 +99,32 @@ class TestSolverConfigFromJson:
 class TestSolverConfigProperties:
     """Verify derived properties match the JSON-backed field values."""
 
-    def test_channel_id_col_is_last_element(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.channel_id_col == raw_data["channel_id_cols"][-1]
+    def test_channel_id_col(self, cfg: SolverConfig):
+        assert cfg.channel_id_col == "channel_id"
 
-    def test_tstart_col(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.tstart_col == raw_data["channel_data_mapping"]["tstart"]
+    def test_channel_id_cols(self, cfg: SolverConfig):
+        assert cfg.channel_id_cols == ["container_id", "channel_id"]
 
-    def test_tend_col(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.tend_col == raw_data["channel_data_mapping"]["tend"]
+    def test_container_id_col(self, cfg: SolverConfig):
+        assert cfg.container_id_col == "container_id"
 
-    def test_value_col(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.value_col == raw_data["channel_data_mapping"]["value"]
+    def test_parent_id_col(self, cfg: SolverConfig):
+        assert cfg.parent_id_col == "parent_id"
 
-    def test_project_id_col(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.project_id_col == raw_data["container_meta_data_mapping"]["project_id"]
+    def test_properties_same_for_default_config(self):
+        default = SolverConfig()
+        assert default.container_id_col == "container_id"
+        assert default.channel_id_col == "channel_id"
+        assert default.tstart_col == "tstart"
+        assert default.tend_col == "tend"
+        assert default.value_col == "value"
+        assert default.project_id_col == "project_id"
+        assert default.parent_id_col == "parent_id"
 
 
 # ---------------------------------------------------------------------------
 # TestFromDict – round-trip through dict matches JSON
 # ---------------------------------------------------------------------------
-
-
-class TestFromDict:
-    """from_dict produces the same SolverConfig as from_json for the same data."""
-
-    def test_round_trip_equals_from_json(self, cfg: SolverConfig, raw_data: dict):
-        cfg_from_dict = SolverConfig.from_dict(raw_data)
-        assert cfg_from_dict.container_id_col == cfg.container_id_col
-        assert cfg_from_dict.channel_id_cols == cfg.channel_id_cols
-        assert cfg_from_dict.channel_data_mapping == cfg.channel_data_mapping
-        assert cfg_from_dict.container_meta_data_mapping == cfg.container_meta_data_mapping
-
-    def test_missing_keys_use_defaults(self):
-        """from_dict with an empty dict produces a default SolverConfig."""
-        default = SolverConfig()
-        from_empty = SolverConfig.from_dict({})
-        assert from_empty.container_id_col == default.container_id_col
-        assert from_empty.channel_id_cols == default.channel_id_cols
-        assert from_empty.channel_data_mapping == default.channel_data_mapping
-        assert from_empty.container_meta_data_mapping == default.container_meta_data_mapping
 
 
 # ---------------------------------------------------------------------------
@@ -127,21 +138,6 @@ class TestColMap:
     def test_col_map_keys(self, cfg: SolverConfig):
         """col_map should contain exactly the expected short keys."""
         assert set(cfg.col_map.keys()) == {"cid", "ch", "ts", "te", "val"}
-
-    def test_col_map_cid(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.col_map["cid"] == raw_data["container_id_col"]
-
-    def test_col_map_ch(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.col_map["ch"] == raw_data["channel_id_cols"][-1]
-
-    def test_col_map_ts(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.col_map["ts"] == raw_data["channel_data_mapping"]["tstart"]
-
-    def test_col_map_te(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.col_map["te"] == raw_data["channel_data_mapping"]["tend"]
-
-    def test_col_map_val(self, cfg: SolverConfig, raw_data: dict):
-        assert cfg.col_map["val"] == raw_data["channel_data_mapping"]["value"]
 
     def test_col_map_default_config(self):
         """Default SolverConfig col_map should match hardcoded defaults."""
@@ -161,3 +157,6 @@ class TestColMap:
         assert cfg.col_map["ts"] == cfg.tstart_col
         assert cfg.col_map["te"] == cfg.tend_col
         assert cfg.col_map["val"] == cfg.value_col
+
+    def test_col_map_values(self, cfg: SolverConfig):
+        assert cfg.col_map == _EXPECTED_COL_MAP

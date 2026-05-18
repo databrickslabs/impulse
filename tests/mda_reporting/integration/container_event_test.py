@@ -55,7 +55,7 @@ def test_container_event_in_report(spark, basic_narrow_db):
                 ]
             ]
         ),
-        query_engine=QueryEngine(solver=Solvers.BASIC_NARROW_SOLVER),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
         measurement_dimensions=[
             MeasurementDimensions.CONTAINER_ID,
             MeasurementDimensions.START_TS,
@@ -163,7 +163,7 @@ def test_container_event_with_basic_event(spark, basic_narrow_db):
                 ]
             ]
         ),
-        query_engine=QueryEngine(solver=Solvers.BASIC_NARROW_SOLVER),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
         measurement_dimensions=[
             MeasurementDimensions.CONTAINER_ID,
             MeasurementDimensions.START_TS,

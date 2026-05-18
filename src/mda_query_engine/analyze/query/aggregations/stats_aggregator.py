@@ -6,11 +6,13 @@ import pyspark.sql.types as T
 from mda_query_engine.analyze.metadata.tag_expression import TagExpression
 from mda_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
+    TimeSeriesSelector,
 )
 from mda_query_engine.analyze.query.aggregations.statistic_type import StatisticType
 from mda_query_engine.analyze.query.solvers.series_cache import SeriesCache
 from mda_query_engine.model.series.intervals import Intervals
 from mda_query_engine.model.series.sample_series import SampleSeries
+
 from .aggregation import Aggregation
 
 # Define supported statistics and their types
@@ -287,6 +289,14 @@ class StatsAggregator(Aggregation):
             else tag_exprs
         )
         return tag_exprs
+
+    def get_selectors(self) -> list[TimeSeriesSelector]:
+        result: list[TimeSeriesSelector] = []
+        for expr in self.input_expressions:
+            result.extend(expr.get_selectors())
+        if self.event_expression is not None:
+            result.extend(self.event_expression.get_selectors())
+        return result
 
     def weighted_median(self, durations, values):
         """Calculate duration-weighted median for RLE compressed data."""

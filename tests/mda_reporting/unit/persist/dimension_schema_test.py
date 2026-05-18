@@ -3,9 +3,9 @@
 from pyspark.sql.types import LongType
 
 from mda_reporting.persist.dimension_schema import (
-    HISTOGRAM_DIMENSION_SCHEMA,
-    HISTOGRAM2D_DIMENSION_SCHEMA,
     EVENT_DIMENSION_SCHEMA,
+    HISTOGRAM2D_DIMENSION_SCHEMA,
+    HISTOGRAM_DIMENSION_SCHEMA,
 )
 
 

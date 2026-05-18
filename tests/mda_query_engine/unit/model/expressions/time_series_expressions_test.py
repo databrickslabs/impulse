@@ -184,3 +184,73 @@ def test_rmod_expression_with_float():
     assert isinstance(op, TimeSeriesOp)
     assert op.args[0] == 2.5
     assert op.args[1] is sel
+
+
+class TestGetSelectors:
+    def test_selector_returns_self(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "test")
+        result = sel.get_selectors()
+        assert result == [sel]
+
+    def test_selector_with_alias_flag(self):
+        sel_direct = TimeSeriesSelector(TagSelector("name") == "a")
+        sel_aliased = TimeSeriesSelector(TagSelector("alias") == "b", uses_alias=True)
+        assert sel_direct.get_selectors() == [sel_direct]
+        assert sel_aliased.get_selectors() == [sel_aliased]
+        assert sel_direct.uses_alias is False
+        assert sel_aliased.uses_alias is True
+
+    def test_op_returns_all_leaf_selectors(self):
+        sel_a = TimeSeriesSelector(TagSelector("name") == "a")
+        sel_b = TimeSeriesSelector(TagSelector("name") == "b")
+        op = sel_a + sel_b
+        result = op.get_selectors()
+        assert len(result) == 2
+        assert sel_a in result
+        assert sel_b in result
+
+    def test_nested_op_returns_all_leaves(self):
+        sel_a = TimeSeriesSelector(TagSelector("name") == "a")
+        sel_b = TimeSeriesSelector(TagSelector("name") == "b")
+        nested = (sel_a + sel_b).mean()
+        result = nested.get_selectors()
+        assert len(result) == 2
+        assert sel_a in result
+        assert sel_b in result
+
+    def test_op_with_scalar_ignores_non_expressions(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        op = sel + 5
+        result = op.get_selectors()
+        assert result == [sel]
+
+    def test_alias_selector_returns_all_aliases(self):
+        sel_a = TimeSeriesSelector(TagSelector("name") == "a")
+        sel_b = TimeSeriesSelector(TagSelector("name") == "b")
+        alias_sel = TimeSeriesAliasSelector(sel_a, sel_b)
+        result = alias_sel.get_selectors()
+        assert len(result) == 2
+        assert sel_a in result
+        assert sel_b in result
+
+    def test_udf_returns_leaf_selectors(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "test")
+        udf_expr = sel.apply(lambda ts: ts * 2)
+        result = udf_expr.get_selectors()
+        assert result == [sel]
+
+    def test_mixed_uses_alias_all_returned(self):
+        sel_direct = TimeSeriesSelector(TagSelector("name") == "a")
+        sel_aliased = TimeSeriesSelector(TagSelector("alias") == "b", uses_alias=True)
+        op = sel_direct + sel_aliased
+        result = op.get_selectors()
+        assert len(result) == 2
+        assert sel_direct in result
+        assert sel_aliased in result
+
+    def test_duplicate_selector_in_expression(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        op = sel.where(sel > 1)
+        result = op.get_selectors()
+        assert len(result) == 2
+        assert all(s is sel for s in result)

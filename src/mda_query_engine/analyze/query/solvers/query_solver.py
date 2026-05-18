@@ -1,14 +1,21 @@
+from __future__ import annotations
+
 import abc
 from abc import ABC
+from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
 from pyspark.sql import DataFrame
+from pyspark.sql.column import Column
 
-from mda_query_engine.analyze.metadata.metric_expression import MetricExpression
-from mda_query_engine.analyze.metadata.tag_expression import TagExpression
+if TYPE_CHECKING:
+    from mda_query_engine.measurement_db import MeasurementDB
+
 from mda_query_engine.analyze.metadata.time_series_expression import (
-    TimeSeriesExpression,
+    TimeSeriesSelector,
 )
+
 from .solver_config import SolverConfig
 
 
@@ -27,6 +34,14 @@ class QuerySolver(ABC):
 
     def __init__(self, config: SolverConfig = None):
         self.config = config or SolverConfig()
+
+    @staticmethod
+    def _apply_column_mapping(df: DataFrame, mapping: dict[str, str]) -> DataFrame:
+        """Rename DataFrame columns according to a physical → internal mapping."""
+        for physical, internal in mapping.items():
+            if physical != internal:
+                df = df.withColumnRenamed(physical, internal)
+        return df
 
     def _build_expr(self, filters):
         """
@@ -49,6 +64,46 @@ class QuerySolver(ABC):
             else:
                 expr = expr | filt.get_selector_expr()
         return expr
+
+    def _empty_channel_match_df(self, spark) -> DataFrame:
+        return spark.createDataFrame(
+            [],
+            schema=T.StructType(
+                [
+                    T.StructField(self.config.container_id_col, T.LongType()),
+                    T.StructField(self.config.channel_id_col, T.LongType()),
+                    T.StructField("selector_ids", T.ArrayType(T.IntegerType())),
+                ]
+            ),
+        )
+
+    def _build_selector_id_expr(self, filters) -> Column:
+        """Build a Spark ``Column`` that maps rows to their ``selector_id``.
+
+        Produces a chained ``F.when`` expression: for each selector in
+        *filters*, if the row satisfies the selector's tag expression the
+        column evaluates to that selector's ``selector_id``.
+
+        Parameters
+        ----------
+        filters : Iterable[TimeSeriesSelector]
+            Selectors whose ``get_selector_expr()`` and ``selector_id`` are
+            used to build the ``WHEN … THEN …`` chain.
+
+        Returns
+        -------
+        pyspark.sql.Column
+            A column expression suitable for ``df.withColumn("selector_id", …)``.
+        """
+        selector_expr = None
+        for selection in filters:
+            if selector_expr is None:
+                selector_expr = F.when(selection.get_selector_expr(), F.lit(selection.selector_id))
+            else:
+                selector_expr = selector_expr.when(
+                    selection.get_selector_expr(), F.lit(selection.selector_id)
+                )
+        return selector_expr
 
     @abc.abstractmethod
     def filter_container_tags(self, spark, query) -> DataFrame:
@@ -108,7 +163,7 @@ class QuerySolver(ABC):
         )
 
     @abc.abstractmethod
-    def filter_channel_tags(self, spark, query, container_df) -> DataFrame:
+    def filter_channel_tags(self, spark, db: MeasurementDB, container_df, selectors) -> DataFrame:
         """
         Stage 3: Filter channels by measurements and tags.
 
@@ -116,10 +171,12 @@ class QuerySolver(ABC):
         ----------
         spark : SparkSession
             Spark session used for query execution.
-        query : QueryBuilder
-            Query object containing filters and db info.
+        db : MeasurementDB
+            Measurement database for table access.
         container_df : pyspark.sql.DataFrame
             DataFrame containing container information.
+        selectors : list[TimeSeriesSelector]
+            Non-aliased (direct) selectors extracted from the query.
 
         Returns
         -------
@@ -134,7 +191,7 @@ class QuerySolver(ABC):
         raise NotImplementedError("Each solver must implement the filter_channel_tags method.")
 
     @abc.abstractmethod
-    def filter_channel_metrics(self, spark, query, channel_df) -> DataFrame:
+    def filter_channel_metrics(self, spark, db: MeasurementDB, channel_df, selectors) -> DataFrame:
         """
         Stage 4: Filter channels by metrics.
 
@@ -142,6 +199,86 @@ class QuerySolver(ABC):
         ----------
         spark : SparkSession
             Spark session used for query execution.
+        db : MeasurementDB
+            Measurement database for table access.
+        channel_df : pyspark.sql.DataFrame
+            DataFrame containing channel information.
+        selectors : list[TimeSeriesSelector]
+            Non-aliased (direct) selectors extracted from the query.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            DataFrame with ``(container_id, channel_id, selector_ids)``
+            where ``selector_ids`` is an array column.
+        Raises
+        ------
+        NotImplementedError
+            If not implemented by subclass.
+        """
+        raise NotImplementedError("Each solver must implement the filter_channel_metrics method.")
+
+    def filter_aliased_channel_metrics(
+        self, spark, db: MeasurementDB, container_df, selectors
+    ) -> DataFrame:
+        """
+        Resolve aliased channel selections via the channel_mapping table.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        db : MeasurementDB
+            Measurement database for table access.
+        container_df : pyspark.sql.DataFrame
+            DataFrame containing filtered container IDs.
+        selectors : list[TimeSeriesSelector]
+            Aliased selectors extracted from the query.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            DataFrame with ``(container_id, channel_id, selector_ids)``
+            where ``selector_ids`` is an array column.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support aliased channel resolution"
+        )
+
+    def resolve_channel_selections(
+        self, spark, channel_metrics_df, aliased_channel_metrics_df
+    ) -> DataFrame:
+        """
+        Union direct and aliased channel metrics, combining selector_ids.
+
+        Only called when aliased selectors are present.  The default
+        implementation raises ``NotImplementedError``; solvers that support
+        aliasing (e.g. ``KeyValueStoreSolver``) must override this.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        channel_metrics_df : pyspark.sql.DataFrame
+            Direct channel metrics with ``selector_ids`` array column.
+        aliased_channel_metrics_df : pyspark.sql.DataFrame
+            Aliased channel metrics with ``selector_ids`` array column.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support aliased channel resolution"
+        )
+
+    def filter_candidates(self, query, channel_df) -> DataFrame:
+        """
+        Stage 5: Select best channel candidate.
+
+        Parameters
+        ----------
         query : QueryBuilder
             Query object containing filters and db info.
         channel_df : pyspark.sql.DataFrame
@@ -150,14 +287,9 @@ class QuerySolver(ABC):
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame containing filtered channel metrics.
-
-        Raises
-        ------
-        NotImplementedError
-            If not implemented by subclass.
+            DataFrame containing selected channel candidates.
         """
-        raise NotImplementedError("Each solver must implement the filter_channel_metrics method.")
+        pass
 
     @abc.abstractmethod
     def solve(self, query, channels_df, selections, dtypes):

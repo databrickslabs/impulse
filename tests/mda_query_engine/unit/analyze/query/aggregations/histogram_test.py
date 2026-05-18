@@ -84,3 +84,30 @@ def test_histogram_custom_weight_str():
     assert callable(hist.get_selector_expr)
     selector_expr_result = hist.get_selector_expr()
     assert selector_expr_result is not None
+
+
+def test_histogram_custom_weights_get_selectors():
+    sel = TimeSeriesSelector(TagSelector("name") == "speed")
+    wgt = TimeSeriesSelector(TagSelector("name") == "torque")
+    hist = HistogramCustomWeights(selection=sel, weights=wgt, bins=[0.0, 1.0])
+    result = hist.get_selectors()
+    assert len(result) == 2
+    assert sel in result
+    assert wgt in result
+
+
+def test_histogram_duration_get_selectors():
+    sel = TimeSeriesSelector(TagSelector("name") == "speed")
+    hist = HistogramDuration(selection=sel, bins=[0.0, 50.0, 100.0])
+    result = hist.get_selectors()
+    assert result == [sel]
+
+
+def test_histogram_duration_get_selectors_nested():
+    sel_a = TimeSeriesSelector(TagSelector("name") == "a")
+    sel_b = TimeSeriesSelector(TagSelector("name") == "b")
+    hist = HistogramDuration(selection=sel_a + sel_b, bins=[0.0, 1.0])
+    result = hist.get_selectors()
+    assert len(result) == 2
+    assert sel_a in result
+    assert sel_b in result
