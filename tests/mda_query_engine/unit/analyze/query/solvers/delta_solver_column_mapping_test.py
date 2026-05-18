@@ -198,7 +198,11 @@ class TestDeltaSolverContainerTagsMapping:
     def db_custom_tags(self, spark):
         tables = _default_tables(spark)
         tables["container_tags"] = _container_tags_df(
-            spark, _CONTAINER_TAGS_ROWS, cid_col="meas_id", key_col="element_id", val_col="attr_val"
+            spark,
+            _CONTAINER_TAGS_ROWS,
+            cid_col="meas_id",
+            key_col="element_id",
+            val_col="attr_val",
         )
         return _make_db(tables)
 
