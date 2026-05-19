@@ -633,7 +633,7 @@ class TestSolveExpressionsBatched:
         write_chain.saveAsTable.assert_called_once()
 
         fq_name = write_chain.saveAsTable.call_args[0][0]
-        assert "__mda_temp_" in fq_name
+        assert "__impulse_temp_" in fq_name
         assert "spark_catalog" in fq_name
         assert "gold" in fq_name
 
