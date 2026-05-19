@@ -23,7 +23,7 @@ A `BasicEvent` derives event instances from a boolean TSAL expression. Each cont
 evaluates to `True` becomes an event instance with a start and end timestamp.
 
 ```python
-from mda_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.basic_event import BasicEvent
 
 rpm_event_expr = (eng_rpm > 2000) & (eng_rpm < 5000)
 
@@ -87,7 +87,7 @@ and end timestamps are taken directly from the `container_metrics` table.
 This is useful when aggregations should run across complete measurements without any filtering.
 
 ```python
-from mda_reporting.events.container_event import ContainerEvent
+from impulse_reporting.events.container_event import ContainerEvent
 
 container_event = ContainerEvent(
     name="container_event",
@@ -126,7 +126,7 @@ sequence:| ------------------------- |
 ```
 
 ```python
-from mda_reporting.events.sequence_of_events import SequenceOfEvents
+from impulse_reporting.events.sequence_of_events import SequenceOfEvents
 
 idle_to_drive = SequenceOfEvents(
     name="idle_to_drive",

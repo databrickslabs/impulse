@@ -17,7 +17,7 @@ Aggregations are organized into **Pages**, which group related visuals within a 
 A `Page` is a logical container for aggregations. Pages are numbered for ordering and attached to the report.
 
 ```python
-from mda_reporting.core.page import Page
+from impulse_reporting.core.page import Page
 
 page = Page(page_number=1)
 my_report.add_page(page)
@@ -48,7 +48,7 @@ The example below uses `HistogramDuration`. Bin counts are **weighted by sample 
 independent of sampling rate.
 
 ```python
-from mda_reporting.aggregations.histogram import HistogramDuration
+from impulse_reporting.aggregations.histogram import HistogramDuration
 
 rpm_hist = HistogramDuration(
     name="rpm_hist",
@@ -134,7 +134,7 @@ This creates 20 bins from 0 to 4750 in steps of 250.
 Both signals are synchronized so they are comparable even when sampling frequencies differ.
 
 ```python
-from mda_reporting.aggregations.histogram2d import Histogram2DDuration
+from impulse_reporting.aggregations.histogram2d import Histogram2DDuration
 
 heatmap = Histogram2DDuration(
     name="rpm_vs_speed",
@@ -221,7 +221,7 @@ Computes descriptive statistics for one or more signals within an event. Statist
 allowing per-interval breakdowns.
 
 ```python
-from mda_reporting.aggregations.stats_aggregator import StatsAggregator
+from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 
 stats = StatsAggregator(
     name="signal_stats",

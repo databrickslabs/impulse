@@ -40,10 +40,10 @@ The example below demonstrates the **reporting** usage mode. Examples of the ad-
 ```python
 from databricks.sdk import WorkspaceClient
 
-from mda_reporting.core.report import Report
-from mda_reporting.core.page import Page
-from mda_reporting.events.basic_event import BasicEvent
-from mda_reporting.aggregations.histogram import HistogramDuration
+from impulse_reporting.core.report import Report
+from impulse_reporting.core.page import Page
+from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.aggregations.histogram import HistogramDuration
 
 ws = WorkspaceClient()
 report = Report(name="battery_thermal", spark=spark, workspace_client=ws, config=my_config)

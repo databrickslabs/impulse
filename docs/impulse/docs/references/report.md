@@ -12,7 +12,7 @@ the data source and sink, and orchestrates computation and persistence.
 
 ```python
 from databricks.sdk import WorkspaceClient
-from mda_reporting.core.report import Report
+from impulse_reporting.core.report import Report
 
 ws = WorkspaceClient()
 

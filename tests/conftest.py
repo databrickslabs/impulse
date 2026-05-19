@@ -9,8 +9,8 @@ from databricks.sdk import WorkspaceClient
 from delta import configure_spark_with_delta_pip
 from pyspark.sql import SparkSession
 
-import mda_query_engine.schema as S
-from mda_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+import impulse_query_engine.schema as S
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 
 
 @pytest.fixture(scope="session")

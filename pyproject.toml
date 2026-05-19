@@ -65,7 +65,7 @@ exclude = ["src/*/demos"]
 
 # Pytest options
 [tool.pytest.ini_options]
-pythonpath = [".", "src/mda_reporting"]
+pythonpath = [".", "src/impulse_reporting"]
 testpaths = ["tests"]
 addopts = "--junitxml=test-results.xml --cov=src --cov-report=html --cov-report=xml:coverage.xml --cov-report=term-missing"
 
@@ -134,7 +134,7 @@ ignore = [
 convention = "numpy"
 
 [tool.ruff.lint.isort]
-known-first-party = ["mda_query_engine", "mda_reporting"]
+known-first-party = ["impulse_query_engine", "impulse_reporting"]
 
 [tool.black]
 line-length = 99

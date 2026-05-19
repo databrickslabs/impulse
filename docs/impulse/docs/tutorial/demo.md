@@ -61,13 +61,13 @@ Import the required classes and create a `Report` instance:
 import pyspark.sql.functions as F
 from databricks.sdk import WorkspaceClient
 
-from mda_reporting.core.report import Report
-from mda_reporting.core.page import Page
-from mda_reporting.aggregations.histogram import HistogramDuration
-from mda_reporting.aggregations.histogram2d import Histogram2DDuration
-from mda_reporting.aggregations.stats_aggregator import StatsAggregator
-from mda_reporting.events.basic_event import BasicEvent
-from mda_reporting.events.container_event import ContainerEvent
+from impulse_reporting.core.report import Report
+from impulse_reporting.core.page import Page
+from impulse_reporting.aggregations.histogram import HistogramDuration
+from impulse_reporting.aggregations.histogram2d import Histogram2DDuration
+from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
+from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.container_event import ContainerEvent
 
 ws = WorkspaceClient()
 my_report = Report(
