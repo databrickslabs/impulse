@@ -282,10 +282,10 @@ Configuration for incremental processing behavior.
 - `silver_last_modified_column` (`str, default="timestamp"`): Column name in the silver layer used for freshness comparison.
 - `gold_last_modified_column` (`str, default="last_modified"`): Column name in the gold layer used for freshness comparison.
 
-## MdaConfig
+## ImpulseConfig
 
 ```python
-class MdaConfig(BaseModel)
+class ImpulseConfig(BaseModel)
 ```
 
 Main configuration model.
@@ -355,6 +355,6 @@ Attributes
  ...         }
  ...     }
  ... }
- >>> config = MdaConfig.model_validate(config_data)
+ >>> config = ImpulseConfig.model_validate(config_data)
 
 

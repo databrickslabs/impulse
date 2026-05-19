@@ -1,6 +1,6 @@
 # Configuration
 
-`MdaConfig` configures everything about a report: the silver-layer input
+`ImpulseConfig` configures everything about a report: the silver-layer input
 tables, the gold-layer output location, container-level filters, the
 query-engine solver, incremental processing, and which container columns
 get surfaced into the gold-layer measurement dimension. Configuration is

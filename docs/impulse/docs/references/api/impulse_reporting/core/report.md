@@ -76,10 +76,10 @@ Get the query solver associated with this report.
 #### load\_config\_from\_file
 
 ```python
-def load_config_from_file(config_path: str) -> MdaConfig
+def load_config_from_file(config_path: str) -> ImpulseConfig
 ```
 
-Load mda configuration from a JSON file.
+Load Impulse configuration from a JSON file.
 
 **Arguments**:
 
@@ -92,10 +92,10 @@ Load mda configuration from a JSON file.
 #### load\_config\_from\_dict
 
 ```python
-def load_config_from_dict(config_info: dict[str, Any]) -> MdaConfig
+def load_config_from_dict(config_info: dict[str, Any]) -> ImpulseConfig
 ```
 
-Load mda configuration from a dictionary.
+Load Impulse configuration from a dictionary.
 
 **Arguments**:
 
@@ -103,12 +103,12 @@ Load mda configuration from a dictionary.
 
 **Returns**:
 
-`MdaConfig`: The loaded mda configuration.
+`ImpulseConfig`: The loaded Impulse configuration.
 
 #### create\_measurement\_db
 
 ```python
-def create_measurement_db(config: MdaConfig,
+def create_measurement_db(config: ImpulseConfig,
                           ws: WorkspaceClient) -> MeasurementDB
 ```
 
@@ -120,7 +120,7 @@ to the ``container_tags_table`` parameter expected by
 
 **Arguments**:
 
-- `config` (`MdaConfig`): The mda configuration.
+- `config` (`ImpulseConfig`): The Impulse configuration.
 - `ws` (`WorkspaceClient`): Authenticated Databricks workspace client.
 
 **Returns**:
@@ -130,7 +130,8 @@ to the ``container_tags_table`` parameter expected by
 #### create\_query\_builder
 
 ```python
-def create_query_builder(db: MeasurementDB, config: MdaConfig) -> QueryBuilder
+def create_query_builder(db: MeasurementDB,
+                         config: ImpulseConfig) -> QueryBuilder
 ```
 
 Create a query builder based on the provided configuration and set container filters.
@@ -144,7 +145,7 @@ available.
 **Arguments**:
 
 - `db` (`MeasurementDB`): The measurement database instance.
-- `config` (`MdaConfig`): The mda configuration.
+- `config` (`ImpulseConfig`): The Impulse configuration.
 
 **Raises**:
 
@@ -158,14 +159,14 @@ is not set.
 #### create\_sink
 
 ```python
-def create_sink(config: MdaConfig) -> Sink
+def create_sink(config: ImpulseConfig) -> Sink
 ```
 
 Create a sink based on the provided configuration.
 
 **Arguments**:
 
-- `config` (`MdaConfig`): The mda configuration.
+- `config` (`ImpulseConfig`): The Impulse configuration.
 
 **Returns**:
 
@@ -174,7 +175,7 @@ Create a sink based on the provided configuration.
 #### create\_solver
 
 ```python
-def create_solver(spark: SparkSession, config: MdaConfig) -> QuerySolver
+def create_solver(spark: SparkSession, config: ImpulseConfig) -> QuerySolver
 ```
 
 Create a query solver based on the provided configuration.
@@ -182,7 +183,7 @@ Create a query solver based on the provided configuration.
 **Arguments**:
 
 - `spark` (`SparkSession`): The Spark session to use for the solver.
-- `config` (`MdaConfig`): The configuration
+- `config` (`ImpulseConfig`): The configuration
 
 **Raises**:
 

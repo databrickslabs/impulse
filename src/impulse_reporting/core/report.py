@@ -157,7 +157,7 @@ class Report:
     @staticmethod
     def load_config_from_file(config_path: str) -> ImpulseConfig:
         """
-        Load mda configuration from a JSON file.
+        Load Impulse configuration from a JSON file.
 
         Parameters
         ----------
@@ -175,7 +175,7 @@ class Report:
     @staticmethod
     def load_config_from_dict(config_info: dict[str, Any]) -> ImpulseConfig:
         """
-        Load mda configuration from a dictionary.
+        Load Impulse configuration from a dictionary.
 
         Parameters
         ----------
@@ -185,7 +185,7 @@ class Report:
         Returns
         -------
         ImpulseConfig
-            The loaded mda configuration.
+            The loaded Impulse configuration.
         """
         return ImpulseConfig.model_validate(config_info)
 
@@ -201,7 +201,7 @@ class Report:
         Parameters
         ----------
         config : ImpulseConfig
-            The mda configuration.
+            The Impulse configuration.
         ws : WorkspaceClient
             Authenticated Databricks workspace client.
 
@@ -233,7 +233,7 @@ class Report:
         db : MeasurementDB
             The measurement database instance.
         config : ImpulseConfig
-            The mda configuration.
+            The Impulse configuration.
 
         Returns
         -------
@@ -276,7 +276,7 @@ class Report:
         Parameters
         ----------
         config : ImpulseConfig
-            The mda configuration.
+            The Impulse configuration.
 
         Returns
         -------
