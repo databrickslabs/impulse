@@ -19,9 +19,9 @@ from impulse_reporting.config.config_parser import (
 
 impulse_config_JSON = {
     "source": {
-        "container_metrics_table": "mda_demo.silver.container_metric",
-        "channel_metrics_table": "mda_demo.silver.channel_metric",
-        "channels_uri": "mda_demo.silver.channel_data",
+        "container_metrics_table": "impulse_demo.silver.container_metric",
+        "channel_metrics_table": "impulse_demo.silver.channel_metric",
+        "channels_uri": "impulse_demo.silver.channel_data",
     },
     "unity_sink": {
         "catalog": "test_catalog",
@@ -54,9 +54,9 @@ impulse_config_JSON = {
 def test_impulse_config_from_dict():
     """Test MdaConfig from a sample JSON-like dictionary."""
     config = ImpulseConfig.model_validate(impulse_config_JSON)
-    assert config.source.container_metrics_table == "mda_demo.silver.container_metric"
-    assert config.source.channel_metrics_table == "mda_demo.silver.channel_metric"
-    assert config.source.channels_uri == "mda_demo.silver.channel_data"
+    assert config.source.container_metrics_table == "impulse_demo.silver.container_metric"
+    assert config.source.channel_metrics_table == "impulse_demo.silver.channel_metric"
+    assert config.source.channels_uri == "impulse_demo.silver.channel_data"
 
     assert config.unity_sink.catalog == "test_catalog"
     assert config.container_filters is not None
@@ -228,9 +228,9 @@ def test_tags_table():
     config_json = impulse_config_JSON.copy()
 
     source = config_json["source"]
-    source["container_tags_table"] = "mda_demo.silver.container_tags"
+    source["container_tags_table"] = "impulse_demo.silver.container_tags"
     config = ImpulseConfig.model_validate(config_json)
-    assert config.source.container_tags_table == "mda_demo.silver.container_tags"
+    assert config.source.container_tags_table == "impulse_demo.silver.container_tags"
 
 
 def test_impulse_config_key_value_store_solver_valid():

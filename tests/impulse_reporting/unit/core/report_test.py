@@ -18,9 +18,9 @@ from impulse_reporting.persist.report_storage import SinkConfig
 
 DUMMY_CONFIG = {
     "source": {
-        "container_metrics_table": "mda_demo.silver.container_metric",
-        "channel_metrics_table": "mda_demo.silver.channel_metric",
-        "channels_uri": "mda_demo.silver.channel_data",
+        "container_metrics_table": "impulse_demo.silver.container_metric",
+        "channel_metrics_table": "impulse_demo.silver.channel_metric",
+        "channels_uri": "impulse_demo.silver.channel_data",
     },
     "unity_sink": {
         "catalog": "test_catalog",
@@ -44,10 +44,10 @@ DUMMY_CONFIG = {
 
 DUMMY_KEY_VALUE_STORE_CONFIG = {
     "source": {
-        "container_tags_table": "mda_demo.silver.concept_entities",
-        "container_metrics_table": "mda_demo.silver.container_metric",
-        "channel_metrics_table": "mda_demo.silver.channel_metric",
-        "channels_uri": "mda_demo.silver.channel_data",
+        "container_tags_table": "impulse_demo.silver.concept_entities",
+        "container_metrics_table": "impulse_demo.silver.container_metric",
+        "channel_metrics_table": "impulse_demo.silver.channel_metric",
+        "channels_uri": "impulse_demo.silver.channel_data",
     },
     "unity_sink": {
         "catalog": "test_catalog",
@@ -64,10 +64,10 @@ DUMMY_KEY_VALUE_STORE_CONFIG = {
 
 DUMMY_KEY_VALUE_STORE_CONFIG_WITH_SOLVER_CONFIG = {
     "source": {
-        "container_tags_table": "mda_demo.silver.concept_entities",
-        "container_metrics_table": "mda_demo.silver.container_metric",
-        "channel_metrics_table": "mda_demo.silver.channel_metric",
-        "channels_uri": "mda_demo.silver.channel_data",
+        "container_tags_table": "impulse_demo.silver.concept_entities",
+        "container_metrics_table": "impulse_demo.silver.container_metric",
+        "channel_metrics_table": "impulse_demo.silver.channel_metric",
+        "channels_uri": "impulse_demo.silver.channel_data",
     },
     "unity_sink": {
         "catalog": "test_catalog",
@@ -96,11 +96,11 @@ DUMMY_KEY_VALUE_STORE_CONFIG_WITH_SOLVER_CONFIG = {
 
 DUMMY_DELTA_CONFIG = {
     "source": {
-        "container_tags_table": "mda_demo.silver.container_tags",
-        "container_metrics_table": "mda_demo.silver.container_metric",
-        "channel_tags_table": "mda_demo.silver.channel_tags",
-        "channel_metrics_table": "mda_demo.silver.channel_metric",
-        "channels_uri": "mda_demo.silver.channel_data",
+        "container_tags_table": "impulse_demo.silver.container_tags",
+        "container_metrics_table": "impulse_demo.silver.container_metric",
+        "channel_tags_table": "impulse_demo.silver.channel_tags",
+        "channel_metrics_table": "impulse_demo.silver.channel_metric",
+        "channels_uri": "impulse_demo.silver.channel_data",
     },
     "unity_sink": {
         "catalog": "test_catalog",
@@ -112,11 +112,11 @@ DUMMY_DELTA_CONFIG = {
 
 DUMMY_DELTA_CONFIG_WITH_SOLVER_CONFIG = {
     "source": {
-        "container_tags_table": "mda_demo.silver.container_tags",
-        "container_metrics_table": "mda_demo.silver.container_metric",
-        "channel_tags_table": "mda_demo.silver.channel_tags",
-        "channel_metrics_table": "mda_demo.silver.channel_metric",
-        "channels_uri": "mda_demo.silver.channel_data",
+        "container_tags_table": "impulse_demo.silver.container_tags",
+        "container_metrics_table": "impulse_demo.silver.container_metric",
+        "channel_tags_table": "impulse_demo.silver.channel_tags",
+        "channel_metrics_table": "impulse_demo.silver.channel_metric",
+        "channels_uri": "impulse_demo.silver.channel_data",
     },
     "unity_sink": {
         "catalog": "test_catalog",
