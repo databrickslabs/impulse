@@ -25,14 +25,14 @@ The demo uses a JSON configuration file that points to the Silver and Gold layer
 ```json
 {
   "source": {
-    "container_metrics_table": "mda_demo.default.container_metrics",
-    "channel_metrics_table": "mda_demo.default.channel_metrics",
-    "channels_uri": "mda_demo.default.channels",
-    "container_tags_table": "mda_demo.default.container_tags",
-    "channel_tags_table": "mda_demo.default.channel_tags"
+    "container_metrics_table": "impulse_demo.default.container_metrics",
+    "channel_metrics_table": "impulse_demo.default.channel_metrics",
+    "channels_uri": "impulse_demo.default.channels",
+    "container_tags_table": "impulse_demo.default.container_tags",
+    "channel_tags_table": "impulse_demo.default.channel_tags"
   },
   "unity_sink": {
-    "catalog": "mda_demo",
+    "catalog": "impulse_demo",
     "schema": "gold",
     "table_prefix": "t"
   },
@@ -48,8 +48,8 @@ The demo uses a JSON configuration file that points to the Silver and Gold layer
 }
 ```
 
-This tells the framework to read from `mda_demo.default.*` Silver tables, use the `DeltaSolver`, and write Gold layer
-results to `mda_demo.gold.t_*`.
+This tells the framework to read from `impulse_demo.default.*` Silver tables, use the `DeltaSolver`, and write Gold layer
+results to `impulse_demo.gold.t_*`.
 
 ---
 
@@ -352,7 +352,7 @@ display(
 
 ## Output tables
 
-After running the notebook, the following tables are created in Unity Catalog under `mda_demo.gold`:
+After running the notebook, the following tables are created in Unity Catalog under `impulse_demo.gold`:
 
 | Table                     | Description                                                  |
 |---------------------------|--------------------------------------------------------------|

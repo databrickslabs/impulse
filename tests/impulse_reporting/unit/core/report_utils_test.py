@@ -608,7 +608,7 @@ class TestSolveExpressionsBatched:
 
         mock_batch_df.createOrReplaceTempView.assert_called_once()
         view_name = mock_batch_df.createOrReplaceTempView.call_args[0][0]
-        assert view_name.startswith("__mda_temp_")
+        assert view_name.startswith("__impulse_temp_")
 
         report.spark.table.assert_called_once_with(view_name)
         assert result is mock_table_df

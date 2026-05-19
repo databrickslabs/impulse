@@ -19,7 +19,7 @@ Initialize the QueryBuilder.
 
 **Arguments**:
 
-- `db` (`mda_query_engine.analyze.MeasurementDB`): Measurement database object.
+- `db` (`impulse_query_engine.analyze.MeasurementDB`): Measurement database object.
 
 #### where
 

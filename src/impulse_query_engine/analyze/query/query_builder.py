@@ -25,7 +25,7 @@ class QueryBuilder:
 
         Parameters
         ----------
-        db : mda_query_engine.analyze.MeasurementDB
+        db : impulse_query_engine.analyze.MeasurementDB
             Measurement database object.
         """
         self.db = db

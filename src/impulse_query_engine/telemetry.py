@@ -86,7 +86,7 @@ def verify_workspace_client(
     ws : WorkspaceClient
         Authenticated workspace client.
     product_name : str
-        Product identifier (e.g. ``"mda"``).
+        Product identifier (e.g. ``"impulse"``).
     version : str
         Product version string.
 

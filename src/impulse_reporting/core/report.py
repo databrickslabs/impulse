@@ -799,7 +799,7 @@ class Report:
         return merge_keys_map.get(agg_type, ["container_id", "visual_id"])
 
     def _cleanup_temp_tables(self) -> None:
-        """Drop leftover ``__mda_temp_*`` Delta tables from previous runs.
+        """Drop leftover ``__impulse_temp_*`` Delta tables from previous runs.
 
         Only applies when a sink is configured; in sinkless mode this is a no-op.
         """

@@ -308,13 +308,13 @@ Attributes
  --------
 >>> config_data = {
  ...     "source": {
- ...         "container_metrics_table": "mda_demo.silver.container_metric",
- ...         "channel_metrics_table": "mda_demo.silver.channel_metric",
- ...         "channels_uri": "mda_demo.silver.channel_data",
- ...         "channel_mapping_table": "mda_demo.data_model.channel_mapping"
+ ...         "container_metrics_table": "impulse_demo.silver.container_metric",
+ ...         "channel_metrics_table": "impulse_demo.silver.channel_metric",
+ ...         "channels_uri": "impulse_demo.silver.channel_data",
+ ...         "channel_mapping_table": "impulse_demo.data_model.channel_mapping"
  ...     },
  ...     "unity_sink": {
- ...         "catalog": "mda_demo",
+ ...         "catalog": "impulse_demo",
  ...         "schema": "silver_refactored",
  ...         "table_prefix": "evaluation"
  ...     },

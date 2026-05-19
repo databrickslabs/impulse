@@ -52,7 +52,7 @@ impulse_config_JSON = {
 
 
 def test_impulse_config_from_dict():
-    """Test MdaConfig from a sample JSON-like dictionary."""
+    """Test ImpulseConfig from a sample JSON-like dictionary."""
     config = ImpulseConfig.model_validate(impulse_config_JSON)
     assert config.source.container_metrics_table == "impulse_demo.silver.container_metric"
     assert config.source.channel_metrics_table == "impulse_demo.silver.channel_metric"
@@ -130,7 +130,7 @@ def test_impulse_config_drop_implausible_data_rejects_rle():
 
 
 def test_impulse_config_from_dict_no_query_engine_provided():
-    """Test MdaConfig with no query engine provided."""
+    """Test ImpulseConfig with no query engine provided."""
     config_json = impulse_config_JSON.copy()
     config_json.pop("query_engine", None)
     config = ImpulseConfig.model_validate(config_json)
@@ -138,7 +138,7 @@ def test_impulse_config_from_dict_no_query_engine_provided():
 
 
 def test_impulse_config_from_dict_no_measurement_dim_provided():
-    """Test MdaConfig with no measurement dimension info provided."""
+    """Test ImpulseConfig with no measurement dimension info provided."""
     config_json = impulse_config_JSON.copy()
     config_json.pop("measurement_dimensions", None)
     config = ImpulseConfig.model_validate(config_json)
@@ -154,7 +154,7 @@ def test_impulse_config_from_dict_no_measurement_dim_provided():
 
 
 def test_impulse_config_from_dict_wrong_measurement_dim_provided():
-    """Test MdaConfig with wrong measurement dimension info provided."""
+    """Test ImpulseConfig with wrong measurement dimension info provided."""
     config_json = impulse_config_JSON.copy()
     config_json.update({"measurement_dimensions": ["wrong_dimension"]})
 
@@ -163,7 +163,7 @@ def test_impulse_config_from_dict_wrong_measurement_dim_provided():
 
 
 def test_impulse_config_no_container_filters():
-    """Test MdaConfig without container_filters field."""
+    """Test ImpulseConfig without container_filters field."""
     config_json = impulse_config_JSON.copy()
     config_json.pop("container_filters")
     config = ImpulseConfig.model_validate(config_json)
@@ -171,7 +171,7 @@ def test_impulse_config_no_container_filters():
 
 
 def test_impulse_config_empty_container_filters():
-    """Test MdaConfig with empty container_filters."""
+    """Test ImpulseConfig with empty container_filters."""
     config_json = impulse_config_JSON.copy()
     config_json["container_filters"] = {}
     config = ImpulseConfig.model_validate(config_json)
@@ -224,7 +224,7 @@ def test_map_gold_name_to_silver():
 
 
 def test_tags_table():
-    """Test the `container_tags_table` field in `MdaConfig.source`."""
+    """Test the `container_tags_table` field in `ImpulseConfig.source`."""
     config_json = impulse_config_JSON.copy()
 
     source = config_json["source"]
@@ -840,13 +840,13 @@ def test_incremental_config_from_dict():
 
 
 def test_impulse_config_without_incremental():
-    """Test MdaConfig without incremental configuration (default behavior)."""
+    """Test ImpulseConfig without incremental configuration (default behavior)."""
     config = ImpulseConfig.model_validate(impulse_config_JSON)
     assert config.incremental is None
 
 
 def test_impulse_config_with_incremental():
-    """Test MdaConfig with incremental configuration provided."""
+    """Test ImpulseConfig with incremental configuration provided."""
     config_json = impulse_config_JSON.copy()
     config_json["incremental"] = {
         "enabled": True,
@@ -859,7 +859,7 @@ def test_impulse_config_with_incremental():
 
 
 def test_impulse_config_with_incremental_disabled():
-    """Test MdaConfig with incremental explicitly disabled."""
+    """Test ImpulseConfig with incremental explicitly disabled."""
     config_json = impulse_config_JSON.copy()
     config_json["incremental"] = {"enabled": False}
     config = ImpulseConfig.model_validate(config_json)

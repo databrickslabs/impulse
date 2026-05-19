@@ -266,9 +266,9 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
     report, tracked_expressions = _build_batched_report(spark)
     _instrument_expression_selectors(tracked_expressions, selector_calls)
 
-    spark.sql("DROP TABLE IF EXISTS spark_catalog.gold.__mda_temp_stale_batch")
+    spark.sql("DROP TABLE IF EXISTS spark_catalog.gold.__impulse_temp_stale_batch")
     spark.sql(
-        "CREATE TABLE spark_catalog.gold.__mda_temp_stale_batch USING DELTA AS "
+        "CREATE TABLE spark_catalog.gold.__impulse_temp_stale_batch USING DELTA AS "
         "SELECT 1 AS stale_id"
     )
 
@@ -276,14 +276,14 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
 
     temp_tables = {
         row.tableName
-        for row in spark.sql("SHOW TABLES IN spark_catalog.gold LIKE '__mda_temp_*'").collect()
+        for row in spark.sql("SHOW TABLES IN spark_catalog.gold LIKE '__impulse_temp_*'").collect()
     }
 
     assert instrumentation["create_sink_calls"] == 1
     assert report._has_sink is True
 
     assert instrumentation["cleanup_calls"] == 1
-    assert "__mda_temp_stale_batch" not in temp_tables
+    assert "__impulse_temp_stale_batch" not in temp_tables
     assert temp_tables
 
     assert instrumentation["build_batches"]

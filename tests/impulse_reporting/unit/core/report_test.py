@@ -182,7 +182,7 @@ def test_set_config():
         config_path=config_path,
     )
 
-    # Verify config was loaded and is an MdaConfig instance
+    # Verify config was loaded and is an ImpulseConfig instance
     report_config = report.get_sink_config()
 
     assert isinstance(report_config, SinkConfig)

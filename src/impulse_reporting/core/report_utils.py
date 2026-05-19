@@ -310,7 +310,7 @@ def solve_expressions_batched(
 
     Each batch is solved independently via ``query.select(*batch_exprs).solve(...)``.
     When a sink is configured the intermediate result is persisted as a temporary
-    Delta table (``__mda_temp_<run_id>_<batch_idx>``); otherwise a Spark temp view
+    Delta table (``__impulse_temp_<run_id>_<batch_idx>``); otherwise a Spark temp view
     is used.  After all batches are solved the per-batch DataFrames are joined on
     ``container_id`` with a full outer join.
 
@@ -357,12 +357,12 @@ def solve_expressions_batched(
         )
 
         if has_sink:
-            table_name = f"__mda_temp_{run_id}_{batch_idx}"
+            table_name = f"__impulse_temp_{run_id}_{batch_idx}"
             fq_name = f"`{catalog}`.`{schema}`.`{table_name}`"
             batch_df.write.format("delta").mode("overwrite").saveAsTable(fq_name)
             batch_names.append(fq_name)
         else:
-            view_name = f"__mda_temp_{run_id}_{batch_idx}"
+            view_name = f"__impulse_temp_{run_id}_{batch_idx}"
             batch_df.createOrReplaceTempView(view_name)
             batch_names.append(view_name)
 
@@ -377,7 +377,7 @@ def solve_expressions_batched(
 
 
 def cleanup_temp_tables(spark: SparkSession, catalog: str, schema: str) -> None:
-    """Drop leftover ``__mda_temp_*`` Delta tables from previous runs.
+    """Drop leftover ``__impulse_temp_*`` Delta tables from previous runs.
 
     Parameters
     ----------
@@ -388,7 +388,7 @@ def cleanup_temp_tables(spark: SparkSession, catalog: str, schema: str) -> None:
     schema : str
         Unity Catalog schema name.
     """
-    tables = spark.sql(f"SHOW TABLES IN `{catalog}`.`{schema}` LIKE '__mda_temp_*'")
+    tables = spark.sql(f"SHOW TABLES IN `{catalog}`.`{schema}` LIKE '__impulse_temp_*'")
     for row in tables.collect():
         table_name = row["tableName"]
         spark.sql(f"DROP TABLE IF EXISTS `{catalog}`.`{schema}`.`{table_name}`")
