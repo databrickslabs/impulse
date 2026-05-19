@@ -168,7 +168,7 @@ distance_bins = (distance_km % 10).intervals_between_falling_edges()
 | `.histogram2d(y_expr, x_bins, y_bins)` | `y_expr: TimeSeriesExpression`, `x_bins: list[float]`, `y_bins: list[float]` | Compute a 2D histogram against another signal.                                                         |
 
 These are lower-level methods on the expression itself. For report-level aggregations, use the `Histogram` and
-`Histogram2D` classes from `mda_reporting.aggregations`.
+`Histogram2D` classes from `impulse_reporting.aggregations`.
 
 ### Signal manipulation
 

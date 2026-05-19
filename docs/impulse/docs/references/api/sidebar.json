@@ -6,97 +6,97 @@
           "items": [
             {
               "items": [
-                "references/api/mda_query_engine/analyze/metadata/metric_expression",
-                "references/api/mda_query_engine/analyze/metadata/tag_expression",
-                "references/api/mda_query_engine/analyze/metadata/time_series_expression"
+                "references/api/impulse_query_engine/analyze/metadata/metric_expression",
+                "references/api/impulse_query_engine/analyze/metadata/tag_expression",
+                "references/api/impulse_query_engine/analyze/metadata/time_series_expression"
               ],
-              "label": "mda_query_engine.analyze.metadata",
+              "label": "impulse_query_engine.analyze.metadata",
               "type": "category"
             },
             {
               "items": [
                 {
                   "items": [
-                    "references/api/mda_query_engine/analyze/query/aggregations/statistic_type"
+                    "references/api/impulse_query_engine/analyze/query/aggregations/statistic_type"
                   ],
-                  "label": "mda_query_engine.analyze.query.aggregations",
+                  "label": "impulse_query_engine.analyze.query.aggregations",
                   "type": "category"
                 },
                 {
                   "items": [
-                    "references/api/mda_query_engine/analyze/query/solvers/delta_solver",
-                    "references/api/mda_query_engine/analyze/query/solvers/key_value_store_solver",
-                    "references/api/mda_query_engine/analyze/query/solvers/query_solver",
-                    "references/api/mda_query_engine/analyze/query/solvers/solver_config"
+                    "references/api/impulse_query_engine/analyze/query/solvers/delta_solver",
+                    "references/api/impulse_query_engine/analyze/query/solvers/key_value_store_solver",
+                    "references/api/impulse_query_engine/analyze/query/solvers/query_solver",
+                    "references/api/impulse_query_engine/analyze/query/solvers/solver_config"
                   ],
-                  "label": "mda_query_engine.analyze.query.solvers",
+                  "label": "impulse_query_engine.analyze.query.solvers",
                   "type": "category"
                 },
-                "references/api/mda_query_engine/analyze/query/query_builder"
+                "references/api/impulse_query_engine/analyze/query/query_builder"
               ],
-              "label": "mda_query_engine.analyze.query",
+              "label": "impulse_query_engine.analyze.query",
               "type": "category"
             }
           ],
-          "label": "mda_query_engine.analyze",
+          "label": "impulse_query_engine.analyze",
           "type": "category"
         },
         {
           "items": [
             {
               "items": [
-                "references/api/mda_query_engine/model/series/intervals",
-                "references/api/mda_query_engine/model/series/points_in_time",
-                "references/api/mda_query_engine/model/series/sample_series"
+                "references/api/impulse_query_engine/model/series/intervals",
+                "references/api/impulse_query_engine/model/series/points_in_time",
+                "references/api/impulse_query_engine/model/series/sample_series"
               ],
-              "label": "mda_query_engine.model.series",
+              "label": "impulse_query_engine.model.series",
               "type": "category"
             }
           ],
-          "label": "mda_query_engine.model",
+          "label": "impulse_query_engine.model",
           "type": "category"
         }
       ],
-      "label": "mda_query_engine",
+      "label": "impulse_query_engine",
       "type": "category"
     },
     {
       "items": [
         {
           "items": [
-            "references/api/mda_reporting/aggregations/histogram",
-            "references/api/mda_reporting/aggregations/histogram2d",
-            "references/api/mda_reporting/aggregations/stats_aggregator"
+            "references/api/impulse_reporting/aggregations/histogram",
+            "references/api/impulse_reporting/aggregations/histogram2d",
+            "references/api/impulse_reporting/aggregations/stats_aggregator"
           ],
-          "label": "mda_reporting.aggregations",
+          "label": "impulse_reporting.aggregations",
           "type": "category"
         },
         {
           "items": [
-            "references/api/mda_reporting/config/config_parser"
+            "references/api/impulse_reporting/config/config_parser"
           ],
-          "label": "mda_reporting.config",
+          "label": "impulse_reporting.config",
           "type": "category"
         },
         {
           "items": [
-            "references/api/mda_reporting/core/page",
-            "references/api/mda_reporting/core/report"
+            "references/api/impulse_reporting/core/page",
+            "references/api/impulse_reporting/core/report"
           ],
-          "label": "mda_reporting.core",
+          "label": "impulse_reporting.core",
           "type": "category"
         },
         {
           "items": [
-            "references/api/mda_reporting/events/basic_event",
-            "references/api/mda_reporting/events/container_event",
-            "references/api/mda_reporting/events/sequence_of_events"
+            "references/api/impulse_reporting/events/basic_event",
+            "references/api/impulse_reporting/events/container_event",
+            "references/api/impulse_reporting/events/sequence_of_events"
           ],
-          "label": "mda_reporting.events",
+          "label": "impulse_reporting.events",
           "type": "category"
         }
       ],
-      "label": "mda_reporting",
+      "label": "impulse_reporting",
       "type": "category"
     }
   ],

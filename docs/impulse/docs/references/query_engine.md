@@ -84,9 +84,9 @@ report config:
 
 Auto-generated symbol-level docs for each solver class:
 
-- [`DeltaSolver`](api/mda_query_engine/analyze/query/solvers/delta_solver.md)
-- [`KeyValueStoreSolver`](api/mda_query_engine/analyze/query/solvers/key_value_store_solver.md)
-- [`QuerySolver`](api/mda_query_engine/analyze/query/solvers/query_solver.md)
+- [`DeltaSolver`](api/impulse_query_engine/analyze/query/solvers/delta_solver.md)
+- [`KeyValueStoreSolver`](api/impulse_query_engine/analyze/query/solvers/key_value_store_solver.md)
+- [`QuerySolver`](api/impulse_query_engine/analyze/query/solvers/query_solver.md)
   — abstract base class defining the six-stage solver pipeline.
-- [`SolverConfig`](api/mda_query_engine/analyze/query/solvers/solver_config.md)
+- [`SolverConfig`](api/impulse_query_engine/analyze/query/solvers/solver_config.md)
   — per-table column mappings, filters, and project scoping.

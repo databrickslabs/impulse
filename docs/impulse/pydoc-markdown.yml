@@ -2,27 +2,27 @@ loaders:
   - type: python
     search_path: [../../src]
     modules:
-      - mda_reporting.core.report
-      - mda_reporting.core.page
-      - mda_reporting.events.basic_event
-      - mda_reporting.events.container_event
-      - mda_reporting.events.sequence_of_events
-      - mda_reporting.aggregations.histogram
-      - mda_reporting.aggregations.histogram2d
-      - mda_reporting.aggregations.stats_aggregator
-      - mda_reporting.config.config_parser
-      - mda_query_engine.analyze.query.query_builder
-      - mda_query_engine.analyze.metadata.time_series_expression
-      - mda_query_engine.analyze.metadata.tag_expression
-      - mda_query_engine.analyze.metadata.metric_expression
-      - mda_query_engine.analyze.query.aggregations.statistic_type
-      - mda_query_engine.analyze.query.solvers.delta_solver
-      - mda_query_engine.analyze.query.solvers.key_value_store_solver
-      - mda_query_engine.analyze.query.solvers.solver_config
-      - mda_query_engine.analyze.query.solvers.query_solver
-      - mda_query_engine.model.series.sample_series
-      - mda_query_engine.model.series.intervals
-      - mda_query_engine.model.series.points_in_time
+      - impulse_reporting.core.report
+      - impulse_reporting.core.page
+      - impulse_reporting.events.basic_event
+      - impulse_reporting.events.container_event
+      - impulse_reporting.events.sequence_of_events
+      - impulse_reporting.aggregations.histogram
+      - impulse_reporting.aggregations.histogram2d
+      - impulse_reporting.aggregations.stats_aggregator
+      - impulse_reporting.config.config_parser
+      - impulse_query_engine.analyze.query.query_builder
+      - impulse_query_engine.analyze.metadata.time_series_expression
+      - impulse_query_engine.analyze.metadata.tag_expression
+      - impulse_query_engine.analyze.metadata.metric_expression
+      - impulse_query_engine.analyze.query.aggregations.statistic_type
+      - impulse_query_engine.analyze.query.solvers.delta_solver
+      - impulse_query_engine.analyze.query.solvers.key_value_store_solver
+      - impulse_query_engine.analyze.query.solvers.solver_config
+      - impulse_query_engine.analyze.query.solvers.query_solver
+      - impulse_query_engine.model.series.sample_series
+      - impulse_query_engine.model.series.intervals
+      - impulse_query_engine.model.series.points_in_time
 
 processors:
   - type: filter

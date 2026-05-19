@@ -184,7 +184,7 @@ that data is impractical — Impulse offers two escape hatches.
 
 ### Column-name remapping with `SolverConfig`
 
-[`SolverConfig`](../references/api/mda_query_engine/analyze/query/solvers/solver_config.md)
+[`SolverConfig`](../references/api/impulse_query_engine/analyze/query/solvers/solver_config.md)
 declares **per-table** mappings from your physical column names to the
 engine's internal names (`container_id`, `channel_id`, `tstart`, `tend`,
 `value`, `key`, ...). Each silver table has its own `TableConfig`
@@ -223,7 +223,7 @@ all — no EAV tag tables, alias lookup tables instead of `channel_tags`,
 computed-column joins, JSON-encoded values, multi-column composite keys
 that need pre-processing, etc. — you can implement a custom solver by
 subclassing
-[`QuerySolver`](../references/api/mda_query_engine/analyze/query/solvers/query_solver.md)
+[`QuerySolver`](../references/api/impulse_query_engine/analyze/query/solvers/query_solver.md)
 (or one of the existing solvers) and registering it in your report config.
 
 This is significantly more invested than the `SolverConfig` path: you take
