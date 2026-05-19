@@ -92,6 +92,39 @@ runs:
         EOF
         printf '::debug::%s\n' 'Configured JFrog access for maven.'
 
+    # PySpark resolves `spark.jars.packages` (e.g. io.delta:delta-spark) via Ivy, not Maven.
+    # Ivy ignores ~/.m2/settings.xml mirrors, so on the protected runner group its default
+    # chain (Maven Central + Spark Packages) is unreachable. Point Ivy at JFrog via
+    # ~/.ivy2/ivysettings.xml and forward it to spark-submit through PYSPARK_SUBMIT_ARGS.
+    - name: Configure Ivy/Spark for JFrog
+      shell: bash
+      env:
+        JFROG_ACCESS_TOKEN: "${{ steps.jfrog-auth.outputs.jfrog-access-token }}"
+      run: |
+        umask 077
+        mkdir -p ~/.ivy2
+        cat > ~/.ivy2/ivysettings.xml << EOF
+        <ivysettings>
+          <settings defaultResolver="jfrog-chain"/>
+          <credentials host="databricks.jfrog.io"
+                       realm="Artifactory Realm"
+                       username="gha-service-account"
+                       passwd="${JFROG_ACCESS_TOKEN}"/>
+          <resolvers>
+            <chain name="jfrog-chain" returnFirst="true">
+              <ibiblio name="local-m2-cache" m2compatible="true"
+                       root="file://\${user.home}/.m2/repository/"/>
+              <ibiblio name="jfrog-central" m2compatible="true"
+                       root="https://databricks.jfrog.io/artifactory/db-maven/"/>
+            </chain>
+          </resolvers>
+        </ivysettings>
+        EOF
+        printf '%s=%s\n' 'PYSPARK_SUBMIT_ARGS' \
+          "--conf spark.jars.ivySettings=${HOME}/.ivy2/ivysettings.xml pyspark-shell" \
+          >> "${GITHUB_ENV}"
+        printf '::debug::%s\n' 'Configured JFrog access for Spark/Ivy.'
+
     - name: Configure netrc for JFrog
       if: "${{ steps.detect-cmds.outputs.command_pip3 == 'true' ||
                steps.detect-cmds.outputs.command_uv == 'true' }}"
