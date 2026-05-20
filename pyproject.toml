@@ -16,7 +16,6 @@ maintainers = [
     {name = "Databricks Labs"}
 ]
 dependencies = [
-    "delta-spark==4.0.1",
     "lz4==4.4.5",
     "nptyping==2.5.0",
 ]
@@ -33,6 +32,7 @@ local-dev = [
     "pyarrow==19.0.1",
     "pydantic==2.11.7",
     "pyspark==4.0.0",
+    "delta-spark==4.0.1",
     "scipy==1.15.1",
 ]
 
