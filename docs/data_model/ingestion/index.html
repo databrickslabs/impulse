@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Ingestion | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/ingestion"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Ingestion | Impulse"><meta data-rh="true" name="description" content="Impulse&#x27;s default solvers read from a"><meta data-rh="true" property="og:description" content="Impulse&#x27;s default solvers read from a"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/ingestion"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/ingestion" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/ingestion" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Ingestion","item":"https://databrickslabs.github.io/impulse/docs/data_model/ingestion"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.af145ca1.css">
-<script src="/impulse/assets/js/runtime~main.68204561.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.ae37b2d7.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.709d6ca5.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.490f4f83.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -147,7 +147,7 @@ path for new deployments. If your data already lives in Delta tables with
 different column names or a fundamentally different layout — and rewriting
 that data is impractical — Impulse offers two escape hatches.</p>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="column-name-remapping-with-solverconfig">Column-name remapping with <code>SolverConfig</code><a href="#column-name-remapping-with-solverconfig" class="hash-link" aria-label="Direct link to column-name-remapping-with-solverconfig" title="Direct link to column-name-remapping-with-solverconfig" translate="no">​</a></h3>
-<p><a class="" href="/impulse/docs/references/api/mda_query_engine/analyze/query/solvers/solver_config"><code>SolverConfig</code></a>
+<p><a class="" href="/impulse/docs/references/api/impulse_query_engine/analyze/query/solvers/solver_config"><code>SolverConfig</code></a>
 declares <strong>per-table</strong> mappings from your physical column names to the
 engine&#x27;s internal names (<code>container_id</code>, <code>channel_id</code>, <code>tstart</code>, <code>tend</code>,
 <code>value</code>, <code>key</code>, ...). Each silver table has its own <code>TableConfig</code>
@@ -182,7 +182,7 @@ all — no EAV tag tables, alias lookup tables instead of <code>channel_tags</co
 computed-column joins, JSON-encoded values, multi-column composite keys
 that need pre-processing, etc. — you can implement a custom solver by
 subclassing
-<a class="" href="/impulse/docs/references/api/mda_query_engine/analyze/query/solvers/query_solver"><code>QuerySolver</code></a>
+<a class="" href="/impulse/docs/references/api/impulse_query_engine/analyze/query/solvers/query_solver"><code>QuerySolver</code></a>
 (or one of the existing solvers) and registering it in your report config.</p>
 <p>This is significantly more invested than the <code>SolverConfig</code> path: you take
 on responsibility for the four solver pipeline stages
