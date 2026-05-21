@@ -16,7 +16,7 @@ properties on :class:`SolverConfig`.
 
 import json
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 
 class TableConfig(BaseModel):
@@ -121,24 +121,6 @@ class SolverConfig(BaseModel):
     channel_mapping: ChannelMappingConfig = ChannelMappingConfig()
     channels: TableConfig = TableConfig()
     unit_conversion: TableConfig = TableConfig()
-
-    @field_validator("channel_mapping", mode="before")
-    @classmethod
-    def _coerce_channel_mapping(cls, v):
-        """Accept a plain ``TableConfig`` instance and coerce to ``ChannelMappingConfig``.
-
-        Lets callers pass ``TableConfig(filters=...)`` (or any subclass) for
-        backward compatibility with code written before ``join_keys`` existed.
-        ``ChannelMappingConfig`` instances pass through unchanged; dicts are
-        validated by pydantic in the usual way.
-        """
-        if isinstance(v, ChannelMappingConfig):
-            return v
-        if isinstance(v, TableConfig):
-            return ChannelMappingConfig(
-                column_name_mapping=v.column_name_mapping, filters=v.filters
-            )
-        return v
 
     # ------------------------------------------------------------------
     # Class methods
@@ -326,9 +308,7 @@ class SolverConfig(BaseModel):
                 (self.source_channel_col, self.channel_name_col),
                 (self.data_key_col, self.data_key_col),
             ]
-        return [
-            (jk.mapping_col, jk.metrics_col) for jk in self.channel_mapping.join_keys
-        ]
+        return [(jk.mapping_col, jk.metrics_col) for jk in self.channel_mapping.join_keys]
 
     @property
     def col_map(self) -> dict[str, str]:

@@ -11,6 +11,7 @@ from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
 )
 from impulse_query_engine.analyze.query.solvers.solver_config import (
+    ChannelMappingConfig,
     SolverConfig,
     TableConfig,
 )
@@ -23,7 +24,7 @@ def _solver(spark: SparkSession) -> KeyValueStoreSolver:
         config=SolverConfig(
             project_id="SAMPLE_PROJECT",
             container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-            channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+            channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
         ),
     )
 

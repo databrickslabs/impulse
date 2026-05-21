@@ -226,20 +226,11 @@ class TestEffectiveAliasJoinKeys:
 
 
 # ---------------------------------------------------------------------------
-# TestChannelMappingConfigCoercion – field validator + JSON round-trip
+# TestChannelMappingConfig – type acceptance + JSON round-trip
 # ---------------------------------------------------------------------------
 
 
-class TestChannelMappingConfigCoercion:
-    def test_accepts_plain_table_config(self):
-        cfg = SolverConfig(
-            channel_mapping=TableConfig(filters={"toolbox_id": "tb"})
-        )
-        # Coerced to ChannelMappingConfig with join_keys=None.
-        assert isinstance(cfg.channel_mapping, ChannelMappingConfig)
-        assert cfg.channel_mapping.filters == {"toolbox_id": "tb"}
-        assert cfg.channel_mapping.join_keys is None
-
+class TestChannelMappingConfig:
     def test_accepts_channel_mapping_config_instance(self):
         cm = ChannelMappingConfig(
             filters={"toolbox_id": "tb"},
@@ -253,9 +244,7 @@ class TestChannelMappingConfigCoercion:
             "channel_mapping": {
                 "column_name_mapping": {"alias": "channel_alias"},
                 "filters": {"toolbox_id": "tb"},
-                "join_keys": [
-                    {"mapping_col": "source_channel", "metrics_col": "channel_name"}
-                ],
+                "join_keys": [{"mapping_col": "source_channel", "metrics_col": "channel_name"}],
             }
         }
         cfg = SolverConfig.from_dict(raw)

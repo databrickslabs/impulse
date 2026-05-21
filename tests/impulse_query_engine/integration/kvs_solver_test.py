@@ -19,6 +19,7 @@ from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
 )
 from impulse_query_engine.analyze.query.solvers.solver_config import (
+    ChannelMappingConfig,
     SolverConfig,
     TableConfig,
 )
@@ -29,7 +30,7 @@ def _kvs_cfg(
     project_id: str = "SAMPLE_PROJECT",
     container_tags: TableConfig | None = None,
     container_metrics: TableConfig | None = None,
-    channel_mapping: TableConfig | None = None,
+    channel_mapping: ChannelMappingConfig | None = None,
 ) -> SolverConfig:
     """Build a SolverConfig wired up for the KVS test data.
 
@@ -42,7 +43,7 @@ def _kvs_cfg(
         container_tags=container_tags or TableConfig(column_name_mapping={"element_id": "key"}),
         container_metrics=container_metrics
         or TableConfig(column_name_mapping={"project": "project_id"}),
-        channel_mapping=channel_mapping or TableConfig(),
+        channel_mapping=channel_mapping or ChannelMappingConfig(),
     )
 
 
@@ -222,7 +223,7 @@ class TestKeyValueStoreSolverAliasIntegration:
         solver = KeyValueStoreSolver(
             spark,
             config=_kvs_cfg(
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query

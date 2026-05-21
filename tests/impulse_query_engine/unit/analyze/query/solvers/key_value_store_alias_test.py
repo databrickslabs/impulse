@@ -33,7 +33,7 @@ class TestFilterAliasedChannelMetrics:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -54,7 +54,7 @@ class TestFilterAliasedChannelMetrics:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -82,7 +82,7 @@ class TestFilterAliasedChannelMetrics:
             config=SolverConfig(
                 project_id="NON_EXISTENT_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -102,7 +102,9 @@ class TestFilterAliasedChannelMetrics:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "non_existent_toolbox"}),
+                channel_mapping=ChannelMappingConfig(
+                    filters={"toolbox_id": "non_existent_toolbox"}
+                ),
             ),
         )
         query = key_value_store_alias_db.query
@@ -122,7 +124,7 @@ class TestFilterAliasedChannelMetrics:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -142,7 +144,7 @@ class TestFilterAliasedChannelMetrics:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -167,7 +169,7 @@ class TestChannelAliasEndToEnd:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -187,7 +189,7 @@ class TestChannelAliasEndToEnd:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -211,7 +213,7 @@ class TestChannelAliasEndToEnd:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -243,7 +245,7 @@ class TestChannelAliasEndToEnd:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_mapping=TableConfig(filters={"toolbox_id": "container_concept"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
         )
         query = key_value_store_alias_db.query
@@ -332,9 +334,7 @@ class TestConfigurableJoinKeys:
             ),
         )
         query = key_value_store_alias_db.query
-        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias(
-            "engine_speed"
-        )
+        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias("engine_speed")
 
         pdf = query.select(engine_speed).toPandas(spark, solver=solver)
         pdf = pdf.sort_values("container_id").reset_index(drop=True)
@@ -365,9 +365,7 @@ class TestConfigurableJoinKeys:
             ),
         )
         query = key_value_store_alias_db.query
-        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias(
-            "engine_speed"
-        )
+        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias("engine_speed")
 
         pdf = query.select(engine_speed).toPandas(spark, solver=solver)
         pdf = pdf.sort_values("container_id").reset_index(drop=True)
@@ -398,9 +396,7 @@ class TestConfigurableJoinKeys:
             ),
         )
         query = key_value_store_alias_db.query
-        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias(
-            "engine_speed"
-        )
+        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias("engine_speed")
 
         pdf = query.select(engine_speed).toPandas(spark, solver=solver)
         pdf = pdf.sort_values("container_id").reset_index(drop=True)
@@ -418,9 +414,7 @@ class TestConfigurableJoinKeys:
             config=SolverConfig(
                 project_id="SAMPLE_PROJECT",
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
-                channel_metrics=TableConfig(
-                    column_name_mapping={"channel_name": "chan"}
-                ),
+                channel_metrics=TableConfig(column_name_mapping={"channel_name": "chan"}),
                 channel_mapping=ChannelMappingConfig(
                     filters={"toolbox_id": "container_concept"},
                     join_keys=[
@@ -432,9 +426,7 @@ class TestConfigurableJoinKeys:
         )
         query = key_value_store_alias_db.query
         # Direct selector — kwarg `chan` must match the renamed column name.
-        engine_rpm = query.channel(chan="Engine RPM", data_key="TM").alias(
-            "engine_rpm"
-        )
+        engine_rpm = query.channel(chan="Engine RPM", data_key="TM").alias("engine_rpm")
 
         pdf = query.select(engine_rpm).toPandas(spark, solver=solver)
         pdf = pdf.sort_values("container_id").reset_index(drop=True)
