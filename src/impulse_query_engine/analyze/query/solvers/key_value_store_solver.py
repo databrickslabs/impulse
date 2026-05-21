@@ -45,9 +45,7 @@ class KVSTimeSeriesCache(SeriesCache):
         self._te_col = col_map["te"]
         self._val_col = col_map["val"]
         self._conv_col = col_map.get("conv")
-        self._has_conversion = (
-            self._conv_col is not None and self._conv_col in pdf.columns
-        )
+        self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
         meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
         self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
@@ -651,12 +649,9 @@ class KeyValueStoreSolver(QuerySolver):
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
 
-        has_conversion_table = (
-            getattr(query.db.config, "unit_conversion_table", None) is not None
-        )
+        has_conversion_table = getattr(query.db.config, "unit_conversion_table", None) is not None
         has_unit_cols = (
-            source_unit_col in channels_df.columns
-            and target_unit_col in channels_df.columns
+            source_unit_col in channels_df.columns and target_unit_col in channels_df.columns
         )
 
         if has_conversion_table and has_unit_cols:

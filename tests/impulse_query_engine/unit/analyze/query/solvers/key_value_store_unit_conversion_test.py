@@ -79,9 +79,7 @@ class TestUnitConversionSolve:
     ):
         solver = _solver(spark)
         query = key_value_store_unit_conversion_db.query
-        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias(
-            "engine_speed"
-        )
+        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias("engine_speed")
 
         pdf = query.select(engine_speed).toPandas(spark, solver=solver)
         pdf = pdf.sort_values("container_id").reset_index(drop=True)
@@ -160,9 +158,7 @@ class TestUnitConversionSolve:
             raw = _expected_raw_values(channels_csv_path, cid, 7)
             row = pdf.loc[pdf["container_id"] == cid].iloc[0]
             np.testing.assert_allclose(row.vehicle_speed_raw.values, raw, rtol=1e-12)
-            np.testing.assert_allclose(
-                row.vehicle_speed_converted.values, raw * factor, rtol=1e-6
-            )
+            np.testing.assert_allclose(row.vehicle_speed_converted.values, raw * factor, rtol=1e-6)
 
     def test_solve_mixed_direct_and_aliased_disjoint_channels(
         self,
