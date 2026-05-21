@@ -15,6 +15,8 @@ import pathlib
 import pytest
 
 from impulse_query_engine.analyze.query.solvers.solver_config import (
+    ChannelMappingConfig,
+    JoinKey,
     SolverConfig,
     TableConfig,
 )
@@ -163,3 +165,103 @@ class TestColMap:
 
     def test_col_map_values(self, cfg: SolverConfig):
         assert cfg.col_map == _EXPECTED_COL_MAP
+
+
+# ---------------------------------------------------------------------------
+# TestAliasInternalNameProperties – channel mapping / metrics internal names
+# ---------------------------------------------------------------------------
+
+
+class TestAliasInternalNameProperties:
+    """Internal-name properties for the alias-resolution columns."""
+
+    def test_source_channel_col(self):
+        assert SolverConfig().source_channel_col == "source_channel"
+
+    def test_data_key_col(self):
+        assert SolverConfig().data_key_col == "data_key"
+
+    def test_channel_alias_col(self):
+        assert SolverConfig().channel_alias_col == "channel_alias"
+
+    def test_channel_name_col(self):
+        assert SolverConfig().channel_name_col == "channel_name"
+
+
+# ---------------------------------------------------------------------------
+# TestEffectiveAliasJoinKeys – default + override behavior
+# ---------------------------------------------------------------------------
+
+
+class TestEffectiveAliasJoinKeys:
+    def test_default_when_join_keys_none(self):
+        cfg = SolverConfig()
+        assert cfg.channel_mapping.join_keys is None
+        assert cfg.effective_alias_join_keys == [
+            ("source_channel", "channel_name"),
+            ("data_key", "data_key"),
+        ]
+
+    def test_single_column_override(self):
+        cfg = SolverConfig(
+            channel_mapping=ChannelMappingConfig(
+                join_keys=[JoinKey(mapping_col="source_channel", metrics_col="channel_name")]
+            )
+        )
+        assert cfg.effective_alias_join_keys == [("source_channel", "channel_name")]
+
+    def test_different_names_per_side(self):
+        cfg = SolverConfig(
+            channel_mapping=ChannelMappingConfig(
+                join_keys=[
+                    JoinKey(mapping_col="source_channel", metrics_col="channel_name"),
+                    JoinKey(mapping_col="map_dk", metrics_col="metrics_dk"),
+                ]
+            )
+        )
+        assert cfg.effective_alias_join_keys == [
+            ("source_channel", "channel_name"),
+            ("map_dk", "metrics_dk"),
+        ]
+
+
+# ---------------------------------------------------------------------------
+# TestChannelMappingConfigCoercion – field validator + JSON round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestChannelMappingConfigCoercion:
+    def test_accepts_plain_table_config(self):
+        cfg = SolverConfig(
+            channel_mapping=TableConfig(filters={"toolbox_id": "tb"})
+        )
+        # Coerced to ChannelMappingConfig with join_keys=None.
+        assert isinstance(cfg.channel_mapping, ChannelMappingConfig)
+        assert cfg.channel_mapping.filters == {"toolbox_id": "tb"}
+        assert cfg.channel_mapping.join_keys is None
+
+    def test_accepts_channel_mapping_config_instance(self):
+        cm = ChannelMappingConfig(
+            filters={"toolbox_id": "tb"},
+            join_keys=[JoinKey(mapping_col="source_channel", metrics_col="channel_name")],
+        )
+        cfg = SolverConfig(channel_mapping=cm)
+        assert cfg.channel_mapping is cm
+
+    def test_json_round_trip_with_join_keys(self):
+        raw = {
+            "channel_mapping": {
+                "column_name_mapping": {"alias": "channel_alias"},
+                "filters": {"toolbox_id": "tb"},
+                "join_keys": [
+                    {"mapping_col": "source_channel", "metrics_col": "channel_name"}
+                ],
+            }
+        }
+        cfg = SolverConfig.from_dict(raw)
+        assert isinstance(cfg.channel_mapping, ChannelMappingConfig)
+        assert cfg.channel_mapping.column_name_mapping == {"alias": "channel_alias"}
+        assert cfg.channel_mapping.filters == {"toolbox_id": "tb"}
+        assert cfg.channel_mapping.join_keys == [
+            JoinKey(mapping_col="source_channel", metrics_col="channel_name")
+        ]

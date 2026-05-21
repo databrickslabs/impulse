@@ -11,6 +11,8 @@ from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
 )
 from impulse_query_engine.analyze.query.solvers.solver_config import (
+    ChannelMappingConfig,
+    JoinKey,
     SolverConfig,
     TableConfig,
 )
@@ -304,3 +306,140 @@ class TestChannelAliasEndToEnd:
     def test_channel_with_alias_without_mapping_raises(self, key_value_store_db: MeasurementDB):
         with pytest.raises(ValueError, match="channel_mapping_table is not configured"):
             key_value_store_db.query.channel_with_alias(channel_alias="engine_speed")
+
+
+class TestConfigurableJoinKeys:
+    """Behavior of the configurable ``channel_mapping.join_keys`` override."""
+
+    def test_single_column_join_key(
+        self, spark: SparkSession, key_value_store_alias_db: MeasurementDB
+    ):
+        # Single-column join on source_channel == channel_name only; data_key
+        # is intentionally dropped from the join.  The alias resolution still
+        # works and the (container_id, channel_alias) dedup keeps results
+        # unique.
+        solver = KeyValueStoreSolver(
+            spark,
+            config=SolverConfig(
+                project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+                channel_mapping=ChannelMappingConfig(
+                    filters={"toolbox_id": "container_concept"},
+                    join_keys=[
+                        JoinKey(mapping_col="source_channel", metrics_col="channel_name"),
+                    ],
+                ),
+            ),
+        )
+        query = key_value_store_alias_db.query
+        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias(
+            "engine_speed"
+        )
+
+        pdf = query.select(engine_speed).toPandas(spark, solver=solver)
+        pdf = pdf.sort_values("container_id").reset_index(drop=True)
+
+        assert pdf["container_id"].tolist() == [1, 2, 3]
+        assert all(length > 0 for length in pdf["engine_speed"].map(len))
+
+    def test_different_data_key_names_per_side_via_rename(
+        self, spark: SparkSession, key_value_store_alias_db: MeasurementDB
+    ):
+        # Path 1: rename both physical `data_key` columns to a common
+        # internal name (here we use a non-default name `dk`).  Two
+        # JoinKey entries cover the composite key.
+        solver = KeyValueStoreSolver(
+            spark,
+            config=SolverConfig(
+                project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+                channel_metrics=TableConfig(column_name_mapping={"data_key": "dk"}),
+                channel_mapping=ChannelMappingConfig(
+                    column_name_mapping={"data_key": "dk"},
+                    filters={"toolbox_id": "container_concept"},
+                    join_keys=[
+                        JoinKey(mapping_col="source_channel", metrics_col="channel_name"),
+                        JoinKey(mapping_col="dk", metrics_col="dk"),
+                    ],
+                ),
+            ),
+        )
+        query = key_value_store_alias_db.query
+        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias(
+            "engine_speed"
+        )
+
+        pdf = query.select(engine_speed).toPandas(spark, solver=solver)
+        pdf = pdf.sort_values("container_id").reset_index(drop=True)
+        assert pdf["container_id"].tolist() == [1, 2, 3]
+        assert all(length > 0 for length in pdf["engine_speed"].map(len))
+
+    def test_different_data_key_names_per_side_via_join_keys(
+        self, spark: SparkSession, key_value_store_alias_db: MeasurementDB
+    ):
+        # Path 2: rename the two physical `data_key` columns to *different*
+        # internal names per table and reference them directly in
+        # join_keys.  No common-name rename — the JoinKey's two sides are
+        # independent.
+        solver = KeyValueStoreSolver(
+            spark,
+            config=SolverConfig(
+                project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+                channel_metrics=TableConfig(column_name_mapping={"data_key": "metrics_dk"}),
+                channel_mapping=ChannelMappingConfig(
+                    column_name_mapping={"data_key": "map_dk"},
+                    filters={"toolbox_id": "container_concept"},
+                    join_keys=[
+                        JoinKey(mapping_col="source_channel", metrics_col="channel_name"),
+                        JoinKey(mapping_col="map_dk", metrics_col="metrics_dk"),
+                    ],
+                ),
+            ),
+        )
+        query = key_value_store_alias_db.query
+        engine_speed = query.channel_with_alias(channel_alias="engine_speed").alias(
+            "engine_speed"
+        )
+
+        pdf = query.select(engine_speed).toPandas(spark, solver=solver)
+        pdf = pdf.sort_values("container_id").reset_index(drop=True)
+        assert pdf["container_id"].tolist() == [1, 2, 3]
+        assert all(length > 0 for length in pdf["engine_speed"].map(len))
+
+    def test_tag_kwarg_must_match_post_rename_name(
+        self, spark: SparkSession, key_value_store_alias_db: MeasurementDB
+    ):
+        # When channel_metrics.channel_name is renamed via column_name_mapping
+        # to a non-default internal name, the direct selector's kwarg must use
+        # the renamed name AND the override `join_keys` must reference it.
+        solver = KeyValueStoreSolver(
+            spark,
+            config=SolverConfig(
+                project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+                channel_metrics=TableConfig(
+                    column_name_mapping={"channel_name": "chan"}
+                ),
+                channel_mapping=ChannelMappingConfig(
+                    filters={"toolbox_id": "container_concept"},
+                    join_keys=[
+                        JoinKey(mapping_col="source_channel", metrics_col="chan"),
+                        JoinKey(mapping_col="data_key", metrics_col="data_key"),
+                    ],
+                ),
+            ),
+        )
+        query = key_value_store_alias_db.query
+        # Direct selector — kwarg `chan` must match the renamed column name.
+        engine_rpm = query.channel(chan="Engine RPM", data_key="TM").alias(
+            "engine_rpm"
+        )
+
+        pdf = query.select(engine_rpm).toPandas(spark, solver=solver)
+        pdf = pdf.sort_values("container_id").reset_index(drop=True)
+        # Direct selector — containers with no matching channel drop out.
+        # Containers 1 and 2 have "Engine RPM"/data_key="TM"; container 3
+        # only carries it under "EngSpd"/"ProjSpecREC_10Hz" (no match).
+        assert sorted(pdf["container_id"].tolist()) == [1, 2]
+        assert all(length > 0 for length in pdf["engine_rpm"].map(len))

@@ -173,7 +173,7 @@ Per-table sections (each a `TableConfig`):
 | `container_metrics`| All solvers                          | Custom container_id column, custom timestamp columns              |
 | `channel_tags`     | DeltaSolver                          | Tag key/value column renames                                      |
 | `channel_metrics`  | All solvers                          | Custom channel_id column, custom value/timestamp columns          |
-| `channel_mapping`  | KeyValueStoreSolver                  | Alias-table column renames; `priority` column                     |
+| `channel_mapping`  | KeyValueStoreSolver                  | Alias-table column renames; `priority` column; optional `join_keys` for non-default alias-resolution composite keys |
 | `channels`         | All solvers                          | RLE column renames (`tstart`/`tend`/`value`)                      |
 | `unit_conversion`  | KeyValueStoreSolver                  | Unit-conversion table column renames (`unit`, `group_id`, `conversion_factor`) |
 
@@ -189,6 +189,10 @@ Internal column names that mappings can target:
 | `priority`      | Tie-breaker column on the `channel_mapping` table        |
 | `project_id`    | Project scoping column                                   |
 | `parent_id`     | Parent/scope identifier                                  |
+| `source_channel`| Source-channel identifier on the `channel_mapping` table |
+| `data_key`      | Data-key identifier (default present on both `channel_mapping` and `channel_metrics`) |
+| `channel_alias` | Alias identifier on the `channel_mapping` table          |
+| `channel_name`  | Channel-name identifier on the `channel_metrics` table   |
 | `source_unit`, `target_unit` | Source/target unit columns on the `channel_mapping` table |
 | `unit`          | Unit name column on the `unit_conversion` table          |
 | `group_id`      | Unit-family identifier on the `unit_conversion` table    |
@@ -266,6 +270,66 @@ conversion is a property of the alias, not of the channel. See
     }
 }
 ```
+
+### Alias-resolution join keys (optional)
+
+`KeyValueStoreSolver.filter_aliased_channel_metrics` joins `channel_mapping`
+to `channel_metrics` to resolve aliased selectors. The default composite key
+is `(source_channel, channel_name) + (data_key, data_key)`. Override
+`channel_mapping.join_keys` to change the arity or column choice — for
+example, a single-column join when `data_key` is not part of the channel
+identity in your silver layout:
+
+```python
+"solver_config": {
+    "channel_mapping": {
+        "join_keys": [
+            {"mapping_col": "source_channel", "metrics_col": "channel_name"}
+        ]
+    }
+}
+```
+
+Each `mapping_col` / `metrics_col` is an **internal** name (the name as the
+solver sees the column **after** `column_name_mapping` has been applied on
+the respective table). The two sides of a pair are independent, so the same
+column can carry different names on the two tables. For instance, a layout
+where the data-key column has different physical names on the two tables
+has two equivalent paths:
+
+```python
+# Path 1 — rename both physical columns to the same internal name; the
+# default join_keys then works unchanged.
+"solver_config": {
+    "channel_mapping": {
+        "column_name_mapping": {"mapping_data_key": "data_key"}
+    },
+    "channel_metrics": {
+        "column_name_mapping": {"metrics_data_key": "data_key"}
+    }
+}
+
+# Path 2 — leave the physical names as-is and reference them directly.
+"solver_config": {
+    "channel_mapping": {
+        "join_keys": [
+            {"mapping_col": "source_channel", "metrics_col": "channel_name"},
+            {"mapping_col": "mapping_data_key", "metrics_col": "metrics_data_key"}
+        ]
+    }
+}
+```
+
+`query.channel(...)` and `query.channel_with_alias(...)` kwargs are column
+references against the **post-`column_name_mapping`** schema. If you
+override `join_keys` (or skip renames) so that the solver sees a column
+under a non-default name, the same name must be used as the kwarg. Example:
+if `join_keys` references `metrics_col: "my_chan_name"` and the column is
+not renamed via `column_name_mapping`, call
+`query.channel(my_chan_name=...)`. The internal-name properties on
+`SolverConfig` exist primarily to remove magic strings from the solver
+code; the user-facing contract is "kwarg name == column name as the solver
+sees it".
 
 ### When to use what
 

@@ -16,7 +16,7 @@ properties on :class:`SolverConfig`.
 
 import json
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class TableConfig(BaseModel):
@@ -36,6 +36,49 @@ class TableConfig(BaseModel):
 
     column_name_mapping: dict[str, str] = {}
     filters: dict[str, str] = {}
+
+
+class JoinKey(BaseModel):
+    """A single column pair in the ``channel_mapping`` → ``channel_metrics`` join.
+
+    Used by :class:`ChannelMappingConfig.join_keys` to override the default
+    alias-resolution composite key.
+
+    Both fields reference column names **after** ``column_name_mapping`` has
+    been applied on the respective table; the two sides are independent, so
+    a column may appear under different names on the two tables.
+
+    Attributes
+    ----------
+    mapping_col : str
+        Column name on ``channel_mapping`` after its ``column_name_mapping``
+        has been applied.
+    metrics_col : str
+        Column name on ``channel_metrics`` after its ``column_name_mapping``
+        has been applied.
+    """
+
+    mapping_col: str
+    metrics_col: str
+
+
+class ChannelMappingConfig(TableConfig):
+    """``TableConfig`` plus an optional alias-resolution join-key spec.
+
+    Attributes
+    ----------
+    join_keys : list[JoinKey] or None
+        Custom composite key for the ``channel_mapping`` → ``channel_metrics``
+        join performed by ``KeyValueStoreSolver.filter_aliased_channel_metrics``.
+        When ``None`` (the default), the solver uses the backward-compatible
+        pair ``[(source_channel, channel_name), (data_key, data_key)]``
+        sourced from :class:`SolverConfig` internal-name properties.
+        Provide a custom list to change the join arity or column choice
+        (e.g. a single-column join when ``data_key`` is not part of the
+        channel identity in your silver layout).
+    """
+
+    join_keys: list[JoinKey] | None = None
 
 
 class SolverConfig(BaseModel):
@@ -60,8 +103,9 @@ class SolverConfig(BaseModel):
         Column mappings and filters for the channel tags table.
     channel_metrics : TableConfig
         Column mappings and filters for the channel metrics table.
-    channel_mapping : TableConfig
-        Column mappings and filters for the channel mapping (alias) table.
+    channel_mapping : ChannelMappingConfig
+        Column mappings, filters, and the alias-resolution ``join_keys``
+        override for the channel mapping (alias) table.
     channels : TableConfig
         Column mappings and filters for the channel data table.
     unit_conversion : TableConfig
@@ -74,9 +118,27 @@ class SolverConfig(BaseModel):
     container_metrics: TableConfig = TableConfig()
     channel_tags: TableConfig = TableConfig()
     channel_metrics: TableConfig = TableConfig()
-    channel_mapping: TableConfig = TableConfig()
+    channel_mapping: ChannelMappingConfig = ChannelMappingConfig()
     channels: TableConfig = TableConfig()
     unit_conversion: TableConfig = TableConfig()
+
+    @field_validator("channel_mapping", mode="before")
+    @classmethod
+    def _coerce_channel_mapping(cls, v):
+        """Accept a plain ``TableConfig`` instance and coerce to ``ChannelMappingConfig``.
+
+        Lets callers pass ``TableConfig(filters=...)`` (or any subclass) for
+        backward compatibility with code written before ``join_keys`` existed.
+        ``ChannelMappingConfig`` instances pass through unchanged; dicts are
+        validated by pydantic in the usual way.
+        """
+        if isinstance(v, ChannelMappingConfig):
+            return v
+        if isinstance(v, TableConfig):
+            return ChannelMappingConfig(
+                column_name_mapping=v.column_name_mapping, filters=v.filters
+            )
+        return v
 
     # ------------------------------------------------------------------
     # Class methods
@@ -170,6 +232,44 @@ class SolverConfig(BaseModel):
         return "priority"
 
     @property
+    def source_channel_col(self) -> str:
+        """Internal column name for the source-channel identifier on the channel_mapping table."""
+        return "source_channel"
+
+    @property
+    def data_key_col(self) -> str:
+        """Internal column name for the data-key identifier.
+
+        Default present on both ``channel_mapping`` and ``channel_metrics``;
+        used by the default :meth:`effective_alias_join_keys` for both sides.
+        Layouts where the two tables carry the data-key column under different
+        physical names can either rename both to ``"data_key"`` via per-table
+        ``column_name_mapping`` or override
+        :attr:`ChannelMappingConfig.join_keys` with explicit
+        ``mapping_col`` / ``metrics_col`` values.
+        """
+        return "data_key"
+
+    @property
+    def channel_alias_col(self) -> str:
+        """Internal column name for the alias identifier on the channel_mapping table.
+
+        Referenced by the dedup window in
+        :meth:`KeyValueStoreSolver.filter_aliased_channel_metrics` and is the
+        conventional kwarg name passed to
+        :meth:`QueryBuilder.channel_with_alias` (e.g.
+        ``channel_with_alias(channel_alias="vehicle_speed")``).  The kwarg name
+        must match the column name as seen by the solver after
+        ``column_name_mapping`` is applied.
+        """
+        return "channel_alias"
+
+    @property
+    def channel_name_col(self) -> str:
+        """Internal column name for the channel-name identifier on the channel_metrics table."""
+        return "channel_name"
+
+    @property
     def project_id_col(self) -> str:
         """Internal column name for the project identifier."""
         return "project_id"
@@ -208,6 +308,27 @@ class SolverConfig(BaseModel):
     def group_id_col(self) -> str:
         """Internal column name for the unit group id on the unit_conversion table."""
         return "group_id"
+
+    @property
+    def effective_alias_join_keys(self) -> list[tuple[str, str]]:
+        """Return the resolved alias-resolution join keys as ``(mapping_col, metrics_col)`` tuples.
+
+        Falls back to the default composite key
+        ``[(source_channel_col, channel_name_col), (data_key_col, data_key_col)]``
+        when :attr:`ChannelMappingConfig.join_keys` is ``None``.  Otherwise
+        returns the configured list.
+
+        Both members of each tuple are column names **after**
+        ``column_name_mapping`` has been applied on the respective table.
+        """
+        if self.channel_mapping.join_keys is None:
+            return [
+                (self.source_channel_col, self.channel_name_col),
+                (self.data_key_col, self.data_key_col),
+            ]
+        return [
+            (jk.mapping_col, jk.metrics_col) for jk in self.channel_mapping.join_keys
+        ]
 
     @property
     def col_map(self) -> dict[str, str]:

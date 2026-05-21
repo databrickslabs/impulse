@@ -36,6 +36,47 @@ names used by the solver.  An empty dict means no renaming
 Keys are internal column names; values are the literal values
 to match.
 
+## JoinKey
+
+```python
+class JoinKey(BaseModel)
+```
+
+A single column pair in the ``channel_mapping`` → ``channel_metrics`` join.
+
+Used by :class:`ChannelMappingConfig.join_keys` to override the default
+alias-resolution composite key.
+
+Both fields reference column names **after** ``column_name_mapping`` has
+been applied on the respective table; the two sides are independent, so
+a column may appear under different names on the two tables.
+
+**Arguments**:
+
+- `mapping_col` (`str`): Column name on ``channel_mapping`` after its ``column_name_mapping``
+has been applied.
+- `metrics_col` (`str`): Column name on ``channel_metrics`` after its ``column_name_mapping``
+has been applied.
+
+## ChannelMappingConfig
+
+```python
+class ChannelMappingConfig(TableConfig)
+```
+
+``TableConfig`` plus an optional alias-resolution join-key spec.
+
+**Arguments**:
+
+- `join_keys` (`list[JoinKey] or None`): Custom composite key for the ``channel_mapping`` → ``channel_metrics``
+join performed by ``KeyValueStoreSolver.filter_aliased_channel_metrics``.
+When ``None`` (the default), the solver uses the backward-compatible
+pair ``[(source_channel, channel_name), (data_key, data_key)]``
+sourced from :class:`SolverConfig` internal-name properties.
+Provide a custom list to change the join arity or column choice
+(e.g. a single-column join when ``data_key`` is not part of the
+channel identity in your silver layout).
+
 ## SolverConfig
 
 ```python
@@ -58,7 +99,8 @@ so that solver code can always reference the same constants.
 - `container_metrics` (`TableConfig`): Column mappings and filters for the container metrics table.
 - `channel_tags` (`TableConfig`): Column mappings and filters for the channel tags table.
 - `channel_metrics` (`TableConfig`): Column mappings and filters for the channel metrics table.
-- `channel_mapping` (`TableConfig`): Column mappings and filters for the channel mapping (alias) table.
+- `channel_mapping` (`ChannelMappingConfig`): Column mappings, filters, and the alias-resolution ``join_keys``
+override for the channel mapping (alias) table.
 - `channels` (`TableConfig`): Column mappings and filters for the channel data table.
 - `unit_conversion` (`TableConfig`): Column mappings and filters for the unit conversion table.
 
@@ -177,6 +219,50 @@ def alias_priority_col() -> str
 Internal column name for the alias priority on the channel_mapping table.
 
 
+#### source\_channel\_col
+
+```python
+def source_channel_col() -> str
+```
+
+Internal column name for the source-channel identifier on the channel_mapping table.
+
+
+#### data\_key\_col
+
+```python
+def data_key_col() -> str
+```
+
+Internal column name for the data-key identifier.
+
+Default present on both ``channel_mapping`` and ``channel_metrics``;
+used by the default :meth:`effective_alias_join_keys` for both sides.
+Layouts where the two tables carry the data-key column under different
+physical names can either rename both to ``"data_key"`` via per-table
+``column_name_mapping`` or override
+
+
+#### channel\_alias\_col
+
+```python
+def channel_alias_col() -> str
+```
+
+Internal column name for the alias identifier on the channel_mapping table.
+
+Referenced by the dedup window in
+
+
+#### channel\_name\_col
+
+```python
+def channel_name_col() -> str
+```
+
+Internal column name for the channel-name identifier on the channel_metrics table.
+
+
 #### project\_id\_col
 
 ```python
@@ -242,6 +328,23 @@ def group_id_col() -> str
 ```
 
 Internal column name for the unit group id on the unit_conversion table.
+
+
+#### effective\_alias\_join\_keys
+
+```python
+def effective_alias_join_keys() -> list[tuple[str, str]]
+```
+
+Return the resolved alias-resolution join keys as ``(mapping_col, metrics_col)`` tuples.
+
+Falls back to the default composite key
+``[(source_channel_col, channel_name_col), (data_key_col, data_key_col)]``
+when :attr:`ChannelMappingConfig.join_keys` is ``None``.  Otherwise
+returns the configured list.
+
+Both members of each tuple are column names **after**
+``column_name_mapping`` has been applied on the respective table.
 
 
 #### col\_map

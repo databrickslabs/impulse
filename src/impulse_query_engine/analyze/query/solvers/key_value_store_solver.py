@@ -403,12 +403,18 @@ class KeyValueStoreSolver(QuerySolver):
 
         resolved_mapping = channel_mapping.where(self._build_expr(selectors))
 
-        channel_metrics = db.channel_metrics(spark).join(
+        channel_metrics = db.channel_metrics(spark)
+        channel_metrics = self._apply_column_mapping(
+            channel_metrics, self.config.channel_metrics.column_name_mapping
+        )
+        channel_metrics = channel_metrics.join(
             F.broadcast(container_df.select(container_id_col)),
             on=[container_id_col],
             how="inner",
         )
         alias_priority_col = self.config.alias_priority_col
+        channel_alias_col = self.config.channel_alias_col
+        join_keys = self.config.effective_alias_join_keys
 
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
@@ -418,25 +424,25 @@ class KeyValueStoreSolver(QuerySolver):
             and target_unit_col in resolved_mapping.columns
         )
 
+        # Mapping-side projection: one aliased copy per mapping_col plus the
+        # alias / priority columns (and the optional unit columns).
         mapping_select_cols = [
-            F.col("source_channel").alias("_map_source_channel"),
-            F.col("data_key").alias("_map_data_key"),
-            F.col("channel_alias"),
-            F.col(alias_priority_col),
+            F.col(mapping_col).alias(f"_map_{mapping_col}") for mapping_col, _ in join_keys
         ]
+        mapping_select_cols.extend([F.col(channel_alias_col), F.col(alias_priority_col)])
         if has_unit_cols:
             mapping_select_cols.extend([F.col(source_unit_col), F.col(target_unit_col)])
 
         resolved = channel_metrics.join(
             resolved_mapping.select(*mapping_select_cols),
             on=[
-                channel_metrics["channel_name"] == F.col("_map_source_channel"),
-                channel_metrics["data_key"] == F.col("_map_data_key"),
+                channel_metrics[metrics_col] == F.col(f"_map_{mapping_col}")
+                for mapping_col, metrics_col in join_keys
             ],
             how="inner",
         )
 
-        dedup_window = Window.partitionBy(container_id_col, "channel_alias").orderBy(
+        dedup_window = Window.partitionBy(container_id_col, channel_alias_col).orderBy(
             F.col(alias_priority_col).asc_nulls_last()
         )
         resolved = resolved.withColumn("_rank", F.row_number().over(dedup_window))
