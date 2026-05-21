@@ -171,6 +171,13 @@ def resolve_channel_selections(spark, channel_metrics_df,
 
 Union direct and aliased channel metrics, combining selector_ids.
 
+When the aliased side carries ``source_unit`` / ``target_unit``
+columns (added by :meth:`filter_aliased_channel_metrics` when a
+unit conversion table is configured), those columns are preserved
+through the union and aggregation.  Direct selectors produce null
+unit columns, which causes the downstream conversion-factor join
+in :meth:`solve` to leave their values unchanged.
+
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
@@ -179,7 +186,9 @@ Union direct and aliased channel metrics, combining selector_ids.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
+`pyspark.sql.DataFrame`: Merged DataFrame with ``(container_id, channel_id, selector_ids)``
+(plus ``source_unit`` / ``target_unit`` when present on the
+aliased side).
 
 #### solve
 
@@ -188,6 +197,13 @@ def solve(query, channels_df, selections, dtypes) -> DataFrame
 ```
 
 Solve the query by grouping channels and applying selections.
+
+When a ``unit_conversion_table`` is configured on the database and
+*channels_df* carries ``source_unit`` / ``target_unit`` columns
+(added upstream by :meth:`filter_aliased_channel_metrics`),
+per-channel conversion factors are computed and propagated into
+the grouped-map UDF so that time-series values are converted from
+the source to the target unit on the fly.
 
 **Arguments**:
 

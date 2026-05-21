@@ -62,6 +62,7 @@ Maps the silver-layer input tables.
 | `container_tags_table`    | `str` | No       | Full Unity Catalog path. Container EAV tags.              |
 | `channel_tags_table`      | `str` | No       | Full Unity Catalog path. Channel EAV tags.                |
 | `channel_mapping_table`   | `str` | No       | Full Unity Catalog path. Logical-to-physical channel alias table. Required when using `QueryBuilder.channel_with_alias()` (currently supported by `KeyValueStoreSolver`). |
+| `unit_conversion_table`   | `str` | No       | Full Unity Catalog path. Per-unit-family conversion factors. When configured together with a `channel_mapping_table` whose rows carry `source_unit` / `target_unit` columns, aliased selectors auto-convert values from source to target unit during `solve()` (currently supported by `KeyValueStoreSolver`). |
 
 Tag tables are required for solvers that consume tag-based filters
 (`DeltaSolver` with tag filters, `KeyValueStoreSolver`).
@@ -174,6 +175,7 @@ Per-table sections (each a `TableConfig`):
 | `channel_metrics`  | All solvers                          | Custom channel_id column, custom value/timestamp columns          |
 | `channel_mapping`  | KeyValueStoreSolver                  | Alias-table column renames; `priority` column                     |
 | `channels`         | All solvers                          | RLE column renames (`tstart`/`tend`/`value`)                      |
+| `unit_conversion`  | KeyValueStoreSolver                  | Unit-conversion table column renames (`unit`, `group_id`, `conversion_factor`) |
 
 Internal column names that mappings can target:
 
@@ -187,6 +189,10 @@ Internal column names that mappings can target:
 | `priority`      | Tie-breaker column on the `channel_mapping` table        |
 | `project_id`    | Project scoping column                                   |
 | `parent_id`     | Parent/scope identifier                                  |
+| `source_unit`, `target_unit` | Source/target unit columns on the `channel_mapping` table |
+| `unit`          | Unit name column on the `unit_conversion` table          |
+| `group_id`      | Unit-family identifier on the `unit_conversion` table    |
+| `conversion_factor` | Per-unit factor on `unit_conversion`; also the per-channel factor name carried into the solve UDF |
 
 :::note Per-solver feature support
 
@@ -234,6 +240,32 @@ However, only the parts each solver supports are actually consumed:
 ```
 
 Sections you don't customize can be omitted; defaults are an empty mapping and no filters.
+
+### Unit conversion (optional)
+
+Set `source.unit_conversion_table` and extend `channel_mapping` with `source_unit` / `target_unit` columns
+to have aliased selectors auto-convert values from source to target unit during `solve()`. Direct selectors
+via `query.channel(...)` always return raw values, even on a channel that an aliased sibling converts —
+conversion is a property of the alias, not of the channel. See
+[`unit_conversion`](../data_model/silver_layer_schema.md#unit_conversion-optional) for the table schema.
+
+```python
+"source": {
+    "container_metrics_table": "my_catalog.silver.container_metrics",
+    "channel_metrics_table": "my_catalog.silver.channel_metrics",
+    "channels_uri": "my_catalog.silver.channels",
+    "channel_mapping_table": "my_catalog.silver.channel_mapping",
+    "unit_conversion_table": "my_catalog.silver.unit_conversion"
+},
+"query_engine": {
+    "solver": "KeyValueStoreSolver",
+    "solver_config": {
+        "unit_conversion": {
+            "column_name_mapping": {}
+        }
+    }
+}
+```
 
 ### When to use what
 

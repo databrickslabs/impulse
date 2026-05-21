@@ -60,6 +60,7 @@ so that solver code can always reference the same constants.
 - `channel_metrics` (`TableConfig`): Column mappings and filters for the channel metrics table.
 - `channel_mapping` (`TableConfig`): Column mappings and filters for the channel mapping (alias) table.
 - `channels` (`TableConfig`): Column mappings and filters for the channel data table.
+- `unit_conversion` (`TableConfig`): Column mappings and filters for the unit conversion table.
 
 #### from\_json
 
@@ -192,6 +193,55 @@ def parent_id_col() -> str
 ```
 
 Internal column name for the parent/scope identifier.
+
+
+#### conversion\_factor\_col
+
+```python
+def conversion_factor_col() -> str
+```
+
+Internal column name for the conversion factor on the unit_conversion table.
+
+Also used as the column that carries the per-channel combined factor
+downstream from :meth:`KeyValueStoreSolver._compute_conversion_factors`
+into the grouped-map UDF.
+
+
+#### source\_unit\_col
+
+```python
+def source_unit_col() -> str
+```
+
+Internal column name for the source unit on the channel_mapping table.
+
+
+#### target\_unit\_col
+
+```python
+def target_unit_col() -> str
+```
+
+Internal column name for the target unit on the channel_mapping table.
+
+
+#### unit\_col
+
+```python
+def unit_col() -> str
+```
+
+Internal column name for the unit name on the unit_conversion table.
+
+
+#### group\_id\_col
+
+```python
+def group_id_col() -> str
+```
+
+Internal column name for the unit group id on the unit_conversion table.
 
 
 #### col\_map

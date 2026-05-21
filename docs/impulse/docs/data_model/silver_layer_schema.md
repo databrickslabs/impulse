@@ -260,7 +260,32 @@ channel name to one or more physical channels keyed by `project_id` /
 | `channel_name` | `string` | No       | Logical channel name to match against `channel_with_alias` selectors. |
 | `data_key`     | `string` | No       | Physical lookup key joined to `channel_metrics`.                      |
 | `priority`     | `int`    | Yes      | Tie-breaker when multiple physical channels match a logical name.     |
+| `source_unit`  | `string` | Yes      | Unit of the raw channel data. When non-null together with `target_unit` and a configured `unit_conversion_table`, the solver converts values from source to target unit on aliased reads. |
+| `target_unit`  | `string` | Yes      | Target unit for aliased reads of this mapping.                        |
 
 Configured via `source.channel_mapping_table` (see
 [Configuration](../config/configuration.md)). Joins to `channel_metrics`
 on `(project_id, data_key, channel_name)`.
+
+---
+
+## unit_conversion (optional)
+
+Per-unit-family conversion factors. Read by `KeyValueStoreSolver` at
+solve time when `source.unit_conversion_table` is configured and the
+`channel_mapping` table carries `source_unit` / `target_unit` columns.
+
+| Column              | Type     | Nullable | Description                                                                                                |
+|---------------------|----------|----------|------------------------------------------------------------------------------------------------------------|
+| `group_id`          | `string` | No       | Unit family identifier (e.g. `speed`, `rotation`). Only units within the same family can convert into each other. |
+| `unit`              | `string` | No       | Unit name. Matches the `source_unit` / `target_unit` values on `channel_mapping`.                          |
+| `conversion_factor` | `double` | No       | Multiplier that converts a value in this unit to the family's base unit. The base unit has factor `1.0`.   |
+
+For each aliased channel the solver looks up `source_factor` (the row
+whose `unit` matches `source_unit`) and `target_factor` (the row whose
+`unit` matches `target_unit`, constrained to the same `group_id`) and
+multiplies values by `source_factor / target_factor`. Missing rows or a
+`group_id` mismatch yield a null factor and no conversion.
+
+Configured via `source.unit_conversion_table` (see
+[Configuration](../config/configuration.md)).

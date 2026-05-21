@@ -146,6 +146,10 @@ configured) regardless of whether ``container_tags_table`` is set.
 - `channels_uri` (`str`): Full Unity Catalog path to the channels data table.
 - `channel_mapping_table` (`str`): Full Unity Catalog path to the channel mapping table. Required when using
 ``channel_with_alias()`` for logical alias resolution.
+- `unit_conversion_table` (`str`): Full Unity Catalog path to the unit conversion table. When set together
+with a ``channel_mapping_table`` whose rows carry ``source_unit`` and
+``target_unit`` columns, the query engine converts time-series values
+from the source to the target unit during ``solve()``.
 
 ## UnitySink
 

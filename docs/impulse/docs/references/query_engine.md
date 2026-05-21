@@ -47,6 +47,7 @@ attributes are already wide on `container_metrics` itself.
 | `container_tags`    | required (narrow EAV)  | optional (narrow EAV)                              |
 | `channel_tags`      | required (narrow EAV)  | not used                                           |
 | `channel_mapping`   | not used               | optional (channel aliases)                         |
+| `unit_conversion`   | not used               | optional (per-alias unit conversion)               |
 
 See the [Silver Layer Schema](../data_model/silver_layer_schema.md) for
 the columns each table is expected to carry.

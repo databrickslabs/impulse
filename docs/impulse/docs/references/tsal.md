@@ -51,6 +51,12 @@ Each keyword argument becomes a tag filter on the `channel_mapping` table; the s
 to the physical channels at read time. Use this when the consuming code should not need to know which physical signal
 backs a given logical name.
 
+When the `channel_mapping` table carries `source_unit` and `target_unit` columns and the report config sets
+`source.unit_conversion_table`, values returned from `channel_with_alias()` are automatically converted from source
+to target unit before any expression is evaluated. Constants and parameters in expressions over an aliased selector
+must therefore be expressed in the target unit. Direct selectors via `channel(...)` on the same physical channel are
+unaffected — conversion is a property of the alias, not of the channel.
+
 ---
 
 ## Operators
