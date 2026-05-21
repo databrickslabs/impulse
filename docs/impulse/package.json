@@ -23,7 +23,7 @@
     "docusaurus-lunr-search": "3.6.1",
     "lucide-react": "0.471.2",
     "prism-react-renderer": "2.4.1",
-    "react": "19.2.4",
+    "react": "19.2.6",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
