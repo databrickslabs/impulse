@@ -25,7 +25,7 @@ class EmptyTimeSeriesCache(SeriesCache):
         """
         return []
 
-    def load_blob(self, mid, cid):
+    def load_blob(self, mid, cid, uses_alias: bool = False):
         """
         Return an empty SampleSeries for any container and channel ID.
 
@@ -35,6 +35,9 @@ class EmptyTimeSeriesCache(SeriesCache):
             Container or measurement ID.
         cid : Any
             Channel ID.
+        uses_alias : bool, optional
+            Unused by this cache; accepted for interface compatibility
+            with :class:`SeriesCache`.
 
         Returns
         -------

@@ -30,16 +30,24 @@ class KVSTimeSeriesCache(SeriesCache):
         Parameters
         ----------
         pdf : pd.DataFrame
-            DataFrame containing time series data.
+            DataFrame containing time series data.  When the column named by
+            ``col_map["conv"]`` is present, :meth:`load_blob` multiplies the
+            loaded values by that per-channel factor.  All rows of a given
+            ``(cid, ch)`` slice are expected to share the same factor.
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
-            ``"val"`` to the actual column names in *pdf*.
+            ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
+            ``"conv"`` column is optional in *pdf*.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
         self._ts_col = col_map["ts"]
         self._te_col = col_map["te"]
         self._val_col = col_map["val"]
+        self._conv_col = col_map.get("conv")
+        self._has_conversion = (
+            self._conv_col is not None and self._conv_col in pdf.columns
+        )
 
         meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
         self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
@@ -67,9 +75,16 @@ class KVSTimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
 
-    def load_blob(self, mid, cid):
+    def load_blob(self, mid, cid, uses_alias: bool = False):
         """
         Load a time series blob from the DataFrame.
+
+        When the underlying *pdf* carries a conversion-factor column (the
+        column named by ``col_map["conv"]``) **and** the caller is an
+        aliased selector (``uses_alias=True``), the returned values are
+        multiplied by that factor.  Direct selectors on the same physical
+        channel always receive raw values — unit conversion is a property
+        of the alias, not of the channel.
 
         Parameters
         ----------
@@ -77,6 +92,9 @@ class KVSTimeSeriesCache(SeriesCache):
             Container or measurement ID.
         cid : Any
             Channel ID.
+        uses_alias : bool, optional
+            ``True`` when the calling selector resolved via channel_mapping.
+            Gates the per-channel conversion factor; defaults to ``False``.
 
         Returns
         -------
@@ -84,7 +102,12 @@ class KVSTimeSeriesCache(SeriesCache):
             The loaded sample series object.
         """
         s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
-        return SampleSeries(s[self._ts_col], s[self._te_col], s[self._val_col])
+        values = s[self._val_col]
+        if self._has_conversion and len(s) > 0 and uses_alias:
+            factor = s[self._conv_col].iloc[0]
+            if pd.notna(factor):
+                values = values * factor
+        return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
 
 class KeyValueStoreSolver(QuerySolver):
@@ -389,13 +412,25 @@ class KeyValueStoreSolver(QuerySolver):
         )
         alias_priority_col = self.config.alias_priority_col
 
+        source_unit_col = self.config.source_unit_col
+        target_unit_col = self.config.target_unit_col
+        has_unit_cols = (
+            db.config.unit_conversion_table is not None
+            and source_unit_col in resolved_mapping.columns
+            and target_unit_col in resolved_mapping.columns
+        )
+
+        mapping_select_cols = [
+            F.col("source_channel").alias("_map_source_channel"),
+            F.col("data_key").alias("_map_data_key"),
+            F.col("channel_alias"),
+            F.col(alias_priority_col),
+        ]
+        if has_unit_cols:
+            mapping_select_cols.extend([F.col(source_unit_col), F.col(target_unit_col)])
+
         resolved = channel_metrics.join(
-            resolved_mapping.select(
-                F.col("source_channel").alias("_map_source_channel"),
-                F.col("data_key").alias("_map_data_key"),
-                F.col("channel_alias"),
-                F.col(alias_priority_col),
-            ),
+            resolved_mapping.select(*mapping_select_cols),
             on=[
                 channel_metrics["channel_name"] == F.col("_map_source_channel"),
                 channel_metrics["data_key"] == F.col("_map_data_key"),
@@ -412,13 +447,23 @@ class KeyValueStoreSolver(QuerySolver):
         resolved = resolved.withColumn(
             "selector_ids", F.array(self._build_selector_id_expr(selectors))
         )
-        return resolved.select(container_id_col, channel_id_col, "selector_ids")
+        out_cols = [container_id_col, channel_id_col, "selector_ids"]
+        if has_unit_cols:
+            out_cols.extend([source_unit_col, target_unit_col])
+        return resolved.select(*out_cols)
 
     def resolve_channel_selections(
         self, spark, channel_metrics_df, aliased_channel_metrics_df
     ) -> DataFrame:
         """
         Union direct and aliased channel metrics, combining selector_ids.
+
+        When the aliased side carries ``source_unit`` / ``target_unit``
+        columns (added by :meth:`filter_aliased_channel_metrics` when a
+        unit conversion table is configured), those columns are preserved
+        through the union and aggregation.  Direct selectors produce null
+        unit columns, which causes the downstream conversion-factor join
+        in :meth:`solve` to leave their values unchanged.
 
         Parameters
         ----------
@@ -432,13 +477,114 @@ class KeyValueStoreSolver(QuerySolver):
         Returns
         -------
         pyspark.sql.DataFrame
-            Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
+            Merged DataFrame with ``(container_id, channel_id, selector_ids)``
+            (plus ``source_unit`` / ``target_unit`` when present on the
+            aliased side).
         """
-        merged = channel_metrics_df.unionByName(aliased_channel_metrics_df)
+        source_unit_col = self.config.source_unit_col
+        target_unit_col = self.config.target_unit_col
+        has_unit_cols = (
+            source_unit_col in aliased_channel_metrics_df.columns
+            and target_unit_col in aliased_channel_metrics_df.columns
+        )
+
+        merged = channel_metrics_df.unionByName(
+            aliased_channel_metrics_df, allowMissingColumns=has_unit_cols
+        )
+
+        agg_exprs = [F.flatten(F.collect_list("selector_ids")).alias("selector_ids")]
+        if has_unit_cols:
+            agg_exprs.append(F.first(source_unit_col, ignorenulls=True).alias(source_unit_col))
+            agg_exprs.append(F.first(target_unit_col, ignorenulls=True).alias(target_unit_col))
+
         return merged.groupBy(
             self.config.container_id_col,
             self.config.channel_id_col,
-        ).agg(F.flatten(F.collect_list("selector_ids")).alias("selector_ids"))
+        ).agg(*agg_exprs)
+
+    # ------------------------------------------------------------------
+    # Unit conversion
+    # ------------------------------------------------------------------
+
+    def _compute_conversion_factors(self, spark, query, channels_df: DataFrame) -> DataFrame:
+        """
+        Join *channels_df* with the unit conversion table to compute a
+        per-channel combined conversion factor.
+
+        The unit conversion table associates each unit with a base-unit
+        scaling factor inside a unit family (``group_id``).  For a row with
+        ``source_unit = S``, ``target_unit = T`` belonging to family ``G``:
+
+        - ``_src_factor`` converts a value in ``S`` to the base unit of ``G``.
+        - ``_tgt_factor`` converts a value in ``T`` to the base unit of ``G``.
+        - The combined factor that converts ``S`` to ``T`` is
+          ``_src_factor / _tgt_factor``.
+
+        Rows whose source or target unit is missing on the table — or whose
+        source/target units belong to different families — receive a null
+        factor.  Null factors are treated as "no conversion" by the cache.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Active Spark session.
+        query : QueryBuilder
+            Query object carrying the configured ``db``.
+        channels_df : pyspark.sql.DataFrame
+            DataFrame that already carries ``source_unit`` / ``target_unit``
+            columns (added by :meth:`filter_aliased_channel_metrics`).
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            *channels_df* augmented with a ``conversion_factor`` column.
+        """
+        uc_table = query.db.unit_conversion(spark)
+        uc_table = self._apply_column_mapping(
+            uc_table, self.config.unit_conversion.column_name_mapping
+        )
+
+        unit_col = self.config.unit_col
+        group_id_col = self.config.group_id_col
+        factor_col = self.config.conversion_factor_col
+        source_unit_col = self.config.source_unit_col
+        target_unit_col = self.config.target_unit_col
+
+        # Source-side join: fetch _src_factor and _src_group_id.
+        channels_df = channels_df.join(
+            F.broadcast(
+                uc_table.select(
+                    F.col(unit_col).alias("_src_unit"),
+                    F.col(factor_col).alias("_src_factor"),
+                    F.col(group_id_col).alias("_src_group_id"),
+                )
+            ),
+            on=[channels_df[source_unit_col] == F.col("_src_unit")],
+            how="left",
+        ).drop("_src_unit")
+
+        # Target-side join: must belong to the same unit family.
+        channels_df = channels_df.join(
+            F.broadcast(
+                uc_table.select(
+                    F.col(unit_col).alias("_tgt_unit"),
+                    F.col(factor_col).alias("_tgt_factor"),
+                    F.col(group_id_col).alias("_tgt_group_id"),
+                )
+            ),
+            on=[
+                channels_df[target_unit_col] == F.col("_tgt_unit"),
+                F.col("_src_group_id") == F.col("_tgt_group_id"),
+            ],
+            how="left",
+        ).drop("_tgt_unit", "_tgt_group_id")
+
+        channels_df = channels_df.withColumn(
+            factor_col,
+            F.col("_src_factor") / F.col("_tgt_factor"),
+        ).drop("_src_factor", "_src_group_id", "_tgt_factor")
+
+        return channels_df
 
     # ------------------------------------------------------------------
     # Solve
@@ -478,6 +624,13 @@ class KeyValueStoreSolver(QuerySolver):
         """
         Solve the query by grouping channels and applying selections.
 
+        When a ``unit_conversion_table`` is configured on the database and
+        *channels_df* carries ``source_unit`` / ``target_unit`` columns
+        (added upstream by :meth:`filter_aliased_channel_metrics`),
+        per-channel conversion factors are computed and propagated into
+        the grouped-map UDF so that time-series values are converted from
+        the source to the target unit on the fly.
+
         Parameters
         ----------
         query : QueryBuilder
@@ -495,6 +648,23 @@ class KeyValueStoreSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
+        source_unit_col = self.config.source_unit_col
+        target_unit_col = self.config.target_unit_col
+
+        has_conversion_table = (
+            getattr(query.db.config, "unit_conversion_table", None) is not None
+        )
+        has_unit_cols = (
+            source_unit_col in channels_df.columns
+            and target_unit_col in channels_df.columns
+        )
+
+        if has_conversion_table and has_unit_cols:
+            channels_df = self._compute_conversion_factors(self.spark, query, channels_df)
+
+        for col_name in (source_unit_col, target_unit_col):
+            if col_name in channels_df.columns:
+                channels_df = channels_df.drop(col_name)
 
         q = query.db.channels(self.spark)
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)

@@ -270,6 +270,7 @@ class TestKeyValueStoreSolverEndToEndWideOnly:
             "ts": "tstart",
             "te": "tend",
             "val": "value",
+            "conv": "conversion_factor",
         }
 
     def test_config_properties_return_internal_names(self, spark: SparkSession):

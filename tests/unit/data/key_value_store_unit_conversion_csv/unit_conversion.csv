@@ -1,0 +1,6 @@
+group_id,unit,conversion_factor
+speed,m/s,1.0
+speed,km/h,0.277778
+speed,mph,0.44704
+rotation,RPM,1.0
+rotation,rad/s,0.10472

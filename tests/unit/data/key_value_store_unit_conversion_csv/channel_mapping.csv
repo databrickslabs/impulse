@@ -1,0 +1,6 @@
+project_id,toolbox_id,channel_alias,source_channel,data_key,priority,source_unit,target_unit
+SAMPLE_PROJECT,container_concept,engine_speed,Engine RPM,TM,,RPM,RPM
+SAMPLE_PROJECT,container_concept,engine_speed,EngSpd,ProjSpecREC_10Hz,,RPM,RPM
+SAMPLE_PROJECT,container_concept,vehicle_speed,Vehicle Speed Sensor,TM,,km/h,m/s
+SAMPLE_PROJECT,container_concept,vehicle_speed,Spd_Vhcl,ProjSpecREC_10Hz,,km/h,m/s
+SAMPLE_PROJECT,container_concept,cross_family_alias,Engine RPM,TM,,RPM,m/s

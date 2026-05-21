@@ -49,7 +49,7 @@ class TimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.df)
         return self.df[idx]
 
-    def load_blob(self, container_id, channel_id):
+    def load_blob(self, container_id, channel_id, uses_alias: bool = False):
         """
         Load a time series blob from disk.
 
@@ -59,6 +59,9 @@ class TimeSeriesCache(SeriesCache):
             Container ID.
         channel_id : Any
             Channel ID.
+        uses_alias : bool, optional
+            Unused by this cache (no unit conversion); accepted for
+            interface compatibility with :class:`SeriesCache`.
 
         Returns
         -------

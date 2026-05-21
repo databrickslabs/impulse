@@ -35,6 +35,7 @@ _EXPECTED_COL_MAP = {
     "ts": "tstart",
     "te": "tend",
     "val": "value",
+    "conv": "conversion_factor",
 }
 
 
@@ -137,7 +138,7 @@ class TestColMap:
 
     def test_col_map_keys(self, cfg: SolverConfig):
         """col_map should contain exactly the expected short keys."""
-        assert set(cfg.col_map.keys()) == {"cid", "ch", "ts", "te", "val"}
+        assert set(cfg.col_map.keys()) == {"cid", "ch", "ts", "te", "val", "conv"}
 
     def test_col_map_default_config(self):
         """Default SolverConfig col_map should match hardcoded defaults."""
@@ -148,6 +149,7 @@ class TestColMap:
             "ts": "tstart",
             "te": "tend",
             "val": "value",
+            "conv": "conversion_factor",
         }
 
     def test_col_map_consistent_with_properties(self, cfg: SolverConfig):
@@ -157,6 +159,7 @@ class TestColMap:
         assert cfg.col_map["ts"] == cfg.tstart_col
         assert cfg.col_map["te"] == cfg.tend_col
         assert cfg.col_map["val"] == cfg.value_col
+        assert cfg.col_map["conv"] == cfg.conversion_factor_col
 
     def test_col_map_values(self, cfg: SolverConfig):
         assert cfg.col_map == _EXPECTED_COL_MAP

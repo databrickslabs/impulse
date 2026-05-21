@@ -61,7 +61,7 @@ class DeltaTimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
 
-    def load_blob(self, mid, cid):
+    def load_blob(self, mid, cid, uses_alias: bool = False):
         """
         Load a time series blob from the DataFrame.
 
@@ -71,6 +71,9 @@ class DeltaTimeSeriesCache(SeriesCache):
             Container or measurement ID.
         cid : Any
             Channel ID.
+        uses_alias : bool, optional
+            Unused by this cache (no unit conversion); accepted for
+            interface compatibility with :class:`SeriesCache`.
 
         Returns
         -------

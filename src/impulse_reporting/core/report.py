@@ -859,6 +859,13 @@ class Report:
         # Validate that every aggregation references a registered event
         self._validate_aggregation_events()
 
+        # TODO: port unit-consistency sanity check from MDA Framework
+        # (`mda_reporting/util/unit_sanity_check.py`). When a
+        # `unit_conversion_table` is configured, walk all aggregation /
+        # event expressions and emit a UserWarning for each aliased
+        # selector whose source_unit differs from target_unit so the
+        # caller knows to express formula constants in target units.
+
         # Clean up temp tables from previous runs
         self._cleanup_temp_tables()
 

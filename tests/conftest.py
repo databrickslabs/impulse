@@ -334,3 +334,69 @@ def key_value_store_alias_db(
     cfg = MeasurementDBConfig.for_debug(tables)
     cfg.channel_mapping_table = "channel_mapping"
     return MeasurementDB(cfg, ws=mock_workspace_client)
+
+
+@pytest.fixture(scope="session")
+def unit_conversion_dataframes(spark):
+    """Load unit-conversion test CSVs into cached in-memory DataFrames.
+
+    Hands DataFrames directly to MeasurementDB (via ``for_debug``) instead of
+    persisting them through Delta — the alias-style write-then-read fixture
+    occasionally hit Delta ``ProtocolChangedException`` during macOS test
+    runs.  Caching the DataFrames once per session keeps the data stable.
+    """
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    base_path = base_path[: base_path.find("tests")]
+
+    container_tags_path = f"{base_path}/tests/unit/data/key_value_store_csv/container_metrics.csv"
+    container_metric_path = f"{base_path}/tests/unit/data/basic_narrow_csv/container_metrics.csv"
+    channel_metric_path = (
+        f"{base_path}/tests/unit/data/key_value_store_alias_csv/channel_metrics.csv"
+    )
+    channels_path = f"{base_path}/tests/unit/data/basic_narrow_csv/channel_data.csv"
+    channel_mapping_path = (
+        f"{base_path}/tests/unit/data/key_value_store_unit_conversion_csv/channel_mapping.csv"
+    )
+    unit_conversion_path = (
+        f"{base_path}/tests/unit/data/key_value_store_unit_conversion_csv/unit_conversion.csv"
+    )
+
+    options = {"header": "True", "delimiter": ",", "inferSchema": "True"}
+
+    def _load(path):
+        df = spark.read.options(**options).csv(path).cache()
+        df.count()
+        return df
+
+    return {
+        "container_tags": _load(container_tags_path),
+        "container_metrics": _load(container_metric_path),
+        "channel_metrics": _load(channel_metric_path),
+        "channels": _load(channels_path),
+        "channel_mapping": _load(channel_mapping_path),
+        "unit_conversion": _load(unit_conversion_path),
+    }
+
+
+@pytest.fixture
+def key_value_store_unit_conversion_db(
+    unit_conversion_dataframes, mock_workspace_client
+) -> MeasurementDB:
+    """Return a key-value-store MeasurementDB with unit conversion configured."""
+    cfg = MeasurementDBConfig.for_debug(unit_conversion_dataframes)
+    cfg.channel_mapping_table = "channel_mapping"
+    cfg.unit_conversion_table = "unit_conversion"
+    return MeasurementDB(cfg, ws=mock_workspace_client)
+
+
+@pytest.fixture
+def key_value_store_unit_conversion_db_no_table(
+    unit_conversion_dataframes, mock_workspace_client
+) -> MeasurementDB:
+    """Same data as ``key_value_store_unit_conversion_db`` but with
+    ``unit_conversion_table=None`` to test the opt-out path."""
+    tables = {k: v for k, v in unit_conversion_dataframes.items() if k != "unit_conversion"}
+    cfg = MeasurementDBConfig.for_debug(tables)
+    cfg.channel_mapping_table = "channel_mapping"
+    # Explicitly leave unit_conversion_table = None
+    return MeasurementDB(cfg, ws=mock_workspace_client)

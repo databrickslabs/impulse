@@ -204,6 +204,11 @@ class Source(BaseModel):
     channel_mapping_table : str, optional
         Full Unity Catalog path to the channel mapping table. Required when using
         ``channel_with_alias()`` for logical alias resolution.
+    unit_conversion_table : str, optional
+        Full Unity Catalog path to the unit conversion table. When set together
+        with a ``channel_mapping_table`` whose rows carry ``source_unit`` and
+        ``target_unit`` columns, the query engine converts time-series values
+        from the source to the target unit during ``solve()``.
 
     Notes
     -----
@@ -217,6 +222,7 @@ class Source(BaseModel):
     channel_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channels_uri: Annotated[str, AfterValidator(is_valid_table_name)]
     channel_mapping_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
+    unit_conversion_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
 
 
 class UnitySink(BaseModel):

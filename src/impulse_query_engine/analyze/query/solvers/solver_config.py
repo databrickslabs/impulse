@@ -64,6 +64,8 @@ class SolverConfig(BaseModel):
         Column mappings and filters for the channel mapping (alias) table.
     channels : TableConfig
         Column mappings and filters for the channel data table.
+    unit_conversion : TableConfig
+        Column mappings and filters for the unit conversion table.
     """
 
     project_id: str | None = None
@@ -74,6 +76,7 @@ class SolverConfig(BaseModel):
     channel_metrics: TableConfig = TableConfig()
     channel_mapping: TableConfig = TableConfig()
     channels: TableConfig = TableConfig()
+    unit_conversion: TableConfig = TableConfig()
 
     # ------------------------------------------------------------------
     # Class methods
@@ -177,6 +180,36 @@ class SolverConfig(BaseModel):
         return "parent_id"
 
     @property
+    def conversion_factor_col(self) -> str:
+        """Internal column name for the conversion factor on the unit_conversion table.
+
+        Also used as the column that carries the per-channel combined factor
+        downstream from :meth:`KeyValueStoreSolver._compute_conversion_factors`
+        into the grouped-map UDF.
+        """
+        return "conversion_factor"
+
+    @property
+    def source_unit_col(self) -> str:
+        """Internal column name for the source unit on the channel_mapping table."""
+        return "source_unit"
+
+    @property
+    def target_unit_col(self) -> str:
+        """Internal column name for the target unit on the channel_mapping table."""
+        return "target_unit"
+
+    @property
+    def unit_col(self) -> str:
+        """Internal column name for the unit name on the unit_conversion table."""
+        return "unit"
+
+    @property
+    def group_id_col(self) -> str:
+        """Internal column name for the unit group id on the unit_conversion table."""
+        return "group_id"
+
+    @property
     def col_map(self) -> dict[str, str]:
         """Short-key → internal-column-name mapping for UDFs and caches."""
         return {
@@ -185,4 +218,5 @@ class SolverConfig(BaseModel):
             "ts": self.tstart_col,
             "te": self.tend_col,
             "val": self.value_col,
+            "conv": self.conversion_factor_col,
         }

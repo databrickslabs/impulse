@@ -598,7 +598,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         # TODO: select candidate
         mid = candidates.container_id.iloc[0]
         cid = candidates.channel_id.iloc[0]
-        return cache.load_blob(mid, cid)
+        return cache.load_blob(mid, cid, uses_alias=self.uses_alias)
 
     def get_required_tag_exprs(self) -> set[TagExpression]:
         """
