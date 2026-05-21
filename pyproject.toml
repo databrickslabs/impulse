@@ -26,7 +26,7 @@ dependencies = [
 # CI install these via `uv sync --all-extras`.
 [project.optional-dependencies]
 local-dev = [
-    "databricks-sdk==0.106.0",
+    "databricks-sdk==0.110.0",
     "matplotlib==3.10.0",
     "pandas==2.2.3",
     "pyarrow==19.0.1",
