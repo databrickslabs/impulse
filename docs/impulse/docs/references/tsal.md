@@ -41,7 +41,7 @@ The solver tries each alias in order and returns the first match.
 
 For workflows where a stable logical name should resolve to one of many physical channels through a separately
 maintained mapping table, use `channel_with_alias()` instead. This is supported by `KeyValueStoreSolver` and requires
-a `channel_mapping_table` to be configured in `source` (see [Configuration](../config/configuration)).
+a `channel_mapping_table` to be configured in `source` (see [Configuration](../config/configuration.md)).
 
 ```python
 rpm = db.query.channel_with_alias(channel_name='Engine RPM')

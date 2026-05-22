@@ -34,6 +34,37 @@ make dev
 runtime and development dependencies (pytest, ruff, black, plus pyspark/pandas/etc.
 declared as `local-dev` extras for use outside Databricks runtimes).
 
+### Project-scoped environment via direnv (recommended on macOS)
+
+This repo ships an [`.envrc`](.envrc) that activates Java, the venv, and the
+PySpark interpreter **only when you `cd` into the repo** — no pollution of your
+global `PATH` or `JAVA_HOME`.
+
+One-time setup:
+
+```bash
+brew install direnv openjdk@17               # JDK 17 stays keg-only — not on global PATH
+echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc # or ~/.bashrc for bash
+exec $SHELL                                  # reload so the hook is active
+cd <path-to-this-repo> && direnv allow       # whitelist the .envrc
+```
+
+After that, every fresh terminal that enters this directory will auto-export:
+
+| Variable | Value |
+|---|---|
+| `JAVA_HOME` | `$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home` |
+| `PATH` | `$JAVA_HOME/bin` prepended |
+| Python venv | `.venv/` activated |
+| `PYSPARK_PYTHON` / `PYSPARK_DRIVER_PYTHON` | `.venv/bin/python` (worker = driver) |
+
+Verify with `java -version` (should show OpenJDK 17) and `which python` (should
+point inside `.venv/`). Outside the repo, both should fall back to whatever
+your system default is — direnv unloads automatically.
+
+> If you can't use direnv, the `.envrc` is a plain shell script — `source .envrc`
+> works as a manual alternative inside a single shell session.
+
 ## Running tests
 
 ```bash
