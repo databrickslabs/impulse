@@ -506,6 +506,12 @@ class KeyValueStoreSolver(QuerySolver):
         unit columns, which causes the downstream conversion-factor join
         in :meth:`solve` to leave their values unchanged.
 
+        Validates that each ``(container_id, channel_id)`` carries at most
+        one distinct ``source_unit`` and one distinct ``target_unit``.  Per
+        physical channel the unit-conversion model can attach only one
+        factor; conflicting aliases would otherwise pick an arbitrary
+        target and silently mis-convert one of them.
+
         Parameters
         ----------
         spark : SparkSession
@@ -521,6 +527,14 @@ class KeyValueStoreSolver(QuerySolver):
             Merged DataFrame with ``(container_id, channel_id, selector_ids)``
             (plus ``source_unit`` / ``target_unit`` when present on the
             aliased side).
+
+        Raises
+        ------
+        ValueError
+            If two or more aliased selectors resolve to the same physical
+            channel with conflicting ``source_unit`` or ``target_unit``
+            values.  Up to three offending channels are listed in the
+            message.
         """
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
@@ -535,13 +549,61 @@ class KeyValueStoreSolver(QuerySolver):
 
         agg_exprs = [F.flatten(F.collect_list("selector_ids")).alias("selector_ids")]
         if has_unit_cols:
-            agg_exprs.append(F.first(source_unit_col, ignorenulls=True).alias(source_unit_col))
-            agg_exprs.append(F.first(target_unit_col, ignorenulls=True).alias(target_unit_col))
+            # collect_set serves a dual purpose: (a) it deduplicates so we
+            # can detect a conflict by size > 1, and (b) the single
+            # remaining element materializes the scalar unit value the
+            # downstream code expects.
+            agg_exprs.append(F.collect_set(source_unit_col).alias("_source_units"))
+            agg_exprs.append(F.collect_set(target_unit_col).alias("_target_units"))
 
-        return merged.groupBy(
+        grouped = merged.groupBy(
             self.config.container_id_col,
             self.config.channel_id_col,
         ).agg(*agg_exprs)
+
+        if has_unit_cols:
+            # TODO(unit-conversion): lift this limitation by attaching the
+            # conversion factor to the selector instead of the channel row
+            # (see PR #30 review).
+            conflicts = (
+                grouped.where(
+                    (F.size("_source_units") > 1) | (F.size("_target_units") > 1)
+                )
+                .select(
+                    self.config.container_id_col,
+                    self.config.channel_id_col,
+                    "_source_units",
+                    "_target_units",
+                )
+                .limit(3)
+                .collect()
+            )
+            if conflicts:
+                details = [
+                    f"(container_id={row[self.config.container_id_col]}, "
+                    f"channel_id={row[self.config.channel_id_col]}): "
+                    f"source_units={sorted(row['_source_units'])}, "
+                    f"target_units={sorted(row['_target_units'])}"
+                    for row in conflicts
+                ]
+                raise ValueError(
+                    "Conflicting unit conversions on the same physical channel "
+                    "(first 3 shown):\n" + "\n".join(details)
+                )
+            # Empty sets (direct-only channels) yield null via
+            # try_element_at, matching the prior F.first(ignorenulls=True)
+            # behavior.  Plain element_at raises on empty arrays in Spark 4.
+            grouped = (
+                grouped.withColumn(
+                    source_unit_col, F.try_element_at("_source_units", F.lit(1))
+                )
+                .withColumn(
+                    target_unit_col, F.try_element_at("_target_units", F.lit(1))
+                )
+                .drop("_source_units", "_target_units")
+            )
+
+        return grouped
 
     # ------------------------------------------------------------------
     # Unit conversion

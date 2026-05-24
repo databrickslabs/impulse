@@ -275,6 +275,18 @@ Configured via `source.channel_mapping_table` (see
 [Configuration](../config/configuration.md)). Joins to `channel_metrics`
 on `(project_id, data_key, channel_name)`.
 
+**Per-channel unit conversion is single-target per query.** Storing two
+distinct aliases that resolve to the same physical channel (same
+`(source_channel, data_key)` → same `channel_metrics.channel_id`) with
+different `target_unit` (or different `source_unit`) values is allowed at
+the table level. The constraint only applies at query time: if a single
+query selects **both** such aliases via `channel_with_alias()`, the solver
+raises `ValueError`. The current per-channel factor model attaches one
+conversion factor per physical channel and cannot apply two distinct
+conversions to the same channel in the same query. Workarounds: select
+the conflicting aliases in **separate queries**, or align the mapping rows
+so they agree on the unit pair per physical channel.
+
 ---
 
 ## unit_conversion (optional)

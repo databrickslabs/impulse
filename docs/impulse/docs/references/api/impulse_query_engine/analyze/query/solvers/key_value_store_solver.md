@@ -190,11 +190,24 @@ through the union and aggregation.  Direct selectors produce null
 unit columns, which causes the downstream conversion-factor join
 in :meth:`solve` to leave their values unchanged.
 
+Validates that each ``(container_id, channel_id)`` carries at most
+one distinct ``source_unit`` and one distinct ``target_unit``.  Per
+physical channel the unit-conversion model can attach only one
+factor; conflicting aliases would otherwise pick an arbitrary
+target and silently mis-convert one of them.
+
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
 - `channel_metrics_df` (`pyspark.sql.DataFrame`): Direct channel metrics with ``selector_ids`` array column.
 - `aliased_channel_metrics_df` (`pyspark.sql.DataFrame`): Aliased channel metrics with ``selector_ids`` array column.
+
+**Raises**:
+
+- `ValueError`: If two or more aliased selectors resolve to the same physical
+channel with conflicting ``source_unit`` or ``target_unit``
+values.  Up to three offending channels are listed in the
+message.
 
 **Returns**:
 

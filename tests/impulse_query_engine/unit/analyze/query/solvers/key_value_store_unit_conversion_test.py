@@ -368,6 +368,145 @@ class TestSourceUnitResolution:
             key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm
 
 
+class TestAliasUnitConflictDetection:
+    """Per-channel unit conversion supports only one (source_unit, target_unit) pair.
+
+    When two aliases on the same physical channel disagree, the solver
+    must raise rather than silently mis-converting one of them.
+    """
+
+    @staticmethod
+    def _mapping_with(spark: SparkSession, rows):
+        """Build a channel_mapping DataFrame from rows matching the
+        unit-conversion fixture schema."""
+        from pyspark.sql.types import IntegerType, StringType, StructField, StructType
+
+        schema = StructType(
+            [
+                StructField("project_id", StringType(), nullable=False),
+                StructField("toolbox_id", StringType(), nullable=False),
+                StructField("channel_alias", StringType(), nullable=False),
+                StructField("source_channel", StringType(), nullable=False),
+                StructField("data_key", StringType(), nullable=False),
+                StructField("priority", IntegerType(), nullable=True),
+                StructField("source_unit", StringType(), nullable=True),
+                StructField("target_unit", StringType(), nullable=True),
+            ]
+        )
+        return spark.createDataFrame(rows, schema=schema)
+
+    def test_conflict_on_target_unit_raises(
+        self, spark: SparkSession, key_value_store_unit_conversion_db: MeasurementDB
+    ):
+        # Two aliases both resolve to (container_id, channel_id) = (1, 7) and
+        # (2, 7) via Vehicle Speed Sensor / TM, but request different
+        # target_units. The solver must raise.
+        original = key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"]
+        conflicting = self._mapping_with(
+            spark,
+            [
+                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_mph",
+                 "Vehicle Speed Sensor", "TM", None, "km/h", "mph"),
+                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_ms",
+                 "Vehicle Speed Sensor", "TM", None, "km/h", "m/s"),
+            ],
+        )
+        key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = conflicting
+
+        try:
+            solver = _solver(spark)
+            query = key_value_store_unit_conversion_db.query
+            mph = query.channel_with_alias(channel_alias="vehicle_speed_mph").alias("mph")
+            ms = query.channel_with_alias(channel_alias="vehicle_speed_ms").alias("ms")
+
+            with pytest.raises(ValueError, match="Conflicting unit conversions") as excinfo:
+                query.select(mph, ms).toPandas(spark, solver=solver)
+
+            msg = str(excinfo.value)
+            assert "channel_id=7" in msg
+            assert "mph" in msg
+            assert "m/s" in msg
+        finally:
+            key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = original
+
+    def test_conflict_on_source_unit_raises(
+        self, spark: SparkSession, key_value_store_unit_conversion_db: MeasurementDB
+    ):
+        # Same physical channel, agreeing target_unit, but disagreeing
+        # source_unit. (The coalesce in filter_aliased_channel_metrics
+        # prefers channel_metrics.unit, but if it's null/absent the
+        # mapping's source_unit wins — and these two mappings disagree.)
+        original = key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"]
+        conflicting = self._mapping_with(
+            spark,
+            [
+                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_a",
+                 "Vehicle Speed Sensor", "TM", None, "km/h", "m/s"),
+                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_b",
+                 "Vehicle Speed Sensor", "TM", None, "mph", "m/s"),
+            ],
+        )
+        # Also drop channel_metrics.unit so neither alias has a value to
+        # coalesce against — both rely on mapping.source_unit.
+        original_cm = key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"]
+        cm_no_unit = original_cm.drop("unit")
+        key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = conflicting
+        key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm_no_unit
+
+        try:
+            solver = _solver(spark)
+            query = key_value_store_unit_conversion_db.query
+            a = query.channel_with_alias(channel_alias="vehicle_speed_a").alias("a")
+            b = query.channel_with_alias(channel_alias="vehicle_speed_b").alias("b")
+
+            with pytest.raises(ValueError, match="Conflicting unit conversions") as excinfo:
+                query.select(a, b).toPandas(spark, solver=solver)
+
+            msg = str(excinfo.value)
+            assert "channel_id=7" in msg
+            assert "km/h" in msg
+            assert "mph" in msg
+        finally:
+            key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = original
+            key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = original_cm
+
+    def test_no_conflict_when_aliases_agree(
+        self,
+        spark: SparkSession,
+        key_value_store_unit_conversion_db: MeasurementDB,
+        channels_csv_path: str,
+    ):
+        # Two aliases on the same physical channel agree on (source_unit,
+        # target_unit). Both selectors should resolve and produce the same
+        # converted values.
+        original = key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"]
+        agreeing = self._mapping_with(
+            spark,
+            [
+                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_a",
+                 "Vehicle Speed Sensor", "TM", None, "km/h", "m/s"),
+                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_b",
+                 "Vehicle Speed Sensor", "TM", None, "km/h", "m/s"),
+            ],
+        )
+        key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = agreeing
+
+        try:
+            solver = _solver(spark)
+            query = key_value_store_unit_conversion_db.query
+            a = query.channel_with_alias(channel_alias="vehicle_speed_a").alias("a")
+            b = query.channel_with_alias(channel_alias="vehicle_speed_b").alias("b")
+
+            pdf = query.select(a, b).toPandas(spark, solver=solver)
+            for cid in (1, 2):
+                expected = _expected_raw_values(channels_csv_path, cid, 7) * 0.277778
+                row = pdf.loc[pdf["container_id"] == cid].iloc[0]
+                np.testing.assert_allclose(row.a.values, expected, rtol=1e-6)
+                np.testing.assert_allclose(row.b.values, expected, rtol=1e-6)
+        finally:
+            key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = original
+
+
 class TestComputeConversionFactors:
     def test_factor_one_for_identical_units(
         self, spark: SparkSession, key_value_store_unit_conversion_db: MeasurementDB
