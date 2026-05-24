@@ -555,6 +555,93 @@ class TestAliasUnitConflictDetection:
             key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = original
 
 
+class TestConversionFactorValidation:
+    """`unit_conversion.conversion_factor` must be a positive non-null number.
+
+    Catches malformed reference rows early so the user sees a clear error
+    instead of silent data corruption (zero/negative) or silent contract
+    violation (null).
+    """
+
+    @staticmethod
+    def _uc_with(spark: SparkSession, rows):
+        """Build a unit_conversion DataFrame with an explicit schema so the
+        nullable factor case doesn't confuse Spark's type inference."""
+        from pyspark.sql.types import (
+            BooleanType,
+            DoubleType,
+            StringType,
+            StructField,
+            StructType,
+        )
+
+        schema = StructType(
+            [
+                StructField("group_id", StringType(), nullable=False),
+                StructField("unit", StringType(), nullable=False),
+                StructField("conversion_factor", DoubleType(), nullable=True),
+                StructField("is_base", BooleanType(), nullable=True),
+            ]
+        )
+        return spark.createDataFrame(rows, schema=schema)
+
+    def _run_with_uc_table(self, spark, db, uc_rows):
+        """Replace the unit_conversion debug table, run a vehicle_speed
+        aliased query, restore the original. Returns nothing — used inside
+        a ``pytest.raises`` block.
+        """
+        original = db.config.debug_tables["unit_conversion"]
+        db.config.debug_tables["unit_conversion"] = self._uc_with(spark, uc_rows)
+        try:
+            solver = _solver(spark)
+            query = db.query
+            vehicle_speed = query.channel_with_alias(channel_alias="vehicle_speed").alias(
+                "vehicle_speed"
+            )
+            query.select(vehicle_speed).toPandas(spark, solver=solver)
+        finally:
+            db.config.debug_tables["unit_conversion"] = original
+
+    def test_zero_factor_raises(
+        self, spark: SparkSession, key_value_store_unit_conversion_db: MeasurementDB
+    ):
+        rows = [
+            ("speed", "m/s", 1.0, True),
+            ("speed", "km/h", 0.0, False),  # bad
+        ]
+        with pytest.raises(ValueError, match="Invalid conversion_factor") as excinfo:
+            self._run_with_uc_table(spark, key_value_store_unit_conversion_db, rows)
+        msg = str(excinfo.value)
+        assert "km/h" in msg
+        assert "conversion_factor=0" in msg
+
+    def test_negative_factor_raises(
+        self, spark: SparkSession, key_value_store_unit_conversion_db: MeasurementDB
+    ):
+        rows = [
+            ("speed", "m/s", 1.0, True),
+            ("speed", "km/h", -1.0, False),  # bad
+        ]
+        with pytest.raises(ValueError, match="Invalid conversion_factor") as excinfo:
+            self._run_with_uc_table(spark, key_value_store_unit_conversion_db, rows)
+        msg = str(excinfo.value)
+        assert "km/h" in msg
+        assert "conversion_factor=-1" in msg
+
+    def test_null_factor_raises(
+        self, spark: SparkSession, key_value_store_unit_conversion_db: MeasurementDB
+    ):
+        rows = [
+            ("speed", "m/s", 1.0, True),
+            ("speed", "km/h", None, False),  # bad
+        ]
+        with pytest.raises(ValueError, match="Invalid conversion_factor") as excinfo:
+            self._run_with_uc_table(spark, key_value_store_unit_conversion_db, rows)
+        msg = str(excinfo.value)
+        assert "km/h" in msg
+        assert "conversion_factor=None" in msg
+
+
 class TestComputeConversionFactors:
     def test_factor_one_for_identical_units(
         self, spark: SparkSession, key_value_store_unit_conversion_db: MeasurementDB

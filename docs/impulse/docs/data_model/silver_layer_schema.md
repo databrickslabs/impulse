@@ -299,7 +299,7 @@ solve time when `source.unit_conversion_table` is configured and the
 |---------------------|----------|----------|------------------------------------------------------------------------------------------------------------|
 | `group_id`          | `string` | No       | Unit family identifier (e.g. `speed`, `rotation`). Only units within the same family can convert into each other. |
 | `unit`              | `string` | No       | Unit name. Matches the `source_unit` / `target_unit` values on `channel_mapping`.                          |
-| `conversion_factor` | `double` | No       | Multiplier that converts a value in this unit to the family's base unit. The base unit has factor `1.0`.   |
+| `conversion_factor` | `double` | No       | Multiplier that converts a value in this unit to the family's base unit. The base unit has factor `1.0`. **Required to be a positive non-null number** — a row with `conversion_factor` null, zero, or negative is rejected at query time with `ValueError` (validation runs once per query that uses unit conversion). |
 
 For each aliased channel the solver looks up `source_factor` (the row
 whose `unit` matches `source_unit`) and `target_factor` (the row whose

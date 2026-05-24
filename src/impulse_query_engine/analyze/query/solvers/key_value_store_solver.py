@@ -603,6 +603,53 @@ class KeyValueStoreSolver(QuerySolver):
     # Unit conversion
     # ------------------------------------------------------------------
 
+    def _validate_unit_conversion_table(self, uc_table: DataFrame) -> None:
+        """Raise ``ValueError`` if the unit_conversion table contains rows
+        whose ``conversion_factor`` is null, zero, or negative.
+
+        ``conversion_factor`` is conceptually a strictly-positive number.
+        A zero on the source side silently corrupts values to all-zero;
+        a zero on the target side raises a cryptic Spark
+        ``ArithmeticException`` deep in the conversion path under Spark 4
+        ANSI mode; a negative value flips signs; a null silently skips
+        conversion (contract violation, not corruption).  Catching all
+        four cases here turns each into a clear, actionable error
+        naming the offending row.
+
+        Parameters
+        ----------
+        uc_table : pyspark.sql.DataFrame
+            The ``unit_conversion`` table **after**
+            ``_apply_column_mapping`` has been applied.
+
+        Raises
+        ------
+        ValueError
+            If any row has ``conversion_factor IS NULL`` or
+            ``conversion_factor <= 0``.  Up to three offending rows are
+            listed in the message.
+        """
+        unit_col = self.config.unit_col
+        group_id_col = self.config.group_id_col
+        factor_col = self.config.conversion_factor_col
+
+        bad_rows = (
+            uc_table.where(F.col(factor_col).isNull() | (F.col(factor_col) <= 0))
+            .select(group_id_col, unit_col, factor_col)
+            .limit(3)
+            .collect()
+        )
+        if bad_rows:
+            details = [
+                f"(group_id={row[group_id_col]}, unit={row[unit_col]}, "
+                f"conversion_factor={row[factor_col]})"
+                for row in bad_rows
+            ]
+            raise ValueError(
+                "Invalid conversion_factor in unit_conversion table "
+                "(must be a positive non-null number; first 3 shown):\n" + "\n".join(details)
+            )
+
     def _compute_conversion_factors(self, spark, query, channels_df: DataFrame) -> DataFrame:
         """
         Join *channels_df* with the unit conversion table to compute a
@@ -635,11 +682,20 @@ class KeyValueStoreSolver(QuerySolver):
         -------
         pyspark.sql.DataFrame
             *channels_df* augmented with a ``conversion_factor`` column.
+
+        Raises
+        ------
+        ValueError
+            If the ``unit_conversion`` table contains a row with a null,
+            zero, or negative ``conversion_factor``.  See
+            :meth:`_validate_unit_conversion_table` for the underlying
+            check.
         """
         uc_table = query.db.unit_conversion(spark)
         uc_table = self._apply_column_mapping(
             uc_table, self.config.unit_conversion.column_name_mapping
         )
+        self._validate_unit_conversion_table(uc_table)
 
         unit_col = self.config.unit_col
         group_id_col = self.config.group_id_col
