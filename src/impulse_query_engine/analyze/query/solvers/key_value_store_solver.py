@@ -566,9 +566,7 @@ class KeyValueStoreSolver(QuerySolver):
             # conversion factor to the selector instead of the channel row
             # (see PR #30 review).
             conflicts = (
-                grouped.where(
-                    (F.size("_source_units") > 1) | (F.size("_target_units") > 1)
-                )
+                grouped.where((F.size("_source_units") > 1) | (F.size("_target_units") > 1))
                 .select(
                     self.config.container_id_col,
                     self.config.channel_id_col,
@@ -594,12 +592,8 @@ class KeyValueStoreSolver(QuerySolver):
             # try_element_at, matching the prior F.first(ignorenulls=True)
             # behavior.  Plain element_at raises on empty arrays in Spark 4.
             grouped = (
-                grouped.withColumn(
-                    source_unit_col, F.try_element_at("_source_units", F.lit(1))
-                )
-                .withColumn(
-                    target_unit_col, F.try_element_at("_target_units", F.lit(1))
-                )
+                grouped.withColumn(source_unit_col, F.try_element_at("_source_units", F.lit(1)))
+                .withColumn(target_unit_col, F.try_element_at("_target_units", F.lit(1)))
                 .drop("_source_units", "_target_units")
             )
 

@@ -405,10 +405,26 @@ class TestAliasUnitConflictDetection:
         conflicting = self._mapping_with(
             spark,
             [
-                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_mph",
-                 "Vehicle Speed Sensor", "TM", None, "km/h", "mph"),
-                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_ms",
-                 "Vehicle Speed Sensor", "TM", None, "km/h", "m/s"),
+                (
+                    "SAMPLE_PROJECT",
+                    "container_concept",
+                    "vehicle_speed_mph",
+                    "Vehicle Speed Sensor",
+                    "TM",
+                    None,
+                    "km/h",
+                    "mph",
+                ),
+                (
+                    "SAMPLE_PROJECT",
+                    "container_concept",
+                    "vehicle_speed_ms",
+                    "Vehicle Speed Sensor",
+                    "TM",
+                    None,
+                    "km/h",
+                    "m/s",
+                ),
             ],
         )
         key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = conflicting
@@ -440,10 +456,26 @@ class TestAliasUnitConflictDetection:
         conflicting = self._mapping_with(
             spark,
             [
-                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_a",
-                 "Vehicle Speed Sensor", "TM", None, "km/h", "m/s"),
-                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_b",
-                 "Vehicle Speed Sensor", "TM", None, "mph", "m/s"),
+                (
+                    "SAMPLE_PROJECT",
+                    "container_concept",
+                    "vehicle_speed_a",
+                    "Vehicle Speed Sensor",
+                    "TM",
+                    None,
+                    "km/h",
+                    "m/s",
+                ),
+                (
+                    "SAMPLE_PROJECT",
+                    "container_concept",
+                    "vehicle_speed_b",
+                    "Vehicle Speed Sensor",
+                    "TM",
+                    None,
+                    "mph",
+                    "m/s",
+                ),
             ],
         )
         # Also drop channel_metrics.unit so neither alias has a value to
@@ -483,10 +515,26 @@ class TestAliasUnitConflictDetection:
         agreeing = self._mapping_with(
             spark,
             [
-                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_a",
-                 "Vehicle Speed Sensor", "TM", None, "km/h", "m/s"),
-                ("SAMPLE_PROJECT", "container_concept", "vehicle_speed_b",
-                 "Vehicle Speed Sensor", "TM", None, "km/h", "m/s"),
+                (
+                    "SAMPLE_PROJECT",
+                    "container_concept",
+                    "vehicle_speed_a",
+                    "Vehicle Speed Sensor",
+                    "TM",
+                    None,
+                    "km/h",
+                    "m/s",
+                ),
+                (
+                    "SAMPLE_PROJECT",
+                    "container_concept",
+                    "vehicle_speed_b",
+                    "Vehicle Speed Sensor",
+                    "TM",
+                    None,
+                    "km/h",
+                    "m/s",
+                ),
             ],
         )
         key_value_store_unit_conversion_db.config.debug_tables["channel_mapping"] = agreeing
