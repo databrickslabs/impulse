@@ -150,6 +150,16 @@ columns, then applies the top-level ``project_id`` filter and any
 per-table ``channel_mapping.filters``, and finally joins with
 channel_metrics to resolve aliases.
 
+When the database is configured with a ``unit_conversion_table`` and
+the ``channel_mapping`` table carries ``source_unit`` / ``target_unit``
+columns, this method also propagates the effective unit pair on each
+resolved row.  The effective ``source_unit`` is computed as
+``COALESCE(channel_metrics.unit, channel_mapping.source_unit)`` so
+that the authoritative per-channel physical unit on
+``channel_metrics`` takes precedence over the mapping-level default
+when present.  ``target_unit`` is always taken from the mapping —
+there is no analogous column on ``channel_metrics``.
+
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
@@ -160,7 +170,9 @@ channel_metrics to resolve aliases.
 **Returns**:
 
 `pyspark.sql.DataFrame`: DataFrame with ``(container_id, channel_id, selector_ids)``
-where ``selector_ids`` is an array column.
+where ``selector_ids`` is an array column.  When unit conversion
+is active (see above), also carries ``source_unit`` and
+``target_unit`` columns.
 
 #### resolve\_channel\_selections
 

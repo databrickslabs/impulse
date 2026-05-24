@@ -183,6 +183,14 @@ pre-filtering before scanning the much larger `channels` table.
 | `pz90`                  | `float`  | Yes      | 90th percentile.                  |
 | `pz99`                  | `float`  | Yes      | 99th percentile.                  |
 
+An optional `unit: string` column may also be present. When the report
+config sets a `unit_conversion_table` and the solver resolves an aliased
+selector, this column is treated as the authoritative source unit of the
+physical channel and takes precedence over `channel_mapping.source_unit`
+via `COALESCE(channel_metrics.unit, channel_mapping.source_unit)`. The
+column is not part of the canonical schema — omit it for layouts that
+don't need per-channel physical units.
+
 ---
 
 ## channel_tags
@@ -260,8 +268,8 @@ channel name to one or more physical channels keyed by `project_id` /
 | `channel_name` | `string` | No       | Logical channel name to match against `channel_with_alias` selectors. |
 | `data_key`     | `string` | No       | Physical lookup key joined to `channel_metrics`.                      |
 | `priority`     | `int`    | Yes      | Tie-breaker when multiple physical channels match a logical name.     |
-| `source_unit`  | `string` | Yes      | Unit of the raw channel data. When non-null together with `target_unit` and a configured `unit_conversion_table`, the solver converts values from source to target unit on aliased reads. |
-| `target_unit`  | `string` | Yes      | Target unit for aliased reads of this mapping.                        |
+| `source_unit`  | `string` | Yes      | **Fallback** source unit for aliased reads of this mapping. The solver resolves the effective source unit as `COALESCE(channel_metrics.unit, channel_mapping.source_unit)`, so `channel_mapping.source_unit` only takes effect when `channel_metrics.unit` is null or absent. When configured together with `target_unit` and a `unit_conversion_table`, the solver converts values from source to target unit on aliased reads. |
+| `target_unit`  | `string` | Yes      | Target unit for aliased reads of this mapping. Always taken from the mapping (there is no analogous column on `channel_metrics`). |
 
 Configured via `source.channel_mapping_table` (see
 [Configuration](../config/configuration.md)). Joins to `channel_metrics`

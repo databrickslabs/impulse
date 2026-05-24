@@ -318,7 +318,22 @@ Internal column name for the target unit on the channel_mapping table.
 def unit_col() -> str
 ```
 
-Internal column name for the unit name on the unit_conversion table.
+Internal column name for the unit identifier.
+
+Used in two places that happen to share the same default name:
+
+- On the ``unit_conversion`` table, as the key joined against
+  ``channel_mapping.source_unit`` / ``target_unit`` to look up a
+  conversion factor.
+- On the ``channel_metrics`` table (optional), as the authoritative
+  physical unit of a channel.  When present, takes precedence over
+  ``channel_mapping.source_unit`` for aliased reads via the
+  :meth:`KeyValueStoreSolver.filter_aliased_channel_metrics`
+  coalesce.
+
+Users with different internal names per table can rename physical
+columns to ``unit`` on each table independently via the per-table
+``column_name_mapping``.
 
 
 #### group\_id\_col

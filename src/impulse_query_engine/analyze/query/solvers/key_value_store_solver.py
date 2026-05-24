@@ -365,6 +365,16 @@ class KeyValueStoreSolver(QuerySolver):
         per-table ``channel_mapping.filters``, and finally joins with
         channel_metrics to resolve aliases.
 
+        When the database is configured with a ``unit_conversion_table`` and
+        the ``channel_mapping`` table carries ``source_unit`` / ``target_unit``
+        columns, this method also propagates the effective unit pair on each
+        resolved row.  The effective ``source_unit`` is computed as
+        ``COALESCE(channel_metrics.unit, channel_mapping.source_unit)`` so
+        that the authoritative per-channel physical unit on
+        ``channel_metrics`` takes precedence over the mapping-level default
+        when present.  ``target_unit`` is always taken from the mapping —
+        there is no analogous column on ``channel_metrics``.
+
         Parameters
         ----------
         spark : SparkSession
@@ -380,7 +390,9 @@ class KeyValueStoreSolver(QuerySolver):
         -------
         pyspark.sql.DataFrame
             DataFrame with ``(container_id, channel_id, selector_ids)``
-            where ``selector_ids`` is an array column.
+            where ``selector_ids`` is an array column.  When unit conversion
+            is active (see above), also carries ``source_unit`` and
+            ``target_unit`` columns.
         """
         container_id_col = self.config.container_id_col
         channel_id_col = self.config.channel_id_col
@@ -418,20 +430,29 @@ class KeyValueStoreSolver(QuerySolver):
 
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
+        unit_col = self.config.unit_col
         has_unit_cols = (
             db.config.unit_conversion_table is not None
             and source_unit_col in resolved_mapping.columns
             and target_unit_col in resolved_mapping.columns
         )
+        metrics_has_unit = unit_col in channel_metrics.columns
 
         # Mapping-side projection: one aliased copy per mapping_col plus the
-        # alias / priority columns (and the optional unit columns).
+        # alias / priority columns (and the optional unit columns, aliased
+        # with the ``_map_`` prefix so we can coalesce the source unit with
+        # ``channel_metrics.unit`` after the join).
         mapping_select_cols = [
             F.col(mapping_col).alias(f"_map_{mapping_col}") for mapping_col, _ in join_keys
         ]
         mapping_select_cols.extend([F.col(channel_alias_col), F.col(alias_priority_col)])
         if has_unit_cols:
-            mapping_select_cols.extend([F.col(source_unit_col), F.col(target_unit_col)])
+            mapping_select_cols.extend(
+                [
+                    F.col(source_unit_col).alias("_map_source_unit"),
+                    F.col(target_unit_col).alias("_map_target_unit"),
+                ]
+            )
 
         resolved = channel_metrics.join(
             resolved_mapping.select(*mapping_select_cols),
@@ -441,6 +462,22 @@ class KeyValueStoreSolver(QuerySolver):
             ],
             how="inner",
         )
+
+        # Materialize the effective source_unit / target_unit. The source unit
+        # comes from ``channel_metrics.unit`` when present (authoritative
+        # physical unit of the channel) and falls back to the mapping
+        # ``source_unit`` otherwise.  The target unit is always taken from
+        # the mapping — there is no per-channel "target" on
+        # ``channel_metrics``; the target is a user choice on the alias.
+        if has_unit_cols:
+            if metrics_has_unit:
+                resolved = resolved.withColumn(
+                    source_unit_col,
+                    F.coalesce(channel_metrics[unit_col], F.col("_map_source_unit")),
+                )
+            else:
+                resolved = resolved.withColumn(source_unit_col, F.col("_map_source_unit"))
+            resolved = resolved.withColumn(target_unit_col, F.col("_map_target_unit"))
 
         dedup_window = Window.partitionBy(container_id_col, channel_alias_col).orderBy(
             F.col(alias_priority_col).asc_nulls_last()

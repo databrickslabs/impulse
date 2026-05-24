@@ -351,7 +351,7 @@ def unit_conversion_dataframes(spark):
     container_tags_path = f"{base_path}/tests/unit/data/key_value_store_csv/container_metrics.csv"
     container_metric_path = f"{base_path}/tests/unit/data/basic_narrow_csv/container_metrics.csv"
     channel_metric_path = (
-        f"{base_path}/tests/unit/data/key_value_store_alias_csv/channel_metrics.csv"
+        f"{base_path}/tests/unit/data/key_value_store_unit_conversion_csv/channel_metrics.csv"
     )
     channels_path = f"{base_path}/tests/unit/data/basic_narrow_csv/channel_data.csv"
     channel_mapping_path = (

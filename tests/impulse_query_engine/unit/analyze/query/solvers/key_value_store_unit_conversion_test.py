@@ -61,16 +61,21 @@ class TestUnitConversionSolve:
         assert pdf["container_id"].tolist() == [1, 2, 3]
 
         factor = 0.277778
-        # Containers 1 and 2 resolve vehicle_speed -> "Vehicle Speed Sensor" (channel 7).
+        # Containers 1 and 2 resolve vehicle_speed -> "Vehicle Speed Sensor" (channel 7);
+        # channel_metrics.unit == "km/h" matches channel_mapping.source_unit, so the
+        # coalesce yields "km/h" and values scale by ~0.277778 to reach m/s.
         for cid in (1, 2):
             expected = _expected_raw_values(channels_csv_path, cid, 7) * factor
             row = pdf.loc[pdf["container_id"] == cid].iloc[0]
             np.testing.assert_allclose(row.vehicle_speed.values, expected, rtol=1e-6)
 
-        # Container 3 resolves to channel 7 via Spd_Vhcl / ProjSpecREC_10Hz.
-        expected3 = _expected_raw_values(channels_csv_path, 3, 7) * factor
+        # Container 3 resolves to channel 7 via Spd_Vhcl / ProjSpecREC_10Hz. Its
+        # channel_metrics.unit is "m/s" (overrides channel_mapping.source_unit="km/h"
+        # via COALESCE), and target_unit is also "m/s", so the conversion factor is
+        # 1.0 and values are unchanged from raw.
+        expected3 = _expected_raw_values(channels_csv_path, 3, 7)
         row3 = pdf.loc[pdf["container_id"] == 3].iloc[0]
-        np.testing.assert_allclose(row3.vehicle_speed.values, expected3, rtol=1e-6)
+        np.testing.assert_allclose(row3.vehicle_speed.values, expected3, rtol=1e-12)
 
     def test_solve_no_conversion_when_same_unit(
         self,
@@ -219,6 +224,148 @@ class TestUnitConversionSolve:
             expected = _expected_raw_values(channels_csv_path, cid, 5)
             row = pdf.loc[pdf["container_id"] == cid].iloc[0]
             np.testing.assert_allclose(row.cross.values, expected, rtol=1e-12)
+
+
+class TestSourceUnitResolution:
+    """Effective source_unit = COALESCE(channel_metrics.unit, channel_mapping.source_unit)."""
+
+    def test_source_unit_from_channel_metrics_overrides_mapping(
+        self,
+        spark: SparkSession,
+        key_value_store_unit_conversion_db: MeasurementDB,
+        channels_csv_path: str,
+    ):
+        # Container 3's Spd_Vhcl row has channel_metrics.unit = "m/s" while the
+        # mapping's source_unit is "km/h".  Coalesce yields "m/s"; mapping's
+        # target_unit is also "m/s"; effective factor = 1.0 (no scaling).
+        solver = _solver(spark)
+        query = key_value_store_unit_conversion_db.query
+        vehicle_speed = query.channel_with_alias(channel_alias="vehicle_speed").alias(
+            "vehicle_speed"
+        )
+
+        pdf = query.select(vehicle_speed).toPandas(spark, solver=solver)
+        row3 = pdf.loc[pdf["container_id"] == 3].iloc[0]
+        expected = _expected_raw_values(channels_csv_path, 3, 7)
+        np.testing.assert_allclose(row3.vehicle_speed.values, expected, rtol=1e-12)
+
+    def test_source_unit_falls_back_to_mapping_when_metrics_unit_null(
+        self,
+        spark: SparkSession,
+        key_value_store_unit_conversion_db: MeasurementDB,
+        channels_csv_path: str,
+    ):
+        # Containers 1 and 2 have channel_metrics.unit = "km/h" (which equals
+        # the mapping's source_unit, so they coalesce identically). To
+        # exercise the null-fallback specifically, construct a custom
+        # channel_metrics where the unit cell is null for the row of interest
+        # — the coalesce must then return the mapping's source_unit.
+        from pyspark.sql import functions as F  # noqa: PLR0402  local import
+
+        # Replace the unit cell on (cid=1, ch=7) with null.
+        cm = key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"]
+        cm_null = cm.withColumn(
+            "unit",
+            F.when(
+                (F.col("container_id") == 1) & (F.col("channel_id") == 7),
+                F.lit(None).cast("string"),
+            ).otherwise(F.col("unit")),
+        )
+        key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm_null
+
+        try:
+            solver = _solver(spark)
+            query = key_value_store_unit_conversion_db.query
+            vehicle_speed = query.channel_with_alias(channel_alias="vehicle_speed").alias(
+                "vehicle_speed"
+            )
+            pdf = query.select(vehicle_speed).toPandas(spark, solver=solver)
+
+            # Container 1: unit null → fall back to mapping source_unit="km/h"
+            # → factor 0.277778.
+            expected = _expected_raw_values(channels_csv_path, 1, 7) * 0.277778
+            row1 = pdf.loc[pdf["container_id"] == 1].iloc[0]
+            np.testing.assert_allclose(row1.vehicle_speed.values, expected, rtol=1e-6)
+        finally:
+            # Restore the fixture so subsequent tests in this session see
+            # the original DataFrame.
+            key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm
+
+    def test_source_unit_falls_back_when_channel_metrics_lacks_unit_column(
+        self,
+        spark: SparkSession,
+        key_value_store_unit_conversion_db: MeasurementDB,
+        channels_csv_path: str,
+    ):
+        # Drop the `unit` column from channel_metrics entirely. The solver
+        # detects its absence (metrics_has_unit = False) and falls back to
+        # the mapping's source_unit directly.
+        cm = key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"]
+        cm_no_unit = cm.drop("unit")
+        key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm_no_unit
+
+        try:
+            solver = _solver(spark)
+            query = key_value_store_unit_conversion_db.query
+            vehicle_speed = query.channel_with_alias(channel_alias="vehicle_speed").alias(
+                "vehicle_speed"
+            )
+            pdf = query.select(vehicle_speed).toPandas(spark, solver=solver)
+
+            # All three containers: no unit column → mapping source_unit
+            # "km/h" wins → factor 0.277778.
+            for cid in (1, 2, 3):
+                expected = _expected_raw_values(channels_csv_path, cid, 7) * 0.277778
+                row = pdf.loc[pdf["container_id"] == cid].iloc[0]
+                np.testing.assert_allclose(row.vehicle_speed.values, expected, rtol=1e-6)
+        finally:
+            key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm
+
+    def test_channel_metrics_unit_col_is_configurable(
+        self,
+        spark: SparkSession,
+        key_value_store_unit_conversion_db: MeasurementDB,
+        channels_csv_path: str,
+    ):
+        # Rename the physical `unit` column to `phys_unit` on channel_metrics,
+        # then point the solver at it via channel_metrics.column_name_mapping.
+        # The configurable unit_col property (default "unit") is what the
+        # solver references; rename brings the physical name to the internal
+        # name.
+        cm = key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"]
+        cm_renamed = cm.withColumnRenamed("unit", "phys_unit")
+        key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm_renamed
+
+        try:
+            solver = KeyValueStoreSolver(
+                spark,
+                config=SolverConfig(
+                    project_id="SAMPLE_PROJECT",
+                    container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+                    channel_metrics=TableConfig(column_name_mapping={"phys_unit": "unit"}),
+                    channel_mapping=ChannelMappingConfig(
+                        filters={"toolbox_id": "container_concept"}
+                    ),
+                ),
+            )
+            query = key_value_store_unit_conversion_db.query
+            vehicle_speed = query.channel_with_alias(channel_alias="vehicle_speed").alias(
+                "vehicle_speed"
+            )
+            pdf = query.select(vehicle_speed).toPandas(spark, solver=solver)
+
+            # Renamed column carries through: container 3 still resolves to
+            # m/s (no scaling); containers 1/2 still scale by 0.277778.
+            expected3 = _expected_raw_values(channels_csv_path, 3, 7)
+            row3 = pdf.loc[pdf["container_id"] == 3].iloc[0]
+            np.testing.assert_allclose(row3.vehicle_speed.values, expected3, rtol=1e-12)
+
+            for cid in (1, 2):
+                expected = _expected_raw_values(channels_csv_path, cid, 7) * 0.277778
+                row = pdf.loc[pdf["container_id"] == cid].iloc[0]
+                np.testing.assert_allclose(row.vehicle_speed.values, expected, rtol=1e-6)
+        finally:
+            key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm
 
 
 class TestComputeConversionFactors:
