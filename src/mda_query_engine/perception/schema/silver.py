@@ -1,8 +1,4 @@
-"""Silver-layer schemas for LakeVision perception extension.
-
-Implements ADR-4 (perception_data_model.md): perception_channels as parallel Silver
-table for media files (camera frames, LiDAR scans, other binary payloads in UC Volumes).
-"""
+"""Silver-layer schemas for the mda_query_engine perception extension."""
 
 import pyspark.sql.types as T
 

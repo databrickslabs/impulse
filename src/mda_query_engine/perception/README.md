@@ -1,68 +1,79 @@
-# LakeVision — Perception Extension for Impulse
+# Perception — Object-Track Querying for Impulse
 
-LakeVision adds perception-data primitives on top of Impulse core (TSAL + signal ingest),
-giving programs working with multi-modal sensor data (LiDAR, camera, radar, annotations)
-a complete governed platform.
+This package extends Impulse core with object-track-based scenario search.
+It adds a TSAL authoring surface over the `object_tracks` table, a solver
+that cogroups scalar channels with per-object data, and the event and schema
+types needed to find, window, and record perception-level scenarios.
 
-> **1. How it works:** `[docs/01_how_it_works.md](docs/01_how_it_works.md)` — end-to-end walkthrough of every LakeVision table with example data, the problems each one solves, and the supported event vocabulary. Start here if you're new to the package or evaluating it for a customer engagement.
+> **How it works:** [`docs/01_how_it_works.md`](docs/01_how_it_works.md) —
+> the data model, the event vocabulary, and how `PerceptionEvent` and
+> `PerceptionSolver` work together. Start here.
 >
-> **2. Building a BYOD adapter:** `[docs/02_building_an_adapter.md](docs/02_building_an_adapter.md)` — what it takes to bring your own data into the platform, which of the four reference adapters (NuScenes, A2D2, PandaSet, mdf4_sample) to copy as a baseline for your scenario, and the common challenges to expect (coordinate frames, timestamp alignment, channel ID allocation).
+> **Authoring events:** [`docs/03_authoring_events.md`](docs/03_authoring_events.md) —
+> how to write `PerceptionEvent` predicates against your data, compose them
+> with `BasicEvent` scalar conditions, and use `SequenceOfEvents` with
+> perception inputs.
 >
-> **3. Authoring events for your data:** `[docs/03_authoring_events.md](docs/03_authoring_events.md)` — how to write `BasicEvent`, `ContainerEvent`, `SequenceOfEvents`, and `PerceptionEvent` predicates against your data. Production patterns (registered derived channels) and exploration patterns (`perception_signal(...)`), layered composition (events of events), and version pinning for regulatory reproducibility.
->
-> **4. Roadmap:** `[docs/04_roadmap.md](docs/04_roadmap.md)` — what is planned beyond the shipped demo, in what order, and why. Covers the `PerceptionEvent` and `derived_channels` centerpiece, solver routing, the labelling-infrastructure motivation, and the full sequence of planned capabilities.
+> **Roadmap:** [`docs/04_roadmap.md`](docs/04_roadmap.md) — what is planned
+> beyond the shipped capabilities and why.
 
-## Python package
-
-LakeVision ships as `src/mda_query_engine/perception/` — a Python package following the same conventions
-as Impulse core (`mda_query_engine`, `mda_reporting`).
+## Quick start
 
 ```python
-from lakevision import PerceptionDB, PerceptionDBConfig
+from mda_query_engine.perception.perception_db import PerceptionDB, PerceptionDBConfig
+from mda_query_engine.perception.events.perception_event import PerceptionEvent
 
 cfg = PerceptionDBConfig.for_unity_catalog("my_catalog")
 db  = PerceptionDB(cfg)
 
-object_tracks    = db.object_tracks(spark)
-frame_embeddings = db.frame_embeddings(spark)
+ot = db.query.object_track   # ObjectTrackAccessor proxy
+
+cyclist_approaching = PerceptionEvent(
+    name="cyclist_front_left_approaching",
+    expr=(ot.detection_class("cyclist"))
+         & (ot.azimuth("front_left"))
+         & (ot.relative_velocity_ms < -3.0),
+    desc="Cyclist approaching from the front-left at >3 m/s closing speed",
+)
+report.add_event(cyclist_approaching)
+report.run()
 ```
 
 ## Modules
 
-
-| Module                 | Provides                                                                                                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `geometry`             | 3D quaternion / rotation helpers, box-corner generation, point-to-image projection                                                                                 |
-| `windowing`            | Event-window filtering shared across adapters                                                                                                                      |
-| `openlabel`            | OpenLABEL exchange-format builders                                                                                                                                 |
-| `perception_db`        | `PerceptionDB` accessor for perception tables (`object_tracks`, `frame_embeddings`, `perception_channels`, `playlist_items`, and the per-sensor annotation tables) |
-| `object_tracks_config` | Per-adapter `ObjectTracksConfig` schemas                                                                                                                           |
-| `playlists`            | `event_fact_to_playlist_items` helper for building named, versioned playlists from `event_instance_fact` rows                                                      |
-| `scalar_metrics`       | `derive_channel_metrics_from_channels` helper for computing per-channel scalar metrics                                                                             |
-| `schema/`              | Spark `StructType` definitions for the silver tables and the per-sensor annotation tables                                                                          |
-
+| Module                 | Provides                                                                                                    |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `perception_db`        | `PerceptionDB` + `PerceptionDBConfig` — accessor for `object_tracks`, `perception_channels`, `perception_event_instance_objects` |
+| `object_tracks_config` | `ObjectTracksConfig` — controls full-stride vs TSAL-gated downsampling at ingest                            |
+| `schema/`              | Spark `StructType` definitions: `OBJECT_TRACKS`, `PERCEPTION_EVENT_INSTANCE_OBJECTS`, `PERCEPTION_CHANNELS` |
+| `tsal/`                | `ObjectTrackAccessor`, `PerceptionSelector`, `PerceptionCache` — predicate authoring surface                |
+| `events/`              | `PerceptionEvent` — event class over `object_tracks`, including `track_scope=True` per-object windowing     |
+| `query/`               | `PerceptionSolver` — cogroup-based solver that delivers `object_tracks` to the per-container UDF            |
 
 ## Design principles
 
-- **TSAL finds the event. Annotation tables explain it.**
-Do not put geometric annotations into `channels`; do not run scenario search over annotation tables.
-- **Pixel values are never stored in Delta binary columns.**
-Raw video/frames land in UC Volumes; `perception_channels` holds file-path pointers.
+- **TSAL finds the event.** Do not run scenario search over raw geometry
+  tables. Author predicates over `object_tracks` using `ObjectTrackAccessor`
+  and let the solver evaluate them at query time.
+- **Binary media is never stored in Delta columns.** Raw frames and point
+  clouds live in Unity Catalog Volumes; `perception_channels` holds file-path
+  pointers and is the join key for frame-level work.
 - **Ingest at native fidelity; downsample at materialisation time per workload.**
-- **OpenLABEL and OpenSCENARIO are exchange formats, not storage formats.**
-- **Build annotation tables only when a downstream consumer is scoped.**
-
+  `ObjectTracksConfig` offers full-stride (default) and TSAL-gated modes.
+  Choose based on whether you need discovery flexibility or storage efficiency.
 ## Relationship to Impulse core
 
 ```
 Impulse core (src/mda_query_engine, src/mda_reporting)
   └── provides: channels, channel_tags, container_tags, TSAL, event_instance_fact
 
-LakeVision (src/mda_query_engine/perception/)
-  └── requires: Impulse core (container_id, TSAL events)
-  └── adds: perception_channels, object_tracks, frame_embeddings, playlist_items,
-             annotation tables (camera_object_detections, lidar_object_detections,
-             radar_object_detections, lane_markings, free_space, predicted_trajectories)
+Perception (src/mda_query_engine/perception/)
+  └── requires: Impulse core (container_id, TSAL events, event_instance_fact)
+  └── adds: object_tracks, perception_channels,
+             perception_event_instance_objects,
+             ObjectTrackAccessor, PerceptionEvent, PerceptionSolver
 ```
 
 `PerceptionDB` sits alongside `MeasurementDB` — it does not replace it.
+For recordings that also have scalar channels, the two accessors share the
+same `container_id` namespace and the same `event_instance_fact` output.

@@ -125,6 +125,7 @@ class TestPerceptionSelectorChannelStub:
         # would destroy the shared session and break downstream tests.
         configure_spark_with_delta_pip(
             SparkSession.builder.master("local[1]")
+            .config("spark.driver.host", "localhost")
         ).getOrCreate()
         sel = PerceptionSelector("detection_class", "eq", "cyclist")
         expr = sel.get_selector_expr()

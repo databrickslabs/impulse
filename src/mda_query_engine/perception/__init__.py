@@ -5,13 +5,11 @@ from mda_query_engine.perception.perception_db import (
     PerceptionDBConfig,
     frame_nearest_to,
 )
-from mda_query_engine.perception.scalar_metrics import derive_channel_metrics_from_channels
 
 __all__ = [
     "ObjectTracksConfig",
     "PerceptionDB",
     "PerceptionDBConfig",
     "PerceptionNotConfigured",
-    "derive_channel_metrics_from_channels",
     "frame_nearest_to",
 ]

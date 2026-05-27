@@ -1,13 +1,4 @@
-from mda_query_engine.perception.schema.annotation import (
-    CAMERA_OBJECT_DETECTIONS,
-    FREE_SPACE,
-    LANE_MARKINGS,
-    LIDAR_OBJECT_DETECTIONS,
-    PREDICTED_TRAJECTORIES,
-    RADAR_OBJECT_DETECTIONS,
-)
 from mda_query_engine.perception.schema.scenario import (
-    FRAME_EMBEDDINGS,
     OBJECT_TRACKS,
     PERCEPTION_EVENT_INSTANCE_OBJECTS,
 )
@@ -16,12 +7,5 @@ from mda_query_engine.perception.schema.silver import PERCEPTION_CHANNELS
 __all__ = [
     "PERCEPTION_CHANNELS",
     "OBJECT_TRACKS",
-    "FRAME_EMBEDDINGS",
     "PERCEPTION_EVENT_INSTANCE_OBJECTS",
-    "CAMERA_OBJECT_DETECTIONS",
-    "LIDAR_OBJECT_DETECTIONS",
-    "RADAR_OBJECT_DETECTIONS",
-    "LANE_MARKINGS",
-    "FREE_SPACE",
-    "PREDICTED_TRAJECTORIES",
 ]

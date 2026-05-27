@@ -1,7 +1,7 @@
-"""Schema smoke tests for LakeVision tables.
+"""Schema smoke tests for mda_query_engine.perception tables.
 
-Verifies that every schema can be used to create an empty DataFrame and that
-key field names and types match the ADR specifications.
+Verifies that each schema can be used to create an empty DataFrame and that
+key field names and types are correct.
 """
 
 import pytest
@@ -44,51 +44,15 @@ class TestScenarioSchemas:
         # Both must be LongType (microseconds) so joins on frame_ts = channels.tstart are safe.
         assert isinstance(_field(S.OBJECT_TRACKS, "frame_ts").dataType, T.LongType)
 
-    def test_frame_embeddings_has_required_fields(self):
-        # Per the 2026-05-20 ADR-8 clarification, embeddings are per-frame
-        # (not per-event-window). Scene-level similarity is computed at query
-        # time by averaging frame vectors within a time range.
-        required = {
-            "container_id",
-            "channel_id",
-            "frame_ts",
-            "embedding_type",
-            "embedding",
-            "model_version",
-        }
-        assert required <= {f.name for f in S.FRAME_EMBEDDINGS}
+    def test_perception_event_instance_objects_has_required_fields(self):
+        required = {"container_id", "event_id", "event_instance_id", "object_id"}
+        assert required <= {f.name for f in S.PERCEPTION_EVENT_INSTANCE_OBJECTS}
 
-    def test_frame_embeddings_embedding_is_float_array(self):
-        field = _field(S.FRAME_EMBEDDINGS, "embedding")
-        assert isinstance(field.dataType, T.ArrayType)
-        assert isinstance(field.dataType.elementType, T.FloatType)
-
-
-class TestAnnotationSchemas:
-    def test_camera_object_detections_bbox_columns(self):
-        bbox_cols = {"x1", "y1", "x2", "y2"}
-        assert bbox_cols <= {f.name for f in S.CAMERA_OBJECT_DETECTIONS}
-
-    def test_lidar_object_detections_cuboid_columns(self):
-        cuboid_cols = {"cx", "cy", "cz", "length", "width", "height", "yaw_rad"}
-        assert cuboid_cols <= {f.name for f in S.LIDAR_OBJECT_DETECTIONS}
-
-    def test_radar_object_detections_polar_columns(self):
-        polar_cols = {"range_m", "azimuth_rad", "radial_velocity_ms"}
-        assert polar_cols <= {f.name for f in S.RADAR_OBJECT_DETECTIONS}
-
-    def test_free_space_boundary_pts_is_array_of_structs(self):
-        field = _field(S.FREE_SPACE, "boundary_pts")
-        assert isinstance(field.dataType, T.ArrayType)
-        assert isinstance(field.dataType.elementType, T.StructType)
-        pt_fields = {f.name for f in field.dataType.elementType}
-        assert {"x", "y"} <= pt_fields
-
-    def test_predicted_trajectories_waypoints_has_time_dimension(self):
-        field = _field(S.PREDICTED_TRAJECTORIES, "waypoints")
-        assert isinstance(field.dataType, T.ArrayType)
-        wp_fields = {f.name for f in field.dataType.elementType}
-        assert {"x", "y", "z", "t"} <= wp_fields
+    def test_perception_event_instance_objects_all_long(self):
+        for field_name in ("container_id", "event_id", "event_instance_id", "object_id"):
+            assert isinstance(
+                _field(S.PERCEPTION_EVENT_INSTANCE_OBJECTS, field_name).dataType, T.LongType
+            )
 
 
 class TestObjectTracksConfig:

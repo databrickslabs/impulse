@@ -142,17 +142,8 @@ class MeasurementDB:
     def object_tracks(self, spark) -> DataFrame:
         return self._require_perception().object_tracks(spark)
 
-    def frame_embeddings(self, spark) -> DataFrame:
-        return self._require_perception().frame_embeddings(spark)
-
     def perception_channels(self, spark) -> DataFrame:
         return self._require_perception().perception_channels(spark)
-
-    def channel_value_labels(self, spark) -> DataFrame:
-        return self._require_perception().channel_value_labels(spark)
-
-    def playlist_items(self, spark) -> DataFrame:
-        return self._require_perception().playlist_items(spark)
 
     def perception_event_instance_objects(self, spark) -> DataFrame:
         return self._require_perception().perception_event_instance_objects(spark)

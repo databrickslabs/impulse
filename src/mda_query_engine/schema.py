@@ -29,18 +29,6 @@ CHANNEL_TAGS = T.StructType(
     ]
 )
 
-# Static reference table mapping ordinal channel integer values to human-readable labels.
-# Single source of truth for label decoding (TSAL constants, SQL joins, UC tag application).
-# Static per channel definition; not written per recording.
-# Join on (channel_id, numeric_value) to decode any ordinal channel in SQL.
-CHANNEL_VALUE_LABELS = T.StructType(
-    [
-        T.StructField("channel_id", T.LongType(), nullable=False),
-        T.StructField("numeric_value", T.DoubleType(), nullable=False),
-        T.StructField("label", T.StringType(), nullable=False),
-    ]
-)
-
 CHANNEL_METRICS = T.StructType(
     [
         T.StructField("container_id", T.LongType(), nullable=False),
