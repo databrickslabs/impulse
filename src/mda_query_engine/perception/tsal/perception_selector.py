@@ -1,15 +1,15 @@
 """PerceptionSelector: a TimeSeriesSelector leaf whose ``build(cache)``
 reads ``object_tracks`` rows from the per-container cache instead of
 ``channels``, applies a row-level predicate, and returns ``Intervals``
-that compose with scalar predicates via ``& | ~``.
+that compose with scalar predicates via ``&`` and ``|``.
 
 The cache passed in is ``PerceptionCache`` — a ``KVSTimeSeriesCache``
-extension that also carries an ``object_tracks_pdf`` and the
-``container_bounds`` needed to make ``~ot.X`` well-defined.
+extension that also carries an ``object_tracks_pdf``.
 """
 
 from __future__ import annotations
 
+import zlib
 from typing import Any
 
 import numpy as np
@@ -108,9 +108,7 @@ class PerceptionCache(KVSTimeSeriesCache):
 
     The channel side of the cache is exactly the ``KVSTimeSeriesCache`` shape
     used by ``KeyValueStoreSolver._solve_udf``. The perception side adds
-    ``object_tracks_pdf`` (per-frame per-object rows for this container) and
-    ``container_bounds`` (``(t_min, t_max)``) so that ``Intervals.__invert__``
-    has a well-defined complement window.
+    ``object_tracks_pdf`` (per-frame per-object rows for this container).
     """
 
     def __init__(
@@ -118,11 +116,9 @@ class PerceptionCache(KVSTimeSeriesCache):
         channels_pdf: pd.DataFrame,
         col_map: dict[str, str],
         object_tracks_pdf: pd.DataFrame,
-        container_bounds: tuple[float, float],
     ):
         super().__init__(channels_pdf, col_map)
         self.object_tracks_pdf = object_tracks_pdf
-        self.container_bounds = container_bounds
 
 
 class PerceptionSelector(TimeSeriesSelector):
@@ -171,6 +167,14 @@ class PerceptionSelector(TimeSeriesSelector):
     def track_scope(self) -> bool:
         return self._track_scope
 
+    @property
+    def selector_id(self) -> int:
+        # Include track_scope so selectors with same predicate but different
+        # track_scope are not deduplicated against each other.
+        return zlib.crc32(
+            repr((self._column, self._op, self._value, self._track_scope)).encode()
+        )
+
     def dtype(self):
         return T.ArrayType(T.ArrayType(T.DoubleType()))
 
@@ -179,7 +183,7 @@ class PerceptionSelector(TimeSeriesSelector):
             return Intervals.empty()
         otp = cache.object_tracks_pdf
         if otp is None or len(otp) == 0:
-            return Intervals(np.array([]), np.array([]), bounds=cache.container_bounds)
+            return Intervals.empty()
 
         # Sort the whole track table first so the "next frame in this object_id"
         # is computed before predicate masking. A row whose predicate matches
@@ -205,7 +209,7 @@ class PerceptionSelector(TimeSeriesSelector):
             mask = mask.fillna(False)
 
         if not mask.any():
-            return Intervals(np.array([]), np.array([]), bounds=cache.container_bounds)
+            return Intervals.empty()
 
         tstarts = otp.loc[mask, "frame_ts"].to_numpy(dtype=np.float64)
         # For the last frame of an object_id with no successor, fall back to
@@ -215,11 +219,7 @@ class PerceptionSelector(TimeSeriesSelector):
         tends = np.where(np.isnan(next_ts_arr), tail, next_ts_arr)
 
         merged_starts, merged_ends = _merge_overlapping_intervals(tstarts, tends)
-        return Intervals(
-            merged_starts,
-            merged_ends,
-            bounds=cache.container_bounds,
-        )
+        return Intervals(merged_starts, merged_ends)
 
     def get_selector_expr(self):
         return F.lit(False)

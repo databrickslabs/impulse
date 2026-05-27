@@ -67,7 +67,6 @@ def _two_object_cache():
         channels_pdf=_empty_channels_pdf(),
         col_map=COL_MAP,
         object_tracks_pdf=_two_object_otp(),
-        container_bounds=(0.0, 1000.0),
     )
 
 
@@ -152,7 +151,6 @@ class TestBuildRespectsCachePartitioning:
             channels_pdf=_empty_channels_pdf(),
             col_map=COL_MAP,
             object_tracks_pdf=otp_single,
-            container_bounds=(0.0, 1000.0),
         )
         result = (
             ot_scoped.detection_class("cyclist").alias("c").build(single_cache)

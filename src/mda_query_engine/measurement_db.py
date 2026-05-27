@@ -94,7 +94,13 @@ class MeasurementDB:
         if self.config.table_locations == "unity_catalog":
             return spark.read.table(table_name)
         elif self.config.table_locations == "debug":
-            return self.config.debug_tables[table_name]
+            tbl = self.config.debug_tables.get(table_name)
+            if tbl is None:
+                raise KeyError(
+                    f"Table {table_name!r} not found in debug_tables. "
+                    f"Available keys: {sorted(self.config.debug_tables)}"
+                )
+            return tbl
         return spark.read.format("delta").load(table_name)
 
     def container_tags(self, spark) -> DataFrame:
@@ -181,12 +187,7 @@ class MeasurementDB:
                 "MeasurementDB.event_instance_fact requires "
                 "event_instance_fact_table to be configured."
             )
-        if self.config.table_locations == "debug":
-            fact_df = self.config.debug_tables[self._event_instance_fact_table]
-        elif self.config.table_locations == "unity_catalog":
-            fact_df = spark.read.table(self._event_instance_fact_table)
-        else:
-            fact_df = spark.read.format("delta").load(self._event_instance_fact_table)
+        fact_df = self._read_table(spark, self._event_instance_fact_table)
         side_car_df = self.perception_event_instance_objects(spark)
         return fact_df.join(
             side_car_df,

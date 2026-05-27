@@ -174,48 +174,18 @@ class QueryBuilder:
         self.selections = list(args)
         return self
 
-    def _collect_time_series_selectors(self, uses_alias=None) -> list[TimeSeriesSelector]:
-        """Collect deduplicated leaf selectors from this query's selections.
+    def _collect_selectors(self, *, perception: bool, uses_alias=None) -> list:
+        """Return deduplicated leaf selectors across all selections.
 
         Parameters
         ----------
+        perception : bool
+            When ``True``, return only ``PerceptionSelector`` leaves.
+            When ``False``, return all other ``TimeSeriesSelector`` leaves
+            (the channel-side pipeline).
         uses_alias : bool or None, optional
-            When ``True``, keep only alias selectors; when ``False``, keep
-            only direct selectors; when ``None`` (default), keep all.
-
-        Returns
-        -------
-        list of TimeSeriesSelector
-            Deduplicated selectors in discovery order. ``PerceptionSelector``
-            leaves are excluded — they short-circuit the channel-side filter
-            pipeline (their ``get_selector_expr()`` returns ``F.lit(False)``)
-            and are routed to ``PerceptionSolver`` via
-            ``_collect_perception_selectors``.
+            Channel-side only. When ``True``/``False``, filter by alias flag.
         """
-        from mda_query_engine.perception.tsal.perception_selector import (
-            PerceptionSelector,
-        )
-
-        selectors = []
-        seen_selector_ids = set()
-        for expression in self.selections:
-            if not isinstance(expression, TimeSeriesExpression):
-                continue
-            for selector in expression.get_selectors():
-                if isinstance(selector, PerceptionSelector):
-                    continue
-                if uses_alias is not None and selector.uses_alias != uses_alias:
-                    continue
-                if selector.selector_id in seen_selector_ids:
-                    continue
-                seen_selector_ids.add(selector.selector_id)
-                selectors.append(selector)
-        return selectors
-
-    def _collect_perception_selectors(self) -> list:
-        """Return the deduplicated ``PerceptionSelector`` leaves across all
-        selections, in discovery order. Empty when no perception leaves are
-        present."""
         from mda_query_engine.perception.tsal.perception_selector import (
             PerceptionSelector,
         )
@@ -226,7 +196,10 @@ class QueryBuilder:
             if not isinstance(expression, TimeSeriesExpression):
                 continue
             for selector in expression.get_selectors():
-                if not isinstance(selector, PerceptionSelector):
+                is_perception_sel = isinstance(selector, PerceptionSelector)
+                if perception != is_perception_sel:
+                    continue
+                if not perception and uses_alias is not None and selector.uses_alias != uses_alias:
                     continue
                 if selector.selector_id in seen:
                     continue
@@ -234,8 +207,21 @@ class QueryBuilder:
                 selectors.append(selector)
         return selectors
 
-    def has_perception(self) -> bool:
-        """True iff any selection contains a ``PerceptionSelector`` leaf."""
+    def _collect_time_series_selectors(self, uses_alias=None) -> list[TimeSeriesSelector]:
+        """Channel-side selectors — ``PerceptionSelector`` leaves excluded."""
+        return self._collect_selectors(perception=False, uses_alias=uses_alias)
+
+    def _collect_perception_selectors(self) -> list:
+        """Perception-side selectors only."""
+        return self._collect_selectors(perception=True)
+
+    def has_perception_selectors(self) -> bool:
+        """True iff any selection contains a ``PerceptionSelector`` leaf.
+
+        Named ``has_perception_selectors`` (not ``has_perception``) to avoid
+        shadowing the ``MeasurementDB.has_perception`` property, which checks
+        whether the DB was configured with perception support at all.
+        """
         return len(self._collect_perception_selectors()) > 0
 
     @property

@@ -79,11 +79,6 @@ class TestPredicateComposition:
         assert isinstance(compound, TimeSeriesOp)
         assert compound.operation is operator.or_
 
-    def test_invert_builds_time_series_op_with_operator_invert(self, ot):
-        compound = ~ot.detection_class("cyclist")
-        assert isinstance(compound, TimeSeriesOp)
-        assert compound.operation is operator.invert
-
     def test_compound_predicate_collects_both_perception_leaves(self, ot):
         compound = ot.detection_class("cyclist") & ot.azimuth("front_left")
         leaves = compound.get_selectors()

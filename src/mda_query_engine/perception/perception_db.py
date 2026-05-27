@@ -172,15 +172,21 @@ def frame_nearest_to(
     container_id: int,
     channel_id: int,
     target_ts: int,
+    *,
+    df=None,
 ) -> Row:
     """Return the `perception_channels` row whose `timestamp` is closest to
     `target_ts` for the given `(container_id, channel_id)`.
 
     Used to pick the camera frame or LiDAR scan nearest to an event's midpoint
     when rendering a visualization.
+
+    Pass ``df=`` to supply a pre-read DataFrame instead of reading the table
+    from the catalog (useful in tests and notebook exploration).
     """
+    source = df if df is not None else spark.read.table(perception_channels_table)
     return (
-        spark.read.table(perception_channels_table)
+        source
         .filter((F.col("container_id") == container_id) & (F.col("channel_id") == channel_id))
         .withColumn("dt", F.abs(F.col("timestamp") - target_ts))
         .orderBy("dt")

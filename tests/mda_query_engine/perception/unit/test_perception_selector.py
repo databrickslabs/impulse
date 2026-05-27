@@ -17,7 +17,7 @@ from mda_query_engine.perception.tsal.perception_selector import (
 )
 
 
-def _make_cache(rows, container_bounds=(0.0, 1000.0)):
+def _make_cache(rows):
     pdf = pd.DataFrame(rows)
     channels_pdf = pd.DataFrame(
         {
@@ -39,7 +39,6 @@ def _make_cache(rows, container_bounds=(0.0, 1000.0)):
         channels_pdf=channels_pdf,
         col_map=col_map,
         object_tracks_pdf=pdf,
-        container_bounds=container_bounds,
     )
 
 
@@ -50,8 +49,7 @@ class TestPerceptionSelectorBuild:
                 {"container_id": 1, "object_id": 10, "frame_ts": 100.0, "detection_class": "cyclist"},
                 {"container_id": 1, "object_id": 10, "frame_ts": 200.0, "detection_class": "cyclist"},
                 {"container_id": 1, "object_id": 11, "frame_ts": 100.0, "detection_class": "car"},
-            ],
-            container_bounds=(0.0, 1000.0),
+            ]
         )
         sel = PerceptionSelector("detection_class", "eq", "cyclist")
         result = sel.build(cache)
@@ -111,21 +109,28 @@ class TestPerceptionSelectorChannelStub:
         # accidentally matching a channel_metrics row. Verify it constructs
         # without error when called with an active SparkContext (the only
         # context in which get_selector_expr is invoked in production).
+        #
+        # Uses configure_spark_with_delta_pip so the JVM is initialized with
+        # the Delta catalog jars — required when this test module runs before
+        # any Spark-dependent tests that share the same JVM process.
         import pytest
 
-        pyspark = pytest.importorskip("pyspark")
+        pytest.importorskip("pyspark")
+        from delta import configure_spark_with_delta_pip
         from pyspark.sql import SparkSession
         from pyspark.sql.column import Column
 
-        spark = SparkSession.builder.master("local[1]").getOrCreate()
-        try:
-            sel = PerceptionSelector("detection_class", "eq", "cyclist")
-            expr = sel.get_selector_expr()
-            assert isinstance(expr, Column)
-            # The expression renders as a boolean literal — no column name appears
-            assert "false" in str(expr).lower() or "literal" in str(expr).lower()
-        finally:
-            spark.stop()
+        # getOrCreate() reuses any existing session (e.g. the root conftest's
+        # session-scoped spark), so we must not call spark.stop() here — that
+        # would destroy the shared session and break downstream tests.
+        configure_spark_with_delta_pip(
+            SparkSession.builder.master("local[1]")
+        ).getOrCreate()
+        sel = PerceptionSelector("detection_class", "eq", "cyclist")
+        expr = sel.get_selector_expr()
+        assert isinstance(expr, Column)
+        # The expression renders as a boolean literal — no column name appears
+        assert "false" in str(expr).lower() or "literal" in str(expr).lower()
 
     def test_required_tags_is_empty(self):
         sel = PerceptionSelector("detection_class", "eq", "cyclist")

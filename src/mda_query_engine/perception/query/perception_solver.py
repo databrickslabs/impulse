@@ -46,24 +46,6 @@ class PerceptionSolver(KeyValueStoreSolver):
     """
 
     @staticmethod
-    def _container_bounds(
-        channels_pdf: pd.DataFrame,
-        object_tracks_pdf: pd.DataFrame,
-        ts_col: str,
-        te_col: str,
-    ) -> tuple[float, float]:
-        candidates: list[float] = []
-        if len(channels_pdf) > 0:
-            candidates.append(float(channels_pdf[ts_col].min()))
-            candidates.append(float(channels_pdf[te_col].max()))
-        if len(object_tracks_pdf) > 0:
-            candidates.append(float(object_tracks_pdf["frame_ts"].min()))
-            candidates.append(float(object_tracks_pdf["frame_ts"].max()))
-        if not candidates:
-            return (0.0, 0.0)
-        return (min(candidates), max(candidates))
-
-    @staticmethod
     def _serialize_intervals(res) -> list:
         if hasattr(res, "serialize") and callable(res.serialize):
             return res.serialize()
@@ -88,9 +70,6 @@ class PerceptionSolver(KeyValueStoreSolver):
         else:
             return pd.DataFrame()
 
-        bounds = PerceptionSolver._container_bounds(
-            channels_pdf, object_tracks_pdf, ts_col, te_col
-        )
         # ``KVSTimeSeriesCache`` requires non-empty channels_pdf to drop value/ts/te
         # columns. When channels_pdf is empty (perception-only run), synthesize a
         # zero-row pdf with the right columns so the cache builds without error.
@@ -109,13 +88,14 @@ class PerceptionSolver(KeyValueStoreSolver):
             channels_pdf=channels_pdf,
             col_map=col_map,
             object_tracks_pdf=object_tracks_pdf,
-            container_bounds=bounds,
         )
 
-        # Build the per-object cache list up-front. Only used by track-scoped
-        # selections, but cheap to skip if none are present.
+        needs_track_scope = any(is_track_scoped(s) for s in selections)
+
+        # Build the per-object cache list only when at least one selection
+        # requires per-object windowing (track_scope=True).
         per_object_caches: list[tuple[int, PerceptionCache]] = []
-        if len(object_tracks_pdf) > 0:
+        if needs_track_scope and len(object_tracks_pdf) > 0:
             for object_id, group in object_tracks_pdf.groupby("object_id"):
                 per_object_caches.append(
                     (
@@ -124,7 +104,6 @@ class PerceptionSolver(KeyValueStoreSolver):
                             channels_pdf=channels_pdf,
                             col_map=col_map,
                             object_tracks_pdf=group.reset_index(drop=True),
-                            container_bounds=bounds,
                         ),
                     )
                 )
@@ -144,7 +123,7 @@ class PerceptionSolver(KeyValueStoreSolver):
         return pd.DataFrame(result)
 
     def solve(self, query, channels_df, selections, dtypes) -> DataFrame:
-        if not query.has_perception():
+        if not query.has_perception_selectors():
             return super().solve(query, channels_df, selections, dtypes)
 
         col_map = self.config.col_map

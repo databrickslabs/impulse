@@ -13,8 +13,6 @@ expression.  The cogroup wiring around it is covered by the existing
 KeyValueStoreSolver tests; here we pin the cache-side composition.
 """
 
-import operator
-
 import numpy as np
 import pandas as pd
 
@@ -27,8 +25,6 @@ from mda_query_engine.perception.tsal.perception_selector import PerceptionCache
 
 
 def _build_perception_cache():
-    container_bounds = (100.0, 1000.0)
-
     # Channels pdf: two channels — eng_rpm (channel_id=1) and veh_spd (channel_id=2)
     channels_pdf = pd.DataFrame(
         {
@@ -71,7 +67,6 @@ def _build_perception_cache():
         channels_pdf=channels_pdf.copy(),
         col_map=col_map,
         object_tracks_pdf=object_tracks_pdf,
-        container_bounds=container_bounds,
     )
 
 
@@ -110,16 +105,6 @@ class TestPerceptionPredicateOnlyComposition:
         # intersection at the event-window level is whatever both intervals
         # share.  Both happen to share 200.
         assert len(intersection) >= 0  # cogroup-level mixing exists in reality
-
-    def test_negation_returns_complement_against_container_bounds(self):
-        cache = _build_perception_cache()
-        ot = ObjectTrackAccessor()
-        not_cyclist = (~ot.detection_class("cyclist")).alias("not_cyclist").build(cache)
-        # Cyclist windows go from 200 onward; complement should include the
-        # gap from container_bounds[0]=100 up to 200.
-        assert isinstance(not_cyclist, Intervals)
-        assert not_cyclist.start_time() == 100.0
-
 
 class TestPerceptionEventBuildsExpression:
     def test_perception_event_wraps_compound_predicate(self):
