@@ -186,14 +186,24 @@ class QueryBuilder:
         Returns
         -------
         list of TimeSeriesSelector
-            Deduplicated selectors in discovery order.
+            Deduplicated selectors in discovery order. ``PerceptionSelector``
+            leaves are excluded — they short-circuit the channel-side filter
+            pipeline (their ``get_selector_expr()`` returns ``F.lit(False)``)
+            and are routed to ``PerceptionSolver`` via
+            ``_collect_perception_selectors``.
         """
+        from mda_query_engine.perception.tsal.perception_selector import (
+            PerceptionSelector,
+        )
+
         selectors = []
         seen_selector_ids = set()
         for expression in self.selections:
             if not isinstance(expression, TimeSeriesExpression):
                 continue
             for selector in expression.get_selectors():
+                if isinstance(selector, PerceptionSelector):
+                    continue
                 if uses_alias is not None and selector.uses_alias != uses_alias:
                     continue
                 if selector.selector_id in seen_selector_ids:
@@ -201,6 +211,52 @@ class QueryBuilder:
                 seen_selector_ids.add(selector.selector_id)
                 selectors.append(selector)
         return selectors
+
+    def _collect_perception_selectors(self) -> list:
+        """Return the deduplicated ``PerceptionSelector`` leaves across all
+        selections, in discovery order. Empty when no perception leaves are
+        present."""
+        from mda_query_engine.perception.tsal.perception_selector import (
+            PerceptionSelector,
+        )
+
+        selectors: list = []
+        seen: set[int] = set()
+        for expression in self.selections:
+            if not isinstance(expression, TimeSeriesExpression):
+                continue
+            for selector in expression.get_selectors():
+                if not isinstance(selector, PerceptionSelector):
+                    continue
+                if selector.selector_id in seen:
+                    continue
+                seen.add(selector.selector_id)
+                selectors.append(selector)
+        return selectors
+
+    def has_perception(self) -> bool:
+        """True iff any selection contains a ``PerceptionSelector`` leaf."""
+        return len(self._collect_perception_selectors()) > 0
+
+    @property
+    def object_track(self):
+        """``ObjectTrackAccessor`` for authoring perception predicates.
+
+        Raises ``PerceptionNotConfigured`` when the bound ``MeasurementDB``
+        was constructed without ``perception_config``.
+        """
+        if not getattr(self.db, "has_perception", False):
+            from mda_query_engine.perception.exceptions import PerceptionNotConfigured
+
+            raise PerceptionNotConfigured(
+                "QueryBuilder.object_track requires the bound MeasurementDB "
+                "to have been constructed with perception_config."
+            )
+        from mda_query_engine.perception.tsal.object_track_accessor import (
+            ObjectTrackAccessor,
+        )
+
+        return ObjectTrackAccessor()
 
     def _determine_result_objects_dtypes(self, default_dtype: T = T.DoubleType()):
         """
