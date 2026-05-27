@@ -310,9 +310,7 @@ class TestDeltaSolverContainerMetricsTimestampMapping:
         assert {"start_ts", "stop_ts"}.issubset(set(result.columns))
         assert "t_start" not in result.columns
         assert "t_stop" not in result.columns
-        rows = sorted(
-            (row.container_id, row.start_ts, row.stop_ts) for row in result.collect()
-        )
+        rows = sorted((row.container_id, row.start_ts, row.stop_ts) for row in result.collect())
         assert rows == [(1, 1000, 3000), (2, 1000, 3000), (3, 1000, 3000)]
 
 
