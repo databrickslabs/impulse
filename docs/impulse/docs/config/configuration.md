@@ -183,7 +183,8 @@ Internal column names that mappings can target:
 |-----------------|----------------------------------------------------------|
 | `container_id`  | Container identifier                                     |
 | `channel_id`    | Channel identifier                                       |
-| `tstart`, `tend`| Sample interval start/end (RLE)                          |
+| `tstart`, `tend`| Sample interval start/end on the `channels` table (RLE)  |
+| `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` to derive event-fact start/end |
 | `value`         | Sample value (or attribute value on the EAV tag table)   |
 | `key`           | Attribute key on the EAV `container_tags` table          |
 | `priority`      | Tie-breaker column on the `channel_mapping` table        |

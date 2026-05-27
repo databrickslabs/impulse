@@ -104,6 +104,25 @@ count.
 | `duration_ms`  | `int`       | Yes      | Total duration in milliseconds.      |
 | `num_channels` | `int`       | Yes      | Number of channels in the container. |
 
+#### Internal columns referenced by the framework
+
+The framework hard-references the following internal names on `container_metrics`. Map any silver column to one of these via
+[`solver_config.container_metrics.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name.
+
+| Internal name | Referenced by                                                                 |
+|---------------|-------------------------------------------------------------------------------|
+| `container_id`| Join key against `container_tags`, upsert key in incremental mode             |
+| `start_ts`    | `ContainerEvent` event-fact `start_ts`; default `measurement_dimensions` entry |
+| `stop_ts`     | `ContainerEvent` event-fact `end_ts`; default `measurement_dimensions` entry  |
+| `project_id`  | `KeyValueStoreSolver` project scoping (when `solver_config.project_id` is set) |
+
+Every other column on `container_metrics` is **pass-through**: it lands in
+the gold `measurement_dimension` table verbatim if you list it in
+[`measurement_dimensions`](../config/configuration.md#measurement_dimensions-optional),
+and can be used in `container_filters.metric_filters`; the framework does
+not reference it under any specific internal name.
+
 ### Additional columns commonly populated
 
 `container_metrics` typically carries additional metadata columns that
@@ -154,6 +173,20 @@ TSAL queries select recordings by tag key (e.g.
 | `key`          | `string` | Yes      | Tag key (e.g. `"vehicle_key"`, `"project_id"`). |
 | `value`        | `string` | Yes      | Tag value.                                      |
 
+#### Internal columns referenced by the framework
+
+Map any silver column to these via
+[`solver_config.container_tags.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name.
+
+| Internal name | Referenced by                                                                                  |
+|---------------|------------------------------------------------------------------------------------------------|
+| `container_id`| Join key into `container_metrics` after tag filtering                                          |
+| `key`         | EAV pivot key — driven by `query.havingTag(...)` and `container_filters.tag_filters`           |
+| `value`       | EAV pivot value — driven by `query.havingTag(...)` and `container_filters.tag_filters`         |
+| `project_id`  | `KeyValueStoreSolver` project scoping (when `solver_config.project_id` is set, and this table carries a project column) |
+| `parent_id`   | Optional per-table filter target (e.g. `solver_config.container_tags.filters = {"parent_id": ...}`) |
+
 ---
 
 ## channel_metrics
@@ -191,6 +224,20 @@ via `COALESCE(channel_metrics.unit, channel_mapping.source_unit)`. The
 column is not part of the canonical schema — omit it for layouts that
 don't need per-channel physical units.
 
+#### Internal columns referenced by the framework
+
+Map any silver column to these via
+[`solver_config.channel_metrics.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name.
+
+| Internal name  | Referenced by                                                                              |
+|----------------|--------------------------------------------------------------------------------------------|
+| `container_id` | Composite join key with `channels` and `channel_tags`                                      |
+| `channel_id`   | Composite join key with `channels` and `channel_tags`                                      |
+| `channel_name` | Default join target on the `channel_mapping`→`channel_metrics` alias-resolution join       |
+| `data_key`     | Default join target on the `channel_mapping`→`channel_metrics` alias-resolution join       |
+| `unit`         | Authoritative source unit on aliased reads (takes precedence over `channel_mapping.source_unit`) |
+
 ---
 
 ## channel_tags
@@ -206,6 +253,20 @@ selectors look up signals by tag key (e.g.
 | `channel_id`   | `int`    | No       | Channel identifier within the container.               |
 | `key`          | `string` | Yes      | Tag key (e.g. `"channel_name"`, `"brand"`, `"model"`). |
 | `value`        | `string` | Yes      | Tag value.                                             |
+
+#### Internal columns referenced by the framework
+
+Map any silver column to these via
+[`solver_config.channel_tags.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name. Note: `channel_tags` is
+read by `DeltaSolver` only.
+
+| Internal name | Referenced by                                                                |
+|---------------|------------------------------------------------------------------------------|
+| `container_id`| Composite join key with `channel_metrics` and `channels`                     |
+| `channel_id`  | Composite join key with `channel_metrics` and `channels`                     |
+| `key`         | EAV pivot key — driven by `query.channel(...)` selector kwargs               |
+| `value`       | EAV pivot value — driven by `query.channel(...)` selector kwargs             |
 
 ---
 
@@ -249,6 +310,24 @@ constructed with `drop_implausible_data=True` — in that mode, samples
 with `is_plausible = False` are filtered before RLE encoding. If the
 flag is `False` (the default), the column is ignored and may be omitted.
 
+#### Internal columns referenced by the framework
+
+Map any silver column to these via
+[`solver_config.channels.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name.
+
+| Internal name | Referenced by                                                                          |
+|---------------|----------------------------------------------------------------------------------------|
+| `container_id`| Composite key joining samples back to their container                                  |
+| `channel_id`  | Composite key joining samples back to their channel                                    |
+| `tstart`      | Sample interval start (RLE format) — consumed by the solve UDF                         |
+| `tend`        | Sample interval end (RLE format) — consumed by the solve UDF                           |
+| `value`       | Sample value — consumed by the solve UDF and aggregations                              |
+
+For raw-format `channels`, the same internal names apply except that
+`timestamp` replaces the `tstart`/`tend` pair; the engine derives `tend`
+during raw→RLE conversion.
+
 ---
 
 ## channel_mapping (optional)
@@ -287,6 +366,29 @@ conversions to the same channel in the same query. Workarounds: select
 the conflicting aliases in **separate queries**, or align the mapping rows
 so they agree on the unit pair per physical channel.
 
+#### Internal columns referenced by the framework
+
+Map any silver column to these via
+[`solver_config.channel_mapping.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name. Note: `channel_mapping`
+is read by `KeyValueStoreSolver` only.
+
+| Internal name    | Referenced by                                                                                  |
+|------------------|------------------------------------------------------------------------------------------------|
+| `channel_alias`  | The user-facing alias selector kwarg in `query.channel_with_alias(channel_alias=...)`           |
+| `channel_name`   | Default join target on the `channel_mapping`→`channel_metrics` join                            |
+| `data_key`       | Default join target on the `channel_mapping`→`channel_metrics` join                            |
+| `source_channel` | Alias-resolution source on the `channel_mapping`→`channel_metrics` join                        |
+| `priority`       | Tie-breaker when multiple physical channels match a logical alias                              |
+| `project_id`     | `KeyValueStoreSolver` project scoping (when `solver_config.project_id` is set)                  |
+| `source_unit`    | Source unit fallback (when paired with a `unit_conversion_table`)                              |
+| `target_unit`    | Target unit for aliased reads (when paired with a `unit_conversion_table`)                     |
+
+To override the default `(source_channel, channel_name) + (data_key, data_key)`
+composite join, set
+[`channel_mapping.join_keys`](../config/configuration.md#alias-resolution-join-keys-optional)
+explicitly.
+
 ---
 
 ## unit_conversion (optional)
@@ -306,6 +408,19 @@ whose `unit` matches `source_unit`) and `target_factor` (the row whose
 `unit` matches `target_unit`, constrained to the same `group_id`) and
 multiplies values by `source_factor / target_factor`. Missing rows or a
 `group_id` mismatch yield a null factor and no conversion.
+
+#### Internal columns referenced by the framework
+
+Map any silver column to these via
+[`solver_config.unit_conversion.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name. Note: `unit_conversion`
+is read by `KeyValueStoreSolver` only.
+
+| Internal name        | Referenced by                                                                              |
+|----------------------|--------------------------------------------------------------------------------------------|
+| `group_id`           | Constraint that source and target units live in the same family                            |
+| `unit`               | Lookup key matched against `channel_mapping.source_unit` / `target_unit`                   |
+| `conversion_factor`  | Multiplier to the family's base unit; combined into the per-channel `source/target` factor |
 
 Configured via `source.unit_conversion_table` (see
 [Configuration](../config/configuration.md)).
