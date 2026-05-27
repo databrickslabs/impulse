@@ -11,7 +11,6 @@ from pyspark.sql import DataFrame, Row, SparkSession
 
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from impulse_reporting.config.config_parser import MeasurementDimensions
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
@@ -179,13 +178,14 @@ class ContainerEvent(Event):
         # Rename silver columns to gold event fact column names and cast
         # timestamps from TIMESTAMP to LongType so the DataFrame is
         # union-compatible with BasicEvent (which produces numeric ts).
+        # Silver-side names come from SolverConfig so customers can remap
+        # physical column names via column_name_mapping. Gold-side names
+        # ("start_ts", "end_ts") are owned by EVENT_INSTANCE_FACT_SCHEMA.
+        start_ts_col = solver.config.start_ts_col
+        stop_ts_col = solver.config.stop_ts_col
         df = (
-            container_metrics_df.withColumnRenamed(
-                MeasurementDimensions.CONTAINER_ID.value, "container_id"
-            )
-            .withColumnRenamed(MeasurementDimensions.START_TS.value, "start_ts")
-            .withColumnRenamed(MeasurementDimensions.STOP_TS.value, "end_ts")
-            .withColumn("start_ts", f.col("start_ts").cast("long"))
+            container_metrics_df.withColumnRenamed(stop_ts_col, "end_ts")
+            .withColumn("start_ts", f.col(start_ts_col).cast("long"))
             .withColumn("end_ts", f.col("end_ts").cast("long"))
         )
 

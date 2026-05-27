@@ -9,7 +9,6 @@ from impulse_reporting.config.config_parser import (
     Comparator,
     ContainerFilters,
     ImpulseConfig,
-    MeasurementDimensions,
     MetricFilter,
     QueryEngine,
     Solvers,
@@ -59,11 +58,7 @@ def test_container_event_in_report(spark, basic_narrow_db):
             ]
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
-        measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
-        ],
+        measurement_dimensions=["container_id", "start_ts", "stop_ts"],
     )
 
     # Create report and add container event
@@ -170,11 +165,7 @@ def test_container_event_with_basic_event(spark, basic_narrow_db):
             ]
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
-        measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
-        ],
+        measurement_dimensions=["container_id", "start_ts", "stop_ts"],
     )
 
     my_report = Report(
@@ -255,11 +246,7 @@ def test_sequence_of_events_without_max_overlap_in_report(spark, basic_narrow_db
             ]
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
-        measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
-        ],
+        measurement_dimensions=["container_id", "start_ts", "stop_ts"],
     )
 
     my_report = Report(

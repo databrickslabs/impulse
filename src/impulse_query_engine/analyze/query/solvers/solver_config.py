@@ -194,6 +194,16 @@ class SolverConfig(BaseModel):
         return "tend"
 
     @property
+    def start_ts_col(self) -> str:
+        """Internal column name for the measurement-start epoch timestamp on container_metrics."""
+        return "start_ts"
+
+    @property
+    def stop_ts_col(self) -> str:
+        """Internal column name for the measurement-stop epoch timestamp on container_metrics."""
+        return "stop_ts"
+
+    @property
     def value_col(self) -> str:
         """Internal column name for the signal value on the channels table."""
         return "value"

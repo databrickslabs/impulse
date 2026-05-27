@@ -1,4 +1,3 @@
-import pyspark.sql.functions as f
 import pytest
 from pydantic import ValidationError
 
@@ -9,7 +8,6 @@ from impulse_reporting.config.config_parser import (
     DataType,
     IncrementalConfig,
     ImpulseConfig,
-    MeasurementDimensions,
     MetricFilter,
     Solvers,
     TagFilter,
@@ -44,7 +42,7 @@ impulse_config_JSON = {
     "measurement_dimensions": [
         "uut_id",
         "file_name",
-        "source_file_path",
+        "file_path",
         "start_ts",
         "stop_ts",
     ],
@@ -66,11 +64,14 @@ def test_impulse_config_from_dict():
     assert config.container_filters.metric_filters[0][0].comparator == Comparator.EQ
     assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
 
-    assert MeasurementDimensions.UUT_ID in config.measurement_dimensions
-    assert MeasurementDimensions.FILE_NAME in config.measurement_dimensions
-    assert MeasurementDimensions.SOURCE_FILE_PATH in config.measurement_dimensions
-    assert MeasurementDimensions.START_TS in config.measurement_dimensions
-    assert MeasurementDimensions.STOP_TS in config.measurement_dimensions
+    # The list passes through verbatim — the framework does not inject container_id.
+    assert config.measurement_dimensions == [
+        "uut_id",
+        "file_name",
+        "file_path",
+        "start_ts",
+        "stop_ts",
+    ]
 
 
 def test_impulse_config_data_format_defaults_to_rle():
@@ -143,23 +144,24 @@ def test_impulse_config_from_dict_no_measurement_dim_provided():
     config_json.pop("measurement_dimensions", None)
     config = ImpulseConfig.model_validate(config_json)
 
-    assert MeasurementDimensions.CONTAINER_ID in config.measurement_dimensions
-    assert MeasurementDimensions.UUT_ID in config.measurement_dimensions
-    assert MeasurementDimensions.FILE_NAME in config.measurement_dimensions
-    assert MeasurementDimensions.SOURCE_FILE_PATH in config.measurement_dimensions
-    assert MeasurementDimensions.START_TS in config.measurement_dimensions
-    assert MeasurementDimensions.STOP_TS in config.measurement_dimensions
-    assert MeasurementDimensions.PROJECT_ID in config.measurement_dimensions
-    assert MeasurementDimensions.ENVIRONMENT in config.measurement_dimensions
+    assert config.measurement_dimensions == ["container_id", "start_ts", "stop_ts"]
 
 
-def test_impulse_config_from_dict_wrong_measurement_dim_provided():
-    """Test ImpulseConfig with wrong measurement dimension info provided."""
+def test_impulse_config_measurement_dimensions_rejects_invalid_identifier():
+    """Names that aren't valid Unity entity identifiers are rejected at config load."""
     config_json = impulse_config_JSON.copy()
-    config_json.update({"measurement_dimensions": ["wrong_dimension"]})
+    config_json.update({"measurement_dimensions": ["bad name with spaces"]})
 
     with pytest.raises(ValidationError):
-        config = ImpulseConfig.model_validate(config_json)
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_impulse_config_measurement_dimensions_user_list_verbatim():
+    """User-supplied list is preserved verbatim — no container_id injection."""
+    config_json = impulse_config_JSON.copy()
+    config_json.update({"measurement_dimensions": ["uut_id"]})
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.measurement_dimensions == ["uut_id"]
 
 
 def test_impulse_config_no_container_filters():
@@ -178,49 +180,6 @@ def test_impulse_config_empty_container_filters():
     assert config.container_filters is not None
     assert config.container_filters.tag_filters == []
     assert config.container_filters.metric_filters == []
-
-
-def test_get_column():
-    """Test the `get_column` method of `MeasurementDimensions`."""
-    implemented = [
-        MeasurementDimensions.CONTAINER_ID,
-        MeasurementDimensions.PROJECT_ID,
-        MeasurementDimensions.UUT_ID,
-        MeasurementDimensions.FILE_NAME,
-        MeasurementDimensions.SOURCE_FILE_PATH,
-        MeasurementDimensions.START_TS,
-        MeasurementDimensions.STOP_TS,
-    ]
-    not_implemented = [
-        MeasurementDimensions.UUT_NAME,
-        MeasurementDimensions.ODO_START,
-        MeasurementDimensions.ODO_STOP,
-    ]
-
-    for dim in implemented:
-        assert str(dim.get_column()) == str(f.col(dim.value))
-
-    for dim in not_implemented:
-        assert str(dim.get_column()) == str(f.lit("NOT_IMPLEMENTED"))
-
-
-def test_map_gold_name_to_silver():
-    """Test the `map_gold_name_to_silver` method of `MeasurementDimensions`."""
-    expected_mappings = {
-        MeasurementDimensions.CONTAINER_ID: MeasurementDimensions.CONTAINER_ID.value,
-        MeasurementDimensions.UUT_ID: MeasurementDimensions.UUT_ID.value,
-        MeasurementDimensions.PROJECT_ID: "project",
-        MeasurementDimensions.UUT_NAME: MeasurementDimensions.UUT_NAME.value,
-        MeasurementDimensions.FILE_NAME: MeasurementDimensions.FILE_NAME.value,
-        MeasurementDimensions.SOURCE_FILE_PATH: "file_path",
-        MeasurementDimensions.START_TS: "start_ts",
-        MeasurementDimensions.STOP_TS: "stop_ts",
-        MeasurementDimensions.ODO_START: MeasurementDimensions.ODO_START.value,
-        MeasurementDimensions.ODO_STOP: MeasurementDimensions.ODO_STOP.value,
-    }
-
-    for dim, expected in expected_mappings.items():
-        assert dim.map_gold_name_to_silver() == expected
 
 
 def test_tags_table():

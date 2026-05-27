@@ -114,6 +114,12 @@ class TestSolverConfigProperties:
     def test_parent_id_col(self, cfg: SolverConfig):
         assert cfg.parent_id_col == "parent_id"
 
+    def test_start_ts_col(self, cfg: SolverConfig):
+        assert cfg.start_ts_col == "start_ts"
+
+    def test_stop_ts_col(self, cfg: SolverConfig):
+        assert cfg.stop_ts_col == "stop_ts"
+
     def test_properties_same_for_default_config(self):
         default = SolverConfig()
         assert default.container_id_col == "container_id"
@@ -123,6 +129,8 @@ class TestSolverConfigProperties:
         assert default.value_col == "value"
         assert default.project_id_col == "project_id"
         assert default.parent_id_col == "parent_id"
+        assert default.start_ts_col == "start_ts"
+        assert default.stop_ts_col == "stop_ts"
 
 
 # ---------------------------------------------------------------------------

@@ -3,9 +3,7 @@ from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated
 
-import pyspark.sql.functions as f
-from pydantic import AfterValidator, BaseModel, model_validator
-from pyspark.sql import Column
+from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
 from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 
@@ -78,88 +76,7 @@ def is_valid_unity_entity_name(entity_name: str) -> str:
         )
 
 
-class MeasurementDimensions(Enum):
-    """
-    Enumeration for available measurement dimensions information.
-    Attributes
-    ----------
-    CONTAINER_ID : str
-        Identifier for the container.
-    UUT_ID : str
-        Identifier for the unit under test (UUT).
-    PROJECT_ID : str
-        Identifier for the project.
-    UUT_NAME : str
-        Name of the unit under test (UUT). Currently not present in implementation.
-    FILE_NAME : str
-        Name of the file associated with the measurement.
-    SOURCE_FILE_PATH : str
-        Path to the source file containing the measurement data.
-    START_TS : str
-        Timestamp of the first data point in the measurement.
-    STOP_TS : str
-        Timestamp of the last data point in the measurement.
-    ODO_START : str
-        Starting odometer reading for the measurement. Currently not present in implementation.
-    ODO_STOP : str
-        Stopping odometer reading for the measurement. Currently not present in implementation.
-    ENVIRONMENT : str
-        Environment in which the measurement was taken either puma or datalogger.
-    Notes
-    -----
-    The `get_column` method returns the corresponding Spark SQL column for each dimension.
-    """
-
-    CONTAINER_ID = "container_id"
-    UUT_ID = "uut_id"
-    PROJECT_ID = "project_id"  # todo not present currently
-    VEHICLE_KEY = "vehicle_key"
-    UUT_NAME = "uut_name"  # todo not present currently
-    FILE_NAME = "file_name"
-    SOURCE_FILE_PATH = "source_file_path"
-    START_TS = "start_ts"
-    STOP_TS = "stop_ts"
-    ODO_START = "odo_start"  # todo not present currently
-    ODO_STOP = "odo_stop"  # todo not present currently
-    ENVIRONMENT = "environment"
-
-    def get_column(self) -> Column:
-        """
-        Returns the corresponding Spark SQL column for the measurement dimension.
-        The column names are mapped to their respective values based on the ER gold naming conventions.
-        Returns
-        -------
-        pyspark.sql.Column
-            The Spark SQL column corresponding to the measurement dimension.
-        """
-        measurement_dimensions_not_present_currently = [
-            MeasurementDimensions.UUT_NAME,
-            MeasurementDimensions.ODO_START,
-            MeasurementDimensions.ODO_STOP,
-        ]
-        measurement_column = (
-            f.lit("NOT_IMPLEMENTED")
-            if self in measurement_dimensions_not_present_currently
-            else f.column(self.value)
-        )
-        return measurement_column
-
-    def map_gold_name_to_silver(self) -> str:
-        """
-        Maps the silver layer column name to the ER gold layer column name.
-
-        Returns
-        -------
-        str
-            The gold layer column name.
-        """
-        measurement_dimensions_er_gold_naming_map = {
-            MeasurementDimensions.PROJECT_ID: "project",
-            MeasurementDimensions.SOURCE_FILE_PATH: "file_path",
-        }
-
-        column_name = measurement_dimensions_er_gold_naming_map.get(self, self.value)
-        return column_name
+DEFAULT_MEASUREMENT_DIMENSIONS = ["container_id", "start_ts", "stop_ts"]
 
 
 class DataType(StrEnum):
@@ -510,8 +427,14 @@ class ImpulseConfig(BaseModel):
          Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
      incremental : IncrementalConfig, optional
          Optional incremental processing configuration. Defaults to IncrementalConfig().
-     measurement_dimensions : list of MeasurementDimensions, optional
-         List of measurement dimensions to include in the configuration.
+     measurement_dimensions : list of str, optional
+         Silver-layer ``container_metrics`` column names to surface into the
+         gold-layer ``measurement_dimension`` table. Defaults to
+         ``["container_id", "start_ts", "stop_ts"]``. The framework does not
+         inject any column the user omits — keeping ``container_id`` in the
+         list is recommended because it is the upsert key for incremental
+         processing and the join key to event-fact tables, but the choice
+         is the user's.
      Examples
      --------
     >>> config_data = {
@@ -572,13 +495,16 @@ class ImpulseConfig(BaseModel):
     query_engine: QueryEngine = QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER)
     incremental: IncrementalConfig | None = None
 
-    measurement_dimensions: list[MeasurementDimensions] | None = [
-        MeasurementDimensions.CONTAINER_ID,
-        MeasurementDimensions.UUT_ID,
-        MeasurementDimensions.FILE_NAME,
-        MeasurementDimensions.SOURCE_FILE_PATH,
-        MeasurementDimensions.START_TS,
-        MeasurementDimensions.STOP_TS,
-        MeasurementDimensions.PROJECT_ID,
-        MeasurementDimensions.ENVIRONMENT,
-    ]
+    measurement_dimensions: list[str] = list(DEFAULT_MEASUREMENT_DIMENSIONS)
+
+    @field_validator("measurement_dimensions", mode="after")
+    @classmethod
+    def _normalize_measurement_dimensions(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for name in value:
+            is_valid_unity_entity_name(name)
+            if name not in seen:
+                seen.add(name)
+                normalized.append(name)
+        return normalized

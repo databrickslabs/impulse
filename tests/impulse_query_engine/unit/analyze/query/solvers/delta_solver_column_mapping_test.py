@@ -282,6 +282,40 @@ class TestDeltaSolverContainerMetricsMapping:
             solver.filter_container_metrics(spark, query, tags_df).collect()
 
 
+class TestDeltaSolverContainerMetricsTimestampMapping:
+    """Verify start_ts/stop_ts on container_metrics can be remapped from custom physical names."""
+
+    @pytest.fixture
+    def db_custom_ts(self, spark):
+        tables = _default_tables(spark)
+        tables["container_metrics"] = _container_metrics_df(
+            spark, _CONTAINER_METRICS_ROWS, start_col="t_start", stop_col="t_stop"
+        )
+        return _make_db(tables)
+
+    def test_filter_container_metrics_exposes_internal_ts_names(self, spark, db_custom_ts):
+        cfg = SolverConfig(
+            container_metrics=TableConfig(
+                column_name_mapping={"t_start": "start_ts", "t_stop": "stop_ts"},
+            ),
+        )
+        solver = DeltaSolver(spark, config=cfg)
+        assert solver.config.start_ts_col == "start_ts"
+        assert solver.config.stop_ts_col == "stop_ts"
+
+        query = db_custom_ts.query
+        tags_df = solver.filter_container_tags(spark, query)
+        result = solver.filter_container_metrics(spark, query, tags_df)
+
+        assert {"start_ts", "stop_ts"}.issubset(set(result.columns))
+        assert "t_start" not in result.columns
+        assert "t_stop" not in result.columns
+        rows = sorted(
+            (row.container_id, row.start_ts, row.stop_ts) for row in result.collect()
+        )
+        assert rows == [(1, 1000, 3000), (2, 1000, 3000), (3, 1000, 3000)]
+
+
 # ===================================================================
 # TEST GROUP 3: channel_tags column rename
 # ===================================================================

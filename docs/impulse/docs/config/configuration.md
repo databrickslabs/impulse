@@ -359,39 +359,42 @@ mode-resolution rules and what counts as a definition change.
 
 ## measurement_dimensions (optional)
 
-List of `container_metrics` columns to surface into the gold-layer
-`measurement_dimension` table.
+List of silver-layer `container_metrics` column names to surface into the
+gold-layer `measurement_dimension` table. Names pass through unchanged:
+whatever you list here is what you get in gold.
 
-**Allowed values:**
+Any column present in your silver `container_metrics` table is a valid
+entry — there is no closed allow-list. Typical choices include
+`container_id`, `uut_id`, `project`, `vehicle_key`, `file_name`,
+`file_path`, `start_ts`, `stop_ts`, and `environment`, but any column
+your silver schema carries is fair game.
 
-| Value              | Description                                  |
-|--------------------|----------------------------------------------|
-| `container_id`     | Container identifier.                        |
-| `uut_id`           | Unit-under-test identifier.                  |
-| `project_id`       | Project identifier.                          |
-| `vehicle_key`      | Vehicle identifier.                          |
-| `file_name`        | Source measurement file name.                |
-| `source_file_path` | Full path to the source file.                |
-| `start_ts`         | Measurement start timestamp.                 |
-| `stop_ts`          | Measurement stop timestamp.                  |
-| `environment`      | Recording environment (e.g. PUMA, datalogger). |
+`container_id` is part of the default list and is recommended for any
+real-world config: it is the upsert key used by incremental processing
+and the join key between the measurement dimension and the event-fact
+tables. If you override `measurement_dimensions` you take full
+ownership of what ends up in gold — the framework does not inject
+`container_id` for you. Omit it only if you know the consequences for
+downstream joins and incremental runs.
 
 **Default:**
 
 ```json
 [
   "container_id",
-  "uut_id",
-  "file_name",
-  "source_file_path",
   "start_ts",
-  "stop_ts",
-  "project_id",
-  "environment"
+  "stop_ts"
 ]
 ```
 
-Pick the entries that match the columns actually present in your
-`container_metrics_table`. Columns referenced here must exist in your
-silver schema; columns that don't appear here are ignored even if they
-exist in silver.
+If any listed column is not present in the silver `container_metrics`
+table when the report runs, the run fails fast with a `ValueError`
+naming the missing columns.
+
+**Migration note (pre-0.1):** earlier versions exposed a fixed enum
+that renamed two silver columns on the way to gold (`project` →
+`project_id`, `file_path` → `source_file_path`). The rename has been
+removed; if you previously listed `"project_id"` or `"source_file_path"`,
+list `"project"` and `"file_path"` instead. The default list also
+shrank — if you relied on the old eight-column default, add the
+columns you want explicitly.

@@ -23,6 +23,6 @@
   "measurement_dimensions": [
     "uut_id",
     "file_name",
-    "source_file_path"
+    "file_path"
   ]
 }

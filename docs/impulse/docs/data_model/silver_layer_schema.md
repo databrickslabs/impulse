@@ -110,20 +110,21 @@ count.
 get surfaced into the gold-layer `measurement_dimension` table when
 listed in the report's
 [`measurement_dimensions`](../config/configuration.md#measurement_dimensions-optional)
-config. The framework recognises the following names through the
-`MeasurementDimensions` enum — populate any subset that fits your
-data; none are required by the engine.
+config. Any column you list there must exist in this table — names
+pass through to gold unchanged. The columns below are common choices,
+but `measurement_dimensions` accepts any column you carry on this
+table.
 
-| Column             | Type     | Description                                  |
-|--------------------|----------|----------------------------------------------|
-| `uut_id`           | `long`   | Unit-under-test identifier.                  |
-| `vehicle_key`      | `string` | Vehicle identifier.                          |
-| `project_id`       | `long`   | Project identifier.                          |
-| `file_name`        | `string` | Source measurement file name.                |
-| `source_file_path` | `string` | Full path to the source file.                |
-| `start_ts`         | `long`   | Measurement start timestamp (epoch).         |
-| `stop_ts`          | `long`   | Measurement stop timestamp (epoch).          |
-| `environment`      | `string` | Recording environment (e.g. PUMA, datalogger). |
+| Column        | Type     | Description                                  |
+|---------------|----------|----------------------------------------------|
+| `uut_id`      | `long`   | Unit-under-test identifier.                  |
+| `vehicle_key` | `string` | Vehicle identifier.                          |
+| `project`     | `long`   | Project identifier.                          |
+| `file_name`   | `string` | Source measurement file name.                |
+| `file_path`   | `string` | Full path to the source file.                |
+| `start_ts`    | `long`   | Measurement start timestamp (epoch).         |
+| `stop_ts`    | `long`   | Measurement stop timestamp (epoch).          |
+| `environment` | `string` | Recording environment (e.g. PUMA, datalogger). |
 
 :::note Two timestamp conventions
 
@@ -132,10 +133,9 @@ section) and `start_ts`/`stop_ts` (epoch long, listed here) are
 **different columns**, not naming variants. Real-world
 `container_metrics` tables typically carry both: `start_dt`/`stop_dt`
 for human-readable display, `start_ts`/`stop_ts` for the gold
-`measurement_dimension` because the corresponding
-`MeasurementDimensions` enum values map to the epoch-typed columns.
-Populate whichever your queries and `measurement_dimensions` config
-need.
+`measurement_dimension` (the default `measurement_dimensions` includes
+the epoch-typed pair). Populate whichever your queries and
+`measurement_dimensions` config need.
 
 :::
 

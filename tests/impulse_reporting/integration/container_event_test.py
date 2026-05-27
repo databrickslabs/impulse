@@ -5,11 +5,14 @@ from unittest.mock import create_autospec
 import pytest
 from databricks.sdk import WorkspaceClient
 
+from impulse_query_engine.analyze.query.solvers.solver_config import (
+    SolverConfig,
+    TableConfig,
+)
 from impulse_reporting.config.config_parser import (
     Comparator,
     ContainerFilters,
     ImpulseConfig,
-    MeasurementDimensions,
     MetricFilter,
     QueryEngine,
     Solvers,
@@ -56,11 +59,7 @@ def test_container_event_in_report(spark, basic_narrow_db):
             ]
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
-        measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
-        ],
+        measurement_dimensions=["container_id", "start_ts", "stop_ts"],
     )
 
     my_report = Report(
@@ -164,11 +163,7 @@ def test_container_event_with_basic_event(spark, basic_narrow_db):
             ]
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
-        measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
-        ],
+        measurement_dimensions=["container_id", "start_ts", "stop_ts"],
     )
 
     my_report = Report(
@@ -265,3 +260,85 @@ def test_report_rejects_two_container_events():
 
     with pytest.raises(ValueError, match="Only one ContainerEvent is allowed per report"):
         report.add_event(event2)
+
+
+def test_container_event_with_remapped_silver_timestamps(spark, basic_narrow_db):
+    """ContainerEvent works end-to-end when silver carries custom timestamp column names.
+
+    Regression test for the SolverConfig.start_ts_col / stop_ts_col contract:
+    a customer whose container_metrics table uses t_start / t_stop instead of
+    start_ts / stop_ts must be able to remap them via column_name_mapping and
+    have ContainerEvent produce correct event-instance-fact rows without
+    framework code changes.
+    """
+    remapped_table = "spark_catalog.silver.container_metrics_remapped_ts"
+    (
+        spark.read.table("spark_catalog.silver.container_metrics")
+        .withColumnRenamed("start_ts", "t_start")
+        .withColumnRenamed("stop_ts", "t_stop")
+        .write.format("delta")
+        .mode("overwrite")
+        .saveAsTable(remapped_table)
+    )
+
+    try:
+        impulse_config = ImpulseConfig(
+            source=Source(
+                container_metrics_table=remapped_table,
+                channel_metrics_table="spark_catalog.silver.channel_metrics",
+                channels_uri="spark_catalog.silver.channels",
+            ),
+            unity_sink=UnitySink(
+                catalog="spark_catalog",
+                schema="gold",
+                table_prefix="container_event_remapped_test",
+            ),
+            container_filters=ContainerFilters(
+                metric_filters=[
+                    [
+                        MetricFilter(
+                            column_name="vehicle_key",
+                            comparator=Comparator.EQ,
+                            value="Seat_Leon",
+                        ),
+                        MetricFilter(
+                            column_name="start_dt",
+                            comparator=Comparator.GE,
+                            value="2025-07-03T07:00:00.000Z",
+                        ),
+                    ]
+                ]
+            ),
+            query_engine=QueryEngine(
+                solver=Solvers.KEY_VALUE_STORE_SOLVER,
+                solver_config=SolverConfig(
+                    container_metrics=TableConfig(
+                        column_name_mapping={"t_start": "start_ts", "t_stop": "stop_ts"},
+                    ),
+                ),
+            ),
+            measurement_dimensions=["container_id", "start_ts", "stop_ts"],
+        )
+
+        my_report = Report(
+            name="container_event_remapped_report",
+            spark=spark,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=dict(impulse_config),
+        )
+        my_report.add_event(ContainerEvent(name="full_measurement"))
+        my_report.determine_report()
+
+        event_rows = my_report.event_dfs["CONTAINER_EVENT"]["changed"].collect()
+        assert len(event_rows) == 3
+
+        expected = {
+            1: {"start_ts": 1751528502708, "end_ts": 1751528610253},
+            2: {"start_ts": 1751528501483, "end_ts": 1751528610235},
+            3: {"start_ts": 1751528500169, "end_ts": 1751528610252},
+        }
+        for row in event_rows:
+            assert row.start_ts == expected[row.container_id]["start_ts"]
+            assert row.end_ts == expected[row.container_id]["end_ts"]
+    finally:
+        spark.sql(f"DROP TABLE IF EXISTS {remapped_table} PURGE")

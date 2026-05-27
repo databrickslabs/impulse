@@ -5,7 +5,7 @@ from pyspark.sql import DataFrame, SparkSession
 
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from impulse_reporting.config.config_parser import ImpulseConfig, MeasurementDimensions
+from impulse_reporting.config.config_parser import ImpulseConfig
 
 
 class ContainerDimension:
@@ -20,10 +20,13 @@ class ContainerDimension:
         pre_filtered_containers_df: DataFrame = None,
     ) -> DataFrame:
         """
-        Retrieves meta dimensions for the specified units under test (UUTs) from the silver container_metrics table.
+        Retrieves the configured measurement dimensions for the matching set
+        of containers from the silver ``container_metrics`` table.
 
         Uses the solver filter pipeline (filter_container_tags -> filter_container_metrics)
-        to resolve the matching set of containers and their full metrics.
+        to resolve the matching set of containers and their full metrics, then
+        selects exactly the columns listed in ``config.measurement_dimensions``.
+        Silver column names pass through to gold unchanged.
 
         Parameters
         ----------
@@ -41,48 +44,33 @@ class ContainerDimension:
         Returns
         -------
         DataFrame
-            A DataFrame containing the selected measurement dimensions for the specified UUTs.
+            A DataFrame containing the selected measurement dimensions for the
+            matching set of containers.
+
+        Raises
+        ------
+        ValueError
+            If any column listed in ``config.measurement_dimensions`` is not
+            present in the silver ``container_metrics`` DataFrame.
         """
         measurement_dimensions = config.measurement_dimensions
-
-        desired_container_metrics_columns = [
-            dimension.get_column() for dimension in measurement_dimensions
-        ]
 
         container_tags_df = solver.filter_container_tags(spark, query)
         df = solver.filter_container_metrics(
             spark, query, container_tags_df, pre_filtered_containers_df
         )
-        df_renamed = ContainerDimension._rename_dimension_cols(df, measurement_dimensions)
-        return df_renamed.select(*desired_container_metrics_columns).transform(
+
+        missing = [c for c in measurement_dimensions if c not in df.columns]
+        if missing:
+            raise ValueError(
+                "Configured measurement_dimensions columns are not present in "
+                f"the silver container_metrics table: {missing}. Available "
+                f"columns: {df.columns}."
+            )
+
+        return df.select(*measurement_dimensions).transform(
             ContainerDimension._add_config_hash(config)
         )
-
-    @staticmethod
-    def _rename_dimension_cols(
-        df: DataFrame, measurement_dimensions: list[MeasurementDimensions]
-    ) -> DataFrame:
-        """
-        Renames the columns of the DataFrame to match the er gold layer schema.
-
-        Parameters
-        ----------
-        df : DataFrame
-            The DataFrame containing the measurement dimensions.
-        measurement_dimensions : list[MeasurementDimensions]
-            List of measurement dimension columns to rename.
-        Returns
-        -------
-        DataFrame
-            A DataFrame with renamed columns based on the measurement dimensions.
-        """
-        renamed_columns = []
-        for column_name in measurement_dimensions:
-            silver_layer_name = MeasurementDimensions(column_name).map_gold_name_to_silver()
-            if silver_layer_name in df.columns:
-                renamed_columns.append(F.col(silver_layer_name).alias(column_name.value))
-
-        return df.select(*renamed_columns)
 
     @staticmethod
     def _add_config_hash(config: ImpulseConfig) -> Callable[..., "DataFrame"]:
