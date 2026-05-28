@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Silver Layer Schema | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Silver Layer Schema | Impulse"><meta data-rh="true" name="description" content="The Silver layer stores measurement data in a normalized, tag-based model."><meta data-rh="true" property="og:description" content="The Silver layer stores measurement data in a normalized, tag-based model."><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Silver Layer Schema","item":"https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.af145ca1.css">
-<script src="/impulse/assets/js/runtime~main.c9079b65.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.cf4686b0.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.2c977ea3.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.86ae6139.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -81,14 +81,50 @@ count.</p>
 
 
 <table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Unique container identifier.</td></tr><tr><td><code>start_dt</code></td><td><code>timestamp</code></td><td>Yes</td><td>Container start datetime.</td></tr><tr><td><code>stop_dt</code></td><td><code>timestamp</code></td><td>Yes</td><td>Container stop datetime.</td></tr><tr><td><code>duration_ms</code></td><td><code>int</code></td><td>Yes</td><td>Total duration in milliseconds.</td></tr><tr><td><code>num_channels</code></td><td><code>int</code></td><td>Yes</td><td>Number of channels in the container.</td></tr></tbody></table>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<p>The framework hard-references the following internal names on <code>container_metrics</code>. Map any silver column to one of these via
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.container_metrics.column_name_mapping</code></a>
+when your physical column has a different name.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Join key against <code>container_tags</code>, upsert key in incremental mode</td></tr><tr><td><code>start_ts</code></td><td><code>ContainerEvent</code> event-fact <code>start_ts</code>; default <code>measurement_dimensions</code> entry</td></tr><tr><td><code>stop_ts</code></td><td><code>ContainerEvent</code> event-fact <code>end_ts</code>; default <code>measurement_dimensions</code> entry</td></tr><tr><td><code>project_id</code></td><td><code>KeyValueStoreSolver</code> project scoping (when <code>solver_config.project_id</code> is set)</td></tr></tbody></table>
+<p>Every other column on <code>container_metrics</code> is <strong>pass-through</strong>: it lands in
+the gold <code>measurement_dimension</code> table verbatim if you list it in
+<a class="" href="/impulse/docs/config/configuration#measurement_dimensions-optional"><code>measurement_dimensions</code></a>,
+and can be used in <code>container_filters.metric_filters</code>; the framework does
+not reference it under any specific internal name.</p>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="additional-columns-commonly-populated">Additional columns commonly populated<a href="#additional-columns-commonly-populated" class="hash-link" aria-label="Direct link to Additional columns commonly populated" title="Direct link to Additional columns commonly populated" translate="no">​</a></h3>
 <p><code>container_metrics</code> typically carries additional metadata columns that
 get surfaced into the gold-layer <code>measurement_dimension</code> table when
 listed in the report&#x27;s
 <a class="" href="/impulse/docs/config/configuration#measurement_dimensions-optional"><code>measurement_dimensions</code></a>
-config. The framework recognises the following names through the
-<code>MeasurementDimensions</code> enum — populate any subset that fits your
-data; none are required by the engine.</p>
+config. Any column you list there must exist in this table — names
+pass through to gold unchanged. The columns below are common choices,
+but <code>measurement_dimensions</code> accepts any column you carry on this
+table.</p>
 
 
 
@@ -139,16 +175,15 @@ data; none are required by the engine.</p>
 
 
 
-<table><thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>uut_id</code></td><td><code>long</code></td><td>Unit-under-test identifier.</td></tr><tr><td><code>vehicle_key</code></td><td><code>string</code></td><td>Vehicle identifier.</td></tr><tr><td><code>project_id</code></td><td><code>long</code></td><td>Project identifier.</td></tr><tr><td><code>file_name</code></td><td><code>string</code></td><td>Source measurement file name.</td></tr><tr><td><code>source_file_path</code></td><td><code>string</code></td><td>Full path to the source file.</td></tr><tr><td><code>start_ts</code></td><td><code>long</code></td><td>Measurement start timestamp (epoch).</td></tr><tr><td><code>stop_ts</code></td><td><code>long</code></td><td>Measurement stop timestamp (epoch).</td></tr><tr><td><code>environment</code></td><td><code>string</code></td><td>Recording environment (e.g. PUMA, datalogger).</td></tr></tbody></table>
+<table><thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>uut_id</code></td><td><code>long</code></td><td>Unit-under-test identifier.</td></tr><tr><td><code>vehicle_key</code></td><td><code>string</code></td><td>Vehicle identifier.</td></tr><tr><td><code>project</code></td><td><code>long</code></td><td>Project identifier.</td></tr><tr><td><code>file_name</code></td><td><code>string</code></td><td>Source measurement file name.</td></tr><tr><td><code>file_path</code></td><td><code>string</code></td><td>Full path to the source file.</td></tr><tr><td><code>start_ts</code></td><td><code>long</code></td><td>Measurement start timestamp (epoch).</td></tr><tr><td><code>stop_ts</code></td><td><code>long</code></td><td>Measurement stop timestamp (epoch).</td></tr><tr><td><code>environment</code></td><td><code>string</code></td><td>Recording environment (e.g. PUMA, datalogger).</td></tr></tbody></table>
 <div class="theme-admonition theme-admonition-note admonition_xJq3 alert alert--secondary"><div class="admonitionHeading_Gvgb"><span class="admonitionIcon_Rf37"><svg viewBox="0 0 14 16"><path fill-rule="evenodd" d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path></svg></span>Two timestamp conventions</div><div class="admonitionContent_BuS1"><p><code>start_dt</code>/<code>stop_dt</code> (datetime, listed in the table at the top of this
 section) and <code>start_ts</code>/<code>stop_ts</code> (epoch long, listed here) are
 <strong>different columns</strong>, not naming variants. Real-world
 <code>container_metrics</code> tables typically carry both: <code>start_dt</code>/<code>stop_dt</code>
 for human-readable display, <code>start_ts</code>/<code>stop_ts</code> for the gold
-<code>measurement_dimension</code> because the corresponding
-<code>MeasurementDimensions</code> enum values map to the epoch-typed columns.
-Populate whichever your queries and <code>measurement_dimensions</code> config
-need.</p></div></div>
+<code>measurement_dimension</code> (the default <code>measurement_dimensions</code> includes
+the epoch-typed pair). Populate whichever your queries and
+<code>measurement_dimensions</code> config need.</p></div></div>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="container_tags">container_tags<a href="#container_tags" class="hash-link" aria-label="Direct link to container_tags" title="Direct link to container_tags" translate="no">​</a></h2>
 <p>Key-value metadata tags for measurement containers. Strict EAV layout —
@@ -185,6 +220,40 @@ TSAL queries select recordings by tag key (e.g.
 
 
 <table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Unique container identifier.</td></tr><tr><td><code>key</code></td><td><code>string</code></td><td>Yes</td><td>Tag key (e.g. <code>&quot;vehicle_key&quot;</code>, <code>&quot;project_id&quot;</code>).</td></tr><tr><td><code>value</code></td><td><code>string</code></td><td>Yes</td><td>Tag value.</td></tr></tbody></table>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-1">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-1" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<p>Map any silver column to these via
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.container_tags.column_name_mapping</code></a>
+when your physical column has a different name.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Join key into <code>container_metrics</code> after tag filtering</td></tr><tr><td><code>key</code></td><td>EAV pivot key — driven by <code>query.havingTag(...)</code> and <code>container_filters.tag_filters</code></td></tr><tr><td><code>value</code></td><td>EAV pivot value — driven by <code>query.havingTag(...)</code> and <code>container_filters.tag_filters</code></td></tr><tr><td><code>project_id</code></td><td><code>KeyValueStoreSolver</code> project scoping (when <code>solver_config.project_id</code> is set, and this table carries a project column)</td></tr><tr><td><code>parent_id</code></td><td>Optional per-table filter target (e.g. <code>solver_config.container_tags.filters = {&quot;parent_id&quot;: ...}</code>)</td></tr></tbody></table>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_metrics">channel_metrics<a href="#channel_metrics" class="hash-link" aria-label="Direct link to channel_metrics" title="Direct link to channel_metrics" translate="no">​</a></h2>
 <p>Pre-computed statistics per channel. The percentile columns (<code>pz1</code>,
@@ -317,6 +386,40 @@ physical channel and takes precedence over <code>channel_mapping.source_unit</co
 via <code>COALESCE(channel_metrics.unit, channel_mapping.source_unit)</code>. The
 column is not part of the canonical schema — omit it for layouts that
 don&#x27;t need per-channel physical units.</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-2">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-2" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<p>Map any silver column to these via
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.channel_metrics.column_name_mapping</code></a>
+when your physical column has a different name.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Composite join key with <code>channels</code> and <code>channel_tags</code></td></tr><tr><td><code>channel_id</code></td><td>Composite join key with <code>channels</code> and <code>channel_tags</code></td></tr><tr><td><code>channel_name</code></td><td>Default join target on the <code>channel_mapping</code>→<code>channel_metrics</code> alias-resolution join</td></tr><tr><td><code>data_key</code></td><td>Default join target on the <code>channel_mapping</code>→<code>channel_metrics</code> alias-resolution join</td></tr><tr><td><code>unit</code></td><td>Authoritative source unit on aliased reads (takes precedence over <code>channel_mapping.source_unit</code>)</td></tr></tbody></table>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_tags">channel_tags<a href="#channel_tags" class="hash-link" aria-label="Direct link to channel_tags" title="Direct link to channel_tags" translate="no">​</a></h2>
 <p>Key-value metadata tags per channel. Strict EAV layout — TSAL channel
@@ -359,6 +462,37 @@ selectors look up signals by tag key (e.g.
 
 
 <table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Parent container identifier.</td></tr><tr><td><code>channel_id</code></td><td><code>int</code></td><td>No</td><td>Channel identifier within the container.</td></tr><tr><td><code>key</code></td><td><code>string</code></td><td>Yes</td><td>Tag key (e.g. <code>&quot;channel_name&quot;</code>, <code>&quot;brand&quot;</code>, <code>&quot;model&quot;</code>).</td></tr><tr><td><code>value</code></td><td><code>string</code></td><td>Yes</td><td>Tag value.</td></tr></tbody></table>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-3">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-3" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<p>Map any silver column to these via
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.channel_tags.column_name_mapping</code></a>
+when your physical column has a different name. Note: <code>channel_tags</code> is
+read by <code>DeltaSolver</code> only.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Composite join key with <code>channel_metrics</code> and <code>channels</code></td></tr><tr><td><code>channel_id</code></td><td>Composite join key with <code>channel_metrics</code> and <code>channels</code></td></tr><tr><td><code>key</code></td><td>EAV pivot key — driven by <code>query.channel(...)</code> selector kwargs</td></tr><tr><td><code>value</code></td><td>EAV pivot value — driven by <code>query.channel(...)</code> selector kwargs</td></tr></tbody></table>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channels">channels<a href="#channels" class="hash-link" aria-label="Direct link to channels" title="Direct link to channels" translate="no">​</a></h2>
 <p>The actual time-series data. Two format variants are supported.</p>
@@ -455,6 +589,43 @@ in either format. It is <strong>only consulted</strong> when the solver is
 constructed with <code>drop_implausible_data=True</code> — in that mode, samples
 with <code>is_plausible = False</code> are filtered before RLE encoding. If the
 flag is <code>False</code> (the default), the column is ignored and may be omitted.</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-4">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-4" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<p>Map any silver column to these via
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.channels.column_name_mapping</code></a>
+when your physical column has a different name.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Composite key joining samples back to their container</td></tr><tr><td><code>channel_id</code></td><td>Composite key joining samples back to their channel</td></tr><tr><td><code>tstart</code></td><td>Sample interval start (RLE format) — consumed by the solve UDF</td></tr><tr><td><code>tend</code></td><td>Sample interval end (RLE format) — consumed by the solve UDF</td></tr><tr><td><code>value</code></td><td>Sample value — consumed by the solve UDF and aggregations</td></tr></tbody></table>
+<p>For raw-format <code>channels</code>, the same internal names apply except that
+<code>timestamp</code> replaces the <code>tstart</code>/<code>tend</code> pair; the engine derives <code>tend</code>
+during raw→RLE conversion.</p>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_mapping-optional">channel_mapping (optional)<a href="#channel_mapping-optional" class="hash-link" aria-label="Direct link to channel_mapping (optional)" title="Direct link to channel_mapping (optional)" translate="no">​</a></h2>
 <p>Alias-resolution table used by <code>KeyValueStoreSolver</code> when selectors are
@@ -547,6 +718,57 @@ conversion factor per physical channel and cannot apply two distinct
 conversions to the same channel in the same query. Workarounds: select
 the conflicting aliases in <strong>separate queries</strong>, or align the mapping rows
 so they agree on the unit pair per physical channel.</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-5">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-5" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<p>Map any silver column to these via
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.channel_mapping.column_name_mapping</code></a>
+when your physical column has a different name. Note: <code>channel_mapping</code>
+is read by <code>KeyValueStoreSolver</code> only.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>channel_alias</code></td><td>The user-facing alias selector kwarg in <code>query.channel_with_alias(channel_alias=...)</code></td></tr><tr><td><code>channel_name</code></td><td>Default join target on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>data_key</code></td><td>Default join target on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>source_channel</code></td><td>Alias-resolution source on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>priority</code></td><td>Tie-breaker when multiple physical channels match a logical alias</td></tr><tr><td><code>project_id</code></td><td><code>KeyValueStoreSolver</code> project scoping (when <code>solver_config.project_id</code> is set)</td></tr><tr><td><code>source_unit</code></td><td>Source unit fallback (when paired with a <code>unit_conversion_table</code>)</td></tr><tr><td><code>target_unit</code></td><td>Target unit for aliased reads (when paired with a <code>unit_conversion_table</code>)</td></tr></tbody></table>
+<p>To override the default <code>(source_channel, channel_name) + (data_key, data_key)</code>
+composite join, set
+<a class="" href="/impulse/docs/config/configuration#alias-resolution-join-keys-optional"><code>channel_mapping.join_keys</code></a>
+explicitly.</p>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="unit_conversion-optional">unit_conversion (optional)<a href="#unit_conversion-optional" class="hash-link" aria-label="Direct link to unit_conversion (optional)" title="Direct link to unit_conversion (optional)" translate="no">​</a></h2>
 <p>Per-unit-family conversion factors. Read by <code>KeyValueStoreSolver</code> at
@@ -587,6 +809,33 @@ whose <code>unit</code> matches <code>source_unit</code>) and <code>target_facto
 <code>unit</code> matches <code>target_unit</code>, constrained to the same <code>group_id</code>) and
 multiplies values by <code>source_factor / target_factor</code>. Missing rows or a
 <code>group_id</code> mismatch yield a null factor and no conversion.</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-6">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-6" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<p>Map any silver column to these via
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.unit_conversion.column_name_mapping</code></a>
+when your physical column has a different name. Note: <code>unit_conversion</code>
+is read by <code>KeyValueStoreSolver</code> only.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>group_id</code></td><td>Constraint that source and target units live in the same family</td></tr><tr><td><code>unit</code></td><td>Lookup key matched against <code>channel_mapping.source_unit</code> / <code>target_unit</code></td></tr><tr><td><code>conversion_factor</code></td><td>Multiplier to the family&#x27;s base unit; combined into the per-channel <code>source/target</code> factor</td></tr></tbody></table>
 <p>Configured via <code>source.unit_conversion_table</code> (see
 <a class="" href="/impulse/docs/config/configuration">Configuration</a>).</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/data_model/silver_layer_schema.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/data_model/ingestion"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Ingestion</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/data_model/gold_layer_event_normalized"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Gold Layer Schema</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#entity-relationship-diagram" class="table-of-contents__link toc-highlight">Entity-relationship diagram</a></li><li><a href="#container_metrics" class="table-of-contents__link toc-highlight">container_metrics</a><ul><li><a href="#additional-columns-commonly-populated" class="table-of-contents__link toc-highlight">Additional columns commonly populated</a></li></ul></li><li><a href="#container_tags" class="table-of-contents__link toc-highlight">container_tags</a></li><li><a href="#channel_metrics" class="table-of-contents__link toc-highlight">channel_metrics</a></li><li><a href="#channel_tags" class="table-of-contents__link toc-highlight">channel_tags</a></li><li><a href="#channels" class="table-of-contents__link toc-highlight">channels</a><ul><li><a href="#rle-format-default" class="table-of-contents__link toc-highlight">RLE format (default)</a></li><li><a href="#raw-format" class="table-of-contents__link toc-highlight">Raw format</a></li><li><a href="#optional-is_plausible-column" class="table-of-contents__link toc-highlight">Optional <code>is_plausible</code> column</a></li></ul></li><li><a href="#channel_mapping-optional" class="table-of-contents__link toc-highlight">channel_mapping (optional)</a></li><li><a href="#unit_conversion-optional" class="table-of-contents__link toc-highlight">unit_conversion (optional)</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
 </body>
