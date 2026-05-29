@@ -878,6 +878,33 @@ def test_resample8():
     nptest.assert_array_equal(exp_values, result.values)
 
 
+def test_resample_with_interior_point_in_time():
+    # Zero-duration sample (tstart == tend) in the middle of the series used
+    # to make the per-block branch extend new_tends without extending
+    # new_tstarts/new_values, tripping the constructor assertion.
+    s1 = SampleSeries([0, 2, 3], [1, 2, 4], [10, 20, 30])
+    result = s1.resample(sample_rate=1.0)
+    exp_tstarts = [0, 3]
+    exp_tends = [1, 4]
+    exp_values = [10, 30]
+    nptest.assert_array_equal(exp_tstarts, result.tstarts)
+    nptest.assert_array_equal(exp_tends, result.tends)
+    nptest.assert_array_equal(exp_values, result.values)
+
+
+def test_resample_with_interior_and_trailing_point_in_time():
+    # Interior point-in-time is skipped; trailing point-in-time is preserved
+    # by the existing special case for the last block.
+    s1 = SampleSeries([0, 2, 3], [1, 2, 3], [10, 20, 30])
+    result = s1.resample(sample_rate=1.0)
+    exp_tstarts = [0, 3]
+    exp_tends = [1, 3]
+    exp_values = [10, 30]
+    nptest.assert_array_equal(exp_tstarts, result.tstarts)
+    nptest.assert_array_equal(exp_tends, result.tends)
+    nptest.assert_array_equal(exp_values, result.values)
+
+
 def test_rolling_average1():
     s1 = SampleSeries([0, 1, 2, 3, 4, 5, 10], [1, 2, 3, 4, 5, 10, 11], [5, 5, 5, 3, 5, 1, 2])
     s1_avg = s1.rolling_average(window_size=3)
