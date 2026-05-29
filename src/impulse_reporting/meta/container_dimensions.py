@@ -129,19 +129,24 @@ class ChannelMappingResolutionDimension:
         """
         Compute the channel mapping resolution dimension for the report.
 
-        Returns ``None`` when the dimension cannot be built — either the
-        solver does not override ``filter_aliased_channel_metrics`` (e.g.
-        ``DeltaSolver``, ``BlobSolver``, ``InMemorySolver``) or the report
-        has no aliased selectors. In both cases the persist step should be
-        a no-op.
+        Returns ``None`` when the report has no aliased selectors — there
+        is nothing to resolve, and the persist step is a no-op.
 
-        When buildable, runs the solver's container-side filter pipeline
+        Otherwise runs the solver's container-side filter pipeline
         (``filter_container_tags`` → ``filter_container_metrics``) so the
         result honors ``pre_filtered_containers_df`` for incremental mode,
         then calls ``filter_aliased_channel_metrics`` with the aliased
         selectors collected from the report's events and aggregations.
         The internal ``selector_ids`` column is dropped since it is a
         runtime artifact and not part of the dimension contract.
+
+        Notes
+        -----
+        Solver-capability is *not* checked here. If a report has aliased
+        selectors, the configured solver must support alias resolution —
+        otherwise ``QueryBuilder.solve`` upstream of this call has
+        already raised ``NotImplementedError``. We rely on that invariant
+        instead of introspecting the solver class.
 
         Parameters
         ----------
@@ -165,15 +170,9 @@ class ChannelMappingResolutionDimension:
             DataFrame with columns
             ``(container_id, channel_id, <metrics-side join keys>,
             channel_alias, alias_priority[, source_unit, target_unit],
-            config_hash)``, or ``None`` if the dimension is not
-            applicable.
+            config_hash)``, or ``None`` if the report has no aliased
+            selectors.
         """
-        if (
-            type(solver).filter_aliased_channel_metrics
-            is QuerySolver.filter_aliased_channel_metrics
-        ):
-            return None
-
         if not aliased_selectors:
             return None
 

@@ -2,7 +2,6 @@
 
 from pyspark.sql import SparkSession
 
-from impulse_query_engine.analyze.query.solvers.in_memory_solver import InMemorySolver
 from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
 )
@@ -52,27 +51,6 @@ def test_returns_none_when_no_aliased_selectors(
         solver=solver,
         config=_impulse_config(),
         aliased_selectors=[],
-    )
-
-    assert result is None
-
-
-def test_returns_none_when_solver_does_not_support_aliasing(
-    spark: SparkSession, key_value_store_alias_db: MeasurementDB
-):
-    """InMemorySolver inherits the base-class NotImplementedError default; dimension must skip."""
-    solver = InMemorySolver()
-    query = key_value_store_alias_db.query
-    # Even with an aliased selector in the query, the dimension must skip when
-    # the solver doesn't override filter_aliased_channel_metrics.
-    aliased = query.channel_with_alias(channel_alias="engine_speed")
-
-    result = ChannelMappingResolutionDimension.get_dimension(
-        spark=spark,
-        query=query,
-        solver=solver,
-        config=_impulse_config(),
-        aliased_selectors=[aliased],
     )
 
     assert result is None
