@@ -5,6 +5,11 @@ from unittest.mock import create_autospec
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import SparkSession
 
+from impulse_query_engine.analyze.query.solvers.solver_config import (
+    ChannelMappingConfig,
+    SolverConfig,
+    TableConfig,
+)
 from impulse_reporting.aggregations.histogram import (
     HistogramCustomWeights,
     HistogramDistance,
@@ -18,6 +23,8 @@ from impulse_reporting.aggregations.histogram2d import (
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.config.config_parser import (
     ImpulseConfig,
+    QueryEngine,
+    Solvers,
     Source,
     UnitySink,
 )
@@ -84,6 +91,70 @@ def create_default_report(
         "veh_spd_event_expr": veh_spd_event_expr,
     }
 
+    return report, channels
+
+
+def create_alias_report(
+    spark: SparkSession,
+    report_name: str = "alias_report",
+    table_prefix: str = "alias_test",
+) -> tuple[Report, dict]:
+    """
+    Create a Report pointed at the ``silver_key_value_store_alias`` schema
+    with ``channel_mapping_table`` configured, plus the matching
+    ``SolverConfig`` (project_id, ``project → project_id`` rename, and a
+    ``toolbox_id`` filter on the channel mapping) so the alias-CSV data
+    resolves cleanly.
+
+    Returns
+    -------
+    tuple
+        - report: Report wired up against the alias silver schema
+        - channels: dict with aliased expressions:
+            - 'engine_speed': aliased Engine RPM channel
+            - 'vehicle_speed': aliased Vehicle Speed Sensor channel
+            - 'weights': vehicle_speed (reused as weights handle)
+            - 'veh_spd_event_expr': vehicle_speed > 1 expression
+    """
+    config = ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver_key_value_store_alias.container_metrics",
+            channel_metrics_table="spark_catalog.silver_key_value_store_alias.channel_metrics",
+            channels_uri="spark_catalog.silver_key_value_store_alias.channels",
+            channel_mapping_table="spark_catalog.silver_key_value_store_alias.channel_mapping",
+        ),
+        unity_sink=UnitySink(
+            catalog="spark_catalog",
+            schema="gold",
+            table_prefix=table_prefix,
+        ),
+        query_engine=QueryEngine(
+            solver=Solvers.KEY_VALUE_STORE_SOLVER,
+            solver_config=SolverConfig(
+                project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
+            ),
+        ),
+    )
+
+    report = Report(
+        name=report_name,
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(config),
+    )
+
+    query = report.get_db().query
+    engine_speed = query.channel_with_alias(channel_alias="engine_speed")
+    vehicle_speed = query.channel_with_alias(channel_alias="vehicle_speed")
+
+    channels = {
+        "engine_speed": engine_speed,
+        "vehicle_speed": vehicle_speed,
+        "weights": vehicle_speed,
+        "veh_spd_event_expr": vehicle_speed > 1,
+    }
     return report, channels
 
 
