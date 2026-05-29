@@ -695,6 +695,49 @@ class TestPersistIncrementalDelegation:
             upsert_call = report.sink.upsert.call_args
             assert upsert_call.args[2] == ["container_id"]
 
+    def test_persist_incremental_channel_mapping_resolution_dimension_upserts(self, spark):
+        """Channel mapping resolution dimension upserts with merge keys read from solver config.
+
+        Guards the SolverConfig parameterization of the merge keys — if the
+        list ever drifts back to hardcoded literals, the column-name
+        properties on solver.config would no longer flow through, and a
+        custom SolverConfig override would break in production.
+        """
+        report = _build_report(spark)
+        mock_dim_df = MagicMock(spec=DataFrame)
+        mock_dim_df.transform.return_value = MagicMock(spec=DataFrame)
+
+        # Pin solver.config.*_col to real strings so the merge keys
+        # resolve from the SolverConfig instead of returning child mocks.
+        report.solver.config.container_id_col = "container_id"
+        report.solver.config.channel_id_col = "channel_id"
+        report.solver.config.channel_alias_col = "channel_alias"
+
+        report.aggregation_dfs = {}
+        report.aggregation_metadata_dfs = {}
+        report.event_dfs = {}
+        report.event_metadata_dfs = {}
+        report.container_dimension_df = None
+        report.channel_mapping_resolution_dimension_df = mock_dim_df
+
+        with (
+            patch("impulse_reporting.core.report.WriterFactory") as mock_factory_cls,
+            patch("impulse_reporting.core.report.ReportEntityTransformer"),
+        ):
+            mock_writer = MagicMock()
+            mock_writer.get_output_uri.return_value = (
+                "catalog.gold.channel_mapping_resolution_dimension"
+            )
+            mock_factory_cls.return_value.create_channel_mapping_resolution_dimension_writer.return_value = (
+                mock_writer
+            )
+
+            report._persist_incremental(changed_aggregation_ids={}, changed_event_ids={})
+
+            report.sink.upsert.assert_called_once()
+            upsert_call = report.sink.upsert.call_args
+            assert upsert_call.args[2] == ["container_id", "channel_id", "channel_alias"]
+
     def test_persist_incremental_cross_type_changed_events_combined(self, spark):
         """When multiple event types share a fact table and both have changed
         definitions, their DataFrames are combined into a single replace_by_ids
