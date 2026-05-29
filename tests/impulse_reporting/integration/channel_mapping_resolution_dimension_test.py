@@ -30,7 +30,7 @@ def test_alias_report_writes_channel_mapping_resolution_dimension(
     gold = spark.read.table("spark_catalog.gold.alias_int_channel_mapping_resolution_dimension")
 
     # Schema: exact column set as written by ChannelMappingResolutionDimension
-    # + meta columns from ContainerDimensionWriter / persist pipeline.
+    # + the _created_at meta column from the writer.
     assert set(gold.columns) == {
         "container_id",
         "channel_id",
@@ -38,7 +38,6 @@ def test_alias_report_writes_channel_mapping_resolution_dimension(
         "data_key",
         "channel_alias",
         "priority",
-        "config_hash",
         "_created_at",
     }
 
@@ -66,12 +65,6 @@ def test_alias_report_writes_channel_mapping_resolution_dimension(
     # The alias CSV leaves `priority` empty (NULL) for every mapping row;
     # those NULLs propagate verbatim through the resolution.
     assert all(r.priority is None for r in rows)
-
-    # config_hash is deterministic per-config and applied uniformly to every
-    # row in the dimension df via ContainerDimension._add_config_hash.
-    config_hashes = {r.config_hash for r in rows}
-    assert len(config_hashes) == 1
-    assert next(iter(config_hashes)) is not None
 
     # _created_at is stamped once via F.current_timestamp() inside
     # ReportEntityTransformer.add_meta_information, so all rows share it.

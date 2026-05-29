@@ -1040,7 +1040,6 @@ class Report:
                 spark=self.spark,
                 query=self.query,
                 solver=self.solver,
-                config=self.config,
                 aliased_selectors=aliased_selectors,
                 pre_filtered_containers_df=pre_filtered_containers_df,
             )

@@ -122,7 +122,6 @@ class ChannelMappingResolutionDimension:
         spark: SparkSession,
         query: QueryBuilder,
         solver: QuerySolver,
-        config: ImpulseConfig,
         aliased_selectors: list[TimeSeriesSelector],
         pre_filtered_containers_df: DataFrame = None,
     ) -> DataFrame | None:
@@ -156,8 +155,6 @@ class ChannelMappingResolutionDimension:
             The query builder used for the report.
         solver : QuerySolver
             The solver instance to use for query execution.
-        config : ImpulseConfig
-            The configuration object; used to attach ``config_hash``.
         aliased_selectors : list[TimeSeriesSelector]
             Aliased selectors (``uses_alias=True``) collected from the
             report's events and aggregations. May be empty.
@@ -169,9 +166,8 @@ class ChannelMappingResolutionDimension:
         DataFrame or None
             DataFrame with columns
             ``(container_id, channel_id, <metrics-side join keys>,
-            channel_alias, alias_priority[, source_unit, target_unit],
-            config_hash)``, or ``None`` if the report has no aliased
-            selectors.
+            channel_alias, alias_priority[, source_unit, target_unit])``,
+            or ``None`` if the report has no aliased selectors.
         """
         if not aliased_selectors:
             return None
@@ -188,4 +184,4 @@ class ChannelMappingResolutionDimension:
         if "selector_ids" in resolved.columns:
             resolved = resolved.drop("selector_ids")
 
-        return resolved.transform(ContainerDimension._add_config_hash(config))
+        return resolved

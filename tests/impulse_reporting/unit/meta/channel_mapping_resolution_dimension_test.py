@@ -11,21 +11,7 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
     TableConfig,
 )
 from impulse_query_engine.measurement_db import MeasurementDB
-from impulse_reporting.config.config_parser import ImpulseConfig
 from impulse_reporting.meta.container_dimensions import ChannelMappingResolutionDimension
-
-
-def _impulse_config() -> ImpulseConfig:
-    return ImpulseConfig.model_validate(
-        {
-            "source": {
-                "container_metrics_table": "c.s.container_metrics",
-                "channel_metrics_table": "c.s.channel_metrics",
-                "channels_uri": "c.s.channels",
-                "channel_mapping_table": "c.s.channel_mapping",
-            },
-        }
-    )
 
 
 def _kvs_solver(spark: SparkSession) -> KeyValueStoreSolver:
@@ -49,7 +35,6 @@ def test_returns_none_when_no_aliased_selectors(
         spark=spark,
         query=query,
         solver=solver,
-        config=_impulse_config(),
         aliased_selectors=[],
     )
 
@@ -67,12 +52,11 @@ def test_returns_resolution_with_expected_schema(
         spark=spark,
         query=query,
         solver=solver,
-        config=_impulse_config(),
         aliased_selectors=[aliased],
     )
 
     assert result is not None
-    # selector_ids must be dropped; config_hash must be appended.
+    # selector_ids is dropped; no config_hash on this dimension.
     assert result.columns == [
         "container_id",
         "channel_id",
@@ -80,7 +64,6 @@ def test_returns_resolution_with_expected_schema(
         "data_key",
         "channel_alias",
         "priority",
-        "config_hash",
     ]
     rows = result.collect()
     assert len(rows) > 0
@@ -90,7 +73,6 @@ def test_returns_resolution_with_expected_schema(
     for row in rows:
         assert row.channel_name in {"Engine RPM", "EngSpd"}
         assert row.data_key in {"TM", "ProjSpecREC_10Hz"}
-        assert row.config_hash is not None
 
 
 def test_dimension_honors_pre_filtered_containers(
@@ -115,7 +97,6 @@ def test_dimension_honors_pre_filtered_containers(
         spark=spark,
         query=query,
         solver=solver,
-        config=_impulse_config(),
         aliased_selectors=[aliased],
         pre_filtered_containers_df=pre_filtered,
     )
