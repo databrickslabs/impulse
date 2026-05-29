@@ -121,7 +121,12 @@ Every other column on `container_metrics` is **pass-through**: it lands in
 the gold `measurement_dimension` table verbatim if you list it in
 [`measurement_dimensions`](../config/configuration.md#measurement_dimensions-optional),
 and can be used in `container_filters.metric_filters`; the framework does
-not reference it under any specific internal name.
+not reference it under any specific internal name. Both `measurement_dimensions`
+entries and `metric_filters.column_name` references are matched against
+the **post-mapping** (internal) column names — i.e. after
+[`solver_config.container_metrics.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+has been applied. If your physical silver column has a different name,
+add it to that mapping and reference the internal name here.
 
 ### Additional columns commonly populated
 
@@ -129,10 +134,12 @@ not reference it under any specific internal name.
 get surfaced into the gold-layer `measurement_dimension` table when
 listed in the report's
 [`measurement_dimensions`](../config/configuration.md#measurement_dimensions-optional)
-config. Any column you list there must exist in this table — names
-pass through to gold unchanged. The columns below are common choices,
-but `measurement_dimensions` accepts any column you carry on this
-table.
+config. Any column you list there must exist on this table under its
+**post-mapping** (internal) name — see
+[`column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+for how physical-to-internal renaming works. Those internal names pass
+through to gold unchanged. The columns below are common choices, but
+`measurement_dimensions` accepts any column you carry on this table.
 
 | Column        | Type     | Description                                  |
 |---------------|----------|----------------------------------------------|

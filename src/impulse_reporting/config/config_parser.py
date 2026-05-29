@@ -428,8 +428,15 @@ class ImpulseConfig(BaseModel):
      incremental : IncrementalConfig, optional
          Optional incremental processing configuration. Defaults to IncrementalConfig().
      measurement_dimensions : list of str, optional
-         Silver-layer ``container_metrics`` column names to surface into the
-         gold-layer ``measurement_dimension`` table. Defaults to
+         Column names to surface from ``container_metrics`` into the
+         gold-layer ``measurement_dimension`` table. Names are matched
+         **after** ``query_engine.solver_config.container_metrics.column_name_mapping``
+         has been applied — i.e. these are the internal (post-mapping)
+         column names, not the physical silver column names. If a silver
+         table uses a physical name like ``my_measurement_id`` mapped to
+         ``container_id``, list ``"container_id"`` here. Each listed name
+         lands in the gold table verbatim, so the configured name is also
+         the gold column name. Defaults to
          ``["container_id", "start_ts", "stop_ts"]``. The framework does not
          inject any column the user omits — keeping ``container_id`` in the
          list is recommended because it is the upsert key for incremental

@@ -360,15 +360,18 @@ mode-resolution rules and what counts as a definition change.
 
 ## measurement_dimensions (optional)
 
-List of silver-layer `container_metrics` column names to surface into the
-gold-layer `measurement_dimension` table. Names pass through unchanged:
-whatever you list here is what you get in gold.
+List of `container_metrics` column names to surface into the gold-layer
+`measurement_dimension` table. Names are matched **after**
+[`solver_config.container_metrics.column_name_mapping`](#solver-column-mappings-and-filters)
+has been applied — i.e. these are the **internal (post-mapping)** column
+names, not the physical silver column names. Each name passes through
+to gold verbatim, so the configured name is also the gold column name.
 
-Any column present in your silver `container_metrics` table is a valid
-entry — there is no closed allow-list. Typical choices include
-`container_id`, `uut_id`, `project`, `vehicle_key`, `file_name`,
+Any column present in your post-mapping `container_metrics` DataFrame
+is a valid entry — there is no closed allow-list. Typical choices
+include `container_id`, `uut_id`, `project`, `vehicle_key`, `file_name`,
 `file_path`, `start_ts`, `stop_ts`, and `environment`, but any column
-your silver schema carries is fair game.
+your silver schema carries (under its internal name) is fair game.
 
 `container_id` is part of the default list and is recommended for any
 real-world config: it is the upsert key used by incremental processing
@@ -388,9 +391,36 @@ downstream joins and incremental runs.
 ]
 ```
 
-If any listed column is not present in the silver `container_metrics`
-table when the report runs, the run fails fast with a `ValueError`
-naming the missing columns.
+If any listed column is not present in the post-mapping
+`container_metrics` DataFrame when the report runs, the run fails fast
+with a `ValueError` naming the missing columns.
+
+### Worked example: physical name differs from internal name
+
+Suppose your silver `container_metrics` table has a physical column
+`my_measurement_id` (no `container_id`). Map it to the internal name
+in `solver_config`, then reference the internal name in
+`measurement_dimensions`:
+
+```json
+{
+  "query_engine": {
+    "solver": "KeyValueStoreSolver",
+    "solver_config": {
+      "container_metrics": {
+        "column_name_mapping": { "my_measurement_id": "container_id" }
+      }
+    }
+  },
+  "measurement_dimensions": ["container_id", "start_ts", "stop_ts"]
+}
+```
+
+The gold `measurement_dimension` table will have columns
+`container_id`, `start_ts`, `stop_ts`. Listing `"my_measurement_id"` in
+`measurement_dimensions` here would fail — by the time the framework
+selects the dimensions, the column has already been renamed to
+`container_id`.
 
 **Migration note (pre-0.1):** earlier versions exposed a fixed enum
 that renamed two silver columns on the way to gold (`project` →

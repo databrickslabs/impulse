@@ -24,9 +24,14 @@ class ContainerDimension:
         of containers from the silver ``container_metrics`` table.
 
         Uses the solver filter pipeline (filter_container_tags -> filter_container_metrics)
-        to resolve the matching set of containers and their full metrics, then
-        selects exactly the columns listed in ``config.measurement_dimensions``.
-        Silver column names pass through to gold unchanged.
+        to resolve the matching set of containers and their full metrics.
+        ``filter_container_metrics`` applies ``container_metrics.column_name_mapping``
+        (physical → internal) before returning, so the DataFrame's columns
+        are already the internal (post-mapping) names. This method then
+        selects exactly the columns listed in ``config.measurement_dimensions``
+        — entries must therefore reference the **post-mapping** (internal)
+        names, not the physical silver column names. Post-mapping column
+        names pass through to gold unchanged.
 
         Parameters
         ----------
@@ -51,7 +56,7 @@ class ContainerDimension:
         ------
         ValueError
             If any column listed in ``config.measurement_dimensions`` is not
-            present in the silver ``container_metrics`` DataFrame.
+            present in the post-mapping ``container_metrics`` DataFrame.
         """
         measurement_dimensions = config.measurement_dimensions
 
@@ -64,8 +69,13 @@ class ContainerDimension:
         if missing:
             raise ValueError(
                 "Configured measurement_dimensions columns are not present in "
-                f"the silver container_metrics table: {missing}. Available "
-                f"columns: {df.columns}."
+                f"the container_metrics DataFrame: {missing}. Available "
+                f"columns: {df.columns}. Note: measurement_dimensions entries "
+                "must be the post-mapping (internal) column names, i.e. the "
+                "names that exist after container_metrics.column_name_mapping "
+                "has been applied. If your physical silver column has a "
+                "different name, add it to that mapping and reference the "
+                "internal name here."
             )
 
         return df.select(*measurement_dimensions).transform(
