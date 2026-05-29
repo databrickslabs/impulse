@@ -177,10 +177,7 @@ class UnitySinkConfig(SinkConfig):
                 f"{self.table_prefix}_channel_mapping_resolution_dimension"
             )
         else:
-            uri = (
-                f"{self.catalog_name}.{self.schema_name}."
-                "channel_mapping_resolution_dimension"
-            )
+            uri = f"{self.catalog_name}.{self.schema_name}." "channel_mapping_resolution_dimension"
         return uri
 
 
@@ -734,6 +731,4 @@ class WriterFactory:
         ChannelMappingResolutionDimensionWriter
             A writer configured for the channel mapping resolution dimension.
         """
-        return ChannelMappingResolutionDimensionWriter(
-            self.sink, self._default_transformer
-        )
+        return ChannelMappingResolutionDimensionWriter(self.sink, self._default_transformer)

@@ -27,9 +27,7 @@ def test_alias_report_writes_channel_mapping_resolution_dimension(
     report.determine_report()
     report.persist_results()
 
-    gold = spark.read.table(
-        "spark_catalog.gold.alias_int_channel_mapping_resolution_dimension"
-    )
+    gold = spark.read.table("spark_catalog.gold.alias_int_channel_mapping_resolution_dimension")
 
     # Schema: exact column set as written by ChannelMappingResolutionDimension
     # + meta columns from ContainerDimensionWriter / persist pipeline.
@@ -50,8 +48,7 @@ def test_alias_report_writes_channel_mapping_resolution_dimension(
     # the (Engine RPM/TM) + (Vehicle Speed Sensor/TM) physical channels;
     # container 3 carries (EngSpd/ProjSpecREC_10Hz) + (Spd_Vhcl/ProjSpecREC_10Hz).
     resolutions = {
-        (r.container_id, r.channel_id, r.channel_name, r.data_key, r.channel_alias)
-        for r in rows
+        (r.container_id, r.channel_id, r.channel_name, r.data_key, r.channel_alias) for r in rows
     }
     assert resolutions == {
         (1, 5, "Engine RPM", "TM", "engine_speed"),
@@ -64,9 +61,7 @@ def test_alias_report_writes_channel_mapping_resolution_dimension(
 
     # The dimension contract dedupes by (container_id, channel_alias);
     # each alias resolves to exactly one physical channel per container.
-    assert len(rows) == len(
-        {(r.container_id, r.channel_alias) for r in rows}
-    ) == 6
+    assert len(rows) == len({(r.container_id, r.channel_alias) for r in rows}) == 6
 
     # The alias CSV leaves `priority` empty (NULL) for every mapping row;
     # those NULLs propagate verbatim through the resolution.

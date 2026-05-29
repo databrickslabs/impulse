@@ -493,9 +493,7 @@ class KeyValueStoreSolver(QuerySolver):
         resolved = resolved.withColumn(
             "selector_ids", F.array(self._build_selector_id_expr(selectors))
         )
-        join_key_metrics_cols = list(
-            dict.fromkeys(metrics_col for _, metrics_col in join_keys)
-        )
+        join_key_metrics_cols = list(dict.fromkeys(metrics_col for _, metrics_col in join_keys))
         out_cols = [
             container_id_col,
             channel_id_col,
