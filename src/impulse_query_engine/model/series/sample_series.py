@@ -1086,6 +1086,10 @@ class SampleSeries:
             # last interval of length 0 is a closed interval. Allow resampled series to start and end at last timestamp
             if (stop_index == len(self) - 1) and (self.tstarts[-1] == self.tends[-1]):
                 tstarts = tmp_tstarts[tmp_tstarts <= t_max]
+            # interior zero-duration block (t_min == t_max, not the trailing point-in-time)
+            # leaves tstarts empty; skip to avoid an unmatched tend being appended.
+            if len(tstarts) == 0:
+                continue
             tends = np.append(tstarts[1:], t_max)
             values = self._interp1d()(tstarts)
             new_tstarts.extend(tstarts)
