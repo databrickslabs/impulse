@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Silver Layer Schema | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Silver Layer Schema | Impulse"><meta data-rh="true" name="description" content="The Silver layer stores measurement data in a normalized, tag-based model."><meta data-rh="true" property="og:description" content="The Silver layer stores measurement data in a normalized, tag-based model."><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Silver Layer Schema","item":"https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.af145ca1.css">
-<script src="/impulse/assets/js/runtime~main.2c977ea3.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.86ae6139.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.f8ae2f65.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.80c7f3e6.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -115,16 +115,23 @@ when your physical column has a different name.</p>
 the gold <code>measurement_dimension</code> table verbatim if you list it in
 <a class="" href="/impulse/docs/config/configuration#measurement_dimensions-optional"><code>measurement_dimensions</code></a>,
 and can be used in <code>container_filters.metric_filters</code>; the framework does
-not reference it under any specific internal name.</p>
+not reference it under any specific internal name. Both <code>measurement_dimensions</code>
+entries and <code>metric_filters.column_name</code> references are matched against
+the <strong>post-mapping</strong> (internal) column names — i.e. after
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.container_metrics.column_name_mapping</code></a>
+has been applied. If your physical silver column has a different name,
+add it to that mapping and reference the internal name here.</p>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="additional-columns-commonly-populated">Additional columns commonly populated<a href="#additional-columns-commonly-populated" class="hash-link" aria-label="Direct link to Additional columns commonly populated" title="Direct link to Additional columns commonly populated" translate="no">​</a></h3>
 <p><code>container_metrics</code> typically carries additional metadata columns that
 get surfaced into the gold-layer <code>measurement_dimension</code> table when
 listed in the report&#x27;s
 <a class="" href="/impulse/docs/config/configuration#measurement_dimensions-optional"><code>measurement_dimensions</code></a>
-config. Any column you list there must exist in this table — names
-pass through to gold unchanged. The columns below are common choices,
-but <code>measurement_dimensions</code> accepts any column you carry on this
-table.</p>
+config. Any column you list there must exist on this table under its
+<strong>post-mapping</strong> (internal) name — see
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>column_name_mapping</code></a>
+for how physical-to-internal renaming works. Those internal names pass
+through to gold unchanged. The columns below are common choices, but
+<code>measurement_dimensions</code> accepts any column you carry on this table.</p>
 
 
 
