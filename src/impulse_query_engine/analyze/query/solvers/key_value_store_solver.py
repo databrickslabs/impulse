@@ -389,10 +389,15 @@ class KeyValueStoreSolver(QuerySolver):
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame with ``(container_id, channel_id, selector_ids)``
-            where ``selector_ids`` is an array column.  When unit conversion
-            is active (see above), also carries ``source_unit`` and
-            ``target_unit`` columns.
+            DataFrame with
+            ``(container_id, channel_id, <metrics-side join keys>,
+            channel_alias, alias_priority, selector_ids)`` where
+            ``selector_ids`` is an array column.  The metrics-side join key
+            columns come from ``effective_alias_join_keys`` (default:
+            ``channel_name``, ``data_key``) and are deduplicated in case the
+            same physical column appears on both sides of a join-key tuple.
+            When unit conversion is active (see above), also carries
+            ``source_unit`` and ``target_unit`` columns.
         """
         container_id_col = self.config.container_id_col
         channel_id_col = self.config.channel_id_col
@@ -488,7 +493,17 @@ class KeyValueStoreSolver(QuerySolver):
         resolved = resolved.withColumn(
             "selector_ids", F.array(self._build_selector_id_expr(selectors))
         )
-        out_cols = [container_id_col, channel_id_col, "selector_ids"]
+        join_key_metrics_cols = list(
+            dict.fromkeys(metrics_col for _, metrics_col in join_keys)
+        )
+        out_cols = [
+            container_id_col,
+            channel_id_col,
+            *join_key_metrics_cols,
+            channel_alias_col,
+            alias_priority_col,
+            "selector_ids",
+        ]
         if has_unit_cols:
             out_cols.extend([source_unit_col, target_unit_col])
         return resolved.select(*out_cols)
@@ -543,8 +558,22 @@ class KeyValueStoreSolver(QuerySolver):
             and target_unit_col in aliased_channel_metrics_df.columns
         )
 
+        # ``filter_aliased_channel_metrics`` emits extra columns
+        # (metrics-side join keys, channel_alias, alias_priority) for the
+        # channel mapping resolution dimension; the solve pipeline only
+        # consumes (container_id, channel_id, selector_ids[, source_unit,
+        # target_unit]) and unionByName requires matching schemas.
+        aliased_solve_cols = [
+            self.config.container_id_col,
+            self.config.channel_id_col,
+            "selector_ids",
+        ]
+        if has_unit_cols:
+            aliased_solve_cols.extend([source_unit_col, target_unit_col])
+        aliased_for_union = aliased_channel_metrics_df.select(*aliased_solve_cols)
+
         merged = channel_metrics_df.unionByName(
-            aliased_channel_metrics_df, allowMissingColumns=has_unit_cols
+            aliased_for_union, allowMissingColumns=has_unit_cols
         )
 
         agg_exprs = [F.flatten(F.collect_list("selector_ids")).alias("selector_ids")]

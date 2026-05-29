@@ -14,6 +14,9 @@ Covers:
 import pandas as pd
 from pyspark.sql import SparkSession
 
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    TimeSeriesExpression,
+)
 from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
     KVSTimeSeriesCache,
@@ -202,7 +205,7 @@ class TestKeyValueStoreSolverFilterMethodsWideOnly:
         )
         tags_df = solver.filter_container_tags(spark, query)
         container_df = solver.filter_container_metrics(spark, query, tags_df)
-        selectors = query._collect_time_series_selectors(uses_alias=False)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=False)
         result = solver.filter_channel_metrics(spark, basic_narrow_db, container_df, selectors)
         assert "container_id" in result.columns
         assert "channel_id" in result.columns

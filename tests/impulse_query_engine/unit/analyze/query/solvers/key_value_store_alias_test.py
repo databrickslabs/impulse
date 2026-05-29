@@ -7,6 +7,9 @@ import pandas as pd
 import pytest
 from pyspark.sql import SparkSession
 
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    TimeSeriesExpression,
+)
 from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
 )
@@ -40,7 +43,7 @@ class TestFilterAliasedChannelMetrics:
         query.select(query.channel(channel_name="Engine RPM", data_key="TM"))
 
         container_df = _filtered_containers(spark, key_value_store_alias_db, solver, query)
-        selectors = query._collect_time_series_selectors(uses_alias=True)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=True)
         result = solver.filter_aliased_channel_metrics(spark, query.db, container_df, selectors)
 
         assert result.columns == ["container_id", "channel_id", "selector_ids"]
@@ -62,7 +65,7 @@ class TestFilterAliasedChannelMetrics:
         query.select(engine_speed)
 
         container_df = _filtered_containers(spark, key_value_store_alias_db, solver, query)
-        selectors = query._collect_time_series_selectors(uses_alias=True)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=True)
         result = solver.filter_aliased_channel_metrics(spark, query.db, container_df, selectors)
 
         rows = {
@@ -89,7 +92,7 @@ class TestFilterAliasedChannelMetrics:
         query.select(query.channel_with_alias(channel_alias="engine_speed"))
 
         container_df = _filtered_containers(spark, key_value_store_alias_db, solver, query)
-        selectors = query._collect_time_series_selectors(uses_alias=True)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=True)
         result = solver.filter_aliased_channel_metrics(spark, query.db, container_df, selectors)
 
         assert result.count() == 0
@@ -111,7 +114,7 @@ class TestFilterAliasedChannelMetrics:
         query.select(query.channel_with_alias(channel_alias="engine_speed"))
 
         container_df = _filtered_containers(spark, key_value_store_alias_db, solver, query)
-        selectors = query._collect_time_series_selectors(uses_alias=True)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=True)
         result = solver.filter_aliased_channel_metrics(spark, query.db, container_df, selectors)
 
         assert result.count() == 0
@@ -132,11 +135,79 @@ class TestFilterAliasedChannelMetrics:
         query.select(engine_speed)
 
         container_df = _filtered_containers(spark, key_value_store_alias_db, solver, query)
-        selectors = query._collect_time_series_selectors(uses_alias=True)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=True)
         result = solver.filter_aliased_channel_metrics(spark, query.db, container_df, selectors)
 
         selector_ids = {row.selector_ids[0] for row in result.collect()}
         assert selector_ids == {engine_speed.selector_id}
+
+    def test_output_columns_default_join_keys(
+        self, spark: SparkSession, key_value_store_alias_db: MeasurementDB
+    ):
+        """Default join keys → output carries channel_name, data_key, channel_alias, priority."""
+        solver = KeyValueStoreSolver(
+            spark,
+            config=SolverConfig(
+                project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+                channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
+            ),
+        )
+        query = key_value_store_alias_db.query
+        query.select(query.channel_with_alias(channel_alias="engine_speed"))
+
+        container_df = _filtered_containers(spark, key_value_store_alias_db, solver, query)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=True)
+        result = solver.filter_aliased_channel_metrics(spark, query.db, container_df, selectors)
+
+        assert result.columns == [
+            "container_id",
+            "channel_id",
+            "channel_name",
+            "data_key",
+            "channel_alias",
+            "priority",
+            "selector_ids",
+        ]
+        rows = result.collect()
+        assert len(rows) > 0
+        row = rows[0]
+        assert row.channel_alias == "engine_speed"
+        assert row.channel_name in {"Engine RPM", "EngSpd"}
+        assert row.data_key in {"TM", "ProjSpecREC_10Hz"}
+
+    def test_output_columns_single_join_key(
+        self, spark: SparkSession, key_value_store_alias_db: MeasurementDB
+    ):
+        """Single-column join_keys override → only that metrics column surfaces."""
+        solver = KeyValueStoreSolver(
+            spark,
+            config=SolverConfig(
+                project_id="SAMPLE_PROJECT",
+                container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+                channel_mapping=ChannelMappingConfig(
+                    filters={"toolbox_id": "container_concept"},
+                    join_keys=[
+                        JoinKey(mapping_col="source_channel", metrics_col="channel_name"),
+                    ],
+                ),
+            ),
+        )
+        query = key_value_store_alias_db.query
+        query.select(query.channel_with_alias(channel_alias="engine_speed"))
+
+        container_df = _filtered_containers(spark, key_value_store_alias_db, solver, query)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=True)
+        result = solver.filter_aliased_channel_metrics(spark, query.db, container_df, selectors)
+
+        assert result.columns == [
+            "container_id",
+            "channel_id",
+            "channel_name",
+            "channel_alias",
+            "priority",
+            "selector_ids",
+        ]
 
     def test_multiple_aliases(self, spark: SparkSession, key_value_store_alias_db: MeasurementDB):
         solver = KeyValueStoreSolver(
@@ -153,7 +224,7 @@ class TestFilterAliasedChannelMetrics:
         query.select(engine_speed, vehicle_speed)
 
         container_df = _filtered_containers(spark, key_value_store_alias_db, solver, query)
-        selectors = query._collect_time_series_selectors(uses_alias=True)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=True)
         result = solver.filter_aliased_channel_metrics(spark, query.db, container_df, selectors)
 
         selector_ids = {row.selector_ids[0] for row in result.collect()}

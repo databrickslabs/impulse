@@ -238,8 +238,12 @@ class QuerySolver(ABC):
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame with ``(container_id, channel_id, selector_ids)``
-            where ``selector_ids`` is an array column.
+            DataFrame with
+            ``(container_id, channel_id, <metrics-side join keys>,
+            channel_alias, alias_priority, selector_ids)`` where
+            ``selector_ids`` is an array column.  Implementations that
+            support unit conversion additionally include ``source_unit``
+            and ``target_unit`` columns.
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support aliased channel resolution"

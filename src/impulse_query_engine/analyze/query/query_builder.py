@@ -174,34 +174,6 @@ class QueryBuilder:
         self.selections = list(args)
         return self
 
-    def _collect_time_series_selectors(self, uses_alias=None) -> list[TimeSeriesSelector]:
-        """Collect deduplicated leaf selectors from this query's selections.
-
-        Parameters
-        ----------
-        uses_alias : bool or None, optional
-            When ``True``, keep only alias selectors; when ``False``, keep
-            only direct selectors; when ``None`` (default), keep all.
-
-        Returns
-        -------
-        list of TimeSeriesSelector
-            Deduplicated selectors in discovery order.
-        """
-        selectors = []
-        seen_selector_ids = set()
-        for expression in self.selections:
-            if not isinstance(expression, TimeSeriesExpression):
-                continue
-            for selector in expression.get_selectors():
-                if uses_alias is not None and selector.uses_alias != uses_alias:
-                    continue
-                if selector.selector_id in seen_selector_ids:
-                    continue
-                seen_selector_ids.add(selector.selector_id)
-                selectors.append(selector)
-        return selectors
-
     def _determine_result_objects_dtypes(self, default_dtype: T = T.DoubleType()):
         """
         Determine result objects and their data types for the selections.
@@ -261,8 +233,12 @@ class QueryBuilder:
         ) = self._determine_result_objects_dtypes()
 
         # extract selectors upfront
-        direct_selectors = self._collect_time_series_selectors(uses_alias=False)
-        aliased_selectors = self._collect_time_series_selectors(uses_alias=True)
+        direct_selectors = TimeSeriesExpression.collect_selectors(
+            self.selections, uses_alias=False
+        )
+        aliased_selectors = TimeSeriesExpression.collect_selectors(
+            self.selections, uses_alias=True
+        )
 
         # create Query
         tags_df = solver.filter_container_tags(spark, self)

@@ -38,7 +38,10 @@ from impulse_reporting.incremental.container_detector import ContainerUpsertDete
 from impulse_reporting.incremental.definition_hash_comparator import (
     DefinitionHashComparator,
 )
-from impulse_reporting.meta.container_dimensions import ContainerDimension
+from impulse_reporting.meta.container_dimensions import (
+    ChannelMappingResolutionDimension,
+    ContainerDimension,
+)
 from impulse_reporting.persist.report_storage import (
     ReportEntityTransformer,
     Sink,
@@ -96,6 +99,7 @@ class Report:
         self.aggregation_dfs = {}
         self.aggregation_metadata_dfs = {}
         self.container_dimension_df = None
+        self.channel_mapping_resolution_dimension_df = None
         self._is_incremental = None
 
         if config:
@@ -591,6 +595,12 @@ class Report:
             uri = writer.get_output_uri()
             writer.write(self.container_dimension_df, uri=uri)
 
+        # persist channel mapping resolution dimension
+        if self.channel_mapping_resolution_dimension_df is not None:
+            writer = storage_factory.create_channel_mapping_resolution_dimension_writer()
+            uri = writer.get_output_uri()
+            writer.write(self.channel_mapping_resolution_dimension_df, uri=uri)
+
     @telemetry_logger("report", "determine_report")
     def _persist_incremental(
         self,
@@ -737,6 +747,25 @@ class Report:
             # Add meta information and upsert directly (no schema transform needed)
             df_enriched = self.container_dimension_df.transform(transformer.add_meta_information)
             self.sink.upsert(df_enriched, uri, ["container_id"])
+
+        # Persist channel mapping resolution dimension
+        # (upsert by container_id, channel_id, channel_alias)
+        if self.channel_mapping_resolution_dimension_df is not None:
+            writer = storage_factory.create_channel_mapping_resolution_dimension_writer()
+            uri = writer.get_output_uri()
+            df_enriched = self.channel_mapping_resolution_dimension_df.transform(
+                transformer.add_meta_information
+            )
+            solver_cfg = self.solver.config
+            self.sink.upsert(
+                df_enriched,
+                uri,
+                [
+                    solver_cfg.container_id_col,
+                    solver_cfg.channel_id_col,
+                    solver_cfg.channel_alias_col,
+                ],
+            )
 
     def _transform_for_persistence(
         self,
@@ -999,6 +1028,22 @@ class Report:
             solver=self.solver,
             config=self.config,
             pre_filtered_containers_df=pre_filtered_containers_df,
+        )
+
+        # Determine channel mapping resolution dimension
+        aliased_selectors = TimeSeriesExpression.collect_selectors(
+            all_changed_expressions + all_unchanged_expressions,
+            uses_alias=True,
+        )
+        self.channel_mapping_resolution_dimension_df = (
+            ChannelMappingResolutionDimension.get_dimension(
+                spark=self.spark,
+                query=self.query,
+                solver=self.solver,
+                config=self.config,
+                aliased_selectors=aliased_selectors,
+                pre_filtered_containers_df=pre_filtered_containers_df,
+            )
         )
 
     def _resolve_is_incremental(self, is_incremental: bool = None) -> bool:

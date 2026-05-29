@@ -3,7 +3,7 @@ from __future__ import annotations
 import abc
 import operator
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 import pyspark.sql.types as T
@@ -196,6 +196,48 @@ class TimeSeriesExpression(abc.ABC):
             Leaf selectors.
         """
         pass
+
+    @staticmethod
+    def collect_selectors(
+        expressions: Iterable[Any],
+        uses_alias: bool | None = None,
+    ) -> list["TimeSeriesSelector"]:
+        """Collect deduplicated leaf selectors from a list of expressions.
+
+        Iterates each item, skips anything that isn't a
+        :class:`TimeSeriesExpression`, walks ``get_selectors()``, applies
+        an optional ``uses_alias`` filter, and deduplicates by
+        ``selector_id`` preserving discovery order.
+
+        Parameters
+        ----------
+        expressions : Iterable[Any]
+            Items to walk; non-``TimeSeriesExpression`` entries are
+            silently skipped (e.g. the ``selections`` list on a
+            ``QueryBuilder`` may carry other selector kinds).
+        uses_alias : bool or None, optional
+            When ``True``, keep only alias selectors; when ``False``,
+            keep only direct selectors; when ``None`` (default), keep
+            all.
+
+        Returns
+        -------
+        list of TimeSeriesSelector
+            Deduplicated selectors in discovery order.
+        """
+        selectors: list["TimeSeriesSelector"] = []
+        seen_ids: set = set()
+        for expression in expressions:
+            if not isinstance(expression, TimeSeriesExpression):
+                continue
+            for selector in expression.get_selectors():
+                if uses_alias is not None and selector.uses_alias != uses_alias:
+                    continue
+                if selector.selector_id in seen_ids:
+                    continue
+                seen_ids.add(selector.selector_id)
+                selectors.append(selector)
+        return selectors
 
     @abc.abstractmethod
     def __str__(self) -> str:

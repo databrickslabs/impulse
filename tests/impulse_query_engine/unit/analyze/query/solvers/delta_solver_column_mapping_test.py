@@ -25,6 +25,9 @@ from pyspark.errors.exceptions.captured import AnalysisException
 from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    TimeSeriesExpression,
+)
 from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     SolverConfig,
@@ -351,7 +354,7 @@ class TestDeltaSolverChannelTagsMapping:
         query.select(query.channel(channel_name="Engine RPM"))
         tags_df = solver.filter_container_tags(spark, query)
         container_df = solver.filter_container_metrics(spark, query, tags_df)
-        selectors = query._collect_time_series_selectors(uses_alias=False)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=False)
         result = solver.filter_channel_tags(spark, db_custom_channel_tags, container_df, selectors)
         assert {"container_id", "channel_id", "selector_id"}.issubset(set(result.columns))
         # Three channels named "Engine RPM" across containers 1, 2, 3
@@ -364,7 +367,7 @@ class TestDeltaSolverChannelTagsMapping:
         query.select(query.channel(channel_name="Engine RPM"))
         tags_df = solver.filter_container_tags(spark, query)
         container_df = solver.filter_container_metrics(spark, query, tags_df)
-        selectors = query._collect_time_series_selectors(uses_alias=False)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=False)
         with pytest.raises(AnalysisException):
             solver.filter_channel_tags(
                 spark, db_custom_channel_tags, container_df, selectors
@@ -398,7 +401,7 @@ class TestDeltaSolverChannelMetricsMapping:
         query.select(query.channel(channel_name="Engine RPM"))
         tags_df = solver.filter_container_tags(spark, query)
         container_df = solver.filter_container_metrics(spark, query, tags_df)
-        selectors = query._collect_time_series_selectors(uses_alias=False)
+        selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=False)
         ch_tags_df = solver.filter_channel_tags(
             spark, db_custom_channel_metrics, container_df, selectors
         )

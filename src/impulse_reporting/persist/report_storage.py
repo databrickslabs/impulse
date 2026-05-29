@@ -71,6 +71,18 @@ class SinkConfig(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_output_uri_channel_mapping_resolution_dimension_table(self) -> str:
+        """
+        Get the output URI for the channel mapping resolution dimension table.
+
+        Returns
+        -------
+        str
+            The output URI for the channel mapping resolution dimension table.
+        """
+        pass
+
 
 @dataclass()
 class UnitySinkConfig(SinkConfig):
@@ -146,6 +158,29 @@ class UnitySinkConfig(SinkConfig):
             )
         else:
             uri = f"{self.catalog_name}.{self.schema_name}.measurement_dimension"
+        return uri
+
+    def get_output_uri_channel_mapping_resolution_dimension_table(self) -> str:
+        """
+        Get the output URI for the channel mapping resolution dimension table
+        in Unity Catalog format.
+
+        Returns
+        -------
+        str
+            The Unity Catalog URI for the channel mapping resolution dimension
+            table.
+        """
+        if self.table_prefix:
+            uri = (
+                f"{self.catalog_name}.{self.schema_name}."
+                f"{self.table_prefix}_channel_mapping_resolution_dimension"
+            )
+        else:
+            uri = (
+                f"{self.catalog_name}.{self.schema_name}."
+                "channel_mapping_resolution_dimension"
+            )
         return uri
 
 
@@ -600,6 +635,39 @@ class ContainerDimensionWriter:
         return self.sink.config.get_output_uri_measurement_dimensions_table()
 
 
+class ChannelMappingResolutionDimensionWriter:
+    """Writer for the channel mapping resolution dimension."""
+
+    def __init__(self, sink: Sink, transformer: ReportEntityTransformer):
+        self.sink = sink
+        self.transformer = transformer
+
+    def write(self, df: DataFrame, uri: str):
+        """
+        Write channel mapping resolution dimension to the sink.
+
+        Parameters
+        ----------
+        df : DataFrame
+            DataFrame containing the channel mapping resolution dimension.
+        uri : str
+            The destination URI.
+        """
+        df_enriched = df.transform(self.transformer.add_meta_information)
+        self.sink.store(df_enriched, uri)
+
+    def get_output_uri(self) -> str:
+        """
+        Get the output URI for the channel mapping resolution dimension table.
+
+        Returns
+        -------
+        str
+            The output URI for the channel mapping resolution dimension table.
+        """
+        return self.sink.config.get_output_uri_channel_mapping_resolution_dimension_table()
+
+
 class WriterFactory:
     """
     Factory class to create report entity writers.
@@ -654,3 +722,18 @@ class WriterFactory:
             A writer configured for measurement dimensions.
         """
         return ContainerDimensionWriter(self.sink, self._default_transformer)
+
+    def create_channel_mapping_resolution_dimension_writer(
+        self,
+    ) -> ChannelMappingResolutionDimensionWriter:
+        """
+        Create a writer for the channel mapping resolution dimension.
+
+        Returns
+        -------
+        ChannelMappingResolutionDimensionWriter
+            A writer configured for the channel mapping resolution dimension.
+        """
+        return ChannelMappingResolutionDimensionWriter(
+            self.sink, self._default_transformer
+        )
