@@ -1030,17 +1030,25 @@ class Report:
             pre_filtered_containers_df=pre_filtered_containers_df,
         )
 
-        # Determine channel mapping resolution dimension
-        aliased_selectors = TimeSeriesExpression.collect_selectors(
-            all_changed_expressions + all_unchanged_expressions,
+        # Determine channel mapping resolution dimension.
+        # Mirror the fact split: aliases from changed definitions resolve
+        # over all containers, aliases only in unchanged definitions stay
+        # scoped to the incrementally-detected containers.
+        changed_aliased_selectors = TimeSeriesExpression.collect_selectors(
+            all_changed_expressions,
+            uses_alias=True,
+        )
+        unchanged_aliased_selectors = TimeSeriesExpression.collect_selectors(
+            all_unchanged_expressions,
             uses_alias=True,
         )
         self.channel_mapping_resolution_dimension_df = (
-            ChannelMappingResolutionDimension.get_dimension(
+            ChannelMappingResolutionDimension.get_dimension_for_scopes(
                 spark=self.spark,
                 query=self.query,
                 solver=self.solver,
-                aliased_selectors=aliased_selectors,
+                changed_aliased_selectors=changed_aliased_selectors,
+                unchanged_aliased_selectors=unchanged_aliased_selectors,
                 pre_filtered_containers_df=pre_filtered_containers_df,
             )
         )

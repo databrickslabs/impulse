@@ -23,6 +23,7 @@ from impulse_reporting.aggregations.histogram2d import (
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.config.config_parser import (
     ImpulseConfig,
+    IncrementalConfig,
     QueryEngine,
     Solvers,
     Source,
@@ -98,6 +99,7 @@ def create_alias_report(
     spark: SparkSession,
     report_name: str = "alias_report",
     table_prefix: str = "alias_test",
+    incremental: bool = False,
 ) -> tuple[Report, dict]:
     """
     Create a Report pointed at the ``silver_key_value_store_alias`` schema
@@ -105,6 +107,14 @@ def create_alias_report(
     ``SolverConfig`` (project_id, ``project → project_id`` rename, and a
     ``toolbox_id`` filter on the channel mapping) so the alias-CSV data
     resolves cleanly.
+
+    Parameters
+    ----------
+    incremental : bool, optional
+        When ``True``, enable incremental processing. The alias silver
+        ``container_metrics`` carries no last-modified column, so update
+        detection is a no-op and only genuinely new containers are
+        upserted (default is ``False``).
 
     Returns
     -------
@@ -135,6 +145,15 @@ def create_alias_report(
                 container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
                 channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
             ),
+        ),
+        incremental=(
+            IncrementalConfig(
+                enabled=True,
+                silver_last_modified_column="timestamp",
+                gold_last_modified_column="_created_at",
+            )
+            if incremental
+            else None
         ),
     )
 
