@@ -7,6 +7,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.model.series import Intervals
 from impulse_query_engine.model.series.points_in_time import PointsInTime
+from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 
@@ -51,6 +52,17 @@ def test_timeseries_where_dtype(narrow_db):
     assert len(result_objects) == len(result_dtypes) == 1
     assert isinstance(result_dtypes[0], T.BinaryType)
     assert isinstance(result_objects[0], SampleSeries)
+
+
+def test_pointsInTimeSeries_dtype(narrow_db):
+    query = narrow_db.query
+    ts = TimeSeriesSelector(TagSelector("name") == "test")
+    expr = ts.where(ts.rising_edge())
+    query.select(expr)
+    result_objects, result_dtypes = query._determine_result_objects_dtypes()
+    assert len(result_objects) == len(result_dtypes) == 1
+    assert isinstance(result_dtypes[0], T.ArrayType)
+    assert isinstance(result_objects[0], PointsInTimeSeries)
 
 
 def test_multiple_selections_dtype(narrow_db):

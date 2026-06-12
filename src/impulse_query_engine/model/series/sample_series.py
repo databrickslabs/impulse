@@ -997,20 +997,33 @@ class SampleSeries:
             synced_list.append(SampleSeries(starts, ends, other_values))
         return tuple(synced_list)
 
-    def where(self, other: Intervals) -> SampleSeries:
+    def where(self, other: Intervals | PointsInTime) -> SampleSeries | PointsInTimeSeries:
         """
-        Returns a SampleSeries where the given intervals are defined.
+        Returns a series filtered to where the given intervals or points are defined.
+
+        When ``other`` is an Intervals object, returns a SampleSeries clipped to those intervals.
+        When ``other`` is a PointsInTime object, returns a PointsInTimeSeries holding, for each
+        point, the value valid at that point (the sample interval ``[tstart, tend)`` containing it).
+        Points that fall outside every sample interval (gaps, before the first or after the last
+        sample) are dropped.
 
         Parameters
         ----------
-        other : Intervals
-            Intervals to filter by.
+        other : Intervals or PointsInTime
+            Intervals or points in time to filter by.
 
         Returns
         -------
-        SampleSeries
-            Filtered SampleSeries.
+        SampleSeries or PointsInTimeSeries
+            Filtered SampleSeries (for Intervals) or PointsInTimeSeries (for PointsInTime).
         """
+        if isinstance(other, PointsInTime):
+            from .points_in_time_series import PointsInTimeSeries
+
+            pairs = PointsInTimeSeries.plane_sweep(other, self)
+            tstarts = [other.tstarts[p] for p, _ in pairs]
+            values = [self.values[s] for _, s in pairs]
+            return PointsInTimeSeries(tstarts, values)
         pairs = SampleSeries.__plane_sweep(self, other)
         starts = [max(self.tstarts[i1], other.tstarts[i2]) for i1, i2 in pairs]
         ends = [min(self.tends[i1], other.tends[i2]) for i1, i2 in pairs]
