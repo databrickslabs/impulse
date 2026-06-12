@@ -65,13 +65,63 @@ class QuerySolver(ABC):
                 expr = expr | filt.get_selector_expr()
         return expr
 
-    def _empty_channel_match_df(self, spark) -> DataFrame:
+    def _build_solve_output_schema(self, channels: DataFrame, selections, dtypes) -> T.StructType:
+        """Build the grouped-map UDF output schema for the ``solve`` stage.
+
+        The ``container_id`` field type is derived from *channels* (the
+        column-mapped channels DataFrame) so it matches the physical type of
+        the source table instead of being hardcoded.  Each selection
+        contributes one field, named after its ``_alias`` and typed by the
+        paired entry in *dtypes*.
+
+        Parameters
+        ----------
+        channels : pyspark.sql.DataFrame
+            The column-mapped channels DataFrame whose ``container_id`` column
+            type is authoritative for the grouped output.
+        selections : Iterable
+            Selection expressions; each contributes a result field.
+        dtypes : Iterable
+            Output Spark data types, paired positionally with *selections*.
+
+        Returns
+        -------
+        pyspark.sql.types.StructType
+            ``[container_id, <selection aliases…>]`` schema.
+        """
+        entries = [
+            T.StructField(
+                self.config.container_id_col,
+                channels.schema[self.config.container_id_col].dataType,
+            )
+        ]
+        for s, dtype in zip(selections, dtypes, strict=False):
+            entries.append(T.StructField(s._alias, dtype))
+        return T.StructType(entries)
+
+    def _empty_channel_match_df(self, spark, db: MeasurementDB) -> DataFrame:
+        """Return an empty ``(container_id, channel_id, selector_ids)`` DataFrame.
+
+        The ``container_id`` and ``channel_id`` types are derived from the
+        column-mapped ``channel_metrics`` table (the source of the real
+        channel-match rows this empty frame is union'd/joined with) so the
+        schemas stay compatible regardless of the physical id types.
+        """
+        ref = self._apply_column_mapping(
+            db.channel_metrics(spark), self.config.channel_metrics.column_name_mapping
+        )
         return spark.createDataFrame(
             [],
             schema=T.StructType(
                 [
-                    T.StructField(self.config.container_id_col, T.LongType()),
-                    T.StructField(self.config.channel_id_col, T.LongType()),
+                    T.StructField(
+                        self.config.container_id_col,
+                        ref.schema[self.config.container_id_col].dataType,
+                    ),
+                    T.StructField(
+                        self.config.channel_id_col,
+                        ref.schema[self.config.channel_id_col].dataType,
+                    ),
                     T.StructField("selector_ids", T.ArrayType(T.IntegerType())),
                 ]
             ),

@@ -3,7 +3,6 @@ from functools import partial
 
 import pandas as pd
 import pyspark.sql.functions as F
-import pyspark.sql.types as T
 from pyspark.sql import DataFrame
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
@@ -241,7 +240,7 @@ class DeltaSolver(QuerySolver):
         mids = container_df.select(container_id_col).distinct()
 
         if len(selectors) == 0:
-            return self._empty_channel_match_df(spark)
+            return self._empty_channel_match_df(spark, db)
 
         required_tags = set()
         for selector in selectors:
@@ -364,10 +363,7 @@ class DeltaSolver(QuerySolver):
             # Calculate the tend info and prepare the data for the solving step.
             q = self.interval_encoder.prepare_channels_df(q)
 
-        schema_entries = [T.StructField(self.config.container_id_col, T.LongType())]
-        for s, dtype in zip(selections, dtypes, strict=False):
-            schema_entries.append(T.StructField(s._alias, dtype))
-        schema = T.StructType(schema_entries)
+        schema = self._build_solve_output_schema(q, selections, dtypes)
 
         solve_udf = F.pandas_udf(
             partial(DeltaSolver._solve_udf, selections=selections, col_map=col_map),
