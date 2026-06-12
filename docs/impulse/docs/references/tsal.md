@@ -135,13 +135,21 @@ distance_km = veh_spd.resample(1e6).cumtrapz() / 3600 / 1e6
 
 ### Filtering
 
-| Method              | Signature                         | Description                                                                                    |
-|---------------------|-----------------------------------|------------------------------------------------------------------------------------------------|
-| `.where(condition)` | `condition: TimeSeriesExpression` | Restrict the signal to time intervals where the condition (an `Intervals` expression) is true. |
+| Method              | Signature                         | Description                                                                                                                                                                                                                                                              |
+|---------------------|-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `.where(condition)` | `condition: TimeSeriesExpression` | Filter the signal by another expression. An `Intervals` condition restricts the signal to those windows and returns a `SampleSeries`. A `PointsInTime` condition (e.g. `rising_edges()`) samples the signal's value at those instants and returns a `PointsInTimeSeries`. |
 
 ```python
+# Intervals condition -> SampleSeries restricted to the windows
 rpm_in_band = eng_rpm.where((eng_rpm > 2000) & (eng_rpm < 5000))
+
+# PointsInTime condition -> PointsInTimeSeries sampled at those instants
+# (instants outside every sample interval are dropped)
+rpm_at_starts = eng_rpm.where(veh_spd.rising_edges())
 ```
+
+See [Core Data Model](core_data_model.md) for the difference between `SampleSeries` and
+`PointsInTimeSeries`.
 
 ### Aggregation (scalar results)
 
@@ -181,7 +189,7 @@ These are lower-level methods on the expression itself. For report-level aggrega
 | Method                 | Signature             | Description                                                                                                                    |
 |------------------------|-----------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | `.sparse()`            | --                    | Merge consecutive samples with the same value into a single interval. Reduces data volume.                                     |
-| `.synchronized(other)` | `other: SampleSeries` | Align two signals to shared overlapping time intervals. Called automatically when combining signals with arithmetic operators. |
+| `.synchronized(other)` | `other: SampleSeries` | Align two signals to shared overlapping time intervals. Called automatically when combining signals with arithmetic operators. (`PointsInTimeSeries` offers `synchronized` / `synchronized_all` too — see [Core Data Model](core_data_model.md).) |
 | `.alias(name)`         | `name: str`           | Assign a display name to the expression. Used as the column name in result DataFrames.                                         |
 
 ### Rolling window operations
@@ -262,11 +270,14 @@ nodes into `SampleSeries` objects, then the tree is evaluated bottom-up.
 
 ## Result types
 
-Depending on the operations applied, a TSAL expression resolves to one of these types at execution time:
+Depending on the operations applied, a TSAL expression resolves to one of these types at execution
+time. See [Core Data Model](core_data_model.md) for the full treatment of these classes and how they
+interact.
 
-| Type             | Description                                                                                                                                         |
-|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `SampleSeries`   | Time series with `(tstarts, tends, values)` arrays. Produced by channel selection, arithmetic, resampling, and integration.                         |
-| `Intervals`      | Set of `(tstart, tend)` pairs. Produced by comparison and logical operators. Supports `&` (intersection), `\|` (union), `expand()`, and `shrink()`. |
-| `PointsInTime`   | Set of individual timestamps. Produced by `.rising_edges()` and `.falling_edges()`.                                                                 |
-| Scalar (`float`) | Single numeric value. Produced by `.min()`, `.max()`, `.mean()`, `.sum()`.                                                                          |
+| Type                 | Description                                                                                                                                                  |
+|----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `SampleSeries`       | Time series with `(tstarts, tends, values)` arrays; the series is valid across its intervals, and each value `v_i` is the measurement at `tstart_i` that stands as the most recent value until `tend_i`. Produced by channel selection, arithmetic, resampling, and integration. |
+| `Intervals`          | Set of `(tstart, tend)` pairs (no values). Produced by comparison and logical operators. Supports `&` (intersection), `\|` (union), `expand()`, and `shrink()`. |
+| `PointsInTime`       | Set of individual timestamps (no values). Produced by `.rising_edges()` and `.falling_edges()`.                                                             |
+| `PointsInTimeSeries` | Timestamp→value series; each value is defined only *at* its timestamp, not in between. Produced by `.where(<PointsInTime expression>)`.                       |
+| Scalar (`float`)     | Single numeric value. Produced by `.min()`, `.max()`, `.mean()`, `.sum()`.                                                                                  |

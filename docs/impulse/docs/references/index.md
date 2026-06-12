@@ -8,6 +8,7 @@ options and API documentation.
 - [Report](report.md) - Report generation and output formats
 - [Query Engine](query_engine.md) - Solver overview and how to pick between `DeltaSolver` and `KeyValueStoreSolver`
 - [TSAL](tsal.md) - Time-Series Analysis Language syntax and usage
+- [Core Data Model](core_data_model.md) - The in-memory result classes TSAL resolves to and how they interact
 - [Event](event.md) - Event detection and processing
 - [Aggregation](aggregation.md) - Aggregation methods and configurations
 - [Persist](persistence.md) - Storage and persistence options for reports and results

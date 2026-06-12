@@ -639,18 +639,25 @@ Synchronize this series with multiple other SampleSeries.
 #### where
 
 ```python
-def where(other: Intervals) -> SampleSeries
+def where(
+        other: Intervals | PointsInTime) -> SampleSeries | PointsInTimeSeries
 ```
 
-Returns a SampleSeries where the given intervals are defined.
+Returns a series filtered to where the given intervals or points are defined.
+
+When ``other`` is an Intervals object, returns a SampleSeries clipped to those intervals.
+When ``other`` is a PointsInTime object, returns a PointsInTimeSeries holding, for each
+point, the value valid at that point (the sample interval ``[tstart, tend)`` containing it).
+Points that fall outside every sample interval (gaps, before the first or after the last
+sample) are dropped.
 
 **Arguments**:
 
-- `other` (`Intervals`): Intervals to filter by.
+- `other` (`Intervals or PointsInTime`): Intervals or points in time to filter by.
 
 **Returns**:
 
-`SampleSeries`: Filtered SampleSeries.
+`SampleSeries or PointsInTimeSeries`: Filtered SampleSeries (for Intervals) or PointsInTimeSeries (for PointsInTime).
 
 #### resample
 

@@ -47,6 +47,7 @@
               "items": [
                 "references/api/impulse_query_engine/model/series/intervals",
                 "references/api/impulse_query_engine/model/series/points_in_time",
+                "references/api/impulse_query_engine/model/series/points_in_time_series",
                 "references/api/impulse_query_engine/model/series/sample_series"
               ],
               "label": "impulse_query_engine.model.series",
