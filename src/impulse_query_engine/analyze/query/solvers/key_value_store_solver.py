@@ -341,7 +341,7 @@ class KeyValueStoreSolver(QuerySolver):
             channel_metrics_df, self.config.channel_metrics.column_name_mapping
         )
         if len(selectors) == 0:
-            return self._empty_channel_match_df(spark)
+            return self._empty_channel_match_df(spark, db)
 
         channel_metrics_df = channel_metrics_df.where(self._build_expr(selectors))
         result = channel_metrics_df.join(
@@ -403,7 +403,7 @@ class KeyValueStoreSolver(QuerySolver):
         channel_id_col = self.config.channel_id_col
 
         if len(selectors) == 0:
-            return self._empty_channel_match_df(spark)
+            return self._empty_channel_match_df(spark, db)
 
         channel_mapping = db.channel_mapping(spark)
         channel_mapping = self._apply_column_mapping(
@@ -850,10 +850,7 @@ class KeyValueStoreSolver(QuerySolver):
             # Calculate the tend info and prepare the data for the solving step.
             q = self.interval_encoder.prepare_channels_df(q)
 
-        schema_entries = [T.StructField(self.config.container_id_col, T.LongType())]
-        for s, dtype in zip(selections, dtypes, strict=False):
-            schema_entries.append(T.StructField(s._alias, dtype))
-        schema = T.StructType(schema_entries)
+        schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
             partial(KeyValueStoreSolver._solve_udf, selections=selections, col_map=col_map),
             schema,
