@@ -22,6 +22,13 @@ overrides are applied. The framework hard-requires only a small subset of this s
 - one of the two `channels` formats below (RLE with `tstart`/`tend` or
   raw with `timestamp`).
 
+`container_id` may be any Spark type (e.g. `long`, `int`, or `string`): the
+engine derives its type from your tables at query time and carries it through
+to the gold layer, so it is **not** required to be `long`. The only constraint
+is that the type is **consistent across all silver tables**, since the engine
+joins them on `container_id`. The `long` shown throughout this page is the
+typical default, not a requirement.
+
 Any other column on `container_metrics` and `channel_metrics` is
 optional and only consulted when referenced by your config (e.g. via
 [`measurement_dimensions`](../config/configuration.md#measurement_dimensions-optional)

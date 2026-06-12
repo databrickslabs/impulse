@@ -213,8 +213,10 @@ scoping filters without writing code, but the underlying tables must
 still follow the silver-layer relationships (EAV tag tables,
 per-`(container_id, channel_id)` channels rows, etc.) and the internal
 key names (`container_id`, `channel_id`) themselves are fixed
-constants. For different relationships or composite keys, see custom
-solvers below.
+constants. Their column *types* are not fixed, though — `container_id`
+in particular may be a `long`, `int`, or `string`; the engine adopts
+whatever type your tables use, as long as it is consistent across them.
+For different relationships or composite keys, see custom solvers below.
 
 ### Custom solvers
 

@@ -16,6 +16,16 @@ All gold-layer table names are prefixed with the configured
 `table_prefix: "my_report"` the histogram fact table becomes
 `my_report_histogram_fact`).
 
+:::note container_id type
+
+The `container_id` type shown in the diagrams and tables below
+(`long`/`int`) is the typical default. The gold layer inherits whatever
+`container_id` type your silver tables use (e.g. `string`) — fact and
+dimension rows are written with the source `container_id` type, not cast to a
+fixed one. See [Silver Layer Schema](silver_layer_schema.md).
+
+:::
+
 ## Entity-relationship diagram
 
 ```mermaid
