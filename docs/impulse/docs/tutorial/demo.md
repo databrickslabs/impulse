@@ -37,7 +37,7 @@ The demo uses a JSON configuration file that points to the Silver and Gold layer
     "table_prefix": "t"
   },
   "query_engine": {
-    "solver": "DeltaSolver"
+    "solver": "DefaultSolver"
   },
   "measurement_dimensions": [
     "container_id",
@@ -48,7 +48,7 @@ The demo uses a JSON configuration file that points to the Silver and Gold layer
 }
 ```
 
-This tells the framework to read from `impulse_demo.default.*` Silver tables, use the `DeltaSolver`, and write Gold layer
+This tells the framework to read from `impulse_demo.default.*` Silver tables, use the `DefaultSolver`, and write Gold layer
 results to `impulse_demo.gold.t_*`.
 
 ---

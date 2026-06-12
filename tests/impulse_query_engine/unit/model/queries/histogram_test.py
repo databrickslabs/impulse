@@ -2,7 +2,7 @@
 import numpy as np
 from pyspark.sql import SparkSession
 
-from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.measurement_db import MeasurementDB
 from tests.conftest import narrow_db, spark
 
@@ -12,7 +12,7 @@ def test_histogram(spark: SparkSession, narrow_db: MeasurementDB):
     q = narrow_db.query
     series1 = q.channel(seed=0)
     q1 = q.select(series1.histogram([-np.inf, -1.0, 0.0, 1.0, np.inf]).alias("hist1"))
-    result = q1.toPandas(spark, solver=DeltaSolver(spark))
+    result = q1.toPandas(spark, solver=DefaultSolver(spark))
     assert 10.0 == sum(result["hist1"].iloc[0][0])
 
 
@@ -25,7 +25,7 @@ def test_histogram2d(spark: SparkSession, narrow_db: MeasurementDB):
     y_bins = [-np.inf, -1.0, 0.0, 1.0, np.inf]
 
     q1 = q.select(series1.histogram2d(series2, x_bins=x_bins, y_bins=y_bins).alias("hist1"))
-    result = q1.toPandas(spark, solver=DeltaSolver(spark))
+    result = q1.toPandas(spark, solver=DefaultSolver(spark))
     assert 10.0 == sum(result["hist1"].iloc[0][0][3])
 
 
@@ -46,7 +46,7 @@ def test_histogram_custom_weights(spark: SparkSession, narrow_db: MeasurementDB)
             math_fct_kwargs={},
         ).alias("hist_custom")
     )
-    result = q1.toPandas(spark, solver=DeltaSolver(spark))
+    result = q1.toPandas(spark, solver=DefaultSolver(spark))
 
     # Verify result structure
     assert "hist_custom" in result.columns
@@ -75,7 +75,7 @@ def test_histogram_custom_weights_with_math_function(
             math_fct_kwargs={},
         ).alias("hist_custom_diff")
     )
-    result = q1.toPandas(spark, solver=DeltaSolver(spark))
+    result = q1.toPandas(spark, solver=DefaultSolver(spark))
 
     # Verify result structure
     assert "hist_custom_diff" in result.columns
@@ -106,7 +106,7 @@ def test_histogram2d_custom_weights(spark: SparkSession, narrow_db: MeasurementD
             math_fct_kwargs={},
         ).alias("hist2d_custom")
     )
-    result = q1.toPandas(spark, solver=DeltaSolver(spark))
+    result = q1.toPandas(spark, solver=DefaultSolver(spark))
 
     # Verify result structure
     assert "hist2d_custom" in result.columns
@@ -139,7 +139,7 @@ def test_histogram2d_custom_weights_with_math_function(
             math_fct_kwargs={},
         ).alias("hist2d_custom_diff")
     )
-    result = q1.toPandas(spark, solver=DeltaSolver(spark))
+    result = q1.toPandas(spark, solver=DefaultSolver(spark))
 
     # Verify result structure
     assert "hist2d_custom_diff" in result.columns

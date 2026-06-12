@@ -37,7 +37,7 @@ class SeriesCache(ABC):
         uses_alias : bool, optional
             ``True`` when the calling selector resolves the channel via a
             ``channel_mapping`` alias.  Caches that perform unit conversion
-            (e.g. :class:`KVSTimeSeriesCache`) only apply the per-channel
+            (e.g. :class:`TimeSeriesCache`) only apply the per-channel
             conversion factor when this is ``True``, so a direct selector
             on the same physical channel always returns raw values.
             Defaults to ``False`` (direct / no-conversion semantics).

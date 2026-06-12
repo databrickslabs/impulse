@@ -25,7 +25,7 @@ Pydantic models. The canonical schema lives in
     "table_prefix": "my_report"
   },
   "query_engine": {
-    "solver": "DeltaSolver",
+    "solver": "DefaultSolver",
     "data_type": "RAW"
   },
   "container_filters": {
@@ -61,11 +61,12 @@ Maps the silver-layer input tables.
 | `channels_uri`            | `str` | Yes      | Full Unity Catalog path. Time-series sample data.         |
 | `container_tags_table`    | `str` | No       | Full Unity Catalog path. Container EAV tags.              |
 | `channel_tags_table`      | `str` | No       | Full Unity Catalog path. Channel EAV tags.                |
-| `channel_mapping_table`   | `str` | No       | Full Unity Catalog path. Logical-to-physical channel alias table. Required when using `QueryBuilder.channel_with_alias()` (currently supported by `KeyValueStoreSolver`). In reporting mode the resolved alias-to-physical-channel mapping is materialized to the gold-layer [`channel_mapping_resolution_dimension`](../data_model/gold_layer_event_normalized.md#dimension-tables). |
-| `unit_conversion_table`   | `str` | No       | Full Unity Catalog path. Per-unit-family conversion factors. When configured together with a `channel_mapping_table` whose rows carry `source_unit` / `target_unit` columns, aliased selectors auto-convert values from source to target unit during `solve()` (currently supported by `KeyValueStoreSolver`). |
+| `channel_mapping_table`   | `str` | No       | Full Unity Catalog path. Logical-to-physical channel alias table. Required when using `QueryBuilder.channel_with_alias()`. In reporting mode the resolved alias-to-physical-channel mapping is materialized to the gold-layer [`channel_mapping_resolution_dimension`](../data_model/gold_layer_event_normalized.md#dimension-tables). |
+| `unit_conversion_table`   | `str` | No       | Full Unity Catalog path. Per-unit-family conversion factors. When configured together with a `channel_mapping_table` whose rows carry `source_unit` / `target_unit` columns, aliased selectors auto-convert values from source to target unit during `solve()`. |
 
-Tag tables are required for solvers that consume tag-based filters
-(`DeltaSolver` with tag filters, `KeyValueStoreSolver`).
+A `container_tags_table` is required to use tag-based container filters;
+a `channel_tags_table` is required to select channels by tag rather than
+by columns on `channel_metrics`.
 
 ---
 
@@ -132,13 +133,13 @@ Two independent filter families:
 
 | Field                   | Type           | Default                  | Description                                                                                                                 |
 |-------------------------|----------------|--------------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `solver`                | `str`          | `"KeyValueStoreSolver"`  | One of `"DeltaSolver"`, `"KeyValueStoreSolver"`. `"KeyValueStoreSolver"` works either against a narrow EAV `container_tags` table or, when `source.container_tags_table` is omitted, against a wide-only data model where container attributes live directly on `container_metrics`. |
+| `solver`                | `str`          | `"DefaultSolver"`        | `"DefaultSolver"` adapts to the silver layer: it selects channels from a narrow EAV `channel_tags` table when `source.channel_tags_table` is set and otherwise from columns on `channel_metrics`; it filters containers via a narrow EAV `container_tags` table or, when `source.container_tags_table` is omitted, a wide-only `container_metrics`. `"DeltaSolver"` and `"KeyValueStoreSolver"` are **deprecated aliases** that resolve to `DefaultSolver`. |
 | `data_type`             | `str`          | `"RLE"`                  | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to RLE before aggregation).                      |
 | `drop_implausible_data` | `bool`         | `false`                  | When `true`, drops `channels` rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
 | `batch_size`            | `int`          | `500`                    | Maximum number of selectors solved per batch.                                                                               |
 | `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` to scope reads by project — it is applied to `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured), so it works in both narrow EAV and wide-only data models. Omit it when you don't need project scoping. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
 
-If `query_engine` is omitted, the default is `KeyValueStoreSolver` with
+If `query_engine` is omitted, the default is `DefaultSolver` with
 `data_type = "RLE"`.
 
 ---
@@ -167,15 +168,15 @@ Top-level fields on `SolverConfig`:
 
 Per-table sections (each a `TableConfig`):
 
-| Section            | Used by                              | Typical mappings                                                  |
-|--------------------|--------------------------------------|-------------------------------------------------------------------|
-| `container_tags`   | DeltaSolver, KeyValueStoreSolver     | `entity_id → container_id`, custom EAV `key`/`value` columns      |
-| `container_metrics`| All solvers                          | Custom container_id column, custom timestamp columns              |
-| `channel_tags`     | DeltaSolver                          | Tag key/value column renames                                      |
-| `channel_metrics`  | All solvers                          | Custom channel_id column, custom value/timestamp columns          |
-| `channel_mapping`  | KeyValueStoreSolver                  | Alias-table column renames; `priority` column; optional `join_keys` for non-default alias-resolution composite keys |
-| `channels`         | All solvers                          | RLE column renames (`tstart`/`tend`/`value`)                      |
-| `unit_conversion`  | KeyValueStoreSolver                  | Unit-conversion table column renames (`unit`, `group_id`, `conversion_factor`) |
+| Section            | When it applies                            | Typical mappings                                                  |
+|--------------------|--------------------------------------------|-------------------------------------------------------------------|
+| `container_tags`   | when `container_tags_table` is configured  | `entity_id → container_id`, custom EAV `key`/`value` columns      |
+| `container_metrics`| always                                     | Custom container_id column, custom timestamp columns              |
+| `channel_tags`     | when `channel_tags_table` is configured    | Tag key/value column renames                                      |
+| `channel_metrics`  | always                                     | Custom channel_id column, custom value/timestamp columns          |
+| `channel_mapping`  | when `channel_mapping_table` is configured | Alias-table column renames; `priority` column; optional `join_keys` for non-default alias-resolution composite keys |
+| `channels`         | always                                     | RLE column renames (`tstart`/`tend`/`value`)                      |
+| `unit_conversion`  | when `unit_conversion_table` is configured | Unit-conversion table column renames (`unit`, `group_id`, `conversion_factor`) |
 
 Internal column names that mappings can target:
 
@@ -199,28 +200,20 @@ Internal column names that mappings can target:
 | `group_id`      | Unit-family identifier on the `unit_conversion` table    |
 | `conversion_factor` | Per-unit factor on `unit_conversion`; also the per-channel factor name carried into the solve UDF |
 
-:::note Per-solver feature support
+:::note Feature support
 
-`solver_config` in your JSON config is forwarded to **both**
-`KeyValueStoreSolver` and `DeltaSolver` by the `Report` factory.
-However, only the parts each solver supports are actually consumed:
-
-- `KeyValueStoreSolver` uses all sections: per-table
-  `column_name_mapping`, per-table `filters`, and top-level
-  `project_id`.
-- `DeltaSolver` uses only the per-table `column_name_mapping` entries
-  on `container_tags`, `container_metrics`, `channel_tags`,
-  `channel_metrics`, and `channels`. Per-table `filters`, top-level
-  `project_id`, and the `channel_mapping` section (alias resolution)
-  are **silently ignored** — the solver class does not read them.
+`DefaultSolver` consumes every section of `solver_config`: per-table
+`column_name_mapping`, per-table `filters`, top-level `project_id`, and the
+`channel_mapping` / `unit_conversion` sections. Sections for tables you do
+not configure (e.g. `channel_tags`, `channel_mapping`) are simply unused.
 
 :::
 
-### Example: KeyValueStoreSolver with renamed columns and per-table filters
+### Example: DefaultSolver with renamed columns and per-table filters
 
 ```python
 "query_engine": {
-    "solver": "KeyValueStoreSolver",
+    "solver": "DefaultSolver",
     "solver_config": {
         "project_id": "my_project",
         "container_tags": {
@@ -263,7 +256,7 @@ conversion is a property of the alias, not of the channel. See
     "unit_conversion_table": "my_catalog.silver.unit_conversion"
 },
 "query_engine": {
-    "solver": "KeyValueStoreSolver",
+    "solver": "DefaultSolver",
     "solver_config": {
         "unit_conversion": {
             "column_name_mapping": {}
@@ -274,7 +267,7 @@ conversion is a property of the alias, not of the channel. See
 
 ### Alias-resolution join keys (optional)
 
-`KeyValueStoreSolver.filter_aliased_channel_metrics` joins `channel_mapping`
+`DefaultSolver.filter_aliased_channel_metrics` joins `channel_mapping`
 to `channel_metrics` to resolve aliased selectors. The default composite key
 is `(source_channel, channel_name) + (data_key, data_key)`. Override
 `channel_mapping.join_keys` to change the arity or column choice — for
@@ -405,7 +398,7 @@ in `solver_config`, then reference the internal name in
 ```json
 {
   "query_engine": {
-    "solver": "KeyValueStoreSolver",
+    "solver": "DefaultSolver",
     "solver_config": {
       "container_metrics": {
         "column_name_mapping": { "my_measurement_id": "container_id" }

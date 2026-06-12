@@ -251,8 +251,13 @@ class QueryBuilder:
         )
 
         if len(aliased_selectors) > 0:
+            # Aliased resolution must run against the full tag-filtered container
+            # set (metrics_df), not channel_tags_df: in EAV mode channel_tags_df
+            # is already narrowed to direct-selector channel matches, which would
+            # under-resolve aliases. In wide mode the two are equivalent (stage 3
+            # passes the container frame through).
             aliased_channel_metrics_df = solver.filter_aliased_channel_metrics(
-                spark, self.db, channel_tags_df, aliased_selectors
+                spark, self.db, metrics_df, aliased_selectors
             )
             channel_metrics_df = solver.resolve_channel_selections(
                 spark, channel_metrics_df, aliased_channel_metrics_df

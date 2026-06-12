@@ -69,7 +69,7 @@ class ChannelMappingConfig(TableConfig)
 **Arguments**:
 
 - `join_keys` (`list[JoinKey] or None`): Custom composite key for the ``channel_mapping`` → ``channel_metrics``
-join performed by ``KeyValueStoreSolver.filter_aliased_channel_metrics``.
+join performed by ``DefaultSolver.filter_aliased_channel_metrics``.
 When ``None`` (the default), the solver uses the backward-compatible
 pair ``[(source_channel, channel_name), (data_key, data_key)]``
 sourced from :class:`SolverConfig` internal-name properties.
@@ -183,6 +183,24 @@ def tend_col() -> str
 Internal column name for the end timestamp.
 
 
+#### start\_ts\_col
+
+```python
+def start_ts_col() -> str
+```
+
+Internal column name for the measurement-start epoch timestamp on container_metrics.
+
+
+#### stop\_ts\_col
+
+```python
+def stop_ts_col() -> str
+```
+
+Internal column name for the measurement-stop epoch timestamp on container_metrics.
+
+
 #### value\_col
 
 ```python
@@ -290,7 +308,7 @@ def conversion_factor_col() -> str
 Internal column name for the conversion factor on the unit_conversion table.
 
 Also used as the column that carries the per-channel combined factor
-downstream from :meth:`KeyValueStoreSolver._compute_conversion_factors`
+downstream from :meth:`DefaultSolver._compute_conversion_factors`
 into the grouped-map UDF.
 
 
@@ -328,7 +346,7 @@ Used in two places that happen to share the same default name:
 - On the ``channel_metrics`` table (optional), as the authoritative
   physical unit of a channel.  When present, takes precedence over
   ``channel_mapping.source_unit`` for aliased reads via the
-  :meth:`KeyValueStoreSolver.filter_aliased_channel_metrics`
+  :meth:`DefaultSolver.filter_aliased_channel_metrics`
   coalesce.
 
 Users with different internal names per table can rename physical

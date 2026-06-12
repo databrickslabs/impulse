@@ -9,10 +9,9 @@ The Silver layer stores measurement data in a normalized, tag-based model.
 Time-series samples live in `channels`; metadata is split across tag
 tables (EAV key-value pairs) and metric tables (pre-computed statistics).
 
-The five tables and columns on this page describe the **typical
+The tables and columns on this page describe the **typical
 default-solver shape** — what Impulse's
-[default solvers](../references/query_engine.md)
-(`DeltaSolver`, `KeyValueStoreSolver`) expect when
+[`DefaultSolver`](../references/query_engine.md) expects when
 no [`SolverConfig`](../config/configuration.md#solver-column-mappings-and-filters)
 overrides are applied. The framework hard-requires only a small subset of this shape:
 
@@ -122,7 +121,7 @@ when your physical column has a different name.
 | `container_id`| Join key against `container_tags`, upsert key in incremental mode             |
 | `start_ts`    | `ContainerEvent` event-fact `start_ts`; default `measurement_dimensions` entry |
 | `stop_ts`     | `ContainerEvent` event-fact `end_ts`; default `measurement_dimensions` entry  |
-| `project_id`  | `KeyValueStoreSolver` project scoping (when `solver_config.project_id` is set) |
+| `project_id`  | `DefaultSolver` project scoping (when `solver_config.project_id` is set) |
 
 Every other column on `container_metrics` is **pass-through**: it lands in
 the gold `measurement_dimension` table verbatim if you list it in
@@ -198,7 +197,7 @@ when your physical column has a different name.
 | `container_id`| Join key into `container_metrics` after tag filtering                                          |
 | `key`         | EAV pivot key — driven by `query.havingTag(...)` and `container_filters.tag_filters`           |
 | `value`       | EAV pivot value — driven by `query.havingTag(...)` and `container_filters.tag_filters`         |
-| `project_id`  | `KeyValueStoreSolver` project scoping (when `solver_config.project_id` is set, and this table carries a project column) |
+| `project_id`  | `DefaultSolver` project scoping (when `solver_config.project_id` is set, and this table carries a project column) |
 | `parent_id`   | Optional per-table filter target (e.g. `solver_config.container_tags.filters = {"parent_id": ...}`) |
 
 ---
@@ -273,7 +272,9 @@ selectors look up signals by tag key (e.g.
 Map any silver column to these via
 [`solver_config.channel_tags.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
 when your physical column has a different name. Note: `channel_tags` is
-read by `DeltaSolver` only.
+read by `DefaultSolver` only when a `channel_tags_table` is configured
+(EAV channel selection); otherwise channel selection runs against columns
+on `channel_metrics`.
 
 | Internal name | Referenced by                                                                |
 |---------------|------------------------------------------------------------------------------|
@@ -346,7 +347,7 @@ during raw→RLE conversion.
 
 ## channel_mapping (optional)
 
-Alias-resolution table used by `KeyValueStoreSolver` when selectors are
+Alias-resolution table used by `DefaultSolver` when selectors are
 created via `QueryBuilder.channel_with_alias()`. Each row maps a logical
 channel name to one or more physical channels keyed by `project_id` /
 `data_key`, with an optional `priority` tie-breaker.
@@ -385,7 +386,7 @@ so they agree on the unit pair per physical channel.
 Map any silver column to these via
 [`solver_config.channel_mapping.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
 when your physical column has a different name. Note: `channel_mapping`
-is read by `KeyValueStoreSolver` only.
+is read by `DefaultSolver` only when a `channel_mapping_table` is configured.
 
 | Internal name    | Referenced by                                                                                  |
 |------------------|------------------------------------------------------------------------------------------------|
@@ -394,7 +395,7 @@ is read by `KeyValueStoreSolver` only.
 | `data_key`       | Default join target on the `channel_mapping`→`channel_metrics` join                            |
 | `source_channel` | Alias-resolution source on the `channel_mapping`→`channel_metrics` join                        |
 | `priority`       | Tie-breaker when multiple physical channels match a logical alias                              |
-| `project_id`     | `KeyValueStoreSolver` project scoping (when `solver_config.project_id` is set)                  |
+| `project_id`     | `DefaultSolver` project scoping (when `solver_config.project_id` is set)                  |
 | `source_unit`    | Source unit fallback (when paired with a `unit_conversion_table`)                              |
 | `target_unit`    | Target unit for aliased reads (when paired with a `unit_conversion_table`)                     |
 
@@ -407,7 +408,7 @@ explicitly.
 
 ## unit_conversion (optional)
 
-Per-unit-family conversion factors. Read by `KeyValueStoreSolver` at
+Per-unit-family conversion factors. Read by `DefaultSolver` at
 solve time when `source.unit_conversion_table` is configured and the
 `channel_mapping` table carries `source_unit` / `target_unit` columns.
 
@@ -428,7 +429,7 @@ multiplies values by `source_factor / target_factor`. Missing rows or a
 Map any silver column to these via
 [`solver_config.unit_conversion.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
 when your physical column has a different name. Note: `unit_conversion`
-is read by `KeyValueStoreSolver` only.
+is read by `DefaultSolver` only when a `unit_conversion_table` is configured.
 
 | Internal name        | Referenced by                                                                              |
 |----------------------|--------------------------------------------------------------------------------------------|

@@ -7,18 +7,17 @@ title: Data Model
 :::caution Prerequisite
 
 The schema described on this page is the full silver-layer shape that
-Impulse's [**default solvers**](../references/query_engine.md)
-(`DeltaSolver`, `KeyValueStoreSolver`) recognise. **Landing your data in
-this shape during ingest is the simplest and most maintainable path** —
-see the [Ingestion guide](ingestion.md).
+Impulse's [**`DefaultSolver`**](../references/query_engine.md) recognises.
+**Landing your data in this shape during ingest is the simplest and most
+maintainable path** — see the [Ingestion guide](ingestion.md).
 
-The default solvers also run on a **subset** of this model.
-`KeyValueStoreSolver` needs only three of the five tables —
-`container_metrics`, `channel_metrics`, and `channels` — and treats
-`container_tags` and `channel_mapping` as optional add-ons. `DeltaSolver`
-is the one that requires all five. See
-[Which solver should I use?](../references/query_engine.md#which-solver-should-i-use)
-for the decision rule.
+`DefaultSolver` also runs on a **subset** of this model: only
+`container_metrics`, `channel_metrics`, and `channels` are required.
+`container_tags` (EAV container filtering), `channel_tags` (EAV channel
+selection), `channel_mapping` (aliases), and `unit_conversion` are optional
+add-ons that the solver uses when configured. See the
+[Query Engine](../references/query_engine.md#table-requirements) page for
+the table-requirements matrix.
 
 Advanced deployments with existing data layouts they cannot or do not want
 to reshape can adapt further by passing a `SolverConfig` to remap column

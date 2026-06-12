@@ -136,8 +136,12 @@ Resolve aliased channel selections via the channel_mapping table.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: DataFrame with ``(container_id, channel_id, selector_ids)``
-where ``selector_ids`` is an array column.
+`pyspark.sql.DataFrame`: DataFrame with
+``(container_id, channel_id, <metrics-side join keys>,
+channel_alias, alias_priority, selector_ids)`` where
+``selector_ids`` is an array column.  Implementations that
+support unit conversion additionally include ``source_unit``
+and ``target_unit`` columns.
 
 #### resolve\_channel\_selections
 
@@ -150,7 +154,7 @@ Union direct and aliased channel metrics, combining selector_ids.
 
 Only called when aliased selectors are present.  The default
 implementation raises ``NotImplementedError``; solvers that support
-aliasing (e.g. ``KeyValueStoreSolver``) must override this.
+aliasing (e.g. ``DefaultSolver``) must override this.
 
 **Arguments**:
 

@@ -88,12 +88,21 @@ class Solvers(Enum):
     """
     Enumeration of available solver types for the query engine.
 
+    ``DEFAULT_SOLVER`` is the single, unified solver. ``DELTA_SOLVER`` and
+    ``KEY_VALUE_STORE_SOLVER`` are **deprecated aliases** kept so that existing
+    report configs continue to deserialize; both now resolve to the same
+    ``DefaultSolver``. They will be removed in a future release.
+
     Attributes
     ----------
+    DEFAULT_SOLVER : str
     DELTA_SOLVER : str
+        Deprecated alias for ``DEFAULT_SOLVER``.
     KEY_VALUE_STORE_SOLVER : str
+        Deprecated alias for ``DEFAULT_SOLVER``.
     """
 
+    DEFAULT_SOLVER = "DefaultSolver"
     DELTA_SOLVER = "DeltaSolver"
     KEY_VALUE_STORE_SOLVER = "KeyValueStoreSolver"
 
@@ -332,7 +341,7 @@ class QueryEngine(BaseModel):
 
     Parameters
     ----------
-    solver : Solvers, default=Solvers.KEY_VALUE_STORE_SOLVER
+    solver : Solvers, default=Solvers.DEFAULT_SOLVER
         The solver type to use for query execution.
     solver_config : SolverConfig, optional
         Per-table column name mappings and filter configuration for
@@ -353,16 +362,19 @@ class QueryEngine(BaseModel):
 
     Notes
     -----
-    The default solver is ``Solvers.KEY_VALUE_STORE_SOLVER``, which
-    operates either with a narrow EAV ``container_tags`` table or in
-    a wide-only data model when ``source.container_tags_table`` is
-    not configured.
+    The default solver is ``Solvers.DEFAULT_SOLVER``.  It selects channels
+    from a narrow EAV ``channel_tags`` table when ``source.channel_tags_table``
+    is configured, and otherwise directly from columns on ``channel_metrics``.
+    It operates either with a narrow EAV ``container_tags`` table or in a
+    wide-only data model when ``source.container_tags_table`` is not
+    configured.  (``DELTA_SOLVER`` and ``KEY_VALUE_STORE_SOLVER`` are
+    deprecated aliases that resolve to the same solver.)
 
     - RLE channel data must contain 'container_id', 'channel_id', 'tstart', 'tend', 'value' columns
     - RAW channel data must contain 'container_id', 'channel_id', 'timestamp', 'value' columns
     """
 
-    solver: Solvers = Solvers.KEY_VALUE_STORE_SOLVER
+    solver: Solvers = Solvers.DEFAULT_SOLVER
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
     solver_config: SolverConfig | None = None
@@ -424,7 +436,7 @@ class ImpulseConfig(BaseModel):
      container_filters : ContainerFilters, optional
          Optional container-level filters (tag-based and/or metric-based).
      query_engine : QueryEngine, optional
-         Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
+         Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
      incremental : IncrementalConfig, optional
          Optional incremental processing configuration. Defaults to IncrementalConfig().
      measurement_dimensions : list of str, optional
@@ -470,7 +482,7 @@ class ImpulseConfig(BaseModel):
      ...         ]
      ...     },
      ...     "query_engine": {
-     ...         "solver": "KeyValueStoreSolver",
+     ...         "solver": "DefaultSolver",
      ...         "solver_config": {
      ...             "project_id": "my_project",
      ...             "container_tags": {
@@ -499,7 +511,7 @@ class ImpulseConfig(BaseModel):
     source: Source
     unity_sink: UnitySink | None = None
     container_filters: ContainerFilters | None = None
-    query_engine: QueryEngine = QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER)
+    query_engine: QueryEngine = QueryEngine(solver=Solvers.DEFAULT_SOLVER)
     incremental: IncrementalConfig | None = None
 
     measurement_dimensions: list[str] = list(DEFAULT_MEASUREMENT_DIMENSIONS)

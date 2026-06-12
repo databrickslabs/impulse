@@ -131,11 +131,11 @@ def test_impulse_config_drop_implausible_data_rejects_rle():
 
 
 def test_impulse_config_from_dict_no_query_engine_provided():
-    """Test ImpulseConfig with no query engine provided."""
+    """Test ImpulseConfig with no query engine provided defaults to DefaultSolver."""
     config_json = impulse_config_JSON.copy()
     config_json.pop("query_engine", None)
     config = ImpulseConfig.model_validate(config_json)
-    assert config.query_engine.solver == Solvers.KEY_VALUE_STORE_SOLVER
+    assert config.query_engine.solver == Solvers.DEFAULT_SOLVER
 
 
 def test_impulse_config_from_dict_no_measurement_dim_provided():
@@ -826,8 +826,17 @@ def test_impulse_config_with_incremental_disabled():
     assert config.incremental.enabled is False
 
 
+def test_impulse_config_default_solver_valid():
+    """DefaultSolver is accepted without project_id or solver_config."""
+    config_json = impulse_config_JSON.copy()
+    config_json["query_engine"] = {"solver": "DefaultSolver"}
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.solver == Solvers.DEFAULT_SOLVER
+    assert config.query_engine.solver_config is None
+
+
 def test_impulse_config_delta_solver_valid():
-    """DeltaSolver is accepted without project_id or solver_config."""
+    """DeltaSolver is a deprecated alias still accepted for backward compatibility."""
     config_json = impulse_config_JSON.copy()
     config_json["query_engine"] = {"solver": "DeltaSolver"}
     config = ImpulseConfig.model_validate(config_json)

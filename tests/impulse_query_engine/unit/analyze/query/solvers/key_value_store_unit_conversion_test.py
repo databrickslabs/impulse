@@ -7,8 +7,8 @@ import pandas as pd
 import pytest
 from pyspark.sql import SparkSession
 
-from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
-    KeyValueStoreSolver,
+from impulse_query_engine.analyze.query.solvers.default_solver import (
+    DefaultSolver,
 )
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     ChannelMappingConfig,
@@ -18,8 +18,8 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
 from impulse_query_engine.measurement_db import MeasurementDB
 
 
-def _solver(spark: SparkSession) -> KeyValueStoreSolver:
-    return KeyValueStoreSolver(
+def _solver(spark: SparkSession) -> DefaultSolver:
+    return DefaultSolver(
         spark,
         config=SolverConfig(
             project_id="SAMPLE_PROJECT",
@@ -179,7 +179,7 @@ class TestUnitConversionSolve:
         # Note: when a direct selector and an aliased selector resolve to the
         # same (container_id, channel_id), the conversion factor stored on the
         # channel row applies to both — the per-channel factor model in
-        # KVSTimeSeriesCache cannot distinguish callers.  We therefore only
+        # TimeSeriesCache cannot distinguish callers.  We therefore only
         # cover the disjoint case here.
         solver = _solver(spark)
         query = key_value_store_unit_conversion_db.query
@@ -337,7 +337,7 @@ class TestSourceUnitResolution:
         key_value_store_unit_conversion_db.config.debug_tables["channel_metrics"] = cm_renamed
 
         try:
-            solver = KeyValueStoreSolver(
+            solver = DefaultSolver(
                 spark,
                 config=SolverConfig(
                     project_id="SAMPLE_PROJECT",

@@ -249,8 +249,8 @@ def test_add_multiple_pages():
 
 def test_create_solver_key_value_store_default_config():
     """KeyValueStoreSolver created without solver_config uses default SolverConfig."""
-    from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
-        KeyValueStoreSolver,
+    from impulse_query_engine.analyze.query.solvers.default_solver import (
+        DefaultSolver,
     )
 
     report = Report(
@@ -261,7 +261,7 @@ def test_create_solver_key_value_store_default_config():
     )
     solver = report.get_solver()
 
-    assert isinstance(solver, KeyValueStoreSolver)
+    assert isinstance(solver, DefaultSolver)
     assert solver.config.container_id_col == "container_id"
     assert solver.config.project_id_col == "project_id"
     assert solver.config.value_col == "value"
@@ -269,8 +269,8 @@ def test_create_solver_key_value_store_default_config():
 
 def test_create_solver_key_value_store_with_solver_config():
     """KeyValueStoreSolver created with solver_config uses provided column mappings."""
-    from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
-        KeyValueStoreSolver,
+    from impulse_query_engine.analyze.query.solvers.default_solver import (
+        DefaultSolver,
     )
 
     report = Report(
@@ -281,7 +281,7 @@ def test_create_solver_key_value_store_with_solver_config():
     )
     solver = report.get_solver()
 
-    assert isinstance(solver, KeyValueStoreSolver)
+    assert isinstance(solver, DefaultSolver)
     assert solver.config.container_id_col == "container_id"
     assert solver.config.channel_id_cols == ["container_id", "channel_id"]
     assert solver.config.tstart_col == "tstart"
@@ -292,7 +292,7 @@ def test_create_solver_key_value_store_with_solver_config():
 
 def test_create_solver_delta_default_config():
     """DeltaSolver created without solver_config gets a default SolverConfig (no renames)."""
-    from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
+    from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 
     report = Report(
         name="test_report",
@@ -302,7 +302,7 @@ def test_create_solver_delta_default_config():
     )
     solver = report.get_solver()
 
-    assert isinstance(solver, DeltaSolver)
+    assert isinstance(solver, DefaultSolver)
     assert solver.config is not None
     # No column_name_mapping entries when solver_config is absent from config.
     assert solver.config.container_tags.column_name_mapping == {}
@@ -314,7 +314,7 @@ def test_create_solver_delta_default_config():
 
 def test_create_solver_delta_with_solver_config():
     """The Report factory forwards solver_config to DeltaSolver — column renames are visible."""
-    from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
+    from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 
     report = Report(
         name="test_report",
@@ -324,7 +324,7 @@ def test_create_solver_delta_with_solver_config():
     )
     solver = report.get_solver()
 
-    assert isinstance(solver, DeltaSolver)
+    assert isinstance(solver, DefaultSolver)
     # Per-table column mappings come through from JSON config.
     assert solver.config.container_tags.column_name_mapping == {"meas_id": "container_id"}
     assert solver.config.container_metrics.column_name_mapping == {"meas_id": "container_id"}

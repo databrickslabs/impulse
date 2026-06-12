@@ -4,7 +4,7 @@ from datetime import datetime
 from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricSelector
-from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.measurement_db import MeasurementDB
 from tests.conftest import narrow_db, spark
 
@@ -14,7 +14,7 @@ def test_metric_expression1(spark: SparkSession, narrow_db: MeasurementDB):
     date_filter = q.metric("start_dt") > datetime.fromisoformat("2023-08-15T00:00:000Z")
     q.where(date_filter)
     series1 = q.channel(seed=0)
-    res = q.select(series1.alias("test")).toPandas(spark, solver=DeltaSolver(spark))
+    res = q.select(series1.alias("test")).toPandas(spark, solver=DefaultSolver(spark))
     assert len(res) == 1
 
 
@@ -23,7 +23,7 @@ def test_metric_expression2(spark: SparkSession, narrow_db: MeasurementDB):
     date_filter = q.metric("start_dt") > datetime.fromisoformat("2023-08-16T00:00:000Z")
     q.where(date_filter)
     series1 = q.channel(seed=0)
-    res = q.select(series1.alias("test")).toPandas(spark, solver=DeltaSolver(spark))
+    res = q.select(series1.alias("test")).toPandas(spark, solver=DefaultSolver(spark))
     assert len(res) == 0
 
 
@@ -34,7 +34,7 @@ def test_metric_expression3(spark: SparkSession, narrow_db: MeasurementDB):
     )
     q.where(date_filter)
     series1 = q.channel(seed=0)
-    res = q.select(series1.alias("test")).toPandas(spark, solver=DeltaSolver(spark))
+    res = q.select(series1.alias("test")).toPandas(spark, solver=DefaultSolver(spark))
     assert len(res) == 1
 
 
@@ -43,7 +43,7 @@ def test_metric_expression4(spark: SparkSession, narrow_db: MeasurementDB):
     min_duration_filter = q.metric("duration_ms") > 100000
     q.where(min_duration_filter)
     series1 = q.channel(seed=0)
-    res = q.select(series1.alias("test")).toPandas(spark, solver=DeltaSolver(spark))
+    res = q.select(series1.alias("test")).toPandas(spark, solver=DefaultSolver(spark))
     assert len(res) == 0
 
 
@@ -58,7 +58,7 @@ def test_metric_expression5(spark: SparkSession, narrow_db: MeasurementDB):
     q.where([date_filter, min_duration_filter])
     print(min_duration_filter.get_selector_expr())
     series1 = q.channel(seed=0)
-    res = q.select(series1.alias("test")).toPandas(spark, solver=DeltaSolver(spark))
+    res = q.select(series1.alias("test")).toPandas(spark, solver=DefaultSolver(spark))
     assert len(res) == 1
 
 
@@ -71,7 +71,7 @@ def test_metric_expression6(spark: SparkSession, narrow_db: MeasurementDB):
     )
     q.where(my_filter)
     series1 = q.channel(seed=0)
-    res = q.select(series1.alias("test")).toPandas(spark, solver=DeltaSolver(spark))
+    res = q.select(series1.alias("test")).toPandas(spark, solver=DefaultSolver(spark))
     assert len(res) == 0
 
 
