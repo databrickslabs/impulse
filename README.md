@@ -4,6 +4,8 @@
 
 The complete documentation is available at: https://databrickslabs.github.io/impulse
 
+Impulse explained in 60 seconds: https://www.youtube.com/shorts/jSlhcFLTsfE
+
 ## Overview
 
 Impulse is a Python-based analytics library designed for processing large-scale time-series measurement data. Built on Apache Spark and Delta Lake, it enables distributed processing of petabyte-scale sensor data from automotive testing, industrial IoT, and other measurement-intensive domains.
