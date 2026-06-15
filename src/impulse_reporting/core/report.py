@@ -513,6 +513,9 @@ class Report:
             self._persist_incremental(changed_aggregation_ids, changed_event_ids)
         else:
             self._persist_full()
+            
+        # Clean up temp tables from previous runs
+        self._cleanup_temp_tables()
 
     def _persist_full(self):
         """
