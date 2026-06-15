@@ -9,8 +9,7 @@
 # OIDC/secrets, so the full suite runs against the real (JFrog/protected-runner)
 # environment.
 #
-# SECURITY: only run this AFTER reviewing the fork's code. Once the code lives on a
-# branch in the main repo, CI runs it with the repo's OIDC identity and secrets.
+# SECURITY: only run this AFTER reviewing the fork's code.
 #
 # Usage:
 #   .github/scripts/fork-sync-pr.sh <PR_NUMBER>     # or: make fork-sync PR=<number>
