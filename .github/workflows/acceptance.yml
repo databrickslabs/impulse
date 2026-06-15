@@ -25,7 +25,7 @@ jobs:
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
     steps:
       - run: echo "Not a fork PR, proceeding"
 
