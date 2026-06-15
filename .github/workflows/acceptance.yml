@@ -37,6 +37,10 @@ jobs:
       labels: linux-ubuntu-latest
     permissions:
       id-token: write
+    # Fork PRs get no OIDC token / secrets from GitHub, so JFrog auth (and therefore
+    # dependency installation) cannot run. Skip CI for them; fork PRs are to be tested
+    # by the reviewer(s) / maintainer(s) before merging.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -63,6 +67,8 @@ jobs:
     needs: [ not-a-fork, lint ]
     permissions:
       id-token: write
+    # See the note on `lint`: fork PRs cannot authenticate to JFrog, so skip CI for them.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     strategy:
       fail-fast: false
       matrix:
