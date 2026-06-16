@@ -8,13 +8,17 @@ title: Silver Layer Schema
 The Silver layer stores measurement data in a normalized model: time-series
 samples live in `channels`, and metadata lives in companion tables.
 
-**You only need three tables to start:** `container_metrics`,
+:::tip Start with three tables
+
+You only need three tables to start: `container_metrics`,
 `channel_metrics`, and `channels`. Everything else is optional —
 `container_tags` and `channel_tags` (EAV tag tables), `channel_mapping`
 (aliases), and `unit_conversion` (per-alias conversion) are add-ons that
 `DefaultSolver` uses only when you configure them. See the
 [Query Engine table requirements](../references/query_engine.md#table-requirements)
 for the full matrix.
+
+:::
 
 The tables and columns on this page describe the **typical default-solver
 shape** — what `DefaultSolver` expects when no
