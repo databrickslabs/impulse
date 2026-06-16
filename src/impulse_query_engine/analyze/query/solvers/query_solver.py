@@ -307,7 +307,7 @@ class QuerySolver(ABC):
 
         Only called when aliased selectors are present.  The default
         implementation raises ``NotImplementedError``; solvers that support
-        aliasing (e.g. ``KeyValueStoreSolver``) must override this.
+        aliasing (e.g. ``DefaultSolver``) must override this.
 
         Parameters
         ----------

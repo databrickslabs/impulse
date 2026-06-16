@@ -24,8 +24,7 @@
                 },
                 {
                   "items": [
-                    "references/api/impulse_query_engine/analyze/query/solvers/delta_solver",
-                    "references/api/impulse_query_engine/analyze/query/solvers/key_value_store_solver",
+                    "references/api/impulse_query_engine/analyze/query/solvers/default_solver",
                     "references/api/impulse_query_engine/analyze/query/solvers/query_solver",
                     "references/api/impulse_query_engine/analyze/query/solvers/solver_config"
                   ],

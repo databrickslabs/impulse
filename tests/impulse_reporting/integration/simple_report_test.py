@@ -747,13 +747,13 @@ def test_persist_report_with_events(spark):
 
 
 def test_simple_report_key_value_store(spark, key_value_store_db):
-    """End-to-end report using KeyValueStoreSolver with EAV key-value-store data.
+    """End-to-end report using DefaultSolver with EAV key-value-store data.
 
     Aligned with config_cs_bronze.json: uses entity_maps_to="container_id"
     and a single Vehicle Speed histogram (analogous to can_vehicle_speed).
     """
 
-    # --- Global report configuration using KeyValueStoreSolver ---
+    # --- Global report configuration using DefaultSolver ---
     config = ImpulseConfig(
         source=Source(
             container_tags_table="spark_catalog.silver_key_value_store.container_tags",

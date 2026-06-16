@@ -6,7 +6,7 @@ options and API documentation.
 ## Available References
 
 - [Report](report.md) - Report generation and output formats
-- [Query Engine](query_engine.md) - Solver overview and how to pick between `DeltaSolver` and `KeyValueStoreSolver`
+- [Query Engine](query_engine.md) - `DefaultSolver` overview and silver-table requirements
 - [TSAL](tsal.md) - Time-Series Analysis Language syntax and usage
 - [Event](event.md) - Event detection and processing
 - [Aggregation](aggregation.md) - Aggregation methods and configurations

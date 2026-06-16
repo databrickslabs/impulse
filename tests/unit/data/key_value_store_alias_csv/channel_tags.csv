@@ -1,0 +1,13 @@
+container_id,channel_id,key,value
+1,6,channel_name,Ambient Air Temperature
+1,9,channel_name,Intake Air Temperature
+3,8,channel_name,Intake Air Temperature
+2,7,channel_name,Vehicle Speed Sensor
+2,5,channel_name,Engine RPM
+3,7,channel_name,Spd_Vhcl
+3,2,channel_name,Ambient Air Temperature
+2,9,channel_name,Intake Air Temperature
+3,5,channel_name,EngSpd
+2,6,channel_name,Ambient Air Temperature
+1,7,channel_name,Vehicle Speed Sensor
+1,5,channel_name,Engine RPM

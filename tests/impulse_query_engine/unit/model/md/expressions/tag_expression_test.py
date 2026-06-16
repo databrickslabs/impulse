@@ -2,7 +2,7 @@
 from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
-from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.measurement_db import MeasurementDB
 from tests.conftest import narrow_db, spark
 
@@ -10,7 +10,7 @@ from tests.conftest import narrow_db, spark
 def test_select_ts(spark: SparkSession, narrow_db: MeasurementDB):
     q = narrow_db.query
     series1 = q.channel(seed=0)
-    res = q.select(series1.alias("test")).toPandas(spark, solver=DeltaSolver(spark))
+    res = q.select(series1.alias("test")).toPandas(spark, solver=DefaultSolver(spark))
     assert len(res) == 1
     ts = res.test.iloc[0]
     assert len(ts) == 10

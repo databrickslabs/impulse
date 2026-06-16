@@ -7,7 +7,7 @@ Tests follow the same pattern as histogram_test.py.
 import pytest
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
-from impulse_query_engine.analyze.query.solvers.key_value_store_solver import KeyValueStoreSolver
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.basic_event import BasicEvent
 
@@ -389,7 +389,7 @@ def test_determine_aggregations(spark, basic_narrow_db):
         event=event,
     )
 
-    solver = KeyValueStoreSolver(spark)
+    solver = DefaultSolver(spark)
     solved_df = basic_narrow_db.query.select(stats_agg.get_expression()).solve(spark, solver)
     df = StatsAggregator.determine_aggregations(
         spark=spark,
@@ -429,7 +429,7 @@ def test_determine_aggregations_multiple_stats(spark, basic_narrow_db):
         event=event2,
     )
 
-    solver = KeyValueStoreSolver(spark)
+    solver = DefaultSolver(spark)
     solved_df = basic_narrow_db.query.select(
         stats_agg1.get_expression(), stats_agg2.get_expression()
     ).solve(spark, solver)
@@ -562,7 +562,7 @@ def test_stats_aggregator_with_all_statistics(spark, basic_narrow_db):
         desc="Test all statistics",
     )
 
-    solver = KeyValueStoreSolver(spark)
+    solver = DefaultSolver(spark)
     solved_df = basic_narrow_db.query.select(stats_agg.get_expression()).solve(spark, solver)
     df = StatsAggregator.determine_aggregations(
         spark=spark,
@@ -593,7 +593,7 @@ def test_stats_aggregator_multiple_input_expressions(spark, basic_narrow_db):
         event=event,
     )
 
-    solver = KeyValueStoreSolver(spark)
+    solver = DefaultSolver(spark)
     solved_df = basic_narrow_db.query.select(stats_agg.get_expression()).solve(spark, solver)
     df = StatsAggregator.determine_aggregations(
         spark=spark,

@@ -60,7 +60,7 @@ ingesting your own data, four invariants matter most:
     tstart, tend, value)`. Run-length encoded data, where identical consecutive values are collapsed into intervals to significantly reduce processing time during analysis.
 
   An optional boolean `is_plausible` column lets the solver drop implausible
-  samples when configured to (`drop_implausible_data=True` on `DeltaSolver`).
+  samples when configured to (`drop_implausible_data=True` on `DefaultSolver`).
 
 The remaining columns on `container_metrics` and `channel_metrics`
 (timestamps, durations, mean/min/max, etc.) are *not* fixed by the engine —
@@ -199,14 +199,10 @@ Impulse's expectations — same set of tables and relationships — but the
 [Solver column mappings and filters](../config/configuration.md#solver-column-mappings-and-filters)
 for the full schema.
 
-How it gets wired in depends on which solver you use:
-
-- **`KeyValueStoreSolver`** and **`DeltaSolver`** — set
-  `query_engine.solver_config` in your report config. The `Report`
-  factory forwards it to both solvers. `KeyValueStoreSolver` consumes
-  every section (column mappings, per-table `filters`, `project_id`,
-  `channel_mapping`); `DeltaSolver` consumes only the per-table
-  `column_name_mapping` entries and silently ignores the rest.
+Set `query_engine.solver_config` in your report config. `DefaultSolver`
+consumes every section that applies to the tables you have configured —
+column mappings, per-table `filters`, `project_id`, and the
+`channel_mapping` / `unit_conversion` sections.
 
 Trade-off either way: this gives you naming flexibility and per-table
 scoping filters without writing code, but the underlying tables must
