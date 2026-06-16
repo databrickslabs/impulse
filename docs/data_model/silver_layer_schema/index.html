@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Silver Layer Schema | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Silver Layer Schema | Impulse"><meta data-rh="true" name="description" content="The Silver layer stores measurement data in a normalized, tag-based model."><meta data-rh="true" property="og:description" content="The Silver layer stores measurement data in a normalized, tag-based model."><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Silver Layer Schema","item":"https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.af145ca1.css">
-<script src="/impulse/assets/js/runtime~main.948776b2.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.0d885a9f.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.ba4329fd.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.5b1e70fb.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -15,10 +15,9 @@
 <p>The Silver layer stores measurement data in a normalized, tag-based model.
 Time-series samples live in <code>channels</code>; metadata is split across tag
 tables (EAV key-value pairs) and metric tables (pre-computed statistics).</p>
-<p>The five tables and columns on this page describe the <strong>typical
+<p>The tables and columns on this page describe the <strong>typical
 default-solver shape</strong> — what Impulse&#x27;s
-<a class="" href="/impulse/docs/references/query_engine">default solvers</a>
-(<code>DeltaSolver</code>, <code>KeyValueStoreSolver</code>) expect when
+<a class="" href="/impulse/docs/references/query_engine"><code>DefaultSolver</code></a> expects when
 no <a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>SolverConfig</code></a>
 overrides are applied. The framework hard-requires only a small subset of this shape:</p>
 <ul>
@@ -116,7 +115,7 @@ when your physical column has a different name.</p>
 
 
 
-<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Join key against <code>container_tags</code>, upsert key in incremental mode</td></tr><tr><td><code>start_ts</code></td><td><code>ContainerEvent</code> event-fact <code>start_ts</code>; default <code>measurement_dimensions</code> entry</td></tr><tr><td><code>stop_ts</code></td><td><code>ContainerEvent</code> event-fact <code>end_ts</code>; default <code>measurement_dimensions</code> entry</td></tr><tr><td><code>project_id</code></td><td><code>KeyValueStoreSolver</code> project scoping (when <code>solver_config.project_id</code> is set)</td></tr></tbody></table>
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Join key against <code>container_tags</code>, upsert key in incremental mode</td></tr><tr><td><code>start_ts</code></td><td><code>ContainerEvent</code> event-fact <code>start_ts</code>; default <code>measurement_dimensions</code> entry</td></tr><tr><td><code>stop_ts</code></td><td><code>ContainerEvent</code> event-fact <code>end_ts</code>; default <code>measurement_dimensions</code> entry</td></tr><tr><td><code>project_id</code></td><td><code>DefaultSolver</code> project scoping (when <code>solver_config.project_id</code> is set)</td></tr></tbody></table>
 <p>Every other column on <code>container_metrics</code> is <strong>pass-through</strong>: it lands in
 the gold <code>measurement_dimension</code> table verbatim if you list it in
 <a class="" href="/impulse/docs/config/configuration#measurement_dimensions-optional"><code>measurement_dimensions</code></a>,
@@ -266,7 +265,7 @@ when your physical column has a different name.</p>
 
 
 
-<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Join key into <code>container_metrics</code> after tag filtering</td></tr><tr><td><code>key</code></td><td>EAV pivot key — driven by <code>query.havingTag(...)</code> and <code>container_filters.tag_filters</code></td></tr><tr><td><code>value</code></td><td>EAV pivot value — driven by <code>query.havingTag(...)</code> and <code>container_filters.tag_filters</code></td></tr><tr><td><code>project_id</code></td><td><code>KeyValueStoreSolver</code> project scoping (when <code>solver_config.project_id</code> is set, and this table carries a project column)</td></tr><tr><td><code>parent_id</code></td><td>Optional per-table filter target (e.g. <code>solver_config.container_tags.filters = {&quot;parent_id&quot;: ...}</code>)</td></tr></tbody></table>
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Join key into <code>container_metrics</code> after tag filtering</td></tr><tr><td><code>key</code></td><td>EAV pivot key — driven by <code>query.havingTag(...)</code> and <code>container_filters.tag_filters</code></td></tr><tr><td><code>value</code></td><td>EAV pivot value — driven by <code>query.havingTag(...)</code> and <code>container_filters.tag_filters</code></td></tr><tr><td><code>project_id</code></td><td><code>DefaultSolver</code> project scoping (when <code>solver_config.project_id</code> is set, and this table carries a project column)</td></tr><tr><td><code>parent_id</code></td><td>Optional per-table filter target (e.g. <code>solver_config.container_tags.filters = {&quot;parent_id&quot;: ...}</code>)</td></tr></tbody></table>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_metrics">channel_metrics<a href="#channel_metrics" class="hash-link" aria-label="Direct link to channel_metrics" title="Direct link to channel_metrics" translate="no">​</a></h2>
 <p>Pre-computed statistics per channel. The percentile columns (<code>pz1</code>,
@@ -399,6 +398,43 @@ physical channel and takes precedence over <code>channel_mapping.source_unit</co
 via <code>COALESCE(channel_metrics.unit, channel_mapping.source_unit)</code>. The
 column is not part of the canonical schema — omit it for layouts that
 don&#x27;t need per-channel physical units.</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel-identifying-columns-required-for-aliasing">Channel-identifying columns (required for aliasing)<a href="#channel-identifying-columns-required-for-aliasing" class="hash-link" aria-label="Direct link to Channel-identifying columns (required for aliasing)" title="Direct link to Channel-identifying columns (required for aliasing)" translate="no">​</a></h4>
+<p>When channel <strong>aliasing</strong> is used — selectors created via
+<code>channel_with_alias(...)</code>, backed by a
+<a href="#channel_mapping-optional" class=""><code>channel_mapping</code></a> table — <code>channel_metrics</code>
+must also carry the columns that <strong>identify a channel within a container</strong>,
+so the solver can resolve each logical alias to a physical <code>channel_id</code>. By
+default these are:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>channel_name</code></td><td><code>string</code></td><td>No</td><td>Physical channel name. Matched against <code>channel_mapping.source_channel</code> in the default alias join.</td></tr><tr><td><code>data_key</code></td><td><code>string</code></td><td>No</td><td>Physical lookup key. Matched against <code>channel_mapping.data_key</code> in the default alias join.</td></tr></tbody></table>
+<p>These columns are only required when aliasing is in use; omit them for
+layouts that never call <code>channel_with_alias(...)</code>. They are needed even
+when a <code>channel_tags</code> table is configured, because alias resolution always
+joins <code>channel_mapping</code> against <code>channel_metrics</code>. The exact join columns
+are configurable via
+<a class="" href="/impulse/docs/config/configuration#alias-resolution-join-keys-optional"><code>channel_mapping.join_keys</code></a>.</p>
 <h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-2">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-2" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
 <p>Map any silver column to these via
 <a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.channel_metrics.column_name_mapping</code></a>
@@ -479,7 +515,9 @@ selectors look up signals by tag key (e.g.
 <p>Map any silver column to these via
 <a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.channel_tags.column_name_mapping</code></a>
 when your physical column has a different name. Note: <code>channel_tags</code> is
-read by <code>DeltaSolver</code> only.</p>
+read by <code>DefaultSolver</code> only when a <code>channel_tags_table</code> is configured
+(EAV channel selection); otherwise channel selection runs against columns
+on <code>channel_metrics</code>.</p>
 
 
 
@@ -641,7 +679,7 @@ when your physical column has a different name.</p>
 during raw→RLE conversion.</p>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_mapping-optional">channel_mapping (optional)<a href="#channel_mapping-optional" class="hash-link" aria-label="Direct link to channel_mapping (optional)" title="Direct link to channel_mapping (optional)" translate="no">​</a></h2>
-<p>Alias-resolution table used by <code>KeyValueStoreSolver</code> when selectors are
+<p>Alias-resolution table used by <code>DefaultSolver</code> when selectors are
 created via <code>QueryBuilder.channel_with_alias()</code>. Each row maps a logical
 channel name to one or more physical channels keyed by <code>project_id</code> /
 <code>data_key</code>, with an optional <code>priority</code> tie-breaker.</p>
@@ -735,7 +773,7 @@ so they agree on the unit pair per physical channel.</p>
 <p>Map any silver column to these via
 <a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.channel_mapping.column_name_mapping</code></a>
 when your physical column has a different name. Note: <code>channel_mapping</code>
-is read by <code>KeyValueStoreSolver</code> only.</p>
+is read by <code>DefaultSolver</code> only when a <code>channel_mapping_table</code> is configured.</p>
 
 
 
@@ -777,14 +815,14 @@ is read by <code>KeyValueStoreSolver</code> only.</p>
 
 
 
-<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>channel_alias</code></td><td>The user-facing alias selector kwarg in <code>query.channel_with_alias(channel_alias=...)</code></td></tr><tr><td><code>channel_name</code></td><td>Default join target on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>data_key</code></td><td>Default join target on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>source_channel</code></td><td>Alias-resolution source on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>priority</code></td><td>Tie-breaker when multiple physical channels match a logical alias</td></tr><tr><td><code>project_id</code></td><td><code>KeyValueStoreSolver</code> project scoping (when <code>solver_config.project_id</code> is set)</td></tr><tr><td><code>source_unit</code></td><td>Source unit fallback (when paired with a <code>unit_conversion_table</code>)</td></tr><tr><td><code>target_unit</code></td><td>Target unit for aliased reads (when paired with a <code>unit_conversion_table</code>)</td></tr></tbody></table>
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>channel_alias</code></td><td>The user-facing alias selector kwarg in <code>query.channel_with_alias(channel_alias=...)</code></td></tr><tr><td><code>channel_name</code></td><td>Default join target on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>data_key</code></td><td>Default join target on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>source_channel</code></td><td>Alias-resolution source on the <code>channel_mapping</code>→<code>channel_metrics</code> join</td></tr><tr><td><code>priority</code></td><td>Tie-breaker when multiple physical channels match a logical alias</td></tr><tr><td><code>project_id</code></td><td><code>DefaultSolver</code> project scoping (when <code>solver_config.project_id</code> is set)</td></tr><tr><td><code>source_unit</code></td><td>Source unit fallback (when paired with a <code>unit_conversion_table</code>)</td></tr><tr><td><code>target_unit</code></td><td>Target unit for aliased reads (when paired with a <code>unit_conversion_table</code>)</td></tr></tbody></table>
 <p>To override the default <code>(source_channel, channel_name) + (data_key, data_key)</code>
 composite join, set
 <a class="" href="/impulse/docs/config/configuration#alias-resolution-join-keys-optional"><code>channel_mapping.join_keys</code></a>
 explicitly.</p>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="unit_conversion-optional">unit_conversion (optional)<a href="#unit_conversion-optional" class="hash-link" aria-label="Direct link to unit_conversion (optional)" title="Direct link to unit_conversion (optional)" translate="no">​</a></h2>
-<p>Per-unit-family conversion factors. Read by <code>KeyValueStoreSolver</code> at
+<p>Per-unit-family conversion factors. Read by <code>DefaultSolver</code> at
 solve time when <code>source.unit_conversion_table</code> is configured and the
 <code>channel_mapping</code> table carries <code>source_unit</code> / <code>target_unit</code> columns.</p>
 
@@ -826,7 +864,7 @@ multiplies values by <code>source_factor / target_factor</code>. Missing rows or
 <p>Map any silver column to these via
 <a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.unit_conversion.column_name_mapping</code></a>
 when your physical column has a different name. Note: <code>unit_conversion</code>
-is read by <code>KeyValueStoreSolver</code> only.</p>
+is read by <code>DefaultSolver</code> only when a <code>unit_conversion_table</code> is configured.</p>
 
 
 

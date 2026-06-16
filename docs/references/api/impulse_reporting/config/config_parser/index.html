@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">impulse_reporting.config.config_parser | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="impulse_reporting.config.config_parser | Impulse"><meta data-rh="true" name="description" content="is\valid\table\_name"><meta data-rh="true" property="og:description" content="is\valid\table\_name"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Reference","item":"https://databrickslabs.github.io/impulse/docs/references/"},{"@type":"ListItem","position":2,"name":"Api","item":"https://databrickslabs.github.io/impulse/docs/references/api"},{"@type":"ListItem","position":3,"name":"config_parser","item":"https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.af145ca1.css">
-<script src="/impulse/assets/js/runtime~main.948776b2.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.0d885a9f.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.ba4329fd.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.5b1e70fb.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -37,49 +37,18 @@
 </ul>
 <p><strong>Returns</strong>:</p>
 <p><code>str</code>: The validated entity name if valid.</p>
-<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="measurementdimensions">MeasurementDimensions<a href="#measurementdimensions" class="hash-link" aria-label="Direct link to MeasurementDimensions" title="Direct link to MeasurementDimensions" translate="no">​</a></h2>
-<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">class</span><span class="token plain"> </span><span class="token class-name" style="color:hsl(29, 54%, 61%)">MeasurementDimensions</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token plain">Enum</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><br></span></code></pre></div></div>
-<p>Enumeration for available measurement dimensions information.</p>
-<p><strong>Arguments</strong>:</p>
-<ul>
-<li class=""><code>CONTAINER_ID</code> (<code>str</code>): Identifier for the container.</li>
-<li class=""><code>UUT_ID</code> (<code>str</code>): Identifier for the unit under test (UUT).</li>
-<li class=""><code>PROJECT_ID</code> (<code>str</code>): Identifier for the project.</li>
-<li class=""><code>UUT_NAME</code> (<code>str</code>): Name of the unit under test (UUT). Currently not present in implementation.</li>
-<li class=""><code>FILE_NAME</code> (<code>str</code>): Name of the file associated with the measurement.</li>
-<li class=""><code>SOURCE_FILE_PATH</code> (<code>str</code>): Path to the source file containing the measurement data.</li>
-<li class=""><code>START_TS</code> (<code>str</code>): Timestamp of the first data point in the measurement.</li>
-<li class=""><code>STOP_TS</code> (<code>str</code>): Timestamp of the last data point in the measurement.</li>
-<li class=""><code>ODO_START</code> (<code>str</code>): Starting odometer reading for the measurement. Currently not present in implementation.</li>
-<li class=""><code>ODO_STOP</code> (<code>str</code>): Stopping odometer reading for the measurement. Currently not present in implementation.</li>
-<li class=""><code>ENVIRONMENT</code> (<code>str</code>): Environment in which the measurement was taken either puma or datalogger.</li>
-</ul>
-<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="project_id">PROJECT_ID<a href="#project_id" class="hash-link" aria-label="Direct link to PROJECT_ID" title="Direct link to PROJECT_ID" translate="no">​</a></h4>
-<p>todo not present currently</p>
-<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="uut_name">UUT_NAME<a href="#uut_name" class="hash-link" aria-label="Direct link to UUT_NAME" title="Direct link to UUT_NAME" translate="no">​</a></h4>
-<p>todo not present currently</p>
-<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="odo_start">ODO_START<a href="#odo_start" class="hash-link" aria-label="Direct link to ODO_START" title="Direct link to ODO_START" translate="no">​</a></h4>
-<p>todo not present currently</p>
-<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="odo_stop">ODO_STOP<a href="#odo_stop" class="hash-link" aria-label="Direct link to ODO_STOP" title="Direct link to ODO_STOP" translate="no">​</a></h4>
-<p>todo not present currently</p>
-<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="get_column">get_column<a href="#get_column" class="hash-link" aria-label="Direct link to get_column" title="Direct link to get_column" translate="no">​</a></h4>
-<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">def</span><span class="token plain"> </span><span class="token function" style="color:hsl(207, 82%, 66%)">get_column</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><span class="token plain"> </span><span class="token operator" style="color:hsl(207, 82%, 66%)">-</span><span class="token operator" style="color:hsl(207, 82%, 66%)">&gt;</span><span class="token plain"> Column</span><br></span></code></pre></div></div>
-<p>Returns the corresponding Spark SQL column for the measurement dimension.</p>
-<p>The column names are mapped to their respective values based on the ER gold naming conventions.</p>
-<p><strong>Returns</strong>:</p>
-<p><code>pyspark.sql.Column</code>: The Spark SQL column corresponding to the measurement dimension.</p>
-<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="map_gold_name_to_silver">map_gold_name_to_silver<a href="#map_gold_name_to_silver" class="hash-link" aria-label="Direct link to map_gold_name_to_silver" title="Direct link to map_gold_name_to_silver" translate="no">​</a></h4>
-<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">def</span><span class="token plain"> </span><span class="token function" style="color:hsl(207, 82%, 66%)">map_gold_name_to_silver</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><span class="token plain"> </span><span class="token operator" style="color:hsl(207, 82%, 66%)">-</span><span class="token operator" style="color:hsl(207, 82%, 66%)">&gt;</span><span class="token plain"> </span><span class="token builtin" style="color:hsl(95, 38%, 62%)">str</span><br></span></code></pre></div></div>
-<p>Maps the silver layer column name to the ER gold layer column name.</p>
-<p><strong>Returns</strong>:</p>
-<p><code>str</code>: The gold layer column name.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="solvers">Solvers<a href="#solvers" class="hash-link" aria-label="Direct link to Solvers" title="Direct link to Solvers" translate="no">​</a></h2>
 <div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">class</span><span class="token plain"> </span><span class="token class-name" style="color:hsl(29, 54%, 61%)">Solvers</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token plain">Enum</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><br></span></code></pre></div></div>
 <p>Enumeration of available solver types for the query engine.</p>
+<p><code>DEFAULT_SOLVER</code> is the single, unified solver. <code>DELTA_SOLVER</code> and
+<code>KEY_VALUE_STORE_SOLVER</code> are <strong>deprecated aliases</strong> kept so that existing
+report configs continue to deserialize; both now resolve to the same
+<code>DefaultSolver</code>. They will be removed in a future release.</p>
 <p><strong>Arguments</strong>:</p>
 <ul>
-<li class=""><code>DELTA_SOLVER</code> (<code>str</code>): None</li>
-<li class=""><code>KEY_VALUE_STORE_SOLVER</code> (<code>str</code>): None</li>
+<li class=""><code>DEFAULT_SOLVER</code> (<code>str</code>): None</li>
+<li class=""><code>DELTA_SOLVER</code> (<code>str</code>): Deprecated alias for <code>DEFAULT_SOLVER</code>.</li>
+<li class=""><code>KEY_VALUE_STORE_SOLVER</code> (<code>str</code>): Deprecated alias for <code>DEFAULT_SOLVER</code>.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="source">Source<a href="#source" class="hash-link" aria-label="Direct link to Source" title="Direct link to Source" translate="no">​</a></h2>
 <div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">class</span><span class="token plain"> </span><span class="token class-name" style="color:hsl(29, 54%, 61%)">Source</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token plain">BaseModel</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><br></span></code></pre></div></div>
@@ -156,7 +125,7 @@ The resulting group expressions are then OR-combined.</p>
 <p><strong>Arguments</strong>:</p>
 <ul>
 <li class="">
-<p><code>solver</code> (<code>Solvers, default=Solvers.KEY_VALUE_STORE_SOLVER</code>): The solver type to use for query execution.</p>
+<p><code>solver</code> (<code>Solvers, default=Solvers.DEFAULT_SOLVER</code>): The solver type to use for query execution.</p>
 </li>
 <li class="">
 <p><code>solver_config</code> (<code>SolverConfig</code>): Per-table column name mappings and filter configuration for
@@ -198,43 +167,32 @@ config validation time.</p>
 <div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">class</span><span class="token plain"> </span><span class="token class-name" style="color:hsl(29, 54%, 61%)">ImpulseConfig</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token plain">BaseModel</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><br></span></code></pre></div></div>
 <p>Main configuration model.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="attributes">Attributes<a href="#attributes" class="hash-link" aria-label="Direct link to Attributes" title="Direct link to Attributes" translate="no">​</a></h2>
-<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="source--sourceconfiguration-for-input-data-sourcesunity_sink--unitysinkconfiguration-for-output-data-locationcontainer_filters--containerfilters-optionaloptional-container-level-filters-tag-based-andor-metric-basedquery_engine--queryengine-optionaloptional-query-engine-configuration-defaults-to-solverskey_value_store_solverincremental--incrementalconfig-optionaloptional-incremental-processing-configuration-defaults-to-incrementalconfigmeasurement_dimensions--list-of-measurementdimensions-optionallist-of-measurement-dimensions-to-include-in-the-configurationexamples">source : Source
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="source--sourceconfiguration-for-input-data-sourcesunity_sink--unitysinkconfiguration-for-output-data-locationcontainer_filters--containerfilters-optionaloptional-container-level-filters-tag-based-andor-metric-basedquery_engine--queryengine-optionaloptional-query-engine-configuration-defaults-to-solversdefault_solverincremental--incrementalconfig-optionaloptional-incremental-processing-configuration-defaults-to-incrementalconfigmeasurement_dimensions--list-of-str-optionalcolumn-names-to-surface-from-container_metrics-into-thegold-layer-measurement_dimension-table-names-are-matchedafter-query_enginesolver_configcontainer_metricscolumn_name_mappinghas-been-applied--ie-these-are-the-internal-post-mappingcolumn-names-not-the-physical-silver-column-names-if-a-silvertable-uses-a-physical-name-like-my_measurement_id-mapped-tocontainer_id-list-container_id-here-each-listed-namelands-in-the-gold-table-verbatim-so-the-configured-name-is-alsothe-gold-column-name-defaults-tocontainer_id-start_ts-stop_ts-the-framework-does-notinject-any-column-the-user-omits--keeping-container_id-in-thelist-is-recommended-because-it-is-the-upsert-key-for-incrementalprocessing-and-the-join-key-to-event-fact-tables-but-the-choiceis-the-usersexamples">source : Source
 Configuration for input data sources.
 unity_sink : UnitySink
 Configuration for output data location.
 container_filters : ContainerFilters, optional
 Optional container-level filters (tag-based and/or metric-based).
 query_engine : QueryEngine, optional
-Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
+Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
 incremental : IncrementalConfig, optional
 Optional incremental processing configuration. Defaults to IncrementalConfig().
-measurement_dimensions : list of MeasurementDimensions, optional
-List of measurement dimensions to include in the configuration.
-Examples<a href="#source--sourceconfiguration-for-input-data-sourcesunity_sink--unitysinkconfiguration-for-output-data-locationcontainer_filters--containerfilters-optionaloptional-container-level-filters-tag-based-andor-metric-basedquery_engine--queryengine-optionaloptional-query-engine-configuration-defaults-to-solverskey_value_store_solverincremental--incrementalconfig-optionaloptional-incremental-processing-configuration-defaults-to-incrementalconfigmeasurement_dimensions--list-of-measurementdimensions-optionallist-of-measurement-dimensions-to-include-in-the-configurationexamples" class="hash-link" aria-label="Direct link to source : Source
-Configuration for input data sources.
-unity_sink : UnitySink
-Configuration for output data location.
-container_filters : ContainerFilters, optional
-Optional container-level filters (tag-based and/or metric-based).
-query_engine : QueryEngine, optional
-Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
-incremental : IncrementalConfig, optional
-Optional incremental processing configuration. Defaults to IncrementalConfig().
-measurement_dimensions : list of MeasurementDimensions, optional
-List of measurement dimensions to include in the configuration.
-Examples" title="Direct link to source : Source
-Configuration for input data sources.
-unity_sink : UnitySink
-Configuration for output data location.
-container_filters : ContainerFilters, optional
-Optional container-level filters (tag-based and/or metric-based).
-query_engine : QueryEngine, optional
-Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
-incremental : IncrementalConfig, optional
-Optional incremental processing configuration. Defaults to IncrementalConfig().
-measurement_dimensions : list of MeasurementDimensions, optional
-List of measurement dimensions to include in the configuration.
-Examples" translate="no">​</a></h2>
+measurement_dimensions : list of str, optional
+Column names to surface from <code>container_metrics</code> into the
+gold-layer <code>measurement_dimension</code> table. Names are matched
+<strong>after</strong> <code>query_engine.solver_config.container_metrics.column_name_mapping</code>
+has been applied — i.e. these are the internal (post-mapping)
+column names, not the physical silver column names. If a silver
+table uses a physical name like <code>my_measurement_id</code> mapped to
+<code>container_id</code>, list <code>&quot;container_id&quot;</code> here. Each listed name
+lands in the gold table verbatim, so the configured name is also
+the gold column name. Defaults to
+<code>[&quot;container_id&quot;, &quot;start_ts&quot;, &quot;stop_ts&quot;]</code>. The framework does not
+inject any column the user omits — keeping <code>container_id</code> in the
+list is recommended because it is the upsert key for incremental
+processing and the join key to event-fact tables, but the choice
+is the user&#x27;s.
+Examples<a href="#source--sourceconfiguration-for-input-data-sourcesunity_sink--unitysinkconfiguration-for-output-data-locationcontainer_filters--containerfilters-optionaloptional-container-level-filters-tag-based-andor-metric-basedquery_engine--queryengine-optionaloptional-query-engine-configuration-defaults-to-solversdefault_solverincremental--incrementalconfig-optionaloptional-incremental-processing-configuration-defaults-to-incrementalconfigmeasurement_dimensions--list-of-str-optionalcolumn-names-to-surface-from-container_metrics-into-thegold-layer-measurement_dimension-table-names-are-matchedafter-query_enginesolver_configcontainer_metricscolumn_name_mappinghas-been-applied--ie-these-are-the-internal-post-mappingcolumn-names-not-the-physical-silver-column-names-if-a-silvertable-uses-a-physical-name-like-my_measurement_id-mapped-tocontainer_id-list-container_id-here-each-listed-namelands-in-the-gold-table-verbatim-so-the-configured-name-is-alsothe-gold-column-name-defaults-tocontainer_id-start_ts-stop_ts-the-framework-does-notinject-any-column-the-user-omits--keeping-container_id-in-thelist-is-recommended-because-it-is-the-upsert-key-for-incrementalprocessing-and-the-join-key-to-event-fact-tables-but-the-choiceis-the-usersexamples" class="hash-link" aria-label="Direct link to source--sourceconfiguration-for-input-data-sourcesunity_sink--unitysinkconfiguration-for-output-data-locationcontainer_filters--containerfilters-optionaloptional-container-level-filters-tag-based-andor-metric-basedquery_engine--queryengine-optionaloptional-query-engine-configuration-defaults-to-solversdefault_solverincremental--incrementalconfig-optionaloptional-incremental-processing-configuration-defaults-to-incrementalconfigmeasurement_dimensions--list-of-str-optionalcolumn-names-to-surface-from-container_metrics-into-thegold-layer-measurement_dimension-table-names-are-matchedafter-query_enginesolver_configcontainer_metricscolumn_name_mappinghas-been-applied--ie-these-are-the-internal-post-mappingcolumn-names-not-the-physical-silver-column-names-if-a-silvertable-uses-a-physical-name-like-my_measurement_id-mapped-tocontainer_id-list-container_id-here-each-listed-namelands-in-the-gold-table-verbatim-so-the-configured-name-is-alsothe-gold-column-name-defaults-tocontainer_id-start_ts-stop_ts-the-framework-does-notinject-any-column-the-user-omits--keeping-container_id-in-thelist-is-recommended-because-it-is-the-upsert-key-for-incrementalprocessing-and-the-join-key-to-event-fact-tables-but-the-choiceis-the-usersexamples" title="Direct link to source--sourceconfiguration-for-input-data-sourcesunity_sink--unitysinkconfiguration-for-output-data-locationcontainer_filters--containerfilters-optionaloptional-container-level-filters-tag-based-andor-metric-basedquery_engine--queryengine-optionaloptional-query-engine-configuration-defaults-to-solversdefault_solverincremental--incrementalconfig-optionaloptional-incremental-processing-configuration-defaults-to-incrementalconfigmeasurement_dimensions--list-of-str-optionalcolumn-names-to-surface-from-container_metrics-into-thegold-layer-measurement_dimension-table-names-are-matchedafter-query_enginesolver_configcontainer_metricscolumn_name_mappinghas-been-applied--ie-these-are-the-internal-post-mappingcolumn-names-not-the-physical-silver-column-names-if-a-silvertable-uses-a-physical-name-like-my_measurement_id-mapped-tocontainer_id-list-container_id-here-each-listed-namelands-in-the-gold-table-verbatim-so-the-configured-name-is-alsothe-gold-column-name-defaults-tocontainer_id-start_ts-stop_ts-the-framework-does-notinject-any-column-the-user-omits--keeping-container_id-in-thelist-is-recommended-because-it-is-the-upsert-key-for-incrementalprocessing-and-the-join-key-to-event-fact-tables-but-the-choiceis-the-usersexamples" translate="no">​</a></h2>
 <blockquote>
 <blockquote>
 <blockquote>
@@ -264,7 +222,7 @@ Examples" translate="no">​</a></h2>
 ...         ]
 ...     },
 ...     &quot;query_engine&quot;: {
-...         &quot;solver&quot;: &quot;KeyValueStoreSolver&quot;,
+...         &quot;solver&quot;: &quot;DefaultSolver&quot;,
 ...         &quot;solver_config&quot;: {
 ...             &quot;project_id&quot;: &quot;my_project&quot;,
 ...             &quot;container_tags&quot;: {
@@ -290,18 +248,31 @@ Examples" translate="no">​</a></h2>
 config = ImpulseConfig.model_validate(config_data)</p>
 </blockquote>
 </blockquote>
-</blockquote></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/references/api/impulse_reporting/config/config_parser.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/references/api/impulse_reporting/aggregations/stats_aggregator"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">stats_aggregator</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/references/api/impulse_reporting/core/page"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">page</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#measurementdimensions" class="table-of-contents__link toc-highlight">MeasurementDimensions</a></li><li><a href="#solvers" class="table-of-contents__link toc-highlight">Solvers</a></li><li><a href="#source" class="table-of-contents__link toc-highlight">Source</a></li><li><a href="#unitysink" class="table-of-contents__link toc-highlight">UnitySink</a></li><li><a href="#comparator" class="table-of-contents__link toc-highlight">Comparator</a></li><li><a href="#casttype" class="table-of-contents__link toc-highlight">CastType</a></li><li><a href="#tagfilter" class="table-of-contents__link toc-highlight">TagFilter</a></li><li><a href="#metricfilter" class="table-of-contents__link toc-highlight">MetricFilter</a></li><li><a href="#containerfilters" class="table-of-contents__link toc-highlight">ContainerFilters</a></li><li><a href="#queryengine" class="table-of-contents__link toc-highlight">QueryEngine</a></li><li><a href="#incrementalconfig" class="table-of-contents__link toc-highlight">IncrementalConfig</a></li><li><a href="#impulseconfig" class="table-of-contents__link toc-highlight">ImpulseConfig</a></li><li><a href="#attributes" class="table-of-contents__link toc-highlight">Attributes</a></li><li><a href="#source--sourceconfiguration-for-input-data-sourcesunity_sink--unitysinkconfiguration-for-output-data-locationcontainer_filters--containerfilters-optionaloptional-container-level-filters-tag-based-andor-metric-basedquery_engine--queryengine-optionaloptional-query-engine-configuration-defaults-to-solverskey_value_store_solverincremental--incrementalconfig-optionaloptional-incremental-processing-configuration-defaults-to-incrementalconfigmeasurement_dimensions--list-of-measurementdimensions-optionallist-of-measurement-dimensions-to-include-in-the-configurationexamples" class="table-of-contents__link toc-highlight">source : Source
+</blockquote></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/references/api/impulse_reporting/config/config_parser.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/references/api/impulse_reporting/aggregations/stats_aggregator"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">stats_aggregator</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/references/api/impulse_reporting/core/page"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">page</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#solvers" class="table-of-contents__link toc-highlight">Solvers</a></li><li><a href="#source" class="table-of-contents__link toc-highlight">Source</a></li><li><a href="#unitysink" class="table-of-contents__link toc-highlight">UnitySink</a></li><li><a href="#comparator" class="table-of-contents__link toc-highlight">Comparator</a></li><li><a href="#casttype" class="table-of-contents__link toc-highlight">CastType</a></li><li><a href="#tagfilter" class="table-of-contents__link toc-highlight">TagFilter</a></li><li><a href="#metricfilter" class="table-of-contents__link toc-highlight">MetricFilter</a></li><li><a href="#containerfilters" class="table-of-contents__link toc-highlight">ContainerFilters</a></li><li><a href="#queryengine" class="table-of-contents__link toc-highlight">QueryEngine</a></li><li><a href="#incrementalconfig" class="table-of-contents__link toc-highlight">IncrementalConfig</a></li><li><a href="#impulseconfig" class="table-of-contents__link toc-highlight">ImpulseConfig</a></li><li><a href="#attributes" class="table-of-contents__link toc-highlight">Attributes</a></li><li><a href="#source--sourceconfiguration-for-input-data-sourcesunity_sink--unitysinkconfiguration-for-output-data-locationcontainer_filters--containerfilters-optionaloptional-container-level-filters-tag-based-andor-metric-basedquery_engine--queryengine-optionaloptional-query-engine-configuration-defaults-to-solversdefault_solverincremental--incrementalconfig-optionaloptional-incremental-processing-configuration-defaults-to-incrementalconfigmeasurement_dimensions--list-of-str-optionalcolumn-names-to-surface-from-container_metrics-into-thegold-layer-measurement_dimension-table-names-are-matchedafter-query_enginesolver_configcontainer_metricscolumn_name_mappinghas-been-applied--ie-these-are-the-internal-post-mappingcolumn-names-not-the-physical-silver-column-names-if-a-silvertable-uses-a-physical-name-like-my_measurement_id-mapped-tocontainer_id-list-container_id-here-each-listed-namelands-in-the-gold-table-verbatim-so-the-configured-name-is-alsothe-gold-column-name-defaults-tocontainer_id-start_ts-stop_ts-the-framework-does-notinject-any-column-the-user-omits--keeping-container_id-in-thelist-is-recommended-because-it-is-the-upsert-key-for-incrementalprocessing-and-the-join-key-to-event-fact-tables-but-the-choiceis-the-usersexamples" class="table-of-contents__link toc-highlight">source : Source
 Configuration for input data sources.
 unity_sink : UnitySink
 Configuration for output data location.
 container_filters : ContainerFilters, optional
 Optional container-level filters (tag-based and/or metric-based).
 query_engine : QueryEngine, optional
-Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
+Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
 incremental : IncrementalConfig, optional
 Optional incremental processing configuration. Defaults to IncrementalConfig().
-measurement_dimensions : list of MeasurementDimensions, optional
-List of measurement dimensions to include in the configuration.
+measurement_dimensions : list of str, optional
+Column names to surface from <code>container_metrics</code> into the
+gold-layer <code>measurement_dimension</code> table. Names are matched
+<strong>after</strong> <code>query_engine.solver_config.container_metrics.column_name_mapping</code>
+has been applied — i.e. these are the internal (post-mapping)
+column names, not the physical silver column names. If a silver
+table uses a physical name like <code>my_measurement_id</code> mapped to
+<code>container_id</code>, list <code>&quot;container_id&quot;</code> here. Each listed name
+lands in the gold table verbatim, so the configured name is also
+the gold column name. Defaults to
+<code>[&quot;container_id&quot;, &quot;start_ts&quot;, &quot;stop_ts&quot;]</code>. The framework does not
+inject any column the user omits — keeping <code>container_id</code> in the
+list is recommended because it is the upsert key for incremental
+processing and the join key to event-fact tables, but the choice
+is the user&#39;s.
 Examples</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>
