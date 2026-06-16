@@ -270,9 +270,7 @@ def setup_key_value_store_alias_db(spark):
     # Narrow/EAV channel_tags mirroring channel_metrics.channel_name. Only consumed
     # by the key_value_store_alias_with_channel_tags_db fixture (EAV + alias
     # coexistence); key_value_store_alias_db stays wide-only by omitting it.
-    channel_tags_path = (
-        f"{base_path}/tests/unit/data/key_value_store_alias_csv/channel_tags.csv"
-    )
+    channel_tags_path = f"{base_path}/tests/unit/data/key_value_store_alias_csv/channel_tags.csv"
 
     options = {"header": "True", "delimiter": ",", "inferSchema": "True"}
     container_tags = spark.read.options(**options).csv(container_tags_path)
