@@ -237,6 +237,27 @@ via `COALESCE(channel_metrics.unit, channel_mapping.source_unit)`. The
 column is not part of the canonical schema — omit it for layouts that
 don't need per-channel physical units.
 
+#### Channel-identifying columns (required for aliasing)
+
+When channel **aliasing** is used — selectors created via
+`channel_with_alias(...)`, backed by a
+[`channel_mapping`](#channel_mapping-optional) table — `channel_metrics`
+must also carry the columns that **identify a channel within a container**,
+so the solver can resolve each logical alias to a physical `channel_id`. By
+default these are:
+
+| Column         | Type     | Nullable | Description                                                                                           |
+|----------------|----------|----------|------------------------------------------------------------------------------------------------------|
+| `channel_name` | `string` | No       | Physical channel name. Matched against `channel_mapping.source_channel` in the default alias join.    |
+| `data_key`     | `string` | No       | Physical lookup key. Matched against `channel_mapping.data_key` in the default alias join.            |
+
+These columns are only required when aliasing is in use; omit them for
+layouts that never call `channel_with_alias(...)`. They are needed even
+when a `channel_tags` table is configured, because alias resolution always
+joins `channel_mapping` against `channel_metrics`. The exact join columns
+are configurable via
+[`channel_mapping.join_keys`](../config/configuration.md#alias-resolution-join-keys-optional).
+
 #### Internal columns referenced by the framework
 
 Map any silver column to these via
