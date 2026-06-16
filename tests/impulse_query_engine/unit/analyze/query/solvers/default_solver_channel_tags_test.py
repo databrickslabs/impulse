@@ -8,27 +8,37 @@ DefaultSolver coverage that is unique to this file:
 - EAV ``channel_tags`` selection **coexisting with ``channel_mapping`` alias
   resolution** in a single query, exercising the QueryBuilder change that feeds the
   aliased path the full tag-filtered container set rather than the direct-narrowed
-  one. No shared fixture carries both tables, so a small one is built here.
+  one. Uses the shared ``key_value_store_alias_with_channel_tags_db`` fixture (the
+  only fixture carrying both a ``channel_tags`` and a ``channel_mapping`` table).
 
 Out of scope here (covered elsewhere):
 - EAV channel selection, its column mapping, and end-to-end EAV solves —
   ``default_solver_eav_column_mapping_test.py``.
 - The wide-mode empty-selector case — ``default_solver_container_filters_test.py``.
+- Alias resolution / unit conversion on the wide model —
+  ``default_solver_alias_test.py`` / ``default_solver_unit_conversion_test.py``.
 """
-
-from unittest.mock import create_autospec
-
-import pandas as pd
-import pyspark.sql.types as T
-import pytest
-from databricks.sdk import WorkspaceClient
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
-from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from impulse_query_engine.analyze.query.solvers.solver_config import (
+    ChannelMappingConfig,
+    SolverConfig,
+    TableConfig,
+)
 from tests.conftest import spark  # noqa: F401  (shared session-scoped fixture)
+
+
+def _alias_config() -> SolverConfig:
+    """The SolverConfig the alias CSV fixtures expect (see default_solver_alias_test)."""
+    return SolverConfig(
+        project_id="SAMPLE_PROJECT",
+        container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+        channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Empty-selector edge case in EAV mode (regression guard) — reuses narrow_db
@@ -65,164 +75,23 @@ class TestEmptySelectorsEAV:
 # ---------------------------------------------------------------------------
 # EAV channel_tags + channel_mapping alias coexistence (QueryBuilder fix guard)
 # ---------------------------------------------------------------------------
-# No shared fixture carries both a channel_tags table (EAV direct selection) and a
-# channel_mapping table (alias resolution), so this small dataset is built locally.
+# Uses key_value_store_alias_with_channel_tags_db, whose channel_tags table mirrors
+# channel_metrics.channel_name. "Engine RPM" exists only in containers 1 & 2, while
+# the alias "engine_speed" (via "EngSpd" in container 3) covers all three — so the
+# aliased side is strictly broader than the direct EAV match, which fails if the
+# aliased path is fed the direct-narrowed frame instead of the full container set.
 
 
-def _container_metrics_df(spark, rows):
-    schema = T.StructType(
-        [
-            T.StructField("container_id", T.LongType()),
-            T.StructField("start_ts", T.LongType()),
-            T.StructField("stop_ts", T.LongType()),
-        ]
-    )
-    return spark.createDataFrame(
-        pd.DataFrame(rows, columns=["container_id", "start_ts", "stop_ts"]), schema
-    )
-
-
-def _channel_tags_df(spark, rows):
-    schema = T.StructType(
-        [
-            T.StructField("container_id", T.LongType()),
-            T.StructField("channel_id", T.IntegerType()),
-            T.StructField("key", T.StringType()),
-            T.StructField("value", T.StringType()),
-        ]
-    )
-    return spark.createDataFrame(
-        pd.DataFrame(rows, columns=["container_id", "channel_id", "key", "value"]), schema
-    )
-
-
-def _channel_metrics_df(spark, rows):
-    schema = T.StructType(
-        [
-            T.StructField("container_id", T.LongType()),
-            T.StructField("channel_id", T.IntegerType()),
-            T.StructField("channel_name", T.StringType()),
-            T.StructField("data_key", T.StringType()),
-            T.StructField("sample_count", T.IntegerType()),
-        ]
-    )
-    return spark.createDataFrame(
-        pd.DataFrame(
-            rows,
-            columns=["container_id", "channel_id", "channel_name", "data_key", "sample_count"],
-        ),
-        schema,
-    )
-
-
-def _channels_df(spark, rows):
-    schema = T.StructType(
-        [
-            T.StructField("container_id", T.LongType()),
-            T.StructField("channel_id", T.IntegerType()),
-            T.StructField("tstart", T.LongType()),
-            T.StructField("tend", T.LongType()),
-            T.StructField("value", T.DoubleType()),
-        ]
-    )
-    return spark.createDataFrame(
-        pd.DataFrame(rows, columns=["container_id", "channel_id", "tstart", "tend", "value"]),
-        schema,
-    )
-
-
-def _channel_mapping_df(spark, rows):
-    schema = T.StructType(
-        [
-            T.StructField("channel_alias", T.StringType()),
-            T.StructField("source_channel", T.StringType()),
-            T.StructField("data_key", T.StringType()),
-            T.StructField("priority", T.IntegerType()),
-        ]
-    )
-    return spark.createDataFrame(
-        pd.DataFrame(rows, columns=["channel_alias", "source_channel", "data_key", "priority"]),
-        schema,
-    )
-
-
-@pytest.fixture
-def eav_plus_alias_db(spark):
-    """A DB with both an EAV ``channel_tags`` table (direct selection) and a
-    ``channel_mapping`` table (alias resolution); ``channel_metrics`` carries
-    ``channel_name`` / ``data_key`` so the default alias join keys resolve.
-
-    "Engine RPM" exists (in channel_tags) only in container 1, while the alias
-    target "Spd" exists in all three containers — so the aliased side is strictly
-    broader than the direct EAV match, and fails if the aliased path is fed the
-    direct-narrowed frame instead of the full container set.
-    """
-    cfg = MeasurementDBConfig.for_debug(
-        {
-            "container_metrics": _container_metrics_df(
-                spark, [(1, 1000, 3000), (2, 1000, 3000), (3, 1000, 3000)]
-            ),
-            "channel_tags": _channel_tags_df(
-                spark,
-                [
-                    (1, 1, "channel_name", "Engine RPM"),
-                    (1, 5, "channel_name", "Spd"),
-                    (2, 5, "channel_name", "Spd"),
-                    (3, 5, "channel_name", "Spd"),
-                ],
-            ),
-            "channel_metrics": _channel_metrics_df(
-                spark,
-                [
-                    (1, 1, "Engine RPM", "TM", 100),
-                    (1, 5, "Spd", "TM", 100),
-                    (2, 5, "Spd", "TM", 100),
-                    (3, 5, "Spd", "TM", 100),
-                ],
-            ),
-            "channels": _channels_df(
-                spark,
-                [
-                    (1, 1, 1000, 2000, 1500.0),
-                    (1, 5, 1000, 2000, 30.0),
-                    (2, 5, 1000, 2000, 40.0),
-                    (3, 5, 1000, 2000, 50.0),
-                ],
-            ),
-            "channel_mapping": _channel_mapping_df(spark, [("vehicle_speed", "Spd", "TM", 1)]),
-        }
-    )
-    return MeasurementDB(cfg, ws=create_autospec(WorkspaceClient))
-
-
-def test_eav_direct_and_alias_coexist(spark, eav_plus_alias_db):
-    solver = DefaultSolver(spark)
-    query = eav_plus_alias_db.query
-
-    direct = query.channel(channel_name="Engine RPM").mean().alias("rpm_mean")
-    aliased = query.channel_with_alias(channel_alias="vehicle_speed").mean().alias("spd_mean")
-
-    result = query.select(direct, aliased).solve(spark, solver=solver)
-    rows = {row.container_id: row for row in result.collect()}
-
-    # Direct EAV selection matches Engine RPM only in container 1.
-    assert rows[1].rpm_mean == pytest.approx(1500.0)
-    # The alias resolves in all three containers — including 2 and 3, which the
-    # direct EAV selector did NOT match. This is the QueryBuilder fix: the
-    # aliased path runs against the full tag-filtered container set.
-    assert rows[1].spd_mean == pytest.approx(30.0)
-    assert rows[2].spd_mean == pytest.approx(40.0)
-    assert rows[3].spd_mean == pytest.approx(50.0)
-
-
-def test_alias_resolves_against_full_container_set(spark, eav_plus_alias_db):
-    """Stage-level guard: the aliased resolution covers all containers regardless
-    of how narrowly the direct EAV selector matched."""
-    solver = DefaultSolver(spark)
-    query = eav_plus_alias_db.query
+def test_alias_resolves_against_full_container_set(
+    spark, key_value_store_alias_with_channel_tags_db
+):
+    """Stage-level guard: the aliased resolution covers all containers regardless of
+    how narrowly the direct EAV selector matched."""
+    solver = DefaultSolver(spark, config=_alias_config())
+    query = key_value_store_alias_with_channel_tags_db.query
     query.select(
         query.channel(channel_name="Engine RPM"),
-        query.channel_with_alias(channel_alias="vehicle_speed"),
+        query.channel_with_alias(channel_alias="engine_speed"),
     )
 
     direct_selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=False)
@@ -231,12 +100,37 @@ def test_alias_resolves_against_full_container_set(spark, eav_plus_alias_db):
     tags_df = solver.filter_container_tags(spark, query)
     metrics_df = solver.filter_container_metrics(spark, query, tags_df)
 
+    # Direct EAV match: "Engine RPM" tagged only in containers 1 and 2.
     channel_tags_df = solver.filter_channel_tags(spark, query.db, metrics_df, direct_selectors)
-    # Direct EAV match is narrowed to container 1 only.
-    assert {row.container_id for row in channel_tags_df.collect()} == {1}
+    assert {row.container_id for row in channel_tags_df.collect()} == {1, 2}
 
-    # Aliased resolution against the full container set still covers 1, 2, 3.
+    # Aliased resolution against the full container set covers 1, 2, AND 3
+    # (container 3 maps via "EngSpd"). This is the QueryBuilder fix.
     aliased_df = solver.filter_aliased_channel_metrics(
         spark, query.db, metrics_df, aliased_selectors
     )
     assert {row.container_id for row in aliased_df.collect()} == {1, 2, 3}
+
+
+def test_eav_direct_and_alias_coexist(spark, key_value_store_alias_with_channel_tags_db):
+    """End-to-end through QueryBuilder.solve: the direct EAV selector and the alias
+    coexist; the alias resolves in every container, including container 3, which the
+    direct EAV selector never matched."""
+    solver = DefaultSolver(spark, config=_alias_config())
+    query = key_value_store_alias_with_channel_tags_db.query
+
+    direct = query.channel(channel_name="Engine RPM").mean().alias("rpm_mean")
+    aliased = query.channel_with_alias(channel_alias="engine_speed").mean().alias("eng_speed_mean")
+
+    result = query.select(direct, aliased).solve(spark, solver=solver)
+    rows = {row.container_id: row for row in result.collect()}
+
+    assert set(rows.keys()) == {1, 2, 3}
+    # Direct EAV selection matched Engine RPM in containers 1 and 2.
+    assert rows[1].rpm_mean > 0
+    assert rows[2].rpm_mean > 0
+    # The alias resolves a real channel in all three containers — including 3, which
+    # the direct selector missed. Without the QueryBuilder fix it would be absent.
+    assert rows[1].eng_speed_mean > 0
+    assert rows[2].eng_speed_mean > 0
+    assert rows[3].eng_speed_mean > 0

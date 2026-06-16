@@ -267,6 +267,12 @@ def setup_key_value_store_alias_db(spark):
     channel_mapping_path = (
         f"{base_path}/tests/unit/data/key_value_store_alias_csv/channel_mapping.csv"
     )
+    # Narrow/EAV channel_tags mirroring channel_metrics.channel_name. Only consumed
+    # by the key_value_store_alias_with_channel_tags_db fixture (EAV + alias
+    # coexistence); key_value_store_alias_db stays wide-only by omitting it.
+    channel_tags_path = (
+        f"{base_path}/tests/unit/data/key_value_store_alias_csv/channel_tags.csv"
+    )
 
     options = {"header": "True", "delimiter": ",", "inferSchema": "True"}
     container_tags = spark.read.options(**options).csv(container_tags_path)
@@ -274,6 +280,7 @@ def setup_key_value_store_alias_db(spark):
     channel_metrics = spark.read.options(**options).csv(channel_metric_path)
     channels = spark.read.options(**options).csv(channels_path)
     channel_mapping = spark.read.options(**options).csv(channel_mapping_path)
+    channel_tags = spark.read.options(**options).csv(channel_tags_path)
 
     container_tags.write.format("delta").mode("overwrite").saveAsTable(
         "spark_catalog.silver_key_value_store_alias.container_tags"
@@ -289,6 +296,9 @@ def setup_key_value_store_alias_db(spark):
     )
     channel_mapping.write.format("delta").mode("overwrite").saveAsTable(
         "spark_catalog.silver_key_value_store_alias.channel_mapping"
+    )
+    channel_tags.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver_key_value_store_alias.channel_tags"
     )
 
 
@@ -331,6 +341,32 @@ def key_value_store_alias_db(
         "spark_catalog.silver_key_value_store_alias.channel_mapping"
     )
 
+    cfg = MeasurementDBConfig.for_debug(tables)
+    cfg.channel_mapping_table = "channel_mapping"
+    return MeasurementDB(cfg, ws=mock_workspace_client)
+
+
+@pytest.fixture
+def key_value_store_alias_with_channel_tags_db(
+    spark, setup_key_value_store_alias_db, mock_workspace_client
+) -> MeasurementDB:
+    """Alias fixture that ALSO carries an EAV ``channel_tags`` table.
+
+    This is the only fixture with both a ``channel_tags`` table (EAV direct channel
+    selection) and a ``channel_mapping`` table (alias resolution), exercising the two
+    together. The ``channel_tags`` rows mirror ``channel_metrics.channel_name``, so a
+    direct ``channel(channel_name="Engine RPM")`` resolves to containers {1, 2} while
+    the alias ``engine_speed`` (via ``EngSpd`` in container 3) resolves to {1, 2, 3}.
+    """
+    schema = "spark_catalog.silver_key_value_store_alias"
+    tables = {
+        "container_tags": spark.read.table(f"{schema}.container_tags"),
+        "container_metrics": spark.read.table(f"{schema}.container_metrics"),
+        "channel_metrics": spark.read.table(f"{schema}.channel_metrics"),
+        "channels": spark.read.table(f"{schema}.channels"),
+        "channel_mapping": spark.read.table(f"{schema}.channel_mapping"),
+        "channel_tags": spark.read.table(f"{schema}.channel_tags"),
+    }
     cfg = MeasurementDBConfig.for_debug(tables)
     cfg.channel_mapping_table = "channel_mapping"
     return MeasurementDB(cfg, ws=mock_workspace_client)
