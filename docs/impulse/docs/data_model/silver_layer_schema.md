@@ -5,21 +5,28 @@ title: Silver Layer Schema
 
 # Silver Layer Schema
 
-The Silver layer stores measurement data in a normalized, tag-based model.
-Time-series samples live in `channels`; metadata is split across tag
-tables (EAV key-value pairs) and metric tables (pre-computed statistics).
+The Silver layer stores measurement data in a normalized model: time-series
+samples live in `channels`, and metadata lives in companion tables.
 
-The tables and columns on this page describe the **typical
-default-solver shape** — what Impulse's
-[`DefaultSolver`](../references/query_engine.md) expects when
-no [`SolverConfig`](../config/configuration.md#solver-column-mappings-and-filters)
-overrides are applied. The framework hard-requires only a small subset of this shape:
+**You only need three tables to start:** `container_metrics`,
+`channel_metrics`, and `channels`. Everything else is optional —
+`container_tags` and `channel_tags` (EAV tag tables), `channel_mapping`
+(aliases), and `unit_conversion` (per-alias conversion) are add-ons that
+`DefaultSolver` uses only when you configure them. See the
+[Query Engine table requirements](../references/query_engine.md#table-requirements)
+for the full matrix.
 
-- `container_id` on every silver table (engine join key);
-- `(container_id, channel_id)` on the channel-side tables and `channels`;
-- `key`, `value` columns on the tag tables (EAV layout);
-- one of the two `channels` formats below (RLE with `tstart`/`tend` or
-  raw with `timestamp`).
+The tables and columns on this page describe the **typical default-solver
+shape** — what `DefaultSolver` expects when no
+[`SolverConfig`](../config/configuration.md#solver-column-mappings-and-filters)
+overrides are applied. The framework hard-requires only a small subset:
+
+- `container_id` on every silver table you provide (engine join key);
+- `(container_id, channel_id)` on `channel_metrics`, `channels`, and (if used)
+  `channel_tags`;
+- one of the two `channels` formats below (RLE with `tstart`/`tend` or raw
+  with `timestamp`);
+- `key`, `value` columns **on the tag tables, only if you use them** (EAV layout).
 
 `container_id` may be any Spark type (e.g. `long`, `int`, or `string`): the
 engine derives its type from your tables at query time and carries it through
@@ -173,10 +180,12 @@ the epoch-typed pair). Populate whichever your queries and
 
 ---
 
-## container_tags
+## container_tags (optional)
 
-Key-value metadata tags for measurement containers. Strict EAV layout —
-TSAL queries select recordings by tag key (e.g.
+**Optional** — only needed for tag-based container filtering. Omit it for the
+wide-only model, where container attributes live as columns on
+`container_metrics`. Key-value metadata tags for measurement containers, strict
+EAV layout — TSAL queries select recordings by tag key (e.g.
 `query.havingTag(vehicle_key="Seat_Leon")` looks up `value` where
 `key = 'vehicle_key'`).
 
@@ -274,12 +283,13 @@ when your physical column has a different name.
 
 ---
 
-## channel_tags
+## channel_tags (optional)
 
-Key-value metadata tags per channel. Strict EAV layout — TSAL channel
-selectors look up signals by tag key (e.g.
-`query.channel(channel_name="Engine_RPM")` looks up `value` where
-`key = 'channel_name'`).
+**Optional** — only needed for EAV channel selection. Omit it to select channels
+directly from columns on `channel_metrics` (e.g. a `channel_name` column). Key-value
+metadata tags per channel, strict EAV layout — TSAL channel selectors look up
+signals by tag key (e.g. `query.channel(channel_name="Engine_RPM")` looks up
+`value` where `key = 'channel_name'`).
 
 | Column         | Type     | Nullable | Description                                            |
 |----------------|----------|----------|--------------------------------------------------------|
