@@ -11,38 +11,73 @@ the component that knows how your silver tables are physically laid out
 and how to read them. Impulse ships a single solver — `DefaultSolver` —
 that adapts to the silver tables you have.
 
-## The solver
+## One solver, three required tables
 
-`DefaultSolver` adapts its behaviour to the shape of your silver layer,
-table by table:
+`DefaultSolver` runs on **just three silver tables**:
 
-- **Channel selection** runs against a narrow EAV `channel_tags` table
-  when one is configured (pivoting its `(key, value)` rows on the fly), and
-  otherwise directly against columns of `channel_metrics` (so an attribute
-  such as `channel_name` lives as a column on `channel_metrics`). The
-  presence of `source.channel_tags_table` selects the mode per query.
-- **Container filtering** uses a narrow EAV `container_tags` table when one
-  is configured, and otherwise treats container attributes as columns on
-  `container_metrics` (the wide-only model).
-- **Channel aliasing** (logical names that map to physical channels) is
-  available when a `channel_mapping` table is configured, with optional
-  per-alias **unit conversion** when a `unit_conversion` table is also
-  configured.
+- `container_metrics` — one row per container (recording).
+- `channel_metrics` — one row per `(container_id, channel_id)` channel.
+- `channels` — the time-series sample data (RLE or raw).
 
-Tag tables (`container_tags`, `channel_tags`) are always read in the narrow
-EAV layout `(key, value)` and pivoted on the fly.
+**Everything else is optional.** In particular, the **tag tables
+(`container_tags`, `channel_tags`) are not required** — supply them only
+when you want EAV-style tag filtering/selection. The `channel_mapping`
+and `unit_conversion` tables are likewise optional add-ons that unlock
+channel aliasing and unit conversion when present.
+
+## How `DefaultSolver` adapts
+
+The solver chooses its behaviour per query from the tables you configure:
+
+- **Channel selection.** With a `channel_tags` table configured, channels
+  are selected from its narrow EAV `(key, value)` rows (pivoted on the
+  fly). Without one, channels are selected directly from columns on
+  `channel_metrics` — so an attribute such as `channel_name` lives as a
+  column on `channel_metrics`. The presence of
+  `source.channel_tags_table` selects the mode.
+- **Container filtering.** With a `container_tags` table configured,
+  containers are filtered from its narrow EAV rows. Without one, container
+  attributes are read as columns on `container_metrics` (the wide-only
+  model).
+- **Channel aliasing.** When a `channel_mapping` table is configured,
+  logical channel names (`channel_with_alias(...)`) resolve to physical
+  channels, with optional per-alias **unit conversion** when a
+  `unit_conversion` table is also configured.
+
+Tag tables, when present, are always read in the narrow EAV layout
+`(key, value)` and pivoted on the fly.
+
+## Channel aliasing requires channel-identifying columns on `channel_metrics`
+
+When you use aliasing (`channel_with_alias(...)` backed by a
+`channel_mapping` table), `DefaultSolver` resolves each logical alias to a
+physical channel by **joining `channel_mapping` to `channel_metrics`**. That
+join needs columns on `channel_metrics` that identify a channel within a
+container — by default **`channel_name` and `data_key`** (the
+`channel_metrics` side of the alias-resolution join keys).
+
+So when aliasing is in use, `channel_metrics` **must carry those
+identifying columns**. This holds *regardless* of whether a `channel_tags`
+table is configured: even if direct channel selection runs against the EAV
+`channel_tags` table, alias resolution always joins `channel_mapping`
+against `channel_metrics`.
+
+You can change which columns are used via `channel_mapping.join_keys` (for
+example, a single-column join when `data_key` is not part of the channel
+identity in your layout) — see
+[Alias-resolution join keys](../config/configuration.md#alias-resolution-join-keys-optional).
 
 ## Table requirements
 
-| Silver table        | Required? | Notes                                                        |
-|---------------------|-----------|--------------------------------------------------------------|
-| `container_metrics` | required  |                                                              |
-| `channel_metrics`   | required  | also carries channel-selection columns in the wide model     |
-| `channels`          | required  | the time-series data (RLE or raw)                            |
-| `container_tags`    | optional  | narrow EAV; omit for the wide-only container model           |
-| `channel_tags`      | optional  | narrow EAV; omit when selection attributes are on `channel_metrics` |
-| `channel_mapping`   | optional  | channel aliases                                              |
-| `unit_conversion`   | optional  | per-alias unit conversion                                    |
+| Silver table        | Required?  | Notes                                                                                  |
+|---------------------|------------|----------------------------------------------------------------------------------------|
+| `container_metrics` | **yes**    | One row per container.                                                                  |
+| `channel_metrics`   | **yes**    | One row per channel. Carries channel-selection columns in the wide model, and the channel-identifying columns (`channel_name`, `data_key`) required for aliasing. |
+| `channels`          | **yes**    | Time-series sample data (RLE or raw).                                                  |
+| `container_tags`    | optional   | Narrow EAV. Omit for the wide-only container model.                                    |
+| `channel_tags`      | optional   | Narrow EAV. Omit when channel-selection attributes live on `channel_metrics`.          |
+| `channel_mapping`   | optional   | Channel aliases. Requires channel-identifying columns on `channel_metrics` (see above).|
+| `unit_conversion`   | optional   | Per-alias unit conversion (used together with `channel_mapping`).                      |
 
 See the [Silver Layer Schema](../data_model/silver_layer_schema.md) for
 the columns each table is expected to carry.
