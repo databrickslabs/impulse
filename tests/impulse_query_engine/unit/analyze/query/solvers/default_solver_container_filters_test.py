@@ -49,7 +49,7 @@ def _default_cfg(project_id: str = "SAMPLE_PROJECT", **table_overrides) -> Solve
     )
 
 
-class TestKeyValueStoreSolverFilterContainerTags:
+class TestDefaultSolverFilterContainerTags:
     """Tests for DefaultSolver.filter_container_tags."""
 
     def test_no_filter_returns_all_containers(
@@ -184,7 +184,7 @@ class TestKeyValueStoreSolverFilterContainerTags:
         assert "model" in columns
 
 
-class TestKeyValueStoreSolverFilterContainerMetrics:
+class TestDefaultSolverFilterContainerMetrics:
     """Tests for DefaultSolver.filter_container_metrics."""
 
     def test_join_with_filtered_tags(self, spark: SparkSession, key_value_store_db: MeasurementDB):
@@ -306,7 +306,7 @@ class TestKeyValueStoreSolverFilterContainerMetrics:
         assert {"container_id", "start_ts", "stop_ts", "brand", "model"}.issubset(cols)
 
 
-class TestKeyValueStoreSolverWithoutContainerTags:
+class TestDefaultSolverWithoutContainerTags:
     """Tests for the wide-only data model (no ``container_tags_table`` configured).
 
     Uses the ``basic_narrow_db`` fixture, which loads only
@@ -382,7 +382,7 @@ class TestKeyValueStoreSolverWithoutContainerTags:
         assert container_ids == {1, 2, 3}
 
 
-class TestKeyValueStoreSolverEmptySelector:
+class TestDefaultSolverEmptySelector:
     """Tests for empty and edge-case TagSelector values in the DefaultSolver."""
 
     def test_empty_string_selector_returns_no_results(
@@ -405,7 +405,7 @@ class TestKeyValueStoreSolverEmptySelector:
         assert result.count() == 0
 
 
-class TestKeyValueStoreSolverMetricExpressions:
+class TestDefaultSolverMetricExpressions:
     """Tests exercising MetricExpression features within the DefaultSolver context."""
 
     def test_required_metrics_single_selector(self):
@@ -441,7 +441,7 @@ class TestKeyValueStoreSolverMetricExpressions:
         assert "MetricOp" in str(expr)
         assert "eq" in str(expr)
 
-    def test_tag_filter_with_key_value_store_solver(
+    def test_tag_filter_with_default_solver(
         self, spark: SparkSession, key_value_store_db: MeasurementDB
     ):
         """End-to-end: tag filter applied via DefaultSolver should filter correctly."""
@@ -501,7 +501,7 @@ class TestSolverConfig:
         assert cfg.channel_id_col == "channel_id"
 
 
-class TestKeyValueStoreSolverConfig:
+class TestDefaultSolverConfig:
     """Tests for configuration handling in DefaultSolver."""
 
     def test_default_config_used_when_none(self, spark: SparkSession):

@@ -5,7 +5,7 @@ interaction with the wide features inherited from the former KeyValueStoreSolver
 (container-tag filtering and channel-alias resolution).
 
 The per-table column-mapping behaviour of the EAV branch is covered in
-``delta_solver_column_mapping_test.py`` (which now runs DefaultSolver).  This
+``default_solver_eav_column_mapping_test.py`` (which now runs DefaultSolver).  This
 file focuses on:
 
 - the empty-selector edge case in EAV mode (regression guard for a latent bug

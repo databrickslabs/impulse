@@ -47,7 +47,7 @@ def _kvs_cfg(
     )
 
 
-class TestKeyValueStoreSolverIntegration:
+class TestDefaultSolverIntegration:
     """End-to-end pipeline tests against the key_value_store_db fixture."""
 
     def test_solve_no_filters_returns_all_containers(
@@ -213,7 +213,7 @@ class TestKeyValueStoreSolverIntegration:
         assert {row.container_id for row in rows} == {1}
 
 
-class TestKeyValueStoreSolverAliasIntegration:
+class TestDefaultSolverAliasIntegration:
     """End-to-end pipeline tests against the alias-enabled KVS fixture."""
 
     def test_solve_with_aliased_channel(

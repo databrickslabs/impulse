@@ -194,7 +194,7 @@ def _default_tables(spark) -> dict:
 # ===================================================================
 
 
-class TestDeltaSolverContainerTagsMapping:
+class TestDefaultSolverContainerTagsMapping:
     """Verify filter_container_tags works when container_tags physical columns are renamed."""
 
     @pytest.fixture
@@ -254,7 +254,7 @@ class TestDeltaSolverContainerTagsMapping:
 # ===================================================================
 
 
-class TestDeltaSolverContainerMetricsMapping:
+class TestDefaultSolverContainerMetricsMapping:
     """Verify filter_container_metrics works when container_metrics columns are renamed."""
 
     @pytest.fixture
@@ -285,7 +285,7 @@ class TestDeltaSolverContainerMetricsMapping:
             solver.filter_container_metrics(spark, query, tags_df).collect()
 
 
-class TestDeltaSolverContainerMetricsTimestampMapping:
+class TestDefaultSolverContainerMetricsTimestampMapping:
     """Verify start_ts/stop_ts on container_metrics can be remapped from custom physical names."""
 
     @pytest.fixture
@@ -322,7 +322,7 @@ class TestDeltaSolverContainerMetricsTimestampMapping:
 # ===================================================================
 
 
-class TestDeltaSolverChannelTagsMapping:
+class TestDefaultSolverChannelTagsMapping:
     """Verify filter_channel_tags works when channel_tags columns are renamed."""
 
     @pytest.fixture
@@ -379,7 +379,7 @@ class TestDeltaSolverChannelTagsMapping:
 # ===================================================================
 
 
-class TestDeltaSolverChannelMetricsMapping:
+class TestDefaultSolverChannelMetricsMapping:
     """Verify filter_channel_metrics works when channel_metrics columns are renamed."""
 
     @pytest.fixture
@@ -418,7 +418,7 @@ class TestDeltaSolverChannelMetricsMapping:
 # ===================================================================
 
 
-class TestDeltaSolverChannelsMapping:
+class TestDefaultSolverChannelsMapping:
     """Verify solve() works when channels (RLE) physical columns are renamed."""
 
     @pytest.fixture
@@ -465,7 +465,7 @@ class TestDeltaSolverChannelsMapping:
 # ===================================================================
 
 
-class TestDeltaSolverFullyCustomMapping:
+class TestDefaultSolverFullyCustomMapping:
     """Every silver table uses non-default physical column names."""
 
     @pytest.fixture
@@ -554,7 +554,7 @@ class TestDeltaSolverFullyCustomMapping:
 # ===================================================================
 
 
-class TestDeltaSolverDefaultConfig:
+class TestDefaultSolverDefaultConfig:
     """When SolverConfig is None or has empty mappings, default column names still work."""
 
     @pytest.fixture

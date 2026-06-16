@@ -65,11 +65,11 @@ def _make_channel_pdf(
 
 
 # ---------------------------------------------------------------------------
-# TestKVSTimeSeriesCache
+# TestTimeSeriesCache
 # ---------------------------------------------------------------------------
 
 
-class TestKVSTimeSeriesCache:
+class TestTimeSeriesCache:
     """Unit tests for TimeSeriesCache."""
 
     def test_default_config_load_blob(self):
@@ -130,11 +130,11 @@ class TestKVSTimeSeriesCache:
 
 
 # ---------------------------------------------------------------------------
-# TestKeyValueStoreSolverUDF
+# TestDefaultSolverUDF
 # ---------------------------------------------------------------------------
 
 
-class TestKeyValueStoreSolverUDF:
+class TestDefaultSolverUDF:
     """Unit tests for DefaultSolver._solve_udf with col_map."""
 
     def test_default_config_result_key(self):
@@ -188,11 +188,11 @@ class TestKeyValueStoreSolverUDF:
 
 
 # ---------------------------------------------------------------------------
-# TestKeyValueStoreSolverFilterMethods (wide-only data model)
+# TestDefaultSolverFilterMethods (wide-only data model)
 # ---------------------------------------------------------------------------
 
 
-class TestKeyValueStoreSolverFilterMethodsWideOnly:
+class TestDefaultSolverFilterMethodsWideOnly:
     """Filter-stage tests against the wide-only fixture (no container_tags_table)."""
 
     def test_filter_channel_metrics_uses_config_cols(
@@ -213,11 +213,11 @@ class TestKeyValueStoreSolverFilterMethodsWideOnly:
 
 
 # ---------------------------------------------------------------------------
-# TestKeyValueStoreSolverEndToEnd (wide-only data model)
+# TestDefaultSolverEndToEnd (wide-only data model)
 # ---------------------------------------------------------------------------
 
 
-class TestKeyValueStoreSolverEndToEndWideOnly:
+class TestDefaultSolverEndToEndWideOnly:
     """End-to-end tests using the wide-only fixture (no container_tags_table)."""
 
     def test_default_config_solve_produces_results(
