@@ -1005,7 +1005,8 @@ class SampleSeries:
         When ``other`` is a PointsInTime object, returns a PointsInTimeSeries holding, for each
         point, the value valid at that point (the sample interval ``[tstart, tend)`` containing it).
         Points that fall outside every sample interval (gaps, before the first or after the last
-        sample) are dropped.
+        sample) are dropped. A trailing zero-duration sample ``[t, t)`` is treated as a closed
+        point, so a query exactly at the final timestamp returns the last value.
 
         Parameters
         ----------

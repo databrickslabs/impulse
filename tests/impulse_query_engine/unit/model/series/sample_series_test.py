@@ -795,11 +795,13 @@ def test_where_pit_spanning_multiple_intervals():
     nptest.assert_array_equal(result.values, [1, 2, 3])
 
 
-def test_where_pit_trailing_zero_duration_dropped():
-    # trailing zero-duration sample [3,3); a point at 3 is dropped (interval not closed at tend).
+def test_where_pit_trailing_zero_duration_closed():
+    # trailing zero-duration sample [3,3) is the closed final point; a query at 3 returns its value.
     s1 = SampleSeries([0, 1, 3], [1, 2, 3], [10, 20, 30])
     result = s1.where(PointsInTime([3.0]))
-    assert len(result) == 0
+    assert isinstance(result, PointsInTimeSeries)
+    nptest.assert_array_equal(result.tstarts, [3.0])
+    nptest.assert_array_equal(result.values, [30])
 
 
 def test_where_pit_nan_value():

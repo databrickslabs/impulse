@@ -161,6 +161,13 @@ def test_plane_sweep_vs_sample_series():
     assert PointsInTimeSeries.plane_sweep(pts, s) == [(0, 0), (1, 1), (2, 2)]
 
 
+def test_plane_sweep_trailing_zero_duration_closed():
+    # last sample [3,3) is a closed point: a query exactly at 3 matches it.
+    pts = PointsInTimeSeries([0.5, 3.0], [0, 0])
+    s = SampleSeries([0, 3], [1, 3], [10, 30])
+    assert PointsInTimeSeries.plane_sweep(pts, s) == [(0, 0), (1, 1)]
+
+
 def test_plane_sweep_vs_intervals():
     pts = PointsInTimeSeries([5, 15, 25], [0, 0, 0])
     intervals = Intervals([0], [20])

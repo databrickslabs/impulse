@@ -163,7 +163,8 @@ Operations move between the four classes (and scalars) in well-defined ways:
 instant it takes the most recently measured value at that instant — the value of the sample interval
 `[tstart, tend)` that contains it — and keeps it. **Points that fall outside every sample interval**
 — in a gap, before the first or after the last sample, where the signal is not valid — **are
-dropped**, so the result may be shorter than the input.
+dropped**, so the result may be shorter than the input. (The trailing sample is treated as a closed
+point, so a query exactly at the final timestamp returns the last value.)
 
 A short example chaining several transitions — read the engine RPM at each wheel-speed rising edge,
 then keep only the high-RPM starts:

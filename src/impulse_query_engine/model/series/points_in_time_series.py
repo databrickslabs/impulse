@@ -114,7 +114,10 @@ class PointsInTimeSeries:
         """
         Plane sweep matching points against half-open intervals ``[interval_ts, interval_te)``.
 
-        Both inputs are assumed sorted in ascending order.
+        Both inputs are assumed sorted in ascending order. A trailing zero-duration interval
+        ``[t, t)`` is treated as the closed point ``{t}``, so a query point exactly at ``t`` matches
+        it. This mirrors ``SampleSeries.__pit_overlaps_interval`` and keeps the final value of a
+        SampleSeries reachable by point sampling (its last sample is the closed endpoint ``[t, t)``).
 
         Parameters
         ----------
@@ -135,12 +138,18 @@ class PointsInTimeSeries:
         pairs = []
         idx1 = 0
         idx2 = 0
+        last = len(interval_ts) - 1
+        last_closed = interval_ts[last] == interval_te[last]
         while idx1 < len(point_ts) and idx2 < len(interval_ts):
             if point_ts[idx1] < interval_ts[idx2]:  # point is before the current interval start
                 idx1 += 1
             else:  # point is at or after the current interval start
                 idx1i = idx1
-                while idx1i < len(point_ts) and interval_te[idx2] > point_ts[idx1i]:
+                while idx1i < len(point_ts) and (
+                    interval_te[idx2] > point_ts[idx1i]
+                    # a trailing zero-duration interval is closed at its endpoint
+                    or (idx2 == last and last_closed and point_ts[idx1i] == interval_te[idx2])
+                ):
                     pairs.append((idx1i, idx2))
                     idx1i += 1
                 idx2 += 1
