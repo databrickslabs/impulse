@@ -1,13 +1,13 @@
 ---
-sidebar_position: 3
-title: TSAL
+sidebar_position: 1
+title: Defining Expressions
 ---
 
-# TSAL -- Time Series Analytics Language
+# Defining Expressions
 
-TSAL is the expression language at the core of Impulse. It provides a Pythonic, Matlab-style syntax for
-selecting physical channels, defining virtual signals, and expressing event conditions. All TSAL expressions are **lazy
-** -- no computation happens until a solver executes the query.
+TSAL expressions are built in Python by selecting channels and combining them with operators and
+signal methods. Every expression is a `TimeSeriesExpression` and stays **lazy** until the query is
+[evaluated](evaluation.md).
 
 ## Channel selection
 
@@ -24,24 +24,18 @@ veh_spd = db.query.channel(channel_name='Vehicle Speed Sensor')
 The returned object is a `TimeSeriesSelector`, which is a `TimeSeriesExpression`. It can be used directly in arithmetic,
 comparisons, or signal methods.
 
-### Channel aliases
-
-When the same physical signal may be stored under different tag combinations, use `with_alias()` to provide fallback
-selectors:
-
-```python
-rpm = db.query.channel(channel_name='Engine RPM', brand='Seat').with_alias(
-    db.query.channel(channel_name='EngineSpeed', brand='Seat')
-)
-```
-
-The solver tries each alias in order and returns the first match.
+:::note Where selection tags must live
+Each tag passed to `channel(...)` must be resolvable by the solver — either as a **column on
+`channel_metrics`** (the wide model) or, when a `channel_tags` table is provisioned, as a
+**`(key, value)` row in `channel_tags`**. Which mode applies depends on whether a `channel_tags`
+table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolver-adapts).
+:::
 
 ### Logical aliases via channel mapping
 
 For workflows where a stable logical name should resolve to one of many physical channels through a separately
 maintained mapping table, use `channel_with_alias()` instead. This requires
-a `channel_mapping_table` to be configured in `source` (see [Configuration](../config/configuration)).
+a `channel_mapping_table` to be configured in `source` (see [Configuration](../../../config/configuration)).
 
 ```python
 rpm = db.query.channel_with_alias(channel_name='Engine RPM')
@@ -50,6 +44,13 @@ rpm = db.query.channel_with_alias(channel_name='Engine RPM')
 Each keyword argument becomes a tag filter on the `channel_mapping` table; the solver joins the matched logical entries
 to the physical channels at read time. Use this when the consuming code should not need to know which physical signal
 backs a given logical name.
+
+:::note
+The tag used for the lookup (e.g. `channel_name`) must also exist as a **column on `channel_metrics`**:
+the solver resolves each logical name by joining `channel_mapping` to `channel_metrics` on the
+channel-identifying columns (by default `channel_name` and `data_key`). See
+[Query Solvers](../query_solvers.md) for details.
+:::
 
 When the `channel_mapping` table carries `source_unit` and `target_unit` columns and the report config sets
 `source.unit_conversion_table`, values returned from `channel_with_alias()` are automatically converted from source
@@ -83,7 +84,7 @@ applying the operation.
 
 ### Comparison operators
 
-Comparison operators produce `Intervals` -- a set of time windows where the condition holds true. This makes them the
+Comparison operators produce `Intervals` — a set of time windows where the condition holds true. This makes them the
 primary building block for event definitions.
 
 | Operator | Example          | Description           |
@@ -126,8 +127,8 @@ type) at execution time.
 | Method                   | Signature            | Description                                                                                                                                |
 |--------------------------|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
 | `.resample(sample_rate)` | `sample_rate: float` | Resample the signal to a uniform sample rate. The rate is specified in the same time unit as the underlying data (typically microseconds). |
-| `.cumtrapz()`            | --                   | Cumulative trapezoidal integration over the signal.                                                                                        |
-| `.trapz()`               | --                   | Total trapezoidal integration (returns a scalar).                                                                                          |
+| `.cumtrapz()`            | —                    | Cumulative trapezoidal integration over the signal.                                                                                        |
+| `.trapz()`               | —                    | Total trapezoidal integration (returns a scalar).                                                                                          |
 
 ```python
 distance_km = veh_spd.resample(1e6).cumtrapz() / 3600 / 1e6
@@ -188,7 +189,7 @@ These are lower-level methods on the expression itself. For report-level aggrega
 
 | Method                 | Signature             | Description                                                                                                                    |
 |------------------------|-----------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `.sparse()`            | --                    | Merge consecutive samples with the same value into a single interval. Reduces data volume.                                     |
+| `.sparse()`            | —                     | Merge consecutive samples with the same value into a single interval. Reduces data volume.                                     |
 | `.synchronized(other)` | `other: SampleSeries` | Align two signals to shared overlapping time intervals. Called automatically when combining signals with arithmetic operators. (`PointsInTimeSeries` offers `synchronized` / `synchronized_all` too — see [Core Data Model](core_data_model.md).) |
 | `.alias(name)`         | `name: str`           | Assign a display name to the expression. Used as the column name in result DataFrames.                                         |
 
@@ -249,35 +250,3 @@ every_10km = (distance_km % 10).intervals_between_falling_edges()
 
 This produces `Intervals` where each interval spans exactly 10 km of travel. These can be used as events for
 aggregation.
-
----
-
-## Expression types
-
-Under the hood, TSAL expressions form a tree of typed nodes:
-
-| Type                      | Role                                                                      |
-|---------------------------|---------------------------------------------------------------------------|
-| `TimeSeriesSelector`      | Leaf node: selects a physical channel by tag expression.                  |
-| `TimeSeriesAliasSelector` | Selects from multiple channel candidates (alias/fallback).                |
-| `TimeSeriesOp`            | Internal node: arithmetic, comparison, logical, or method-call operation. |
-| `TimeSeriesUDF`           | User-defined function applied to one or more expressions.                 |
-
-The expression tree is materialized when `QueryBuilder.solve()` is called. The solver resolves `TimeSeriesSelector`
-nodes into `SampleSeries` objects, then the tree is evaluated bottom-up.
-
----
-
-## Result types
-
-Depending on the operations applied, a TSAL expression resolves to one of these types at execution
-time. See [Core Data Model](core_data_model.md) for the full treatment of these classes and how they
-interact.
-
-| Type                 | Description                                                                                                                                                  |
-|----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `SampleSeries`       | Time series with `(tstarts, tends, values)` arrays; the series is valid across its intervals, and each value `v_i` is the measurement at `tstart_i` that stands as the most recent value until `tend_i`. Produced by channel selection, arithmetic, resampling, and integration. |
-| `Intervals`          | Set of `(tstart, tend)` pairs (no values). Produced by comparison and logical operators. Supports `&` (intersection), `\|` (union), `expand()`, and `shrink()`. |
-| `PointsInTime`       | Set of individual timestamps (no values). Produced by `.rising_edges()` and `.falling_edges()`.                                                             |
-| `PointsInTimeSeries` | Timestamp→value series; each value is defined only *at* its timestamp, not in between. Produced by `.where(<PointsInTime expression>)`.                       |
-| Scalar (`float`)     | Single numeric value. Produced by `.min()`, `.max()`, `.mean()`, `.sum()`.                                                                                  |

@@ -1,9 +1,9 @@
 ---
 sidebar_position: 2
-title: Query Engine
+title: Query Solvers
 ---
 
-# Query Engine
+# Query Solvers
 
 The query engine resolves channel selections and evaluates events and
 aggregations against silver-layer data. It does this through a *solver*:
@@ -65,7 +65,7 @@ against `channel_metrics`.
 You can change which columns are used via `channel_mapping.join_keys` (for
 example, a single-column join when `data_key` is not part of the channel
 identity in your layout) — see
-[Alias-resolution join keys](../config/configuration.md#alias-resolution-join-keys-optional).
+[Alias-resolution join keys](../../config/configuration.md#alias-resolution-join-keys-optional).
 
 ## Table requirements
 
@@ -79,18 +79,18 @@ identity in your layout) — see
 | `channel_mapping`   | optional   | Channel aliases. Requires channel-identifying columns on `channel_metrics` (see above).|
 | `unit_conversion`   | optional   | Per-alias unit conversion (used together with `channel_mapping`).                      |
 
-See the [Silver Layer Schema](../data_model/silver_layer_schema.md) for
+See the [Silver Layer Schema](../../data_model/silver_layer_schema.md) for
 the columns each table is expected to carry.
 
 ## Configuring the solver
 
 Solver tuning lives under the `query_engine` section of your report config:
 
-- [`query_engine.solver`](../config/configuration.md#query_engine-optional)
+- [`query_engine.solver`](../../config/configuration.md#query_engine-optional)
   — the solver to use. Defaults to `"DefaultSolver"`. The values
   `"DeltaSolver"` and `"KeyValueStoreSolver"` are **deprecated aliases**
   retained for backward compatibility; both resolve to `DefaultSolver`.
-- [Solver column mappings and filters](../config/configuration.md#solver-column-mappings-and-filters)
+- [Solver column mappings and filters](../../config/configuration.md#solver-column-mappings-and-filters)
   — adapt the solver to a silver layer whose physical column names
   diverge from Impulse's internal names, scope reads by `project_id`, or
   apply per-table equality filters.
@@ -102,8 +102,8 @@ with `DefaultSolver` and `data_type = "RLE"`.
 
 Auto-generated symbol-level docs:
 
-- [`DefaultSolver`](api/impulse_query_engine/analyze/query/solvers/default_solver.md)
-- [`QuerySolver`](api/impulse_query_engine/analyze/query/solvers/query_solver.md)
+- [`DefaultSolver`](../api/impulse_query_engine/analyze/query/solvers/default_solver.md)
+- [`QuerySolver`](../api/impulse_query_engine/analyze/query/solvers/query_solver.md)
   — abstract base class defining the six-stage solver pipeline.
-- [`SolverConfig`](api/impulse_query_engine/analyze/query/solvers/solver_config.md)
+- [`SolverConfig`](../api/impulse_query_engine/analyze/query/solvers/solver_config.md)
   — per-table column mappings, filters, and project scoping.

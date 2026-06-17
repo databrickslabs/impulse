@@ -340,7 +340,7 @@ sees it".
 Incremental processing reuses results from prior runs for unchanged
 definitions and reprocesses only containers that are new or have been
 updated in silver. See the
-[Report reference](../references/report.md#incremental-processing) for
+[Report reference](../references/report/index.md#incremental-processing) for
 mode-resolution rules and what counts as a definition change.
 
 | Field                         | Type   | Default         | Description                                                            |

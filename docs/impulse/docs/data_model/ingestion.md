@@ -5,7 +5,7 @@ title: Ingestion
 
 # Ingestion
 
-Impulse's [`DefaultSolver`](../references/query_engine.md) reads from a
+Impulse's [`DefaultSolver`](../references/query_engine/query_solvers.md) reads from a
 silver layer of **three required tables**: `container_metrics`,
 `channel_metrics`, and `channels`. Two further tables, `container_tags`
 and `channel_tags`, are **fully optional** — add them only if you want

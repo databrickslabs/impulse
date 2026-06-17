@@ -1,13 +1,14 @@
 ---
-sidebar_position: 4
+sidebar_position: 2
 title: Core Data Model
 ---
 
 # Core Data Model
 
-Every [TSAL](tsal.md) expression is lazy — it describes *what* to compute, not *how*. When a solver
-runs the query, each expression is evaluated **per container** and resolves to one of a small set of
-in-memory, numpy-backed classes. Those classes are the **core data model**:
+A TSAL expression resolves to one of a small set of in-memory, numpy-backed classes — the **core data
+model**. Channel selection and arithmetic produce a `SampleSeries`, comparisons produce `Intervals`,
+edge detection produces `PointsInTime`, and sampling at instants produces a `PointsInTimeSeries`.
+([Evaluation](evaluation.md) explains how a query produces these per container.)
 
 | Class                | Carries values? | Has duration? | Typical source                                  |
 |----------------------|-----------------|---------------|-------------------------------------------------|
@@ -18,7 +19,7 @@ in-memory, numpy-backed classes. Those classes are the **core data model**:
 
 :::note Not the storage schema
 This page describes the **in-memory result classes** a query evaluates to. It is unrelated to the
-[Data Model](../data_model/index.md) section, which documents the **silver-layer storage schema**
+[Data Model](../../../data_model/index.md) section, which documents the **silver-layer storage schema**
 (the Delta tables Impulse reads from). The core data model lives only in memory during query
 execution.
 :::
@@ -69,7 +70,7 @@ Key operations: arithmetic (`+ - * / %`) and comparisons (which produce `Interva
 `trapz()` / `cumtrapz()`, `rising_edges()` / `falling_edges()`, `histogram()`, and the
 duration-weighted reducers `sum()` / `min()` / `max()` / `mean()`.
 
-→ API: [`SampleSeries`](api/impulse_query_engine/model/series/sample_series.md)
+→ API: [`SampleSeries`](../../api/impulse_query_engine/model/series/sample_series.md)
 
 ---
 
@@ -88,7 +89,7 @@ bounds), `merge_overlaps()` / `merge_intervals(gap)`, `debounce(d)`, and `filter
 shorter than `d`). Intersecting `Intervals` with a `PointsInTime` keeps only the points that fall
 inside a window and returns a `PointsInTime`.
 
-→ API: [`Intervals`](api/impulse_query_engine/model/series/intervals.md)
+→ API: [`Intervals`](../../api/impulse_query_engine/model/series/intervals.md)
 
 ---
 
@@ -104,7 +105,7 @@ eng_rpm.rising_edges()   # PointsInTime: instants where RPM increased
 Key operations: `&` / `|` (set intersection / union by timestamp) and `expand()` / `expand_left()`
 / `expand_right()`, which widen each point into a window and return `Intervals`.
 
-→ API: [`PointsInTime`](api/impulse_query_engine/model/series/points_in_time.md)
+→ API: [`PointsInTime`](../../api/impulse_query_engine/model/series/points_in_time.md)
 
 ---
 
@@ -136,7 +137,7 @@ Because there is no validity between points, the operators differ from `SampleSe
 - **`synchronized()` / `synchronized_all()`** align this series with a `SampleSeries` or another
   `PointsInTimeSeries` onto their shared instants, returning value-carrying point series.
 
-→ API: [`PointsInTimeSeries`](api/impulse_query_engine/model/series/points_in_time_series.md)
+→ API: [`PointsInTimeSeries`](../../api/impulse_query_engine/model/series/points_in_time_series.md)
 
 ---
 
@@ -175,35 +176,3 @@ rpm_at_starts = eng_rpm.where(starts)      # PointsInTimeSeries
 hot_starts = rpm_at_starts > 3000          # PointsInTime (instants only)
 avg_start_rpm = rpm_at_starts.mean()       # scalar (unweighted)
 ```
-
----
-
-## From TSAL to the core data model
-
-A TSAL expression is a **lazy tree** of typed nodes — `TimeSeriesSelector` (a channel leaf),
-`TimeSeriesOp` (an arithmetic / comparison / logical / method node), `TimeSeriesAliasSelector`, and
-`TimeSeriesUDF` (see [Expression types](tsal.md#expression-types)). Building the tree computes
-nothing.
-
-When [`QueryBuilder.solve()`](tsal.md) runs, the [solver](query_engine.md) does the following per
-container:
-
-1. **Resolve leaves.** Each `TimeSeriesSelector` is matched to a physical channel and loaded into a
-   `SampleSeries` from the silver-layer data.
-2. **Evaluate bottom-up.** Each `TimeSeriesOp` calls the corresponding method/operator on the
-   core-model object its children produced — e.g. `eng_rpm > 2000` builds a `SampleSeries` for
-   `eng_rpm`, then the `>` op turns it into an `Intervals`. The result of the whole tree is one
-   core-model object (or a scalar) per container.
-3. **Serialize into the output DataFrame.** Each result type maps to a Spark column type:
-
-   | Result type          | Spark column type                  | How it is stored        |
-   |----------------------|------------------------------------|-------------------------|
-   | `SampleSeries`       | `BinaryType`                       | serialized (pickle+lz4) |
-   | `Intervals`          | `ArrayType(ArrayType(DoubleType))` | `[[tstart, tend], ...]` |
-   | `PointsInTime`       | `ArrayType(DoubleType)`            | `[tstart, ...]`         |
-   | `PointsInTimeSeries` | `ArrayType(ArrayType(DoubleType))` | `[[tstart, value], ...]`|
-   | scalar               | `DoubleType`                       | the value               |
-
-`toPandas()` deserializes the binary `SampleSeries` columns back into objects; the array-backed
-types are returned as nested lists. See [Query Engine](query_engine.md) for the full solver pipeline
-and how to choose between `DeltaSolver` and `KeyValueStoreSolver`.

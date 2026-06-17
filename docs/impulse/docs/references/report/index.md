@@ -1,5 +1,4 @@
 ---
-sidebar_position: 1
 title: Report
 ---
 
@@ -75,14 +74,14 @@ useful for ad-hoc analysis, notebooks, and tests where writing to Unity Catalog 
 
 Configuration is defined as JSON (or an equivalent Python dictionary) and
 validated using Pydantic models. See
-[Configuration](../config/configuration.md) for the full schema.
+[Configuration](../../config/configuration.md) for the full schema.
 
 ## Incremental processing
 
 Incremental processing lets `determine_report()` skip containers and
 definitions it already handled on a prior run. Turn it on via
 `incremental.enabled` in config (see
-[Configuration › incremental](../config/configuration.md#incremental-optional)),
+[Configuration › incremental](../../config/configuration.md#incremental-optional)),
 or pass `is_incremental=True` at call time.
 
 #### On each run
