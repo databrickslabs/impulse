@@ -5,16 +5,17 @@ title: Ingestion
 
 # Ingestion
 
-Impulse's [default solvers](../references/query_engine.md) read from a
-silver layer composed of a minimum of three tables: `container_metrics`,
-`channel_metrics`, and `channels`. Two additional tables, `container_tags`
-and `channel_tags`, are optional but strongly recommended. They carry the contextual metadata that the
-user-facing channel selection API (`query.channel(channel_name="Engine_RPM")`)
-and tag-based container filtering rely on. The full schema is on the
-[Silver Layer ER Diagram](silver_layer_schema.md). This page is for engineers
-who already have measurement data (CSV, MDF4, a vendor-specific binary, or
-Delta with a different shape) and need a starting point for landing it in
-that layout.
+Impulse's [`DefaultSolver`](../references/query_engine.md) reads from a
+silver layer of **three required tables**: `container_metrics`,
+`channel_metrics`, and `channels`. Two further tables, `container_tags`
+and `channel_tags`, are **fully optional** — add them only if you want
+tag-based container filtering or EAV channel selection
+(`query.channel(channel_name="Engine_RPM")`); without `channel_tags`,
+channels are selected directly from columns on `channel_metrics`. The full
+schema is on the [Silver Layer ER Diagram](silver_layer_schema.md). This page
+is for engineers who already have measurement data (CSV, MDF4, a
+vendor-specific binary, or Delta with a different shape) and need a starting
+point for landing it in that layout.
 
 Impulse does not ship an ingestion component. The library reads from the
 silver layer; producing it is your responsibility. **Landing your data in
@@ -39,7 +40,7 @@ below.
 ## 1. The contract
 
 The full schema is on the [ER diagram page](silver_layer_schema.md). When
-ingesting your own data, four invariants matter most:
+ingesting your own data, the required invariants are:
 
 - **`container_id` is the primary key on `container_metrics`** and the
   foreign key on every other table. One container is one recording (one
@@ -48,11 +49,6 @@ ingesting your own data, four invariants matter most:
 - **`(container_id, channel_id)` identifies a channel within a container.**
   Channel IDs are local to their container — `channel_id = 1` in container A
   has nothing to do with `channel_id = 1` in container B.
-- **Tag tables are strict EAV.** `container_tags` is `(container_id, key,
-  value)`; `channel_tags` is `(container_id, channel_id, key, value)`. TSAL
-  selects recordings and signals by tag key, e.g. `query.channel(channel_name=
-  "Engine_RPM")` looks up `channel_tags.value` where `key = 'channel_name'`.
-  If a key is not in the tag table, no expression can find it.
 - **`channels` supports two formats.** The query engine accepts either:
   - **Raw** — one row per sample: `(container_id, channel_id, timestamp,
     value)`.
@@ -60,7 +56,14 @@ ingesting your own data, four invariants matter most:
     tstart, tend, value)`. Run-length encoded data, where identical consecutive values are collapsed into intervals to significantly reduce processing time during analysis.
 
   An optional boolean `is_plausible` column lets the solver drop implausible
-  samples when configured to (`drop_implausible_data=True` on `DeltaSolver`).
+  samples when configured to (`drop_implausible_data=True` on `DefaultSolver`).
+
+The **tag tables are optional, strict EAV** — add them only if you want
+tag-based selection. `container_tags` is `(container_id, key, value)`;
+`channel_tags` is `(container_id, channel_id, key, value)`. TSAL then selects
+recordings and signals by tag key, e.g. `query.channel(channel_name="Engine_RPM")`
+looks up `channel_tags.value` where `key = 'channel_name'`. Without
+`channel_tags`, channel selectors match columns on `channel_metrics` instead.
 
 The remaining columns on `container_metrics` and `channel_metrics`
 (timestamps, durations, mean/min/max, etc.) are *not* fixed by the engine —
@@ -199,14 +202,10 @@ Impulse's expectations — same set of tables and relationships — but the
 [Solver column mappings and filters](../config/configuration.md#solver-column-mappings-and-filters)
 for the full schema.
 
-How it gets wired in depends on which solver you use:
-
-- **`KeyValueStoreSolver`** and **`DeltaSolver`** — set
-  `query_engine.solver_config` in your report config. The `Report`
-  factory forwards it to both solvers. `KeyValueStoreSolver` consumes
-  every section (column mappings, per-table `filters`, `project_id`,
-  `channel_mapping`); `DeltaSolver` consumes only the per-table
-  `column_name_mapping` entries and silently ignores the rest.
+Set `query_engine.solver_config` in your report config. `DefaultSolver`
+consumes every section that applies to the tables you have configured —
+column mappings, per-table `filters`, `project_id`, and the
+`channel_mapping` / `unit_conversion` sections.
 
 Trade-off either way: this gives you naming flexibility and per-table
 scoping filters without writing code, but the underlying tables must

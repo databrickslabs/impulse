@@ -15,10 +15,7 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 import pytest
 
-from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
-from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
-    KeyValueStoreSolver,
-)
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from tests.conftest import basic_narrow_db, narrow_db, spark  # noqa: F401  (pytest fixtures)
 
@@ -44,7 +41,7 @@ def test_delta_solve_preserves_container_id_type(spark, narrow_db, cid_type):
     db = _recast_container_id(narrow_db, cid_type)
     query = db.query
     result = query.select(query.channel(seed="0").mean().alias("m")).solve(
-        spark, solver=DeltaSolver(spark)
+        spark, solver=DefaultSolver(spark)
     )
     assert result.schema["container_id"].dataType == cid_type
     means = [row.m for row in result.collect()]
@@ -57,13 +54,13 @@ def test_kvs_solve_preserves_container_id_type(spark, basic_narrow_db, cid_type)
     query = db.query
     result = query.select(
         query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
-    ).solve(spark, solver=KeyValueStoreSolver(spark))
+    ).solve(spark, solver=DefaultSolver(spark))
     assert result.schema["container_id"].dataType == cid_type
     means = [row.m for row in result.collect()]
     assert any(m is not None and m != 0 for m in means), means
 
 
-@pytest.mark.parametrize("solver_cls", [DeltaSolver, KeyValueStoreSolver])
+@pytest.mark.parametrize("solver_cls", [DefaultSolver, DefaultSolver])
 def test_empty_channel_match_df_derives_types(spark, basic_narrow_db, solver_cls):
     """The empty channel-match frame derives its id type from channel_metrics."""
     db = _recast_container_id(basic_narrow_db, T.StringType())
@@ -74,11 +71,11 @@ def test_empty_channel_match_df_derives_types(spark, basic_narrow_db, solver_cls
 
 
 def test_kvs_solve_empty_result_preserves_type(spark, basic_narrow_db):
-    """KeyValueStoreSolver's ``container_count == 0`` path keeps the string type."""
+    """DefaultSolver's ``container_count == 0`` path keeps the string type."""
     db = _recast_container_id(basic_narrow_db, T.StringType())
     query = db.query
     result = query.select(
         query.channel(channel_name="Nonexistent Channel").mean().alias("m")
-    ).solve(spark, solver=KeyValueStoreSolver(spark))
+    ).solve(spark, solver=DefaultSolver(spark))
     assert result.schema["container_id"].dataType == T.StringType()
     assert result.count() == 0

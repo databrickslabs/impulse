@@ -2,8 +2,8 @@
 
 from pyspark.sql import SparkSession
 
-from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
-    KeyValueStoreSolver,
+from impulse_query_engine.analyze.query.solvers.default_solver import (
+    DefaultSolver,
 )
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     ChannelMappingConfig,
@@ -14,8 +14,8 @@ from impulse_query_engine.measurement_db import MeasurementDB
 from impulse_reporting.meta.container_dimensions import ChannelMappingResolutionDimension
 
 
-def _kvs_solver(spark: SparkSession) -> KeyValueStoreSolver:
-    return KeyValueStoreSolver(
+def _kvs_solver(spark: SparkSession) -> DefaultSolver:
+    return DefaultSolver(
         spark,
         config=SolverConfig(
             project_id="SAMPLE_PROJECT",

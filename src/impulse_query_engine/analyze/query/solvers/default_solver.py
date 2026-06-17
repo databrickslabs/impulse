@@ -22,10 +22,10 @@ if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
 
 
-class KVSTimeSeriesCache(SeriesCache):
+class TimeSeriesCache(SeriesCache):
     def __init__(self, pdf, col_map: dict[str, str]):
         """
-        Initialize the KVSTimeSeriesCache.
+        Initialize the TimeSeriesCache.
 
         Parameters
         ----------
@@ -108,14 +108,27 @@ class KVSTimeSeriesCache(SeriesCache):
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
 
-class KeyValueStoreSolver(QuerySolver):
+class DefaultSolver(QuerySolver):
     """
-    Solver for querying container metadata from a narrow/EAV key-value-store table.
+    The default query-engine solver.  Adapts to the shape of the silver layer.
 
-    This solver reads container tags from a narrow-format table where each
-    attribute is stored as a separate row (entity_id, element_id, value) and
-    pivots it to wide format for filtering. It then filters the container_metrics
-    table and resolves channel aliases via the channel_mapping table.
+    Channel selection works in two modes, chosen per query by whether a
+    ``channel_tags_table`` is configured on the database:
+
+    - **EAV channel_tags** (``channel_tags_table`` set): channel attributes
+      such as ``channel_name`` live as narrow key/value rows in a
+      ``channel_tags`` table, which is pivoted to wide format on the fly and
+      matched against the channel selectors.
+    - **Wide channel_metrics** (no ``channel_tags_table``): the selection
+      attributes are columns on ``channel_metrics`` and are matched directly,
+      with no pivot.
+
+    Container tags are likewise optional: when a ``container_tags_table`` is
+    configured the narrow/EAV table is pivoted for tag-based container
+    filtering; otherwise container attributes are expected as columns on
+    ``container_metrics`` (wide-only model).  The solver additionally supports
+    channel-alias resolution via the ``channel_mapping`` table and per-alias
+    unit conversion via the ``unit_conversion`` table.
 
     Physical column names that differ from the framework-internal names are
     translated via per-table ``column_name_mapping`` entries at the point
@@ -294,7 +307,19 @@ class KeyValueStoreSolver(QuerySolver):
 
     def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
         """
-        Pass through container DataFrame.
+        Stage 3: resolve channel selectors against the EAV ``channel_tags``
+        table, or pass through when no such table is configured.
+
+        When a ``channel_tags_table`` is configured on the database, the narrow
+        key/value rows are pivoted to wide format (one column per required tag
+        key), matched against the selectors, and each surviving
+        ``(container_id, channel_id)`` row is assigned its ``selector_id`` so
+        that stage 4 only has to drop channels lacking metric entries.
+
+        When no ``channel_tags_table`` is configured, the channel-selection
+        attributes (e.g. ``channel_name``) live as columns on
+        ``channel_metrics``; this stage is then a pass-through and the matching
+        happens in :meth:`filter_channel_metrics`.
 
         Parameters
         ----------
@@ -303,20 +328,62 @@ class KeyValueStoreSolver(QuerySolver):
         db : MeasurementDB
             Measurement database for table access.
         container_df : pyspark.sql.DataFrame
-            DataFrame containing container information.
+            DataFrame containing the tag-filtered container information.
         selectors : list[TimeSeriesSelector]
-            Non-aliased selectors (unused by this solver).
+            Non-aliased (direct) selectors.
 
         Returns
         -------
         pyspark.sql.DataFrame
-            The input container DataFrame.
+            ``(container_id, channel_id, selector_id)`` in EAV mode, or the
+            input container DataFrame unchanged in wide mode.
         """
-        return container_df
+        if db.config.channel_tags_table is None:
+            return container_df
 
-    def filter_channel_metrics(self, spark, db, container_df, selectors) -> DataFrame:
+        container_id_col = self.config.container_id_col
+        channel_id_col = self.config.channel_id_col
+        tag_key_col = self.config.tag_key_col
+        tag_value_col = self.config.tag_value_col
+
+        if len(selectors) == 0:
+            return self._empty_channel_match_df(spark, db)
+
+        mids = container_df.select(container_id_col).distinct()
+
+        required_tags = set()
+        for selector in selectors:
+            required_tags.update(selector.required_tags())
+
+        tbl = db.channel_tags(spark)
+        tbl = self._apply_column_mapping(tbl, self.config.channel_tags.column_name_mapping)
+        expr = self._build_expr(selectors)
+
+        tags = (
+            tbl.where(F.col(tag_key_col).isin(required_tags))
+            .join(F.broadcast(mids), on=[container_id_col], how="inner")
+            .groupBy(container_id_col, channel_id_col)
+            .pivot(tag_key_col, list(required_tags))
+            .agg(F.first(F.col(tag_value_col)))
+            .where(expr)
+        )
+        tags = tags.withColumn("selector_id", self._build_selector_id_expr(selectors))
+        return tags.select(container_id_col, channel_id_col, "selector_id")
+
+    def filter_channel_metrics(self, spark, db, channel_df, selectors) -> DataFrame:
         """
-        Filter channels by metrics and required tags.
+        Stage 4: produce ``(container_id, channel_id, selector_ids)``.
+
+        In EAV mode (``channel_tags_table`` configured) *channel_df* already
+        carries a ``selector_id`` from :meth:`filter_channel_tags`; this stage
+        inner-joins ``channel_metrics`` on ``(container_id, channel_id)`` to
+        drop channels without metric entries, then wraps ``selector_id`` into
+        the ``selector_ids`` array.
+
+        In wide mode (no ``channel_tags_table``) *channel_df* is the container
+        frame; the selectors are applied directly to ``channel_metrics``
+        columns, the result is restricted to the candidate containers, and
+        ``selector_ids`` is computed from the matching selectors.
 
         Parameters
         ----------
@@ -324,8 +391,9 @@ class KeyValueStoreSolver(QuerySolver):
             Spark session used for query execution.
         db : MeasurementDB
             Measurement database for table access.
-        container_df : pyspark.sql.DataFrame
-            DataFrame containing container information.
+        channel_df : pyspark.sql.DataFrame
+            In EAV mode, the ``(container_id, channel_id, selector_id)`` frame
+            from :meth:`filter_channel_tags`; in wide mode, the container frame.
         selectors : list[TimeSeriesSelector]
             Non-aliased (direct) selectors.
 
@@ -336,16 +404,32 @@ class KeyValueStoreSolver(QuerySolver):
         """
         container_id_col = self.config.container_id_col
         channel_id_col = self.config.channel_id_col
+
+        if len(selectors) == 0:
+            return self._empty_channel_match_df(spark, db)
+
         channel_metrics_df = db.channel_metrics(spark)
         channel_metrics_df = self._apply_column_mapping(
             channel_metrics_df, self.config.channel_metrics.column_name_mapping
         )
-        if len(selectors) == 0:
-            return self._empty_channel_match_df(spark, db)
 
+        if db.config.channel_tags_table is not None:
+            # EAV mode: channel_df = (container_id, channel_id, selector_id).
+            # Inner-join channel_metrics to drop channels without metric entries.
+            metrics = channel_metrics_df.select(container_id_col, channel_id_col).join(
+                F.broadcast(channel_df),
+                on=[container_id_col, channel_id_col],
+                how="inner",
+            )
+            metrics = metrics.withColumn("selector_ids", F.array(F.col("selector_id"))).drop(
+                "selector_id"
+            )
+            return metrics.select(container_id_col, channel_id_col, "selector_ids")
+
+        # Wide mode: selectors apply directly to channel_metrics columns.
         channel_metrics_df = channel_metrics_df.where(self._build_expr(selectors))
         result = channel_metrics_df.join(
-            F.broadcast(container_df.select(container_id_col)),
+            F.broadcast(channel_df.select(container_id_col)),
             on=[container_id_col],
             how="inner",
         )
@@ -788,7 +872,7 @@ class KeyValueStoreSolver(QuerySolver):
         pd.DataFrame
             DataFrame containing results for each selection.
         """
-        cache = KVSTimeSeriesCache(pdf, col_map=col_map)
+        cache = TimeSeriesCache(pdf, col_map=col_map)
         cid_col = col_map["cid"]
         result = {cid_col: [pdf[cid_col].iloc[0]]}
         for s in selections:
@@ -852,7 +936,7 @@ class KeyValueStoreSolver(QuerySolver):
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
-            partial(KeyValueStoreSolver._solve_udf, selections=selections, col_map=col_map),
+            partial(DefaultSolver._solve_udf, selections=selections, col_map=col_map),
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )

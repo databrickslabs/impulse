@@ -8,85 +8,101 @@ title: Query Engine
 The query engine resolves channel selections and evaluates events and
 aggregations against silver-layer data. It does this through a *solver*:
 the component that knows how your silver tables are physically laid out
-and how to read them. Two solvers ship with Impulse — `DeltaSolver` and
-`KeyValueStoreSolver` — and the right one depends on which silver tables
-you have.
+and how to read them. Impulse ships a single solver — `DefaultSolver` —
+that adapts to the silver tables you have.
 
-Both solvers read tag tables in the same narrow EAV layout `(key, value)`
-and pivot them on the fly; the practical difference is *which* silver
-tables each one consumes.
+## One solver, three required tables
 
-## Available solvers
+`DefaultSolver` runs on **just three silver tables**:
 
-**`DeltaSolver`** consumes the full default silver-layer schema —
-`container_metrics`, `container_tags`, `channel_metrics`, `channel_tags`,
-and `channels` — and uses `channel_tags` for channel selection (pivoting
-its narrow EAV rows on the fly). It is the right pick whenever your data
-matches the [default silver-layer
-shape](../data_model/silver_layer_schema.md) and you don't need channel
-aliasing.
+- `container_metrics` — one row per container (recording).
+- `channel_metrics` — one row per `(container_id, channel_id)` channel.
+- `channels` — the time-series sample data (RLE or raw).
 
-**`KeyValueStoreSolver`** does not consume `channel_tags` at all —
-channel selection runs directly against columns of `channel_metrics`, so
-attributes such as `channel_name` must live as columns on
-`channel_metrics`. It needs only three silver tables —
-`container_metrics`, `channel_metrics`, and `channels` — and supports two
-optional add-ons: a narrow EAV `container_tags` table for tag-based
-container filtering, and a `channel_mapping` table to resolve channel
-aliases (logical names that map to physical channels). It is the right
-pick when you don't have a `channel_tags` table, or when container
-attributes are already wide on `container_metrics` itself.
+**Everything else is optional.** In particular, the **tag tables
+(`container_tags`, `channel_tags`) are not required** — supply them only
+when you want EAV-style tag filtering/selection. The `channel_mapping`
+and `unit_conversion` tables are likewise optional add-ons that unlock
+channel aliasing and unit conversion when present.
+
+## How `DefaultSolver` adapts
+
+The solver chooses its behaviour per query from the tables you configure:
+
+- **Channel selection.** With a `channel_tags` table configured, channels
+  are selected from its narrow EAV `(key, value)` rows (pivoted on the
+  fly). Without one, channels are selected directly from columns on
+  `channel_metrics` — so an attribute such as `channel_name` lives as a
+  column on `channel_metrics`. The presence of
+  `source.channel_tags_table` selects the mode.
+- **Container filtering.** With a `container_tags` table configured,
+  containers are filtered from its narrow EAV rows. Without one, container
+  attributes are read as columns on `container_metrics` (the wide-only
+  model).
+- **Channel aliasing.** When a `channel_mapping` table is configured,
+  logical channel names (`channel_with_alias(...)`) resolve to physical
+  channels, with optional per-alias **unit conversion** when a
+  `unit_conversion` table is also configured.
+
+Tag tables, when present, are always read in the narrow EAV layout
+`(key, value)` and pivoted on the fly.
+
+## Channel aliasing requires channel-identifying columns on `channel_metrics`
+
+When you use aliasing (`channel_with_alias(...)` backed by a
+`channel_mapping` table), `DefaultSolver` resolves each logical alias to a
+physical channel by **joining `channel_mapping` to `channel_metrics`**. That
+join needs columns on `channel_metrics` that identify a channel within a
+container — by default **`channel_name` and `data_key`** (the
+`channel_metrics` side of the alias-resolution join keys).
+
+So when aliasing is in use, `channel_metrics` **must carry those
+identifying columns**. This holds *regardless* of whether a `channel_tags`
+table is configured: even if direct channel selection runs against the EAV
+`channel_tags` table, alias resolution always joins `channel_mapping`
+against `channel_metrics`.
+
+You can change which columns are used via `channel_mapping.join_keys` (for
+example, a single-column join when `data_key` is not part of the channel
+identity in your layout) — see
+[Alias-resolution join keys](../config/configuration.md#alias-resolution-join-keys-optional).
 
 ## Table requirements
 
-| Silver table        | `DeltaSolver`          | `KeyValueStoreSolver`                              |
-|---------------------|------------------------|----------------------------------------------------|
-| `container_metrics` | required               | required                                           |
-| `channel_metrics`   | required               | required (also carries channel selection columns)  |
-| `channels`          | required               | required                                           |
-| `container_tags`    | required (narrow EAV)  | optional (narrow EAV)                              |
-| `channel_tags`      | required (narrow EAV)  | not used                                           |
-| `channel_mapping`   | not used               | optional (channel aliases)                         |
-| `unit_conversion`   | not used               | optional (per-alias unit conversion)               |
+| Silver table        | Required?  | Notes                                                                                  |
+|---------------------|------------|----------------------------------------------------------------------------------------|
+| `container_metrics` | **yes**    | One row per container.                                                                  |
+| `channel_metrics`   | **yes**    | One row per channel. Carries channel-selection columns in the wide model, and the channel-identifying columns (`channel_name`, `data_key`) required for aliasing. |
+| `channels`          | **yes**    | Time-series sample data (RLE or raw).                                                  |
+| `container_tags`    | optional   | Narrow EAV. Omit for the wide-only container model.                                    |
+| `channel_tags`      | optional   | Narrow EAV. Omit when channel-selection attributes live on `channel_metrics`.          |
+| `channel_mapping`   | optional   | Channel aliases. Requires channel-identifying columns on `channel_metrics` (see above).|
+| `unit_conversion`   | optional   | Per-alias unit conversion (used together with `channel_mapping`).                      |
 
 See the [Silver Layer Schema](../data_model/silver_layer_schema.md) for
 the columns each table is expected to carry.
 
-## Which solver should I use?
-
-- Do you have all five silver tables in the default shape?
-  → **`DeltaSolver`**.
-- Otherwise → **`KeyValueStoreSolver`**.
-
-`KeyValueStoreSolver` also covers the wide-only case where container
-attributes live directly on `container_metrics` and no `container_tags`
-table exists; just omit `source.container_tags_table` from your config.
-See the
-[`query_engine.solver` field](../config/configuration.md#query_engine-optional)
-for details.
-
-`KeyValueStoreSolver` is the default — if `query_engine` is omitted from
-your config entirely, the engine runs with `KeyValueStoreSolver` and
-`data_type = "RLE"`.
-
 ## Configuring the solver
 
-Solver selection and tuning live under the `query_engine` section of your
-report config:
+Solver tuning lives under the `query_engine` section of your report config:
 
 - [`query_engine.solver`](../config/configuration.md#query_engine-optional)
-  — which solver to use.
+  — the solver to use. Defaults to `"DefaultSolver"`. The values
+  `"DeltaSolver"` and `"KeyValueStoreSolver"` are **deprecated aliases**
+  retained for backward compatibility; both resolve to `DefaultSolver`.
 - [Solver column mappings and filters](../config/configuration.md#solver-column-mappings-and-filters)
-  — adapt either solver to a silver layer whose physical column names
+  — adapt the solver to a silver layer whose physical column names
   diverge from Impulse's internal names, scope reads by `project_id`, or
   apply per-table equality filters.
 
+If `query_engine` is omitted from your config entirely, the engine runs
+with `DefaultSolver` and `data_type = "RLE"`.
+
 ## API reference
 
-Auto-generated symbol-level docs for each solver class:
+Auto-generated symbol-level docs:
 
-- [`DeltaSolver`](api/impulse_query_engine/analyze/query/solvers/delta_solver.md)
-- [`KeyValueStoreSolver`](api/impulse_query_engine/analyze/query/solvers/key_value_store_solver.md)
+- [`DefaultSolver`](api/impulse_query_engine/analyze/query/solvers/default_solver.md)
 - [`QuerySolver`](api/impulse_query_engine/analyze/query/solvers/query_solver.md)
   — abstract base class defining the six-stage solver pipeline.
 - [`SolverConfig`](api/impulse_query_engine/analyze/query/solvers/solver_config.md)

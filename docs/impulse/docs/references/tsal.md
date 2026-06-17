@@ -40,7 +40,7 @@ The solver tries each alias in order and returns the first match.
 ### Logical aliases via channel mapping
 
 For workflows where a stable logical name should resolve to one of many physical channels through a separately
-maintained mapping table, use `channel_with_alias()` instead. This is supported by `KeyValueStoreSolver` and requires
+maintained mapping table, use `channel_with_alias()` instead. This requires
 a `channel_mapping_table` to be configured in `source` (see [Configuration](../config/configuration)).
 
 ```python

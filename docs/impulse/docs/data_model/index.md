@@ -4,28 +4,18 @@ title: Data Model
 
 # Data Model
 
-:::caution Prerequisite
+:::tip Start with three tables
 
-The schema described on this page is the full silver-layer shape that
-Impulse's [**default solvers**](../references/query_engine.md)
-(`DeltaSolver`, `KeyValueStoreSolver`) recognise. **Landing your data in
-this shape during ingest is the simplest and most maintainable path** —
-see the [Ingestion guide](ingestion.md).
+[`DefaultSolver`](../references/query_engine.md) needs **only three tables**:
+`container_metrics`, `channel_metrics`, and `channels`. The tag tables
+(`container_tags`, `channel_tags`) and the `channel_mapping` / `unit_conversion`
+tables are **fully optional** add-ons, used only when configured — see the
+[Query Engine table requirements](../references/query_engine.md#table-requirements).
 
-The default solvers also run on a **subset** of this model.
-`KeyValueStoreSolver` needs only three of the five tables —
-`container_metrics`, `channel_metrics`, and `channels` — and treats
-`container_tags` and `channel_mapping` as optional add-ons. `DeltaSolver`
-is the one that requires all five. See
-[Which solver should I use?](../references/query_engine.md#which-solver-should-i-use)
-for the decision rule.
-
-Advanced deployments with existing data layouts they cannot or do not want
-to reshape can adapt further by passing a `SolverConfig` to remap column
-names, or by implementing a custom solver for fundamentally different
-physical layouts. The ingestion guide's
-[last section](ingestion.md#adapting-to-existing-data-layouts) covers the
-tradeoffs.
+The rest of this page documents the full shape. Landing your data in it during
+ingest is the simplest path (see the [Ingestion guide](ingestion.md)); if you
+can't reshape, a [`SolverConfig`](ingestion.md#adapting-to-existing-data-layouts)
+can remap column names, or you can implement a custom solver.
 
 :::
 
@@ -41,18 +31,17 @@ All layers are stored as Delta tables in Unity Catalog, which makes them easy to
 
 ## Silver Layer (Input)
 
-The Silver layer uses a **tag-based model** where metadata is separated from time-series data. Three tables are required (`container_metrics`, `channel_metrics`, `channels`); two optional tag tables (`container_tags`, `channel_tags`) carry contextual metadata used by the channel selection API.
+**Only three tables are required** — `container_metrics`, `channel_metrics`, and `channels`. The two tag tables (`container_tags`, `channel_tags`) are **fully optional**: add them only when you want tag-based container filtering or EAV channel selection.
 
-| Table               | Purpose                                                                                |
-|---------------------|----------------------------------------------------------------------------------------|
-| `container_metrics` | One row per measurement container with timestamps, duration, and channel count.        |
-| `container_tags`    | Key-value metadata tags for containers (e.g. `vehicle_key`, `project_id`).             |
-| `channel_metrics`   | Pre-computed statistics per channel (min, max, mean, percentiles, sample count).        |
-| `channel_tags`      | Key-value metadata tags per channel (e.g. `channel_name`, `brand`, `model`).           |
-| `channels`          | Time-series sample data, either as raw `(timestamp, value)` samples or as run-length-encoded intervals `[tstart, tend)`. |
+| Table               | Required? | Purpose                                                                                |
+|---------------------|-----------|----------------------------------------------------------------------------------------|
+| `container_metrics` | **Yes**   | One row per measurement container with timestamps, duration, and channel count.        |
+| `channel_metrics`   | **Yes**   | Pre-computed statistics per channel (min, max, mean, percentiles, sample count). Also carries channel-selection columns (e.g. `channel_name`) in the wide model. |
+| `channels`          | **Yes**   | Time-series sample data, either as raw `(timestamp, value)` samples or as run-length-encoded intervals `[tstart, tend)`. |
+| `container_tags`    | Optional  | Key-value metadata tags for containers (e.g. `vehicle_key`, `project_id`).             |
+| `channel_tags`      | Optional  | Key-value metadata tags per channel (e.g. `channel_name`, `brand`, `model`).           |
 
-Channels are selected by querying `channel_tags` (e.g. `channel_name = "Engine RPM"`) rather than by fixed column names.
-This allows the same schema to support arbitrary signal sets across different projects.
+Channels are selected either from an EAV `channel_tags` table (e.g. `channel_name = "Engine RPM"`) or directly from columns on `channel_metrics` — in both cases by signal metadata rather than fixed column positions, so the same schema supports arbitrary signal sets across projects.
 
 See the [Silver Layer ER Diagram](silver_layer_schema.md) for table relationships.
 For background on the design, see the [Databricks blog post on revolutionizing car measurement data storage and analysis](https://www.databricks.com/blog/revolutionizing-car-measurement-data-storage-and-analysis-mercedes-benzs-petabyte-scale).

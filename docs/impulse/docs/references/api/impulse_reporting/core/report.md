@@ -137,10 +137,9 @@ def create_query_builder(db: MeasurementDB,
 Create a query builder based on the provided configuration and set container filters.
 
 Validates that tag filters are only used when a
-``container_tags_table`` is configured in ``source``.  Both
-KeyValueStoreSolver and DeltaSolver support tag and metric filters,
-but tag filters require the narrow ``container_tags`` table to be
-available.
+``container_tags_table`` is configured in ``source``.  DefaultSolver
+supports tag and metric filters, but tag filters require the narrow
+``container_tags`` table to be available.
 
 **Arguments**:
 

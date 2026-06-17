@@ -44,5 +44,12 @@ lock-dependencies:
 	@perl -pi -e 's|registry = "https://[^"]*"|registry = "https://pypi.org/simple"|g' uv.lock
 	@printf 'Stripped registry references from uv.lock.\n'
 
+# Mirror a fork PR onto a fork-test/pr-<N> branch in the main repo and open a test PR,
+# so CI (which is skipped for fork PRs) runs with JFrog/OIDC. Review the fork code first.
+# Usage: make fork-sync PR=<number>
+fork-sync:
+	@test -n "$(PR)" || (echo "Usage: make fork-sync PR=<number>"; exit 1)
+	./.github/scripts/fork-sync-pr.sh $(PR)
+
 .DEFAULT: all
-.PHONY: all clean dev lint fmt test coverage build lock-dependencies
+.PHONY: all clean dev lint fmt test coverage build lock-dependencies fork-sync

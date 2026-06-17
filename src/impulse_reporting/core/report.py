@@ -10,10 +10,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
-from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
-from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
-    KeyValueStoreSolver,
-)
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_reporting.aggregations.aggregation_types import AggregationType
@@ -227,10 +224,9 @@ class Report:
         Create a query builder based on the provided configuration and set container filters.
 
         Validates that tag filters are only used when a
-        ``container_tags_table`` is configured in ``source``.  Both
-        KeyValueStoreSolver and DeltaSolver support tag and metric filters,
-        but tag filters require the narrow ``container_tags`` table to be
-        available.
+        ``container_tags_table`` is configured in ``source``.  DefaultSolver
+        supports tag and metric filters, but tag filters require the narrow
+        ``container_tags`` table to be available.
 
         Parameters
         ----------
@@ -316,16 +312,12 @@ class Report:
         ValueError
             If the solver type is unknown.
         """
+        # DELTA_SOLVER and KEY_VALUE_STORE_SOLVER are deprecated aliases retained
+        # for backward compatibility with existing report configs; all three
+        # resolve to the unified DefaultSolver.
         match config.query_engine.solver:
-            case Solvers.DELTA_SOLVER:
-                return DeltaSolver(
-                    spark,
-                    config=config.query_engine.solver_config,
-                    is_raw_data=config.query_engine.data_type is DataType.RAW,
-                    drop_implausible_data=config.query_engine.drop_implausible_data,
-                )
-            case Solvers.KEY_VALUE_STORE_SOLVER:
-                return KeyValueStoreSolver(
+            case Solvers.DEFAULT_SOLVER | Solvers.DELTA_SOLVER | Solvers.KEY_VALUE_STORE_SOLVER:
+                return DefaultSolver(
                     spark,
                     config=config.query_engine.solver_config,
                     is_raw_data=config.query_engine.data_type is DataType.RAW,
@@ -333,8 +325,9 @@ class Report:
                 )
             case _:
                 raise ValueError(
-                    f"Unknown query engine, we currently only support "
-                    f"{Solvers.DELTA_SOLVER}, {Solvers.KEY_VALUE_STORE_SOLVER}"
+                    f"Unknown query engine solver: {config.query_engine.solver}. "
+                    f"Supported: {Solvers.DEFAULT_SOLVER} (DELTA_SOLVER and "
+                    f"KEY_VALUE_STORE_SOLVER are deprecated aliases)."
                 )
 
     def get_sink_config(self) -> SinkConfig:

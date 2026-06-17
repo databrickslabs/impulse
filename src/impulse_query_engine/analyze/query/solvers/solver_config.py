@@ -69,7 +69,7 @@ class ChannelMappingConfig(TableConfig):
     ----------
     join_keys : list[JoinKey] or None
         Custom composite key for the ``channel_mapping`` → ``channel_metrics``
-        join performed by ``KeyValueStoreSolver.filter_aliased_channel_metrics``.
+        join performed by ``DefaultSolver.filter_aliased_channel_metrics``.
         When ``None`` (the default), the solver uses the backward-compatible
         pair ``[(source_channel, channel_name), (data_key, data_key)]``
         sourced from :class:`SolverConfig` internal-name properties.
@@ -247,7 +247,7 @@ class SolverConfig(BaseModel):
         """Internal column name for the alias identifier on the channel_mapping table.
 
         Referenced by the dedup window in
-        :meth:`KeyValueStoreSolver.filter_aliased_channel_metrics` and is the
+        :meth:`DefaultSolver.filter_aliased_channel_metrics` and is the
         conventional kwarg name passed to
         :meth:`QueryBuilder.channel_with_alias` (e.g.
         ``channel_with_alias(channel_alias="vehicle_speed")``).  The kwarg name
@@ -276,7 +276,7 @@ class SolverConfig(BaseModel):
         """Internal column name for the conversion factor on the unit_conversion table.
 
         Also used as the column that carries the per-channel combined factor
-        downstream from :meth:`KeyValueStoreSolver._compute_conversion_factors`
+        downstream from :meth:`DefaultSolver._compute_conversion_factors`
         into the grouped-map UDF.
         """
         return "conversion_factor"
@@ -303,7 +303,7 @@ class SolverConfig(BaseModel):
         - On the ``channel_metrics`` table (optional), as the authoritative
           physical unit of a channel.  When present, takes precedence over
           ``channel_mapping.source_unit`` for aliased reads via the
-          :meth:`KeyValueStoreSolver.filter_aliased_channel_metrics`
+          :meth:`DefaultSolver.filter_aliased_channel_metrics`
           coalesce.
 
         Users with different internal names per table can rename physical

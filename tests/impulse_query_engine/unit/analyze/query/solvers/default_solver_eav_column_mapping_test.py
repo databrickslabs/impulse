@@ -1,9 +1,9 @@
 # pylint: disable=missing-function-docstring
 """
 Tests verifying that SolverConfig column-name mappings are actually used
-by DeltaSolver when processing DataFrames with non-default column names.
+by DefaultSolver when processing DataFrames with non-default column names.
 
-DeltaSolver reads five silver tables and applies `column_name_mapping`
+DefaultSolver reads five silver tables and applies `column_name_mapping`
 to each one when reading.  These tests build DataFrames with custom
 physical column names and verify the solver renames them to the internal
 names so that the rest of the pipeline succeeds:
@@ -28,7 +28,7 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
-from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     SolverConfig,
     TableConfig,
@@ -194,7 +194,7 @@ def _default_tables(spark) -> dict:
 # ===================================================================
 
 
-class TestDeltaSolverContainerTagsMapping:
+class TestDefaultSolverContainerTagsMapping:
     """Verify filter_container_tags works when container_tags physical columns are renamed."""
 
     @pytest.fixture
@@ -219,7 +219,7 @@ class TestDeltaSolverContainerTagsMapping:
                 },
             ),
         )
-        solver = DeltaSolver(spark, config=cfg)
+        solver = DefaultSolver(spark, config=cfg)
         query = db_custom_tags.query
         result = solver.filter_container_tags(spark, query)
         ids = {row.container_id for row in result.collect()}
@@ -235,7 +235,7 @@ class TestDeltaSolverContainerTagsMapping:
                 },
             ),
         )
-        solver = DeltaSolver(spark, config=cfg)
+        solver = DefaultSolver(spark, config=cfg)
         query = db_custom_tags.query
         query.where(TagSelector("model") == "Ateca")
         result = solver.filter_container_tags(spark, query)
@@ -243,7 +243,7 @@ class TestDeltaSolverContainerTagsMapping:
         assert ids == {3}
 
     def test_default_config_fails_on_renamed_data(self, spark, db_custom_tags):
-        solver = DeltaSolver(spark)
+        solver = DefaultSolver(spark)
         query = db_custom_tags.query
         with pytest.raises(AnalysisException):
             solver.filter_container_tags(spark, query).collect()
@@ -254,7 +254,7 @@ class TestDeltaSolverContainerTagsMapping:
 # ===================================================================
 
 
-class TestDeltaSolverContainerMetricsMapping:
+class TestDefaultSolverContainerMetricsMapping:
     """Verify filter_container_metrics works when container_metrics columns are renamed."""
 
     @pytest.fixture
@@ -269,7 +269,7 @@ class TestDeltaSolverContainerMetricsMapping:
         cfg = SolverConfig(
             container_metrics=TableConfig(column_name_mapping={"run_id": "container_id"}),
         )
-        solver = DeltaSolver(spark, config=cfg)
+        solver = DefaultSolver(spark, config=cfg)
         query = db_custom_metrics.query
         tags_df = solver.filter_container_tags(spark, query)
         result = solver.filter_container_metrics(spark, query, tags_df)
@@ -278,14 +278,14 @@ class TestDeltaSolverContainerMetricsMapping:
         assert ids == {1, 2, 3}
 
     def test_default_config_fails_on_renamed_metrics(self, spark, db_custom_metrics):
-        solver = DeltaSolver(spark)
+        solver = DefaultSolver(spark)
         query = db_custom_metrics.query
         tags_df = solver.filter_container_tags(spark, query)
         with pytest.raises(AnalysisException):
             solver.filter_container_metrics(spark, query, tags_df).collect()
 
 
-class TestDeltaSolverContainerMetricsTimestampMapping:
+class TestDefaultSolverContainerMetricsTimestampMapping:
     """Verify start_ts/stop_ts on container_metrics can be remapped from custom physical names."""
 
     @pytest.fixture
@@ -302,7 +302,7 @@ class TestDeltaSolverContainerMetricsTimestampMapping:
                 column_name_mapping={"t_start": "start_ts", "t_stop": "stop_ts"},
             ),
         )
-        solver = DeltaSolver(spark, config=cfg)
+        solver = DefaultSolver(spark, config=cfg)
         assert solver.config.start_ts_col == "start_ts"
         assert solver.config.stop_ts_col == "stop_ts"
 
@@ -322,7 +322,7 @@ class TestDeltaSolverContainerMetricsTimestampMapping:
 # ===================================================================
 
 
-class TestDeltaSolverChannelTagsMapping:
+class TestDefaultSolverChannelTagsMapping:
     """Verify filter_channel_tags works when channel_tags columns are renamed."""
 
     @pytest.fixture
@@ -349,7 +349,7 @@ class TestDeltaSolverChannelTagsMapping:
                 },
             ),
         )
-        solver = DeltaSolver(spark, config=cfg)
+        solver = DefaultSolver(spark, config=cfg)
         query = db_custom_channel_tags.query
         query.select(query.channel(channel_name="Engine RPM"))
         tags_df = solver.filter_container_tags(spark, query)
@@ -362,7 +362,7 @@ class TestDeltaSolverChannelTagsMapping:
         assert pairs == {(1, 1), (2, 1), (3, 1)}
 
     def test_default_config_fails_on_renamed_channel_tags(self, spark, db_custom_channel_tags):
-        solver = DeltaSolver(spark)
+        solver = DefaultSolver(spark)
         query = db_custom_channel_tags.query
         query.select(query.channel(channel_name="Engine RPM"))
         tags_df = solver.filter_container_tags(spark, query)
@@ -379,7 +379,7 @@ class TestDeltaSolverChannelTagsMapping:
 # ===================================================================
 
 
-class TestDeltaSolverChannelMetricsMapping:
+class TestDefaultSolverChannelMetricsMapping:
     """Verify filter_channel_metrics works when channel_metrics columns are renamed."""
 
     @pytest.fixture
@@ -396,7 +396,7 @@ class TestDeltaSolverChannelMetricsMapping:
                 column_name_mapping={"run_id": "container_id", "signal_id": "channel_id"},
             ),
         )
-        solver = DeltaSolver(spark, config=cfg)
+        solver = DefaultSolver(spark, config=cfg)
         query = db_custom_channel_metrics.query
         query.select(query.channel(channel_name="Engine RPM"))
         tags_df = solver.filter_container_tags(spark, query)
@@ -418,7 +418,7 @@ class TestDeltaSolverChannelMetricsMapping:
 # ===================================================================
 
 
-class TestDeltaSolverChannelsMapping:
+class TestDefaultSolverChannelsMapping:
     """Verify solve() works when channels (RLE) physical columns are renamed."""
 
     @pytest.fixture
@@ -447,7 +447,7 @@ class TestDeltaSolverChannelsMapping:
                 },
             ),
         )
-        solver = DeltaSolver(spark, config=cfg)
+        solver = DefaultSolver(spark, config=cfg)
         query = db_custom_channels.query
         eng_rpm = query.channel(channel_name="Engine RPM")
         result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark, solver=solver)
@@ -465,7 +465,7 @@ class TestDeltaSolverChannelsMapping:
 # ===================================================================
 
 
-class TestDeltaSolverFullyCustomMapping:
+class TestDefaultSolverFullyCustomMapping:
     """Every silver table uses non-default physical column names."""
 
     @pytest.fixture
@@ -539,7 +539,7 @@ class TestDeltaSolverFullyCustomMapping:
         )
 
     def test_end_to_end_solve_fully_custom(self, spark, db_fully_custom):
-        solver = DeltaSolver(spark, config=self._cfg())
+        solver = DefaultSolver(spark, config=self._cfg())
         query = db_fully_custom.query
         query.where(TagSelector("model") == "Ateca")
         eng_rpm = query.channel(channel_name="Engine RPM")
@@ -554,7 +554,7 @@ class TestDeltaSolverFullyCustomMapping:
 # ===================================================================
 
 
-class TestDeltaSolverDefaultConfig:
+class TestDefaultSolverDefaultConfig:
     """When SolverConfig is None or has empty mappings, default column names still work."""
 
     @pytest.fixture
@@ -564,7 +564,7 @@ class TestDeltaSolverDefaultConfig:
     def test_solver_without_config_works_with_default_names(
         self, spark: SparkSession, db_default: MeasurementDB
     ):
-        solver = DeltaSolver(spark)
+        solver = DefaultSolver(spark)
         query = db_default.query
         eng_rpm = query.channel(channel_name="Engine RPM")
         result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark, solver=solver)
@@ -574,7 +574,7 @@ class TestDeltaSolverDefaultConfig:
     def test_solver_with_empty_config_works_with_default_names(
         self, spark: SparkSession, db_default: MeasurementDB
     ):
-        solver = DeltaSolver(spark, config=SolverConfig())
+        solver = DefaultSolver(spark, config=SolverConfig())
         query = db_default.query
         eng_rpm = query.channel(channel_name="Engine RPM")
         result = query.select(eng_rpm.mean().alias("rpm_mean")).solve(spark, solver=solver)

@@ -43,74 +43,6 @@ Validate if a string is a valid Unity Catalog entity name.
 
 `str`: The validated entity name if valid.
 
-## MeasurementDimensions
-
-```python
-class MeasurementDimensions(Enum)
-```
-
-Enumeration for available measurement dimensions information.
-
-**Arguments**:
-
-- `CONTAINER_ID` (`str`): Identifier for the container.
-- `UUT_ID` (`str`): Identifier for the unit under test (UUT).
-- `PROJECT_ID` (`str`): Identifier for the project.
-- `UUT_NAME` (`str`): Name of the unit under test (UUT). Currently not present in implementation.
-- `FILE_NAME` (`str`): Name of the file associated with the measurement.
-- `SOURCE_FILE_PATH` (`str`): Path to the source file containing the measurement data.
-- `START_TS` (`str`): Timestamp of the first data point in the measurement.
-- `STOP_TS` (`str`): Timestamp of the last data point in the measurement.
-- `ODO_START` (`str`): Starting odometer reading for the measurement. Currently not present in implementation.
-- `ODO_STOP` (`str`): Stopping odometer reading for the measurement. Currently not present in implementation.
-- `ENVIRONMENT` (`str`): Environment in which the measurement was taken either puma or datalogger.
-
-#### PROJECT\_ID
-
-todo not present currently
-
-
-#### UUT\_NAME
-
-todo not present currently
-
-
-#### ODO\_START
-
-todo not present currently
-
-
-#### ODO\_STOP
-
-todo not present currently
-
-
-#### get\_column
-
-```python
-def get_column() -> Column
-```
-
-Returns the corresponding Spark SQL column for the measurement dimension.
-
-The column names are mapped to their respective values based on the ER gold naming conventions.
-
-**Returns**:
-
-`pyspark.sql.Column`: The Spark SQL column corresponding to the measurement dimension.
-
-#### map\_gold\_name\_to\_silver
-
-```python
-def map_gold_name_to_silver() -> str
-```
-
-Maps the silver layer column name to the ER gold layer column name.
-
-**Returns**:
-
-`str`: The gold layer column name.
-
 ## Solvers
 
 ```python
@@ -119,10 +51,16 @@ class Solvers(Enum)
 
 Enumeration of available solver types for the query engine.
 
+``DEFAULT_SOLVER`` is the single, unified solver. ``DELTA_SOLVER`` and
+``KEY_VALUE_STORE_SOLVER`` are **deprecated aliases** kept so that existing
+report configs continue to deserialize; both now resolve to the same
+``DefaultSolver``. They will be removed in a future release.
+
 **Arguments**:
 
-- `DELTA_SOLVER` (`str`): None
-- `KEY_VALUE_STORE_SOLVER` (`str`): None
+- `DEFAULT_SOLVER` (`str`): None
+- `DELTA_SOLVER` (`str`): Deprecated alias for ``DEFAULT_SOLVER``.
+- `KEY_VALUE_STORE_SOLVER` (`str`): Deprecated alias for ``DEFAULT_SOLVER``.
 
 ## Source
 
@@ -241,7 +179,7 @@ Configuration for the query engine solver.
 
 **Arguments**:
 
-- `solver` (`Solvers, default=Solvers.KEY_VALUE_STORE_SOLVER`): The solver type to use for query execution.
+- `solver` (`Solvers, default=Solvers.DEFAULT_SOLVER`): The solver type to use for query execution.
 - `solver_config` (`SolverConfig`): Per-table column name mappings and filter configuration for
 the solver.  Use this when your silver-layer tables use
 non-default column names or when you need project/toolbox
@@ -303,11 +241,24 @@ Attributes
  container_filters : ContainerFilters, optional
      Optional container-level filters (tag-based and/or metric-based).
  query_engine : QueryEngine, optional
-     Optional query engine configuration. Defaults to Solvers.KEY_VALUE_STORE_SOLVER.
+     Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
  incremental : IncrementalConfig, optional
      Optional incremental processing configuration. Defaults to IncrementalConfig().
- measurement_dimensions : list of MeasurementDimensions, optional
-     List of measurement dimensions to include in the configuration.
+ measurement_dimensions : list of str, optional
+     Column names to surface from ``container_metrics`` into the
+     gold-layer ``measurement_dimension`` table. Names are matched
+     **after** ``query_engine.solver_config.container_metrics.column_name_mapping``
+     has been applied — i.e. these are the internal (post-mapping)
+     column names, not the physical silver column names. If a silver
+     table uses a physical name like ``my_measurement_id`` mapped to
+     ``container_id``, list ``"container_id"`` here. Each listed name
+     lands in the gold table verbatim, so the configured name is also
+     the gold column name. Defaults to
+     ``["container_id", "start_ts", "stop_ts"]``. The framework does not
+     inject any column the user omits — keeping ``container_id`` in the
+     list is recommended because it is the upsert key for incremental
+     processing and the join key to event-fact tables, but the choice
+     is the user's.
  Examples
  --------
 >>> config_data = {
@@ -336,7 +287,7 @@ Attributes
  ...         ]
  ...     },
  ...     "query_engine": {
- ...         "solver": "KeyValueStoreSolver",
+ ...         "solver": "DefaultSolver",
  ...         "solver_config": {
  ...             "project_id": "my_project",
  ...             "container_tags": {

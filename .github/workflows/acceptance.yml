@@ -17,8 +17,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate CI behind a single check. Fork PRs get no OIDC token / secrets from GitHub, so
+  # JFrog auth (and therefore dependency installation) cannot run. On a fork PR this job
+  # is skipped, which cascades to lint and test. Fork PRs are tested by a maintainer via
+  # `make fork-sync PR=<n>` (after reviewing the code) before merging.
+  not-a-fork:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+    steps:
+      - run: echo "Not a fork PR, proceeding"
+
   lint:
     name: Lint and format check
+    needs: not-a-fork
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -47,7 +60,7 @@ jobs:
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
-    needs: [ lint ]
+    needs: [ not-a-fork, lint ]
     permissions:
       id-token: write
     strategy:
