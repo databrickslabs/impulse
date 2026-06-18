@@ -56,27 +56,45 @@ def test_persist_point_value_aggregator(spark):
     event_fact = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
 
     pva_rows = fact.filter(F.col("visual_id") == pva.get_id())
-    assert pva_rows.count() > 0
-    # every row is a single sampled value
-    assert pva_rows.filter(F.col("aggregation_label") != "value").count() == 0
-    assert pva_rows.filter(F.col("statistic_value").isNull()).count() == 0
-
-    # every aggregator row's event_instance_id links to a PointsInTimeEvent instance
     pit_instances = event_fact.filter(F.col("event_id") == pit_event.get_id())
-    unmatched = pva_rows.join(
-        pit_instances.select("event_instance_id").distinct(),
-        on="event_instance_id",
-        how="left_anti",
-    )
-    assert unmatched.count() == 0
+    assert pva_rows.count() > 0
 
-    # dimension row persisted with the right agg_type
+    # every fact row is a single sampled value of the right channel and event
+    assert pva_rows.filter(F.col("aggregation_label") != "value").count() == 0
+    assert pva_rows.filter(F.col("channel_name") != "Engine RPM").count() == 0
+    assert pva_rows.filter(F.col("event_id") != pit_event.get_id()).count() == 0
+
+    # sampled values are real Engine RPM measurements (non-null and positive at rising edges)
+    assert pva_rows.filter(F.col("statistic_value").isNull()).count() == 0
+    vmin, vmax = pva_rows.agg(F.min("statistic_value"), F.max("statistic_value")).first()
+    assert vmin > 0 and vmax >= vmin
+
+    # bijection on event_instance_id: every instant produced exactly one value, and every
+    # value links back to a (zero-duration) PointsInTimeEvent instance
     assert (
-        dim.filter(
-            (F.col("name") == "rpm_at_edges") & (F.col("agg_type") == "point_value_aggregator")
+        pva_rows.join(
+            pit_instances.select("event_instance_id").distinct(),
+            on="event_instance_id",
+            how="left_anti",
         ).count()
-        == 1
+        == 0
     )
+    assert (
+        pit_instances.join(
+            pva_rows.select("event_instance_id").distinct(),
+            on="event_instance_id",
+            how="left_anti",
+        ).count()
+        == 0
+    )
+    assert pit_instances.filter(F.col("start_ts") != F.col("end_ts")).count() == 0
+
+    # dimension row persisted with the right metadata
+    dim_rows = dim.filter(F.col("name") == "rpm_at_edges").collect()
+    assert len(dim_rows) == 1
+    assert dim_rows[0]["agg_type"] == "point_value_aggregator"
+    assert dim_rows[0]["channel_names"] == ["Engine RPM"]
+    assert dim_rows[0]["statistics"] == ["value"]
 
 
 def test_stats_and_point_value_share_fact_table_without_clobber(spark):
@@ -117,7 +135,31 @@ def test_stats_and_point_value_share_fact_table_without_clobber(spark):
     my_report.persist_results()
 
     fact = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_fact")
-    visual_ids = {row.visual_id for row in fact.select("visual_id").distinct().collect()}
-    # both aggregators survive in the shared fact table
-    assert stats.get_id() in visual_ids
-    assert pva.get_id() in visual_ids
+    dim = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_dimension")
+
+    stats_rows = fact.filter(F.col("visual_id") == stats.get_id())
+    pva_rows = fact.filter(F.col("visual_id") == pva.get_id())
+
+    # both aggregators survive in the shared fact table with their own rows
+    assert stats_rows.count() > 0
+    assert pva_rows.count() > 0
+
+    # each type kept its own aggregation labels (no clobber, no cross-contamination)
+    stats_labels = {
+        r["aggregation_label"] for r in stats_rows.select("aggregation_label").distinct().collect()
+    }
+    pva_labels = {
+        r["aggregation_label"] for r in pva_rows.select("aggregation_label").distinct().collect()
+    }
+    assert stats_labels == {"min", "max"}
+    assert pva_labels == {"value"}
+
+    # both dimension rows survive with the correct agg_type
+    agg_types = {
+        r["name"]: r["agg_type"]
+        for r in dim.filter(F.col("name").isin("rpm_stats", "rpm_at_edges")).collect()
+    }
+    assert agg_types == {
+        "rpm_stats": "stats_aggregator",
+        "rpm_at_edges": "point_value_aggregator",
+    }
