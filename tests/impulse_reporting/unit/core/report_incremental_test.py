@@ -833,7 +833,7 @@ class TestPersistFullDictHandling:
             assert len(dfs_arg) == 2
 
     def test_persist_full_single_df_format(self, spark):
-        """_persist_full passes single DataFrame directly to writer."""
+        """_persist_full groups by table, so a single DataFrame is written as a 1-element list."""
         report = _build_report(spark)
         mock_agg_df = MagicMock(spec=DataFrame)
 
@@ -856,7 +856,9 @@ class TestPersistFullDictHandling:
             mock_writer.write.assert_called_once()
             write_call = mock_writer.write.call_args
             dfs_arg = write_call.args[0] if write_call.args else write_call.kwargs.get("df")
-            assert dfs_arg is mock_agg_df
+            assert isinstance(dfs_arg, list)
+            assert len(dfs_arg) == 1
+            assert dfs_arg[0] is mock_agg_df
 
     def test_persist_full_dict_with_none_values_skipped(self, spark):
         """_persist_full skips None values in dict format (e.g., only changed but no unchanged)."""
