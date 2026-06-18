@@ -5,6 +5,8 @@ import numpy as np
 import numpy.testing as nptest
 
 from impulse_query_engine.model.series.intervals import Intervals
+from impulse_query_engine.model.series.points_in_time import PointsInTime
+from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 
@@ -716,6 +718,106 @@ def test_where_complex():
     nptest.assert_array_equal([1], result.tstarts)
     nptest.assert_array_equal([2], result.tends)
     nptest.assert_array_equal([2], result.values)
+
+
+def test_where_intervals_still_sampleseries():
+    s1 = SampleSeries([0, 1, 2], [1, 2, 3], [1, 2, 3])
+    result = s1.where(Intervals([0], [3]))
+    assert isinstance(result, SampleSeries)
+
+
+def test_where_pit_empty_points():
+    s1 = SampleSeries([0, 1, 2], [1, 2, 3], [10, 20, 30])
+    result = s1.where(PointsInTime.empty())
+    assert isinstance(result, PointsInTimeSeries)
+    assert len(result) == 0
+
+
+def test_where_pit_empty_series():
+    result = SampleSeries.empty().where(PointsInTime([1, 2]))
+    assert isinstance(result, PointsInTimeSeries)
+    assert len(result) == 0
+
+
+def test_where_pit_non_overlapping():
+    s1 = SampleSeries([0, 1, 2], [1, 2, 3], [10, 20, 30])
+    result = s1.where(PointsInTime([100, 200]))
+    assert isinstance(result, PointsInTimeSeries)
+    assert len(result) == 0
+
+
+def test_where_pit_basic():
+    s1 = SampleSeries([0, 1, 2], [1, 2, 3], [10, 20, 30])
+    result = s1.where(PointsInTime([0.5, 1.5, 2.5]))
+    nptest.assert_array_equal(result.tstarts, [0.5, 1.5, 2.5])
+    nptest.assert_array_equal(result.values, [10, 20, 30])
+
+
+def test_where_pit_on_tstart():
+    s1 = SampleSeries([0, 1, 2], [1, 2, 3], [10, 20, 30])
+    result = s1.where(PointsInTime([1.0]))
+    nptest.assert_array_equal(result.tstarts, [1.0])
+    nptest.assert_array_equal(result.values, [20])
+
+
+def test_where_pit_on_tend_continuous():
+    # point at a sample's tend lands in the next (continuous) sample, not the one ending there.
+    s1 = SampleSeries([0, 1, 2], [1, 2, 3], [10, 20, 30])
+    result = s1.where(PointsInTime([1.0]))
+    nptest.assert_array_equal(result.values, [20])
+
+
+def test_where_pit_on_tend_gap():
+    # gap between [0,1) and [2,3); the tend at 1.0 begins a gap -> point dropped.
+    s1 = SampleSeries([0, 2], [1, 3], [10, 30])
+    result = s1.where(PointsInTime([1.0]))
+    assert len(result) == 0
+
+
+def test_where_pit_in_gap():
+    s1 = SampleSeries([0, 2], [1, 3], [10, 30])
+    result = s1.where(PointsInTime([0.5, 1.5, 2.5]))
+    nptest.assert_array_equal(result.tstarts, [0.5, 2.5])
+    nptest.assert_array_equal(result.values, [10, 30])
+
+
+def test_where_pit_multiple_in_one_interval():
+    s1 = SampleSeries([0], [10], [5])
+    result = s1.where(PointsInTime([1, 2, 3]))
+    nptest.assert_array_equal(result.tstarts, [1, 2, 3])
+    nptest.assert_array_equal(result.values, [5, 5, 5])
+
+
+def test_where_pit_spanning_multiple_intervals():
+    s1 = SampleSeries([0, 10, 20], [10, 20, 30], [1, 2, 3])
+    result = s1.where(PointsInTime([5, 15, 25]))
+    nptest.assert_array_equal(result.tstarts, [5, 15, 25])
+    nptest.assert_array_equal(result.values, [1, 2, 3])
+
+
+def test_where_pit_trailing_zero_duration_closed():
+    # trailing zero-duration sample [3,3) is the closed final point; a query at 3 returns its value.
+    s1 = SampleSeries([0, 1, 3], [1, 2, 3], [10, 20, 30])
+    result = s1.where(PointsInTime([3.0]))
+    assert isinstance(result, PointsInTimeSeries)
+    nptest.assert_array_equal(result.tstarts, [3.0])
+    nptest.assert_array_equal(result.values, [30])
+
+
+def test_where_pit_nan_value():
+    s1 = SampleSeries([0, 1], [1, 2], [np.nan, 20])
+    result = s1.where(PointsInTime([0.5]))
+    assert len(result) == 1
+    assert np.isnan(result.values[0])
+
+
+def test_where_pit_rising_edge():
+    s1 = SampleSeries([0, 10, 20], [10, 20, 30], [100, 200, 300])
+    s2 = SampleSeries([0, 10, 20], [10, 20, 30], [1, 2, 1])
+    result = s1.where(s2.rising_edge())
+    assert isinstance(result, PointsInTimeSeries)
+    nptest.assert_array_equal(result.tstarts, [10])
+    nptest.assert_array_equal(result.values, [200])
 
 
 def test_intervals_between_falling_edges_empty():

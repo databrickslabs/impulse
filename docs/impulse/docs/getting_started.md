@@ -128,9 +128,9 @@ the 2000-2500 rpm bin.
 - **[Tutorial — Reporting walkthrough](tutorial/demo.md)** — the same workflow
   with multiple events, 1D and 2D histograms, and statistics
   aggregators.
-- **[TSAL reference](./references/tsal.md)** — the full DSL for
-  selecting channels, building virtual signals, and expressing event
-  conditions.
+- **[TSAL reference](./references/query_engine/tsal/index.md)** — the full DSL for
+  selecting channels, building virtual signals, expressing event
+  conditions, and the core data model expressions resolve to.
 - **[Data Model](./data_model/index.md)** — the silver-layer schema
   Impulse expects, and how to land your own measurement data into it.
 - **[Configuration reference](./config/configuration.md)** — every

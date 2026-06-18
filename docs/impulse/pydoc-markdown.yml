@@ -22,6 +22,7 @@ loaders:
       - impulse_query_engine.model.series.sample_series
       - impulse_query_engine.model.series.intervals
       - impulse_query_engine.model.series.points_in_time
+      - impulse_query_engine.model.series.points_in_time_series
 
 processors:
   - type: filter

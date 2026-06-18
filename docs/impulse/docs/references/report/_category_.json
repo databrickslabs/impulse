@@ -1,0 +1,9 @@
+{
+  "label": "Report",
+  "position": 1,
+  "link": {
+    "type": "doc",
+    "id": "references/report/index"
+  },
+  "collapsed": true
+}

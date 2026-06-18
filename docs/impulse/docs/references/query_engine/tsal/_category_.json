@@ -1,0 +1,9 @@
+{
+  "label": "TSAL",
+  "position": 1,
+  "link": {
+    "type": "doc",
+    "id": "references/query_engine/tsal/index"
+  },
+  "collapsed": true
+}

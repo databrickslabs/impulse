@@ -15,7 +15,7 @@ You only need three tables to start: `container_metrics`,
 `container_tags` and `channel_tags` (EAV tag tables), `channel_mapping`
 (aliases), and `unit_conversion` (per-alias conversion) are add-ons that
 `DefaultSolver` uses only when you configure them. See the
-[Query Engine table requirements](../references/query_engine.md#table-requirements)
+[Query Engine table requirements](../references/query_engine/query_solvers.md#table-requirements)
 for the full matrix.
 
 :::

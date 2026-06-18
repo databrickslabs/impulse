@@ -5,12 +5,8 @@ options and API documentation.
 
 ## Available References
 
-- [Report](report.md) - Report generation and output formats
-- [Query Engine](query_engine.md) - `DefaultSolver` overview and silver-table requirements
-- [TSAL](tsal.md) - Time-Series Analysis Language syntax and usage
-- [Event](event.md) - Event detection and processing
-- [Aggregation](aggregation.md) - Aggregation methods and configurations
-- [Persist](persistence.md) - Storage and persistence options for reports and results
+- [Report](report/index.md) - The `Report` orchestrator and its building blocks: Events, Aggregations, and the Persist module.
+- [Query Engine](query_engine/index.md) - The TSAL expression language and the `DefaultSolver` (Query Solvers) that evaluates it.
 - [API Reference](api/) - Auto-generated symbol-level API docs from source-code docstrings
 
 ## Overview

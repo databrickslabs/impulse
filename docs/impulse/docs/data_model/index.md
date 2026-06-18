@@ -6,11 +6,11 @@ title: Data Model
 
 :::tip Start with three tables
 
-[`DefaultSolver`](../references/query_engine.md) needs **only three tables**:
+[`DefaultSolver`](../references/query_engine/query_solvers.md) needs **only three tables**:
 `container_metrics`, `channel_metrics`, and `channels`. The tag tables
 (`container_tags`, `channel_tags`) and the `channel_mapping` / `unit_conversion`
 tables are **fully optional** add-ons, used only when configured — see the
-[Query Engine table requirements](../references/query_engine.md#table-requirements).
+[Query Engine table requirements](../references/query_engine/query_solvers.md#table-requirements).
 
 The rest of this page documents the full shape. Landing your data in it during
 ingest is the simplest path (see the [Ingestion guide](ingestion.md)); if you
