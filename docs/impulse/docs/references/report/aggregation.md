@@ -6,7 +6,8 @@ title: Aggregations
 # Aggregations
 
 Aggregations compute summary results over channels, optionally scoped to an event.
-Impulse provides three aggregation types: **Histogram**, **Histogram2D**, and **Statistics**.
+Impulse provides four aggregation types: **Histogram**, **Histogram2D**, **Statistics**, and
+**PointValue** (sampling channel values at the instants of a `PointsInTimeEvent`).
 
 Aggregations are organized into **Pages**, which group related visuals within a report.
 
@@ -322,3 +323,65 @@ band_stats = StatsAggregator(
     event=eng_rpm_event,
 )
 ```
+
+---
+
+## PointValueAggregator
+
+`PointValueAggregator` samples one or more channels **at the instants of a
+[`PointsInTimeEvent`](event#pointsintimeevent)** — for example at every rising edge — and records the
+channel's value at each instant. Where `StatsAggregator` summarizes a channel over event *intervals*,
+`PointValueAggregator` reads a single value *at each point in time*.
+
+Each input channel is filtered with `.where(<event points>)`, which yields the value valid at every
+point; one fact row is produced per (channel, instant).
+
+```python
+from impulse_reporting.aggregations.point_value_aggregator import PointValueAggregator
+from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
+
+eng_rpm = my_report.get_db().query.channel(channel_name="Engine RPM")
+
+rpm_rising = PointsInTimeEvent(name="rpm_rising", expr=eng_rpm.rising_edges())
+my_report.add_event(rpm_rising)
+
+rpm_at_edges = PointValueAggregator(
+    name="rpm_at_edges",
+    input_expressions=[eng_rpm],
+    channel_names=["Engine RPM"],
+    event=rpm_rising,
+    desc="Engine RPM sampled at its rising edges",
+)
+page.add_aggregation(rpm_at_edges)
+```
+
+### Parameters
+
+| Parameter           | Type                         | Required | Description                                                                                     |
+|---------------------|------------------------------|----------|-------------------------------------------------------------------------------------------------|
+| `name`              | `str`                        | Yes      | Unique aggregation name.                                                                        |
+| `input_expressions` | `list[TimeSeriesExpression]` | Yes      | Channel expressions to sample. Each must evaluate to a `SampleSeries`.                          |
+| `channel_names`     | `list[str]`                  | Yes      | Display names for each signal. Must match the length of `input_expressions`.                    |
+| `event`             | `PointsInTimeEvent`          | Yes      | Event whose instants define where the channels are sampled. **Must be a `PointsInTimeEvent`.**  |
+| `desc`              | `str`                        | No       | Description stored in the dimension table.                                                      |
+| `values_unit`       | `str`                        | No       | Unit of the sampled values.                                                                     |
+
+### How it works
+
+1. The `event`'s expression is solved to a `PointsInTime` (the instants).
+2. Each input channel is sampled at those instants via `SampleSeries.where(points)`. A point that
+   falls outside a channel's coverage is simply omitted for that channel.
+3. Each (channel, instant) becomes one fact row.
+
+### Output schema
+
+`PointValueAggregator` reuses the **`stats_aggregator_fact`** and **`stats_aggregator_dimension`**
+tables (see [StatsAggregator output schema](#output-schema-2)). In the fact rows:
+
+- `aggregation_label` is always `"value"`.
+- `statistic_value` is the sampled channel value at the instant.
+- `event_instance_id` matches the zero-duration instance materialized by the `PointsInTimeEvent`
+  (`start_ts == end_ts`), so fact rows join to that event's instances in `event_instance_fact`.
+
+Rows from `StatsAggregator` and `PointValueAggregator` coexist in the same tables and are distinguished
+by `agg_type` (`"point_value_aggregator"`).

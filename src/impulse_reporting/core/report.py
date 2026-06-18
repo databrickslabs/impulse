@@ -517,33 +517,47 @@ class Report:
         """
         storage_factory = WriterFactory(self.sink)
 
-        # aggregation fact tables
+        # aggregation fact tables — group by output table to handle shared tables
+        # (e.g. StatsAggregator and PointValueAggregator both write stats_aggregator_fact)
+        agg_fact_by_table = {}
         for aggregation_type_str, aggregation_dfs in self.aggregation_dfs.items():
-            aggregation_type = AggregationType[aggregation_type_str]
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(aggregation_type)
+            table_name = AggregationType[aggregation_type_str].get_fact_table_name()
+            agg_fact_by_table.setdefault(table_name, [])
 
             # Handle both dict format (from incremental mode) and DataFrame format
             if isinstance(aggregation_dfs, dict):
-                dfs_to_combine = []
                 if aggregation_dfs.get("changed") is not None:
-                    dfs_to_combine.append(aggregation_dfs["changed"])
+                    agg_fact_by_table[table_name].append(aggregation_dfs["changed"])
                 if aggregation_dfs.get("unchanged") is not None:
-                    dfs_to_combine.append(aggregation_dfs["unchanged"])
-                if dfs_to_combine:
-                    writer.write(dfs_to_combine, schema=schema, uri=uri)
+                    agg_fact_by_table[table_name].append(aggregation_dfs["unchanged"])
             else:
-                writer.write(aggregation_dfs, schema=schema, uri=uri)
+                agg_fact_by_table[table_name].append(aggregation_dfs)
 
-        # aggregation dimension tables
+        for table_name, agg_dfs_list in agg_fact_by_table.items():
+            if not agg_dfs_list:
+                continue
+            aggregation_type = AggregationType.get_any_for_fact_table(table_name)
+            writer = storage_factory.create_writer(aggregation_type)
+            schema, uri = writer.extract_fact_schema_and_output_uri(aggregation_type)
+            writer.write(agg_dfs_list, schema=schema, uri=uri)
+
+        # aggregation dimension tables — group by output table to handle shared tables
+        agg_dim_by_table = {}
         for (
             aggregation_type_str,
             aggregation_metadata_dfs,
         ) in self.aggregation_metadata_dfs.items():
-            aggregation_type = AggregationType[aggregation_type_str]
+            table_name = AggregationType[aggregation_type_str].get_dimension_table_name()
+            agg_dim_by_table.setdefault(table_name, [])
+            agg_dim_by_table[table_name].append(aggregation_metadata_dfs)
+
+        for table_name, agg_meta_dfs_list in agg_dim_by_table.items():
+            if not agg_meta_dfs_list:
+                continue
+            aggregation_type = AggregationType.get_any_for_dimension_table(table_name)
             writer = storage_factory.create_writer(aggregation_type)
             schema, uri = writer.extract_metadata_schema_and_output_uri(aggregation_type)
-            writer.write(aggregation_metadata_dfs, schema=schema, uri=uri)
+            writer.write(agg_meta_dfs_list, schema=schema, uri=uri)
 
         # event fact tables — group by output table to handle mixed event types
         event_fact_by_table = {}
@@ -811,6 +825,13 @@ class Report:
                 "y_bin_ID",
             ],
             AggregationType.STATS_AGGREGATOR: [
+                "container_id",
+                "visual_id",
+                "aggregation_label",
+                "event_instance_id",
+                "channel_name",
+            ],
+            AggregationType.POINT_VALUE_AGGREGATOR: [
                 "container_id",
                 "visual_id",
                 "aggregation_label",

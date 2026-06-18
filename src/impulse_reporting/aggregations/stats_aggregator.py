@@ -20,6 +20,7 @@ from impulse_query_engine.analyze.query.aggregations.stats_aggregator import (
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.model.series.intervals import Intervals
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.events.event import Event
@@ -80,6 +81,9 @@ class StatsAggregator(Aggregation):
             )
         self.statistics = statistics
         self.event = event
+        self._validate_event_evaluation_type(
+            self.event, Intervals, example="(channel > 2000) & (channel < 5000)"
+        )
         self.desc = desc
         self.agg_type = agg_type
         self.values_unit = values_unit

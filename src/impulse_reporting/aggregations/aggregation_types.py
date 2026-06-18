@@ -4,6 +4,7 @@ from pyspark.sql.types import StructType
 
 from impulse_reporting.aggregations.histogram import Histogram
 from impulse_reporting.aggregations.histogram2d import Histogram2D
+from impulse_reporting.aggregations.point_value_aggregator import PointValueAggregator
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.persist.dimension_schema import (
     HISTOGRAM2D_DIMENSION_SCHEMA,
@@ -35,6 +36,7 @@ class AggregationType(Enum):
     HISTOGRAM = Histogram
     HISTOGRAM2D = Histogram2D
     STATS_AGGREGATOR = StatsAggregator
+    POINT_VALUE_AGGREGATOR = PointValueAggregator
 
     def get_fact_table_name(self) -> str:
         """
@@ -56,6 +58,8 @@ class AggregationType(Enum):
             case AggregationType.HISTOGRAM2D:
                 return "histogram2d_fact"
             case AggregationType.STATS_AGGREGATOR:
+                return "stats_aggregator_fact"
+            case AggregationType.POINT_VALUE_AGGREGATOR:
                 return "stats_aggregator_fact"
             case _:
                 raise ValueError(f"Unsupported aggregation type: {self}")
@@ -81,6 +85,8 @@ class AggregationType(Enum):
                 return HISTOGRAM2D_FACT_SCHEMA
             case AggregationType.STATS_AGGREGATOR:
                 return STATS_AGGREGATOR_FACT_SCHEMA
+            case AggregationType.POINT_VALUE_AGGREGATOR:
+                return STATS_AGGREGATOR_FACT_SCHEMA
             case _:
                 raise ValueError(f"Unsupported event type: {self}")
 
@@ -105,6 +111,8 @@ class AggregationType(Enum):
                 return "histogram2d_dimension"
             case AggregationType.STATS_AGGREGATOR:
                 return "stats_aggregator_dimension"
+            case AggregationType.POINT_VALUE_AGGREGATOR:
+                return "stats_aggregator_dimension"
             case _:
                 raise ValueError(f"Unsupported aggregation type: {self}")
 
@@ -128,5 +136,53 @@ class AggregationType(Enum):
                 return HISTOGRAM2D_DIMENSION_SCHEMA
             case AggregationType.STATS_AGGREGATOR:
                 return STATS_AGGREGATOR_DIMENSION_SCHEMA
+            case AggregationType.POINT_VALUE_AGGREGATOR:
+                return STATS_AGGREGATOR_DIMENSION_SCHEMA
             case _:
                 raise ValueError(f"Unsupported aggregation type: {self}")
+
+    @classmethod
+    def get_any_for_fact_table(cls, table_name: str) -> "AggregationType":
+        """Return the first AggregationType whose fact table name matches.
+
+        Parameters
+        ----------
+        table_name : str
+            Fact table name to look up.
+
+        Returns
+        -------
+        AggregationType
+
+        Raises
+        ------
+        ValueError
+            If no AggregationType matches the given table name.
+        """
+        for at in cls:
+            if at.get_fact_table_name() == table_name:
+                return at
+        raise ValueError(f"No AggregationType found for fact table: {table_name}")
+
+    @classmethod
+    def get_any_for_dimension_table(cls, table_name: str) -> "AggregationType":
+        """Return the first AggregationType whose dimension table name matches.
+
+        Parameters
+        ----------
+        table_name : str
+            Dimension table name to look up.
+
+        Returns
+        -------
+        AggregationType
+
+        Raises
+        ------
+        ValueError
+            If no AggregationType matches the given table name.
+        """
+        for at in cls:
+            if at.get_dimension_table_name() == table_name:
+                return at
+        raise ValueError(f"No AggregationType found for dimension table: {table_name}")

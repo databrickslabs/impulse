@@ -833,7 +833,7 @@ class TestPersistFullDictHandling:
             assert len(dfs_arg) == 2
 
     def test_persist_full_single_df_format(self, spark):
-        """_persist_full passes single DataFrame directly to writer."""
+        """_persist_full groups by table, so a single DataFrame is written as a 1-element list."""
         report = _build_report(spark)
         mock_agg_df = MagicMock(spec=DataFrame)
 
@@ -856,7 +856,9 @@ class TestPersistFullDictHandling:
             mock_writer.write.assert_called_once()
             write_call = mock_writer.write.call_args
             dfs_arg = write_call.args[0] if write_call.args else write_call.kwargs.get("df")
-            assert dfs_arg is mock_agg_df
+            assert isinstance(dfs_arg, list)
+            assert len(dfs_arg) == 1
+            assert dfs_arg[0] is mock_agg_df
 
     def test_persist_full_dict_with_none_values_skipped(self, spark):
         """_persist_full skips None values in dict format (e.g., only changed but no unchanged)."""
@@ -889,3 +891,26 @@ class TestPersistFullDictHandling:
             # Should only include the non-None df
             assert isinstance(dfs_arg, list)
             assert len(dfs_arg) == 1
+
+    def test_persist_full_skips_when_all_dfs_none(self, spark):
+        """A type with neither changed nor unchanged dfs yields an empty grouped list,
+        so the per-table loop skips it and no write happens."""
+        report = _build_report(spark)
+
+        report.aggregation_dfs = {"HISTOGRAM": {"changed": None, "unchanged": None}}
+        report.aggregation_metadata_dfs = {}
+        report.event_dfs = {}
+        report.event_metadata_dfs = {}
+        report.container_dimension_df = None
+
+        with patch("impulse_reporting.core.report.WriterFactory") as mock_factory_cls:
+            mock_writer = MagicMock()
+            mock_writer.extract_fact_schema_and_output_uri.return_value = (
+                MagicMock(),
+                "catalog.gold.hist_fact",
+            )
+            mock_factory_cls.return_value.create_writer.return_value = mock_writer
+
+            report._persist_full()
+
+            mock_writer.write.assert_not_called()

@@ -13,6 +13,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.model.series.intervals import Intervals
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.events.event import Event
@@ -526,6 +527,9 @@ class Histogram2DDuration(Histogram2D):
         self.x_bins = x_bins
         self.y_bins = y_bins
         self.event = event
+        self._validate_event_evaluation_type(
+            self.event, Intervals, example="(channel > 2000) & (channel < 5000)"
+        )
         self.expression = self._set_expression()
         self.desc = desc
         self.agg_type = agg_type
@@ -639,6 +643,9 @@ class Histogram2DCustomWeights(Histogram2D):
             values_unit=values_unit,
             x_bins_unit=x_bins_unit,
             y_bins_unit=y_bins_unit,
+        )
+        self._validate_event_evaluation_type(
+            self.event, Intervals, example="(channel > 2000) & (channel < 5000)"
         )
         self.weights_expr = weights_expr
         self.weights_expr.require_evaluation_type(

@@ -28,6 +28,54 @@ class Aggregation(ABC):
         self.page_number = -1  # Default value indicating no page assigned
         self.report_id = -1  # Default value indicating no report assigned
 
+    def _validate_event_evaluation_type(
+        self,
+        event: Event | None,
+        expected: type,
+        *,
+        example: str | None = None,
+        required: bool = False,
+    ) -> None:
+        """
+        Validate the scoping event by the core-model type its expression evaluates to.
+
+        The event's *expression* (not its class) is checked, so any event type whose
+        expression yields ``expected`` is accepted.
+
+        Parameters
+        ----------
+        event : Event or None
+            The scoping event to validate.
+        expected : type
+            Required core-model class the event's expression must evaluate to
+            (e.g. ``Intervals``, ``PointsInTime``).
+        example : str, optional
+            Short example of a valid event expression, appended to the error message.
+        required : bool, optional
+            If True, a missing event or an event with no expression (e.g.
+            ``ContainerEvent``) is rejected. If False (default), both are accepted as
+            a whole-series scope.
+
+        Raises
+        ------
+        ValueError
+            If the event's expression does not evaluate to ``expected`` (or the event
+            is missing / has no expression while ``required`` is True).
+        """
+        owner = type(self).__name__
+        expr = event.get_expression() if event is not None else None
+        if expr is None:
+            # No expression: a missing event or a whole-series event (e.g. ContainerEvent).
+            if required:
+                hint = f" (e.g. {example})" if example else ""
+                raise ValueError(
+                    f"{owner} requires an event whose expression evaluates to "
+                    f"{expected.__name__}{hint}"
+                )
+            return
+        # Delegate the type check + "got <actual>" message to the expression itself.
+        expr.require_evaluation_type(expected, owner=f"{owner} event", example=example)
+
     def set_page_number(self, page_number: int):
         """
         Set the page number for the aggregation.

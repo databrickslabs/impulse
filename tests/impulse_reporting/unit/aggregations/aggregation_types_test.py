@@ -20,6 +20,37 @@ def test_histogram():
     assert result == "histogram_dimension"
 
 
+def test_point_value_aggregator_routes_to_stats_tables():
+    """POINT_VALUE_AGGREGATOR reuses the shared stats_aggregator fact/dimension tables."""
+    from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
+    from impulse_reporting.persist.fact_schema import STATS_AGGREGATOR_FACT_SCHEMA
+
+    t = AggregationType.POINT_VALUE_AGGREGATOR
+    assert t.get_fact_table_name() == "stats_aggregator_fact"
+    assert t.get_dimension_table_name() == "stats_aggregator_dimension"
+    assert t.get_fact_schema() == STATS_AGGREGATOR_FACT_SCHEMA
+    assert t.get_dimension_schema() == STATS_AGGREGATOR_DIMENSION_SCHEMA
+
+
+def test_get_any_for_fact_table():
+    assert AggregationType.get_any_for_fact_table("stats_aggregator_fact") in (
+        AggregationType.STATS_AGGREGATOR,
+        AggregationType.POINT_VALUE_AGGREGATOR,
+    )
+    assert AggregationType.get_any_for_fact_table("histogram_fact") == AggregationType.HISTOGRAM
+    with pytest.raises(ValueError, match="No AggregationType found for fact table"):
+        AggregationType.get_any_for_fact_table("non_existent_table")
+
+
+def test_get_any_for_dimension_table():
+    assert AggregationType.get_any_for_dimension_table("stats_aggregator_dimension") in (
+        AggregationType.STATS_AGGREGATOR,
+        AggregationType.POINT_VALUE_AGGREGATOR,
+    )
+    with pytest.raises(ValueError, match="No AggregationType found for dimension table"):
+        AggregationType.get_any_for_dimension_table("non_existent_table")
+
+
 def test_all_aggregation_type_methods_supported():
     """
     Test that all methods work for all AggregationType enum values.
