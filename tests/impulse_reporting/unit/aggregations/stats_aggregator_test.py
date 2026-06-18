@@ -10,6 +10,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import TimeSer
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 
 
 def test_as_spark_row():
@@ -659,4 +660,16 @@ def test_init_rejects_non_sample_series_input():
             input_expressions=[TimeSeriesSelector(None) > 0],
             channel_names=["Signal"],
             statistics=["min"],
+        )
+
+
+def test_init_rejects_points_in_time_event():
+    """The scoping event must evaluate to Intervals; a PointsInTimeEvent is rejected."""
+    with pytest.raises(ValueError, match="Intervals"):
+        StatsAggregator(
+            name="bad_event",
+            input_expressions=[TimeSeriesSelector(None)],
+            channel_names=["Signal"],
+            statistics=["min"],
+            event=PointsInTimeEvent(name="p", expr=TimeSeriesSelector(None).rising_edges()),
         )

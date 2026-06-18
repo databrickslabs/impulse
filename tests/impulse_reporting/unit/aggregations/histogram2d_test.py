@@ -11,6 +11,7 @@ from impulse_reporting.aggregations.histogram2d import (
     Histogram2DDuration,
 )
 from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from tests.conftest import basic_narrow_db, spark
 
 
@@ -1585,6 +1586,19 @@ def test_init_rejects_non_sample_series_axis_expr():
             y_expr=TimeSeriesSelector(None),
             x_bins=[0.0, 1.0],
             y_bins=[0.0, 1.0],
+        )
+
+
+def test_init_rejects_points_in_time_event():
+    """The scoping event must evaluate to Intervals; a PointsInTimeEvent is rejected."""
+    with pytest.raises(ValueError, match="Intervals"):
+        Histogram2DDuration(
+            name="bad",
+            x_expr=TimeSeriesSelector(None),
+            y_expr=TimeSeriesSelector(None),
+            x_bins=[0.0, 1.0],
+            y_bins=[0.0, 1.0],
+            event=PointsInTimeEvent(name="p", expr=TimeSeriesSelector(None).rising_edges()),
         )
 
 

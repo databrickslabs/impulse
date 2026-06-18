@@ -16,24 +16,24 @@ from impulse_query_engine.analyze.query.aggregations.point_value_aggregator impo
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.model.series.points_in_time import PointsInTime
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.event import Event
-from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import STATS_AGGREGATOR_FACT_SCHEMA
 
 
 class PointValueAggregator(Aggregation):
-    """Reporting aggregation that samples channels at the instants of a PointsInTimeEvent.
+    """Reporting aggregation that samples channels at a set of points in time.
 
     Each input expression (a ``SampleSeries``) is sampled at every instant of the
-    ``event`` (a :class:`PointsInTimeEvent`). One fact row is produced per (channel,
-    instant) with the sampled value, written to the shared ``stats_aggregator_fact``
-    table. The ``aggregation_label`` is always ``"value"`` and each row's
-    ``event_instance_id`` matches the corresponding zero-duration instance materialized
-    by the ``PointsInTimeEvent``.
+    ``event`` (any event whose expression evaluates to ``PointsInTime``, e.g. a
+    :class:`PointsInTimeEvent`). One fact row is produced per (channel, instant) with the
+    sampled value, written to the shared ``stats_aggregator_fact`` table. The
+    ``aggregation_label`` is always ``"value"`` and each row's ``event_instance_id``
+    matches the corresponding zero-duration instance materialized by the event.
     """
 
     def __init__(
@@ -41,7 +41,7 @@ class PointValueAggregator(Aggregation):
         name: str,
         input_expressions: list[TimeSeriesExpression],
         channel_names: list[str],
-        event: PointsInTimeEvent,
+        event: Event,
         desc: str = None,
         agg_type: str = "point_value_aggregator",
         values_unit: str = None,
@@ -57,9 +57,9 @@ class PointValueAggregator(Aggregation):
             Channel expressions to sample. Each must evaluate to a ``SampleSeries``.
         channel_names : list of str
             Display names for the signals. Must be the same length as input_expressions.
-        event : PointsInTimeEvent
+        event : Event
             Event whose instants define where the channels are sampled. Required; its
-            expression must evaluate to ``PointsInTime``.
+            expression must evaluate to ``PointsInTime`` (e.g. a ``PointsInTimeEvent``).
         desc : str, optional
             Description of the aggregation.
         agg_type : str, optional
@@ -75,12 +75,10 @@ class PointValueAggregator(Aggregation):
             expr.require_evaluation_type(
                 SampleSeries, owner="PointValueAggregator", example="a channel selection"
             )
-        if not isinstance(event, PointsInTimeEvent):
-            raise ValueError(
-                "PointValueAggregator requires a PointsInTimeEvent as 'event' (its expression "
-                f"must evaluate to PointsInTime); got {type(event).__name__}"
-            )
         self.event = event
+        self._validate_event_evaluation_type(
+            self.event, PointsInTime, example="channel.rising_edges()", required=True
+        )
         self.desc = desc
         self.agg_type = agg_type
         self.values_unit = values_unit

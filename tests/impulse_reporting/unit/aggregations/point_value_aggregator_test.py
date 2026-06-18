@@ -1,5 +1,7 @@
 """Unit tests for the reporting PointValueAggregator."""
 
+from unittest.mock import MagicMock
+
 import pyspark.sql.functions as F
 import pytest
 
@@ -7,6 +9,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import TimeSer
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_reporting.aggregations.point_value_aggregator import PointValueAggregator
 from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from tests.conftest import basic_narrow_db, spark
 
@@ -68,9 +71,9 @@ def test_init_rejects_non_sample_series_input():
         )
 
 
-def test_init_rejects_non_points_in_time_event():
-    """The event must be a PointsInTimeEvent."""
-    with pytest.raises(ValueError, match="PointsInTimeEvent"):
+def test_init_rejects_event_not_evaluating_to_points_in_time():
+    """An event whose expression yields Intervals (e.g. BasicEvent) is rejected."""
+    with pytest.raises(ValueError, match="PointsInTime"):
         PointValueAggregator(
             name="bad",
             input_expressions=[TimeSeriesSelector(None)],
@@ -80,13 +83,39 @@ def test_init_rejects_non_points_in_time_event():
 
 
 def test_init_rejects_missing_event():
-    with pytest.raises(ValueError, match="PointsInTimeEvent"):
+    with pytest.raises(ValueError, match="PointsInTime"):
         PointValueAggregator(
             name="bad",
             input_expressions=[TimeSeriesSelector(None)],
             channel_names=["c"],
             event=None,
         )
+
+
+def test_init_rejects_container_event():
+    """ContainerEvent has no expression (whole-series scope) — not a points event."""
+    with pytest.raises(ValueError, match="PointsInTime"):
+        PointValueAggregator(
+            name="bad",
+            input_expressions=[TimeSeriesSelector(None)],
+            channel_names=["c"],
+            event=ContainerEvent(name="c"),
+        )
+
+
+def test_init_accepts_any_event_evaluating_to_points_in_time():
+    """Acceptance is by expression type, not event class: any event whose expression
+    evaluates to PointsInTime is accepted (not only PointsInTimeEvent)."""
+    fake_event = MagicMock()
+    fake_event.get_expression.return_value = TimeSeriesSelector(None).rising_edges()
+
+    agg = PointValueAggregator(
+        name="ok",
+        input_expressions=[TimeSeriesSelector(None)],
+        channel_names=["c"],
+        event=fake_event,
+    )
+    assert agg.get_event() is fake_event
 
 
 def test_channel_names_length_mismatch():
