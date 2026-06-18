@@ -40,7 +40,7 @@ eng_rpm_event = BasicEvent(
 | Parameter           | Type                   | Required | Description                                                                                          |
 |---------------------|------------------------|----------|------------------------------------------------------------------------------------------------------|
 | `name`              | `str`                  | Yes      | Unique event name. Used as identifier in fact and dimension tables.                                  |
-| `expr`              | `TimeSeriesExpression` | Yes      | Boolean TSAL expression defining the event condition. Must resolve to `Intervals` at execution time. |
+| `expr`              | `TimeSeriesExpression` | Yes      | Boolean TSAL expression defining the event condition. Must evaluate to `Intervals`; validated at construction (raises `ValueError` otherwise). |
 | `desc`              | `str`                  | No       | Human-readable description stored in the event dimension table.                                      |
 | `required_channels` | `list[str]`            | No       | Channel names required for this event. Informational; stored in the event dimension table.           |
 | `attributes`        | `Mapping[str, str]`    | No       | Free-form key-value metadata stored in the event dimension table (e.g. `limit_type`, `limit_direction`). Values are coerced to strings. |
@@ -141,7 +141,7 @@ idle_to_drive = SequenceOfEvents(
 | Parameter           | Type                          | Required | Description                                                                                                                                                                  |
 |---------------------|-------------------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `name`              | `str`                         | Yes      | Unique event name.                                                                                                                                                           |
-| `expressions`       | `list[TimeSeriesExpression]`  | Yes      | Ordered list of expressions. Each must resolve to `Intervals`.                                                                                                               |
+| `expressions`       | `list[TimeSeriesExpression]`  | Yes      | Ordered list of expressions. Each must evaluate to `Intervals`; validated at construction (raises `ValueError` otherwise).                                                   |
 | `desc`              | `str`                         | No       | Human-readable description.                                                                                                                                                  |
 | `required_channels` | `list[str]`                   | No       | Channel names required for this event. Informational; stored in the event dimension table.                                                                                   |
 | `max_overlap`       | `float`                       | No       | Maximum allowed overlap between consecutive intervals. Sequences whose overlap exceeds this value are skipped. Expressed in the same time unit as the underlying timestamps. |

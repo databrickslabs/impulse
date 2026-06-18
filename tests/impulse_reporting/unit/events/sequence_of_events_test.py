@@ -11,7 +11,7 @@ def test_sequence_of_events_init():
     """Test SequenceOfEvents initialization with required parameters."""
     event = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
 
     assert event.name == "test_soe"
@@ -25,7 +25,7 @@ def test_sequence_of_events_init_with_optional_params():
     """Test SequenceOfEvents initialization with optional parameters."""
     event = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
         desc="desc",
         required_channels=["ch1"],
     )
@@ -41,7 +41,7 @@ def test_get_name():
     """Test get_name method."""
     event = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     assert event.get_name() == "test_soe"
 
@@ -50,15 +50,15 @@ def test_get_id():
     """Test get_id method determinism and differentiation by name."""
     event1 = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     event2 = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     event3 = SequenceOfEvents(
         name="test_soe_2",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
 
     assert event1.get_id() == event2.get_id()
@@ -69,7 +69,7 @@ def test_get_expression():
     """Test get_expression method returns TimeSeriesExpression."""
     event = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     expression = event.get_expression()
     assert expression is not None
@@ -80,7 +80,7 @@ def test_get_expression_str():
     """Test get_expression_str method."""
     event = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     expr_str = event.get_expression_str()
     assert isinstance(expr_str, str)
@@ -91,7 +91,7 @@ def test_as_dict():
     """Test as_dict method."""
     event = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     event_dict = event.as_dict()
 
@@ -109,7 +109,7 @@ def test_as_spark_row():
     """Test as_spark_row method."""
     event = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     row = event.as_spark_row()
     assert len(row) == 9  # Should have 9 fields as defined in the schema
@@ -119,11 +119,11 @@ def test_determine_metadata_df(spark):
     """Test determine_metadata_df method."""
     event1 = SequenceOfEvents(
         name="test_soe_1",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     event2 = SequenceOfEvents(
         name="test_soe_2",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
 
     metadata_df = SequenceOfEvents.determine_metadata_df(spark, [event1, event2])
@@ -170,7 +170,16 @@ def test_determine_events(spark, basic_narrow_db):
 def test_determine_events_requires_solved_df(spark):
     event = SequenceOfEvents(
         name="test_soe",
-        expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        expressions=[(TimeSeriesSelector(None) > 0), (TimeSeriesSelector(None) > 0)],
     )
     with pytest.raises(ValueError, match="requires solved_df"):
         SequenceOfEvents.determine_events(spark, [event])
+
+
+def test_init_rejects_non_intervals_expression():
+    """Each expression must evaluate to Intervals; a bare selector is SampleSeries."""
+    with pytest.raises(ValueError, match="Intervals"):
+        SequenceOfEvents(
+            name="test_soe",
+            expressions=[(TimeSeriesSelector(None) > 0), TimeSeriesSelector(None)],
+        )

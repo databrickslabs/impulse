@@ -10,6 +10,13 @@ Impulse provides three aggregation types: **Histogram**, **Histogram2D**, and **
 
 Aggregations are organized into **Pages**, which group related visuals within a report.
 
+:::note Expression types
+Aggregation signal inputs — `base_expr`, `x_expr`, `y_expr`, `weights_expr`, and each element of
+`input_expressions` — must evaluate to a **`SampleSeries`** (a channel-like signal). This is validated when
+the aggregation is constructed; passing an expression that evaluates to something else (e.g. an `Intervals`
+comparison or a `PointsInTime`) raises a `ValueError`.
+:::
+
 ---
 
 ## Page

@@ -60,12 +60,9 @@ class PointsInTimeEvent(Event):
         """
         Event.__init__(self, name)
         self.expression = expr.alias(name)
-        if self.expression.evaluation_type() is not PointsInTime:
-            raise ValueError(
-                "PointsInTimeEvent requires an expression that evaluates to PointsInTime "
-                f"(e.g. channel.rising_edges()); got "
-                f"{self.expression.evaluation_type().__name__}"
-            )
+        self.expression.require_evaluation_type(
+            PointsInTime, owner="PointsInTimeEvent", example="channel.rising_edges()"
+        )
         self.description = desc
         self.required_channels = required_channels
         normalized_attributes: dict[str, str] = {}

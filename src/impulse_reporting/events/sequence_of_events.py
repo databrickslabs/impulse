@@ -13,6 +13,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.events import SequenceOfEventsExpression
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.model.series.intervals import Intervals
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
@@ -66,6 +67,10 @@ class SequenceOfEvents(Event):
             any other derived unit.
         """
         Event.__init__(self, name)
+        for expr in expressions:
+            expr.require_evaluation_type(
+                Intervals, owner="SequenceOfEvents", example="channel > 0"
+            )
         self.expression = SequenceOfEventsExpression(expressions, max_overlap=max_overlap).alias(
             name
         )

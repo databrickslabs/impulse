@@ -79,6 +79,35 @@ class TimeSeriesExpression(abc.ABC):
 
         return type(self.build(EmptyTimeSeriesCache()))
 
+    def require_evaluation_type(
+        self, expected: type, *, owner: str, example: str | None = None
+    ) -> None:
+        """
+        Validate that this expression evaluates to ``expected``; raise otherwise.
+
+        Parameters
+        ----------
+        expected : type
+            Required core-model class (e.g. ``Intervals``, ``SampleSeries``,
+            ``PointsInTime``).
+        owner : str
+            Caller name, used in the error message (e.g. ``"BasicEvent"``).
+        example : str, optional
+            Short example of a valid expression, appended as a hint.
+
+        Raises
+        ------
+        ValueError
+            If the expression does not evaluate to ``expected``.
+        """
+        actual = self.evaluation_type()
+        if actual is not expected:
+            hint = f" (e.g. {example})" if example else ""
+            raise ValueError(
+                f"{owner} requires an expression that evaluates to "
+                f"{expected.__name__}{hint}; got {actual.__name__}"
+            )
+
     def __getstate__(self):  # overwrite to avoid errors from __getattr__
         return self.__dict__
 

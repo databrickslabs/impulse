@@ -20,6 +20,7 @@ from impulse_query_engine.analyze.query.aggregations.stats_aggregator import (
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
@@ -73,6 +74,10 @@ class StatsAggregator(Aggregation):
         self.input_expressions = input_expressions
         self.channel_names = channel_names
         self._validate_channel_names()
+        for expr in self.input_expressions:
+            expr.require_evaluation_type(
+                SampleSeries, owner="StatsAggregator", example="a channel selection"
+            )
         self.statistics = statistics
         self.event = event
         self.desc = desc

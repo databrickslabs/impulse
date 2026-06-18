@@ -14,7 +14,7 @@ from impulse_reporting.events.basic_event import BasicEvent
 
 def test_as_spark_row():
     """Test that as_spark_row returns a Row with expected fields."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -34,7 +34,7 @@ def test_as_spark_row():
 def test_stats_aggregator_init():
     """Test StatsAggregator initialization with required parameters."""
     input_expr = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -59,7 +59,7 @@ def test_stats_aggregator_init():
 def test_stats_aggregator_init_with_optional_params():
     """Test StatsAggregator initialization with all optional parameters."""
     input_expr = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -87,7 +87,7 @@ def test_stats_aggregator_init_multiple_expressions():
     """Test StatsAggregator initialization with multiple input expressions."""
     input_expr1 = TimeSeriesSelector(None)
     input_expr2 = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -106,7 +106,7 @@ def test_stats_aggregator_init_multiple_expressions():
 def test_stats_aggregator_channel_names_validation():
     """Test that channel_names validation raises error on length mismatch."""
     input_expr = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     with pytest.raises(ValueError) as exc_info:
@@ -123,7 +123,7 @@ def test_stats_aggregator_channel_names_validation():
 
 def test_stats_aggregator_empty_expressions_raises():
     """Test that empty input_expressions raises error."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     with pytest.raises(ValueError) as exc_info:
@@ -140,7 +140,7 @@ def test_stats_aggregator_empty_expressions_raises():
 
 def test_get_name():
     """Test get_name method."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -155,7 +155,7 @@ def test_get_name():
 
 def test_get_id():
     """Test get_id returns consistent unique identifier."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -176,7 +176,7 @@ def test_get_id():
 
 def test_get_id_different_for_different_names():
     """Test that get_id returns different values for different names."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg1 = StatsAggregator(
@@ -200,7 +200,7 @@ def test_get_id_different_for_different_names():
 
 def test_get_expression():
     """Test get_expression method returns TimeSeriesExpression."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
     input_expr = TimeSeriesSelector(None)
 
@@ -219,7 +219,7 @@ def test_get_expression():
 
 def test_get_expression_str():
     """Test get_expression_str method."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -237,7 +237,7 @@ def test_get_expression_str():
 
 def test_get_event():
     """Test get_event method returns the associated event."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -254,7 +254,7 @@ def test_get_event():
 
 def test_as_dict():
     """Test as_dict method returns dictionary with expected keys."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -283,7 +283,7 @@ def test_as_dict():
 
 def test_as_dict_multiple_signals():
     """Test as_dict with multiple signals."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -303,7 +303,7 @@ def test_as_dict_multiple_signals():
 
 def test_as_spark_row_complete():
     """Test as_spark_row with all fields populated."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -329,7 +329,7 @@ def test_as_spark_row_complete():
 
 def test_as_spark_row_minimal():
     """Test as_spark_row with minimal required fields."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -351,7 +351,7 @@ def test_as_spark_row_minimal():
 
 def test_statistics_list_validation():
     """Test that statistics parameter accepts different statistic types."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     # Test with various statistics
@@ -611,7 +611,7 @@ def test_stats_aggregator_multiple_input_expressions(spark, basic_narrow_db):
 
 def test_report_id_and_page_number_assignment():
     """Test that report_id and page_number can be assigned."""
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     stats_agg = StatsAggregator(
@@ -644,8 +644,19 @@ def test_determine_aggregations_requires_solved_df(spark):
         input_expressions=[TimeSeriesSelector(None)],
         channel_names=["Engine RPM"],
         statistics=["min", "max", "mean"],
-        event=BasicEvent(name="test_event_1", expr=TimeSeriesSelector(None)),
+        event=BasicEvent(name="test_event_1", expr=TimeSeriesSelector(None) > 0),
     )
 
     with pytest.raises(ValueError, match="requires solved_df"):
         StatsAggregator.determine_aggregations(spark=spark, aggregations=[stats_agg])
+
+
+def test_init_rejects_non_sample_series_input():
+    """Input expressions must evaluate to SampleSeries; Intervals must be rejected."""
+    with pytest.raises(ValueError, match="SampleSeries"):
+        StatsAggregator(
+            name="bad_stats",
+            input_expressions=[TimeSeriesSelector(None) > 0],
+            channel_names=["Signal"],
+            statistics=["min"],
+        )

@@ -1,5 +1,6 @@
 # pylint: disable=missing-function-docstring, redefined-outer-name
 import pyspark.sql.types as T
+import pytest
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -92,6 +93,26 @@ def test_evaluation_type_points_in_time_series():
 def test_evaluation_type_scalar():
     # scalar aggregations evaluate to a (numpy) float; np.float64 subclasses float
     assert issubclass(_eval_ts().mean().evaluation_type(), float)
+
+
+# ---------------------------------------------------------------------------
+# TimeSeriesExpression.require_evaluation_type (raises on mismatch)
+# ---------------------------------------------------------------------------
+def test_require_evaluation_type_passes_on_match():
+    # returns None and does not raise when the type matches
+    assert _eval_ts().require_evaluation_type(SampleSeries, owner="Test") is None
+
+
+def test_require_evaluation_type_raises_on_mismatch():
+    with pytest.raises(
+        ValueError, match="Owner requires an expression that evaluates to Intervals"
+    ):
+        _eval_ts().require_evaluation_type(Intervals, owner="Owner")
+
+
+def test_require_evaluation_type_reports_actual_and_example():
+    with pytest.raises(ValueError, match="got SampleSeries"):
+        _eval_ts().require_evaluation_type(Intervals, owner="Owner", example="channel > 0")
 
 
 def test_multiple_selections_dtype(narrow_db):

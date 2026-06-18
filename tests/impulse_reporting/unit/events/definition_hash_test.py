@@ -9,7 +9,7 @@ class TestBasicEventDefinitionHash:
 
     def test_definition_hash_returns_int(self):
         """Test that determine_definition_hash returns an integer."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
         event = BasicEvent(name="test_event", expr=expr)
 
         hash_value = event.determine_definition_hash()
@@ -17,7 +17,7 @@ class TestBasicEventDefinitionHash:
 
     def test_same_expression_produces_same_hash(self):
         """Test that identical expressions produce the same hash."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
 
         event1 = BasicEvent(name="event_a", expr=expr)
         event2 = BasicEvent(name="event_b", expr=expr)
@@ -27,7 +27,7 @@ class TestBasicEventDefinitionHash:
 
     def test_hash_excludes_name(self):
         """Test that hash doesn't change when only name changes."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
 
         event1 = BasicEvent(name="event_version_1", expr=expr)
         event2 = BasicEvent(name="event_version_2", expr=expr)
@@ -36,7 +36,7 @@ class TestBasicEventDefinitionHash:
 
     def test_hash_excludes_description(self):
         """Test that hash doesn't change when only description changes."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
 
         event1 = BasicEvent(name="test_event", expr=expr, desc="Description v1")
         event2 = BasicEvent(name="test_event", expr=expr, desc="Description v2")
@@ -45,7 +45,7 @@ class TestBasicEventDefinitionHash:
 
     def test_hash_is_consistent_across_instances(self):
         """Test that hash is consistent for same expression across multiple calls."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
         event = BasicEvent(name="test_event", expr=expr)
 
         hash1 = event.determine_definition_hash()
@@ -56,7 +56,7 @@ class TestBasicEventDefinitionHash:
 
     def test_get_id_differs_from_definition_hash(self):
         """Test that get_id and determine_definition_hash produce different values."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
 
         event1 = BasicEvent(name="event_a", expr=expr)
         event2 = BasicEvent(name="event_b", expr=expr)
@@ -69,7 +69,7 @@ class TestBasicEventDefinitionHash:
 
     def test_as_dict_includes_definition_hash(self):
         """Test that as_dict includes the definition_hash field."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
         event = BasicEvent(name="test_event", expr=expr)
 
         result = event.as_dict()
@@ -79,7 +79,7 @@ class TestBasicEventDefinitionHash:
 
     def test_hash_value_within_long_range(self):
         """Test that hash value fits within signed 64-bit long range."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
         event = BasicEvent(name="test_event", expr=expr)
 
         hash_value = event.determine_definition_hash()
