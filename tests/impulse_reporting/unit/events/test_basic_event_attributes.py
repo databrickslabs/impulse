@@ -13,32 +13,32 @@ class TestBasicEventAttributes:
 
     def test_default_attributes_is_empty_dict(self):
         """BasicEvent without attributes kwarg should default to {}."""
-        event = BasicEvent(name="e", expr=TimeSeriesSelector(None))
+        event = BasicEvent(name="e", expr=(TimeSeriesSelector(None) > 0))
         assert event.attributes == {}
 
     def test_custom_attributes(self):
         """BasicEvent with explicit attributes should store them."""
         attrs = {"limit_type": "warning", "limit_direction": "lower"}
-        event = BasicEvent(name="e", expr=TimeSeriesSelector(None), attributes=attrs)
+        event = BasicEvent(name="e", expr=(TimeSeriesSelector(None) > 0), attributes=attrs)
         assert event.attributes == attrs
 
     def test_as_dict_includes_attributes(self):
         """as_dict must include the 'attributes' key with correct value."""
         attrs = {"limit_type": "error"}
-        event = BasicEvent(name="e", expr=TimeSeriesSelector(None), attributes=attrs)
+        event = BasicEvent(name="e", expr=(TimeSeriesSelector(None) > 0), attributes=attrs)
         d = event.as_dict()
         assert "attributes" in d
         assert d["attributes"] == attrs
 
     def test_as_dict_default_attributes(self):
         """as_dict must include attributes == {} when none are provided."""
-        event = BasicEvent(name="e", expr=TimeSeriesSelector(None))
+        event = BasicEvent(name="e", expr=(TimeSeriesSelector(None) > 0))
         d = event.as_dict()
         assert d["attributes"] == {}
 
     def test_definition_hash_excludes_attributes(self):
         """Changing attributes must not change the definition hash."""
-        expr = TimeSeriesSelector(None)
+        expr = TimeSeriesSelector(None) > 0
         ev1 = BasicEvent(name="e", expr=expr, attributes={"limit_type": "warning"})
         ev2 = BasicEvent(name="e", expr=expr, attributes={"limit_type": "error"})
         ev3 = BasicEvent(name="e", expr=expr)
@@ -50,7 +50,7 @@ class TestBasicEventAttributes:
         """as_spark_row must include an 'attributes' field."""
         event = BasicEvent(
             name="e",
-            expr=TimeSeriesSelector(None),
+            expr=(TimeSeriesSelector(None) > 0),
             attributes={"k": "v"},
         )
         row = event.as_spark_row()
@@ -59,13 +59,13 @@ class TestBasicEventAttributes:
 
     def test_as_spark_row_field_count(self):
         """Spark row must have 9 fields matching EVENT_DIMENSION_SCHEMA."""
-        event = BasicEvent(name="e", expr=TimeSeriesSelector(None))
+        event = BasicEvent(name="e", expr=(TimeSeriesSelector(None) > 0))
         row = event.as_spark_row()
         assert len(row) == len(EVENT_DIMENSION_SCHEMA.fields)
 
     def test_none_attributes_becomes_empty_dict(self):
         """Passing attributes=None should be treated as {}."""
-        event = BasicEvent(name="e", expr=TimeSeriesSelector(None), attributes=None)
+        event = BasicEvent(name="e", expr=(TimeSeriesSelector(None) > 0), attributes=None)
         assert event.attributes == {}
 
 

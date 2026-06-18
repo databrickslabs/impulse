@@ -1,5 +1,6 @@
 # pylint: disable=missing-function-docstring, redefined-outer-name
 import pyspark.sql.types as T
+import pytest
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -63,6 +64,55 @@ def test_pointsInTimeSeries_dtype(narrow_db):
     assert len(result_objects) == len(result_dtypes) == 1
     assert isinstance(result_dtypes[0], T.ArrayType)
     assert isinstance(result_objects[0], PointsInTimeSeries)
+
+
+# ---------------------------------------------------------------------------
+# TimeSeriesExpression.evaluation_type (builds against an empty cache, no Spark)
+# ---------------------------------------------------------------------------
+def _eval_ts():
+    return TimeSeriesSelector(TagSelector("name") == "test")
+
+
+def test_evaluation_type_sample_series():
+    assert _eval_ts().evaluation_type() is SampleSeries
+
+
+def test_evaluation_type_intervals():
+    assert (_eval_ts() > 0).evaluation_type() is Intervals
+
+
+def test_evaluation_type_points_in_time():
+    assert _eval_ts().rising_edge().evaluation_type() is PointsInTime
+
+
+def test_evaluation_type_points_in_time_series():
+    ts = _eval_ts()
+    assert ts.where(ts.rising_edge()).evaluation_type() is PointsInTimeSeries
+
+
+def test_evaluation_type_scalar():
+    # scalar aggregations evaluate to a (numpy) float; np.float64 subclasses float
+    assert issubclass(_eval_ts().mean().evaluation_type(), float)
+
+
+# ---------------------------------------------------------------------------
+# TimeSeriesExpression.require_evaluation_type (raises on mismatch)
+# ---------------------------------------------------------------------------
+def test_require_evaluation_type_passes_on_match():
+    # returns None and does not raise when the type matches
+    assert _eval_ts().require_evaluation_type(SampleSeries, owner="Test") is None
+
+
+def test_require_evaluation_type_raises_on_mismatch():
+    with pytest.raises(
+        ValueError, match="Owner requires an expression that evaluates to Intervals"
+    ):
+        _eval_ts().require_evaluation_type(Intervals, owner="Owner")
+
+
+def test_require_evaluation_type_reports_actual_and_example():
+    with pytest.raises(ValueError, match="got SampleSeries"):
+        _eval_ts().require_evaluation_type(Intervals, owner="Owner", example="channel > 0")
 
 
 def test_multiple_selections_dtype(narrow_db):

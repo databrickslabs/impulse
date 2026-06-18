@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import hashlib
-import zlib
 from collections.abc import Mapping
 
 import pyspark.sql.functions as f
+import zlib
 from pyspark.sql import Row, SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
-from impulse_query_engine.analyze.query.events import SequenceOfEventsExpression
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from impulse_query_engine.model.series.intervals import Intervals
+from impulse_query_engine.model.series.points_in_time import PointsInTime
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
@@ -21,58 +20,48 @@ from impulse_reporting.util.event_instance_util import generate_event_instance_i
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
 
-class SequenceOfEvents(Event):
-    """Class representing a sequence-of-events event in a report.
+class PointsInTimeEvent(Event):
+    """Class representing an event whose expression evaluates to a ``PointsInTime``.
 
-    Visual timeline (two intervals where the second starts before the first ends):
-
-        time --->
-        event_1: | ------------------- |
-        event_2:             | ------------- |
-        sequence:| ------------------------- |
-
-    Rule:
-    - If the next interval starts before the current one ends, the resulting
-      sequence interval starts at the first event's start and ends at the
-      next event's end.
+    Each point in time becomes one zero-duration event instance (``start_ts == end_ts``) written to
+    the ``event_instance_fact`` table. This is the point-wise counterpart of ``BasicEvent`` (which
+    expects an ``Intervals`` expression); a typical expression is ``channel.rising_edges()``.
     """
 
     def __init__(
         self,
         name: str,
-        expressions: list[TimeSeriesExpression],
-        desc: str | None = None,
-        required_channels: list[str] | None = None,
-        max_overlap: float | None = None,
+        expr: TimeSeriesExpression,
+        desc: str = None,
+        required_channels: list[str] = None,
         attributes: Mapping[str, str] = None,
     ):
         """
-        Initialize a SequenceOfEvents object.
+        Initialize a PointsInTimeEvent object.
 
         Parameters
         ----------
         name : str
             Name of the event.
-        expressions : list of TimeSeriesExpression
-            Ordered list of expressions. Each expression must yield Intervals.
+        expr : TimeSeriesExpression
+            Time series expression for the event. Must evaluate to a ``PointsInTime``
+            (e.g. ``channel.rising_edges()``).
         desc : str, optional
             Description of the event.
         required_channels : list of str, optional
             List of required channels for the event.
-        max_overlap : float, optional
-            Maximum allowed overlap time between consecutive events.
-            If not None, intervals whose overlap exceeds this value are skipped.
-            Expressed in the same time units as the underlying data
-            (e.g. milliseconds-since-epoch timestamps), not seconds or
-            any other derived unit.
+        attributes : Mapping[str, str], optional
+            Key-value metadata for the event (e.g. limit_type, limit_direction).
+
+        Raises
+        ------
+        ValueError
+            If ``expr`` does not evaluate to a ``PointsInTime``.
         """
         Event.__init__(self, name)
-        for expr in expressions:
-            expr.require_evaluation_type(
-                Intervals, owner="SequenceOfEvents", example="channel > 0"
-            )
-        self.expression = SequenceOfEventsExpression(expressions, max_overlap=max_overlap).alias(
-            name
+        self.expression = expr.alias(name)
+        self.expression.require_evaluation_type(
+            PointsInTime, owner="PointsInTimeEvent", example="channel.rising_edges()"
         )
         self.description = desc
         self.required_channels = required_channels
@@ -91,7 +80,7 @@ class SequenceOfEvents(Event):
             Unique positive 32-bit integer identifier for the event.
         """
         hash_input = f"{self.name}"
-        return zlib.crc32(hash_input.encode()) & 0x7FFFFFFF
+        return zlib.crc32(hash_input.encode()) & 0x7FFFFFFF  # Ensures positive 32-bit int
 
     def get_expression(self) -> TimeSeriesExpression | None:
         """
@@ -105,18 +94,18 @@ class SequenceOfEvents(Event):
         return self.expression
 
     def get_event_type_str(self) -> str:
-        """Get the event type string for SequenceOfEvents.
+        """Get the event type string for PointsInTimeEvent.
 
         Returns
         -------
         str
             Event type string.
         """
-        return "SEQUENCE_OF_EVENTS"
+        return "POINTS_IN_TIME_EVENT"
 
     def determine_definition_hash(self) -> int:
         """
-        Calculate definition hash for sequence-of-events event.
+        Calculate definition hash for the point-in-time event.
 
         Only includes the expression (computation logic), which is the
         only attribute that affects the event results.
@@ -128,7 +117,10 @@ class SequenceOfEvents(Event):
         int
             Hash value representing the computation definition.
         """
+        # Only the expression affects results
         hash_input = self.get_expression_str()
+
+        # Use SHA-256 and return as int (truncated to fit LongType)
         hash_bytes = hashlib.sha256(hash_input.encode()).digest()
         return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
 
@@ -168,7 +160,7 @@ class SequenceOfEvents(Event):
     def determine_events(
         cls,
         spark: SparkSession,
-        events: list[SequenceOfEvents],
+        events: list[PointsInTimeEvent],
         *,
         solved_df: "DataFrame" = None,
         query: QueryBuilder = None,
@@ -176,14 +168,19 @@ class SequenceOfEvents(Event):
         pre_filtered_containers_df=None,
     ):
         """
-        Extract event fact table for the given list of SequenceOfEvents objects.
+        Extract the event fact table for the given list of PointsInTimeEvent objects.
+
+        Each point in time becomes one zero-duration instance (``start_ts == end_ts``). The
+        expression result is a flat array of timestamps (``PointsInTime``), so it is exploded into
+        one row per timestamp; the ``start_ts < end_ts`` filter used by interval events is
+        deliberately omitted (it would drop every point).
 
         Parameters
         ----------
         spark : SparkSession
             Spark session for data processing.
-        events : list of SequenceOfEvents
-            List of SequenceOfEvents objects to process.
+        events : list of PointsInTimeEvent
+            List of PointsInTimeEvent objects to process.
         solved_df : DataFrame, optional
             Pre-solved wide DataFrame from centralized batch solve. Required.
         query : QueryBuilder, optional
@@ -200,7 +197,7 @@ class SequenceOfEvents(Event):
         """
         if solved_df is None:
             raise ValueError(
-                "SequenceOfEvents.determine_events requires solved_df. "
+                "PointsInTimeEvent.determine_events requires solved_df. "
                 "Provide a pre-solved DataFrame from the centralized batch-solve flow."
             )
 
@@ -217,25 +214,24 @@ class SequenceOfEvents(Event):
             .select(
                 "container_id",
                 "event_name",
-                f.explode(f.col("value")).alias("event_instance"),
+                f.explode(f.col("value")).alias("ts"),
             )
-            .withColumn("start_ts", f.col("event_instance").getItem(0))
-            .withColumn("end_ts", f.col("event_instance").getItem(1))
+            .withColumn("start_ts", f.col("ts").cast("long"))
+            .withColumn("end_ts", f.col("ts").cast("long"))
             .withColumn(
                 "event_instance_id",
-                generate_event_instance_id_column(event_type=SequenceOfEvents),
+                generate_event_instance_id_column(event_type=PointsInTimeEvent),
             )
             .withColumn(
                 "event_id",
                 ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
             )
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
-            .where(f.col("start_ts") < f.col("end_ts"))
         )
         return df
 
     @classmethod
-    def determine_metadata_df(cls, spark: SparkSession, events: list[SequenceOfEvents]):
+    def determine_metadata_df(cls, spark: SparkSession, events: list[PointsInTimeEvent]):
         """
         Create a Spark DataFrame containing event metadata.
 
@@ -243,8 +239,8 @@ class SequenceOfEvents(Event):
         ----------
         spark : SparkSession
             Spark session for data processing.
-        events : list of SequenceOfEvents
-            List of SequenceOfEvents objects.
+        events : list of PointsInTimeEvent
+            List of PointsInTimeEvent objects.
 
         Returns
         -------

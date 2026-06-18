@@ -49,7 +49,7 @@ def test_histogram2d_init():
 def test_histogram_init_with_optional_params():
     """Test Histogram2D initialization with all optional parameters"""
     base_expr = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
     bins = [0.0, 5.0, 10.0]
     hist = Histogram2DDuration(
@@ -107,7 +107,7 @@ def test_get_expression_with_event_expr():
     ts_expr = TimeSeriesSelector(None)
     bins = [0.0, 1.0, 2.0]
 
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     hist = Histogram2DDuration(
@@ -467,7 +467,7 @@ def test_add_event_id_column(spark):
 
     ts_expr = TimeSeriesSelector(None)
     bins = [0.0, 1.0, 2.0]
-    my_event = BasicEvent(name="veh_spd_event", expr=ts_expr, desc="Vehicle speed > 1 km/h")
+    my_event = BasicEvent(name="veh_spd_event", expr=ts_expr > 0, desc="Vehicle speed > 1 km/h")
     hist = Histogram2DDuration(
         name="rpm_vs_speed_hist",
         x_expr=ts_expr,
@@ -697,7 +697,7 @@ def test_histogram2d_custom_weights_init_with_optional_params():
     x_expr = TimeSeriesSelector(None)
     y_expr = TimeSeriesSelector(None)
     weights_expr = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
     x_bins = [0.0, 5.0, 10.0]
     y_bins = [0.0, 100.0, 200.0]
@@ -790,7 +790,7 @@ def test_histogram2d_custom_weights_get_expression_with_event():
     weights_expr = TimeSeriesSelector(None)
     bins = [0.0, 1.0, 2.0]
 
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     hist = Histogram2DCustomWeights(
@@ -961,7 +961,7 @@ def test_histogram2d_distance_init_with_optional_params():
     x_expr = TimeSeriesSelector(None)
     y_expr = TimeSeriesSelector(None)
     weights_expr = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
     x_bins = [0.0, 5.0, 10.0]
     y_bins = [0.0, 100.0, 200.0]
@@ -1050,7 +1050,7 @@ def test_histogram2d_distance_get_expression_with_event():
     weights_expr = TimeSeriesSelector(None)
     bins = [0.0, 1.0, 2.0]
 
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
 
     hist = Histogram2DDistance(
@@ -1300,7 +1300,7 @@ def test_histogram2d_custom_weights_get_event():
     x_expr = TimeSeriesSelector(None)
     y_expr = TimeSeriesSelector(None)
     weights_expr = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
     bins = [0.0, 1.0, 2.0]
 
@@ -1331,7 +1331,7 @@ def test_histogram2d_distance_get_event():
     x_expr = TimeSeriesSelector(None)
     y_expr = TimeSeriesSelector(None)
     weights_expr = TimeSeriesSelector(None)
-    event_expr = TimeSeriesSelector(None)
+    event_expr = TimeSeriesSelector(None) > 0
     basic_event = BasicEvent(name="test_event", expr=event_expr)
     bins = [0.0, 1.0, 2.0]
 
@@ -1533,7 +1533,7 @@ def test_definition_hash_changes_with_event():
     """Adding an event must change the hash."""
     ts_expr = TimeSeriesSelector(None)
     bins = [0.0, 1.0, 2.0]
-    event = BasicEvent(name="ev", expr=TimeSeriesSelector(None))
+    event = BasicEvent(name="ev", expr=TimeSeriesSelector(None) > 0)
     hist_no_event = Histogram2DDuration(
         name="h", x_expr=ts_expr, y_expr=ts_expr, x_bins=bins, y_bins=bins
     )
@@ -1574,3 +1574,28 @@ def test_determine_aggregations_requires_solved_df(spark):
     )
     with pytest.raises(ValueError, match="requires solved_df"):
         Histogram2DDuration.determine_aggregations(spark=spark, aggregations=[hist])
+
+
+def test_init_rejects_non_sample_series_axis_expr():
+    """x_expr / y_expr must evaluate to SampleSeries; an Intervals expression is rejected."""
+    with pytest.raises(ValueError, match="SampleSeries"):
+        Histogram2DDuration(
+            name="bad",
+            x_expr=TimeSeriesSelector(None) > 0,
+            y_expr=TimeSeriesSelector(None),
+            x_bins=[0.0, 1.0],
+            y_bins=[0.0, 1.0],
+        )
+
+
+def test_init_rejects_non_sample_series_weights_expr():
+    """weights_expr must evaluate to SampleSeries; an Intervals expression is rejected."""
+    with pytest.raises(ValueError, match="SampleSeries"):
+        Histogram2DCustomWeights(
+            name="bad",
+            x_expr=TimeSeriesSelector(None),
+            y_expr=TimeSeriesSelector(None),
+            weights_expr=TimeSeriesSelector(None) > 0,
+            x_bins=[0.0, 1.0],
+            y_bins=[0.0, 1.0],
+        )

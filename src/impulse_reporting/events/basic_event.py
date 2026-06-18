@@ -12,6 +12,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.model.series.intervals import Intervals
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
@@ -48,6 +49,9 @@ class BasicEvent(Event):
         """
         Event.__init__(self, name)
         self.expression = expr.alias(name)
+        self.expression.require_evaluation_type(
+            Intervals, owner="BasicEvent", example="(channel > 2000) & (channel < 5000)"
+        )
         self.description = desc
         self.required_channels = required_channels
         normalized_attributes: dict[str, str] = {}

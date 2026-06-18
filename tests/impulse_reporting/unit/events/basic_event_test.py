@@ -8,7 +8,7 @@ from tests.conftest import basic_narrow_db, spark
 
 def test_as_dict():
     """Test as_dict method"""
-    event = BasicEvent(name="my_event_1", expr=TimeSeriesSelector(None))
+    event = BasicEvent(name="my_event_1", expr=(TimeSeriesSelector(None) > 0))
     event_dict = event.as_dict()
     assert isinstance(event_dict, dict)
     assert event_dict.get("event_id") == event.get_id()
@@ -22,20 +22,20 @@ def test_as_dict():
 
 def test_as_spark_row():
     """Test as_spark_row method"""
-    event = BasicEvent(name="my_event_1", expr=TimeSeriesSelector(None))
+    event = BasicEvent(name="my_event_1", expr=(TimeSeriesSelector(None) > 0))
     row = event.as_spark_row()
     assert len(row) == 9
 
 
 def test_get_event_type_str():
     """Test get_event_type_str method."""
-    event = BasicEvent(name="my_event", expr=TimeSeriesSelector(None))
+    event = BasicEvent(name="my_event", expr=(TimeSeriesSelector(None) > 0))
     assert event.get_event_type_str() == "BASIC_EVENT"
 
 
 def test_basic_event_init():
     """Test BasicEvent initialization with required parameters"""
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     event = BasicEvent(name="test_event", expr=expr)
 
     assert event.name == "test_event"
@@ -46,7 +46,7 @@ def test_basic_event_init():
 
 def test_basic_event_init_with_optional_params():
     """Test BasicEvent initialization with all optional parameters"""
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
 
     event = BasicEvent(
         name="test_event",
@@ -63,13 +63,13 @@ def test_basic_event_init_with_optional_params():
 
 def test_get_name():
     """Test get_name method"""
-    event = BasicEvent(name="my_event", expr=TimeSeriesSelector(None))
+    event = BasicEvent(name="my_event", expr=(TimeSeriesSelector(None) > 0))
     assert event.get_name() == "my_event"
 
 
 def test_get_expression():
     """Test get_expression method returns TimeSeriesExpression"""
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     event = BasicEvent(name="test", expr=expr)
     expression = event.get_expression()
     assert expression is not None
@@ -79,7 +79,7 @@ def test_get_expression():
 
 def test_get_expression_str():
     """Test get_expression_str method"""
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     event = BasicEvent(name="test", expr=expr)
     expr_str = event.get_expression_str()
     assert isinstance(expr_str, str)
@@ -126,7 +126,7 @@ def test_determine_metadata_df(spark):
     """Test determine_metadata_df method"""
     event = BasicEvent(
         name="test_event",
-        expr=TimeSeriesSelector(None),
+        expr=(TimeSeriesSelector(None) > 0),
         required_channels=["test_signal"],
     )
 
@@ -149,7 +149,7 @@ def test_determine_metadata_df(spark):
 # ---------------------------------------------------------------------------
 def test_definition_hash_exists_in_as_dict():
     """Verify definition_hash key is present and non-null in as_dict output."""
-    event = BasicEvent(name="hash_event", expr=TimeSeriesSelector(None))
+    event = BasicEvent(name="hash_event", expr=(TimeSeriesSelector(None) > 0))
     d = event.as_dict()
     assert "definition_hash" in d
     assert d["definition_hash"] is not None
@@ -158,7 +158,7 @@ def test_definition_hash_exists_in_as_dict():
 
 def test_definition_hash_exists_in_spark_row():
     """Verify definition_hash field is present in as_spark_row output."""
-    event = BasicEvent(name="hash_event", expr=TimeSeriesSelector(None))
+    event = BasicEvent(name="hash_event", expr=(TimeSeriesSelector(None) > 0))
     row = event.as_spark_row()
     assert hasattr(row, "definition_hash")
     assert row.definition_hash is not None
@@ -167,7 +167,7 @@ def test_definition_hash_exists_in_spark_row():
 
 def test_definition_hash_is_deterministic():
     """Same expression must always produce the same hash."""
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     ev1 = BasicEvent(name="ev", expr=expr)
     ev2 = BasicEvent(name="ev", expr=expr)
     assert ev1.determine_definition_hash() == ev2.determine_definition_hash()
@@ -175,7 +175,7 @@ def test_definition_hash_is_deterministic():
 
 def test_definition_hash_ignores_name():
     """Hash must not change when only the name differs."""
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     ev1 = BasicEvent(name="name_a", expr=expr)
     ev2 = BasicEvent(name="name_b", expr=expr)
     assert ev1.determine_definition_hash() == ev2.determine_definition_hash()
@@ -183,7 +183,7 @@ def test_definition_hash_ignores_name():
 
 def test_definition_hash_ignores_description():
     """Hash must not change when only desc differs."""
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     ev1 = BasicEvent(name="ev", expr=expr, desc="Description A")
     ev2 = BasicEvent(name="ev", expr=expr, desc="Description B")
     assert ev1.determine_definition_hash() == ev2.determine_definition_hash()
@@ -191,13 +191,25 @@ def test_definition_hash_ignores_description():
 
 def test_definition_hash_ignores_required_channels():
     """Hash must not change when only required_channels differs."""
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     ev1 = BasicEvent(name="ev", expr=expr, required_channels=["ch1"])
     ev2 = BasicEvent(name="ev", expr=expr, required_channels=["ch1", "ch2"])
     assert ev1.determine_definition_hash() == ev2.determine_definition_hash()
 
 
 def test_determine_events_requires_solved_df(spark):
-    event = BasicEvent(name="test_event_1", expr=TimeSeriesSelector(None))
+    event = BasicEvent(name="test_event_1", expr=(TimeSeriesSelector(None) > 0))
     with pytest.raises(ValueError, match="requires solved_df"):
         BasicEvent.determine_events(spark, [event])
+
+
+def test_init_rejects_sample_series_expression():
+    """A bare selector evaluates to SampleSeries, not Intervals."""
+    with pytest.raises(ValueError, match="Intervals"):
+        BasicEvent(name="e", expr=TimeSeriesSelector(None))
+
+
+def test_init_rejects_points_in_time_expression():
+    """rising_edges() evaluates to PointsInTime, not Intervals."""
+    with pytest.raises(ValueError, match="Intervals"):
+        BasicEvent(name="e", expr=TimeSeriesSelector(None).rising_edges())

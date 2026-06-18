@@ -61,6 +61,53 @@ class TimeSeriesExpression(abc.ABC):
         """
         return T.DoubleType()
 
+    def evaluation_type(self) -> type:
+        """
+        Return the core-model class this expression evaluates to.
+
+        Builds the expression against an empty cache (cheap, no Spark and no data) and returns the
+        resulting object's type -- e.g. ``SampleSeries``, ``Intervals``, ``PointsInTime``,
+        ``PointsInTimeSeries``, or a numeric type for scalar aggregations. Useful for validating up
+        front that an expression evaluates to an expected type.
+
+        Returns
+        -------
+        type
+            The type of the object the expression evaluates to.
+        """
+        from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
+
+        return type(self.build(EmptyTimeSeriesCache()))
+
+    def require_evaluation_type(
+        self, expected: type, *, owner: str, example: str | None = None
+    ) -> None:
+        """
+        Validate that this expression evaluates to ``expected``; raise otherwise.
+
+        Parameters
+        ----------
+        expected : type
+            Required core-model class (e.g. ``Intervals``, ``SampleSeries``,
+            ``PointsInTime``).
+        owner : str
+            Caller name, used in the error message (e.g. ``"BasicEvent"``).
+        example : str, optional
+            Short example of a valid expression, appended as a hint.
+
+        Raises
+        ------
+        ValueError
+            If the expression does not evaluate to ``expected``.
+        """
+        actual = self.evaluation_type()
+        if actual is not expected:
+            hint = f" (e.g. {example})" if example else ""
+            raise ValueError(
+                f"{owner} requires an expression that evaluates to "
+                f"{expected.__name__}{hint}; got {actual.__name__}"
+            )
+
     def __getstate__(self):  # overwrite to avoid errors from __getattr__
         return self.__dict__
 

@@ -106,7 +106,7 @@ class TestHistogramDefinitionHash:
     def test_hash_with_event_filter(self):
         """Test that hash includes event filter expression."""
         base_expr = TimeSeriesSelector(None)
-        event_expr = TimeSeriesSelector(None)
+        event_expr = TimeSeriesSelector(None) > 0
         event = BasicEvent(name="test_event", expr=event_expr)
         bins = [0.0, 1.0, 2.0]
 

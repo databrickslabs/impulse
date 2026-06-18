@@ -31,6 +31,19 @@ def test_container_event():
     assert result == "event_dimension"
 
 
+def test_points_in_time_event():
+    """POINTS_IN_TIME_EVENT routes to the shared event_instance_fact / event_dimension."""
+    assert EventType.POINTS_IN_TIME_EVENT.get_fact_table_name() == "event_instance_fact"
+    assert EventType.POINTS_IN_TIME_EVENT.get_dimension_table_name() == "event_dimension"
+    assert EventType.POINTS_IN_TIME_EVENT.get_fact_schema().fieldNames() == [
+        "container_id",
+        "event_instance_id",
+        "event_id",
+        "start_ts",
+        "end_ts",
+    ]
+
+
 def test_all_event_type_methods_supported():
     """
     Test that all methods work for all EventType enum values.

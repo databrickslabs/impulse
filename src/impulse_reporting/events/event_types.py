@@ -4,6 +4,7 @@ from pyspark.sql.types import StructType
 
 from impulse_reporting.events.basic_event import BasicEvent
 from impulse_reporting.events.container_event import ContainerEvent
+from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from impulse_reporting.events.sequence_of_events import SequenceOfEvents
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
@@ -30,6 +31,7 @@ class EventType(Enum):
     BASIC_EVENT = BasicEvent
     CONTAINER_EVENT = ContainerEvent
     SEQUENCE_OF_EVENTS = SequenceOfEvents
+    POINTS_IN_TIME_EVENT = PointsInTimeEvent
 
     def get_fact_table_name(self) -> str:
         """
@@ -46,7 +48,12 @@ class EventType(Enum):
             If the event type is not supported.
         """
         match self:
-            case EventType.BASIC_EVENT | EventType.CONTAINER_EVENT | EventType.SEQUENCE_OF_EVENTS:
+            case (
+                EventType.BASIC_EVENT
+                | EventType.CONTAINER_EVENT
+                | EventType.SEQUENCE_OF_EVENTS
+                | EventType.POINTS_IN_TIME_EVENT
+            ):
                 return "event_instance_fact"
             case _:
                 raise ValueError(f"Unsupported event type: {self}")
@@ -66,7 +73,12 @@ class EventType(Enum):
             If the event type is not supported.
         """
         match self:
-            case EventType.BASIC_EVENT | EventType.CONTAINER_EVENT | EventType.SEQUENCE_OF_EVENTS:
+            case (
+                EventType.BASIC_EVENT
+                | EventType.CONTAINER_EVENT
+                | EventType.SEQUENCE_OF_EVENTS
+                | EventType.POINTS_IN_TIME_EVENT
+            ):
                 return EVENT_INSTANCE_FACT_SCHEMA
             case _:
                 raise ValueError(f"Unsupported event type: {self}")
@@ -86,7 +98,12 @@ class EventType(Enum):
             If the event type is not supported.
         """
         match self:
-            case EventType.BASIC_EVENT | EventType.CONTAINER_EVENT | EventType.SEQUENCE_OF_EVENTS:
+            case (
+                EventType.BASIC_EVENT
+                | EventType.CONTAINER_EVENT
+                | EventType.SEQUENCE_OF_EVENTS
+                | EventType.POINTS_IN_TIME_EVENT
+            ):
                 return "event_dimension"
             case _:
                 raise ValueError(f"Unsupported aggregation type: {self}")
@@ -104,7 +121,12 @@ class EventType(Enum):
             If the event type is not supported.
         """
         match self:
-            case EventType.BASIC_EVENT | EventType.CONTAINER_EVENT | EventType.SEQUENCE_OF_EVENTS:
+            case (
+                EventType.BASIC_EVENT
+                | EventType.CONTAINER_EVENT
+                | EventType.SEQUENCE_OF_EVENTS
+                | EventType.POINTS_IN_TIME_EVENT
+            ):
                 return EVENT_DIMENSION_SCHEMA
             case _:
                 raise ValueError(f"Unsupported event type: {self}")

@@ -40,7 +40,7 @@ eng_rpm_event = BasicEvent(
 | Parameter           | Type                   | Required | Description                                                                                          |
 |---------------------|------------------------|----------|------------------------------------------------------------------------------------------------------|
 | `name`              | `str`                  | Yes      | Unique event name. Used as identifier in fact and dimension tables.                                  |
-| `expr`              | `TimeSeriesExpression` | Yes      | Boolean TSAL expression defining the event condition. Must resolve to `Intervals` at execution time. |
+| `expr`              | `TimeSeriesExpression` | Yes      | Boolean TSAL expression defining the event condition. Must evaluate to `Intervals`; validated at construction (raises `ValueError` otherwise). |
 | `desc`              | `str`                  | No       | Human-readable description stored in the event dimension table.                                      |
 | `required_channels` | `list[str]`            | No       | Channel names required for this event. Informational; stored in the event dimension table.           |
 | `attributes`        | `Mapping[str, str]`    | No       | Free-form key-value metadata stored in the event dimension table (e.g. `limit_type`, `limit_direction`). Values are coerced to strings. |
@@ -141,7 +141,7 @@ idle_to_drive = SequenceOfEvents(
 | Parameter           | Type                          | Required | Description                                                                                                                                                                  |
 |---------------------|-------------------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `name`              | `str`                         | Yes      | Unique event name.                                                                                                                                                           |
-| `expressions`       | `list[TimeSeriesExpression]`  | Yes      | Ordered list of expressions. Each must resolve to `Intervals`.                                                                                                               |
+| `expressions`       | `list[TimeSeriesExpression]`  | Yes      | Ordered list of expressions. Each must evaluate to `Intervals`; validated at construction (raises `ValueError` otherwise).                                                   |
 | `desc`              | `str`                         | No       | Human-readable description.                                                                                                                                                  |
 | `required_channels` | `list[str]`                   | No       | Channel names required for this event. Informational; stored in the event dimension table.                                                                                   |
 | `max_overlap`       | `float`                       | No       | Maximum allowed overlap between consecutive intervals. Sequences whose overlap exceeds this value are skipped. Expressed in the same time unit as the underlying timestamps. |
@@ -157,6 +157,38 @@ idle_to_drive = SequenceOfEvents(
 
 ---
 
+## PointsInTimeEvent
+
+A `PointsInTimeEvent` derives event instances from a TSAL expression that evaluates to a
+`PointsInTime` (a set of instants) — typically `channel.rising_edges()` or `channel.falling_edges()`.
+Each instant becomes one **zero-duration** event instance (`start_ts == end_ts`), in contrast to
+[`BasicEvent`](#basicevent), which produces durationed intervals.
+
+```python
+from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
+
+eng_rpm = my_report.get_db().query.channel(channel_name="Engine RPM")
+rpm_rising = PointsInTimeEvent(
+    name="rpm_rising_edges",
+    expr=eng_rpm.rising_edges(),
+    desc="Instants where engine RPM rises",
+)
+my_report.add_event(rpm_rising)
+```
+
+### How it works
+
+1. The expression is solved against the report's wide DataFrame, producing a flat array of timestamps.
+2. Each timestamp is materialized as one event instance with `start_ts == end_ts` in the shared
+   `event_instance_fact` table.
+
+The expression **must** evaluate to a `PointsInTime`; otherwise construction raises a `ValueError`
+(use [`BasicEvent`](#basicevent) for an `Intervals` condition). Point instances share
+`event_instance_fact` with interval events — distinguish them by joining `event_dimension` on
+`event_id` and filtering `event_type == "POINTS_IN_TIME_EVENT"`, or by the `start_ts == end_ts` property.
+
+---
+
 ## Event output schema
 
 ### event_dimension
@@ -167,7 +199,7 @@ Stores event definitions (one row per event per report).
 |---------------------|---------------------|-----------------------------------------------------------------------------|
 | `event_id`          | `int`               | Unique event identifier (CRC32 hash of name + expression).                  |
 | `report_id`         | `int`               | Report identifier.                                                          |
-| `event_type`        | `str`               | `"BASIC_EVENT"`, `"CONTAINER_EVENT"`, or `"SEQUENCE_OF_EVENTS"`.             |
+| `event_type`        | `str`               | `"BASIC_EVENT"`, `"CONTAINER_EVENT"`, `"SEQUENCE_OF_EVENTS"`, or `"POINTS_IN_TIME_EVENT"`. |
 | `event_name`        | `str`               | Event name.                                                                 |
 | `event_description` | `str`               | Event description.                                                          |
 | `required_channels` | `array[str]`        | Required channel names (null for `ContainerEvent`).                         |
@@ -187,12 +219,16 @@ Stores materialized event occurrences (one row per event instance per container)
 | `start_ts`          | `long` | Event instance start timestamp.          |
 | `end_ts`            | `long` | Event instance end timestamp.            |
 
+Interval events satisfy `start_ts < end_ts`; `PointsInTimeEvent` instances are zero-duration
+(`start_ts == end_ts`).
+
 ---
 
 ## Choosing between event types
 
-| Criterion                        | BasicEvent                                              | ContainerEvent                                    | SequenceOfEvents                                                          |
-|----------------------------------|---------------------------------------------------------|---------------------------------------------------|---------------------------------------------------------------------------|
-| Requires a TSAL expression       | Yes (one)                                               | No                                                | Yes (ordered list)                                                        |
-| Multiple instances per container | Yes (one per matching interval)                         | No (always one per container)                     | Yes (one per joined sequence)                                             |
-| Use case                         | Signal-based conditions, operating bands, distance bins | Full-run aggregations, container-level statistics | State transitions and multi-step patterns where consecutive states overlap |
+| Criterion                        | BasicEvent                                              | ContainerEvent                                    | SequenceOfEvents                                                          | PointsInTimeEvent                                          |
+|----------------------------------|---------------------------------------------------------|---------------------------------------------------|---------------------------------------------------------------------------|------------------------------------------------------------|
+| Requires a TSAL expression       | Yes (one)                                               | No                                                | Yes (ordered list)                                                        | Yes (one, must evaluate to `PointsInTime`)                 |
+| Multiple instances per container | Yes (one per matching interval)                         | No (always one per container)                     | Yes (one per joined sequence)                                             | Yes (one per instant)                                      |
+| Instance duration                | Interval (`start_ts < end_ts`)                          | Full container window                             | Interval (`start_ts < end_ts`)                                            | Zero (`start_ts == end_ts`)                                |
+| Use case                         | Signal-based conditions, operating bands, distance bins | Full-run aggregations, container-level statistics | State transitions and multi-step patterns where consecutive states overlap | Edge/instant events, e.g. `rising_edges()` / `falling_edges()` |

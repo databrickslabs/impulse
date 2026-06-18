@@ -12,6 +12,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import HISTOGRAM_DIMENSION_SCHEMA
@@ -60,6 +61,9 @@ class Histogram(Aggregation, ABC):
         """
         Aggregation.__init__(self, name)
         self.base_expr = base_expr
+        self.base_expr.require_evaluation_type(
+            SampleSeries, owner=type(self).__name__, example="a channel selection"
+        )
         self.bins = bins
         self.event = event
         self.desc = desc
@@ -416,6 +420,9 @@ class HistogramCustomWeights(Histogram):
             bins_unit,
         )
         self.weights_expr = weights_expr
+        self.weights_expr.require_evaluation_type(
+            SampleSeries, owner=type(self).__name__, example="a channel selection"
+        )
         self.weights_channel_name = weights_channel_name
         self.channel_interp_kind = channel_interp_kind
         self.weights_interp_kind = weights_interp_kind

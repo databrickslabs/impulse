@@ -27,7 +27,7 @@ def test_empty_events_list_returns_empty_tuples(spark):
 def test_all_events_changed_when_table_does_not_exist(spark):
     """Test that all events are marked as changed when gold table doesn't exist."""
     comparator = DefinitionHashComparator(spark)
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     events = [
         BasicEvent(name="event_1", expr=expr),
         BasicEvent(name="event_2", expr=expr),
@@ -48,7 +48,7 @@ def test_all_events_changed_when_table_does_not_exist(spark):
 def test_new_event_is_marked_as_changed(spark):
     """Test that a new event not in gold table is marked as changed."""
     comparator = DefinitionHashComparator(spark)
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
 
     # Create an event
     new_event = BasicEvent(name="new_event", expr=expr)
@@ -80,7 +80,7 @@ def test_new_event_is_marked_as_changed(spark):
 def test_unchanged_event_with_matching_hash(spark):
     """Test that event with matching hash is marked as unchanged."""
     comparator = DefinitionHashComparator(spark)
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     event = BasicEvent(name="test_event", expr=expr)
 
     # Create dimension table with matching hash
@@ -110,7 +110,7 @@ def test_unchanged_event_with_matching_hash(spark):
 def test_changed_event_with_different_hash(spark):
     """Test that event with different hash is marked as changed."""
     comparator = DefinitionHashComparator(spark)
-    expr = TimeSeriesSelector(None)
+    expr = TimeSeriesSelector(None) > 0
     event = BasicEvent(name="test_event", expr=expr)
 
     # Create dimension table with different hash (simulating definition change)
