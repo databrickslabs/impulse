@@ -61,6 +61,24 @@ class TimeSeriesExpression(abc.ABC):
         """
         return T.DoubleType()
 
+    def evaluation_type(self) -> type:
+        """
+        Return the core-model class this expression evaluates to.
+
+        Builds the expression against an empty cache (cheap, no Spark and no data) and returns the
+        resulting object's type -- e.g. ``SampleSeries``, ``Intervals``, ``PointsInTime``,
+        ``PointsInTimeSeries``, or a numeric type for scalar aggregations. Useful for validating up
+        front that an expression evaluates to an expected type.
+
+        Returns
+        -------
+        type
+            The type of the object the expression evaluates to.
+        """
+        from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
+
+        return type(self.build(EmptyTimeSeriesCache()))
+
     def __getstate__(self):  # overwrite to avoid errors from __getattr__
         return self.__dict__
 

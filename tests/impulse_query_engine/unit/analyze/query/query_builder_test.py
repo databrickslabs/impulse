@@ -65,6 +65,35 @@ def test_pointsInTimeSeries_dtype(narrow_db):
     assert isinstance(result_objects[0], PointsInTimeSeries)
 
 
+# ---------------------------------------------------------------------------
+# TimeSeriesExpression.evaluation_type (builds against an empty cache, no Spark)
+# ---------------------------------------------------------------------------
+def _eval_ts():
+    return TimeSeriesSelector(TagSelector("name") == "test")
+
+
+def test_evaluation_type_sample_series():
+    assert _eval_ts().evaluation_type() is SampleSeries
+
+
+def test_evaluation_type_intervals():
+    assert (_eval_ts() > 0).evaluation_type() is Intervals
+
+
+def test_evaluation_type_points_in_time():
+    assert _eval_ts().rising_edge().evaluation_type() is PointsInTime
+
+
+def test_evaluation_type_points_in_time_series():
+    ts = _eval_ts()
+    assert ts.where(ts.rising_edge()).evaluation_type() is PointsInTimeSeries
+
+
+def test_evaluation_type_scalar():
+    # scalar aggregations evaluate to a (numpy) float; np.float64 subclasses float
+    assert issubclass(_eval_ts().mean().evaluation_type(), float)
+
+
 def test_multiple_selections_dtype(narrow_db):
     query = narrow_db.query
     ts1 = TimeSeriesSelector(TagSelector("name") == "test_1")
