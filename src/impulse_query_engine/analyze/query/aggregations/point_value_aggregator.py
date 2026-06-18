@@ -112,10 +112,10 @@ class PointValueAggregator(Aggregation):
         point_timestamps: list[list[float]] = []
         values: list[list[float]] = []
         for expr in self.input_expressions:
-            series = expr.build(cache)
-            pit = series.where(points)
-            point_timestamps.append(pit.tstarts.tolist())
-            values.append(pit.values.tolist())
+            sample_series = expr.build(cache)
+            pit_series = sample_series.where(points)
+            point_timestamps.append(pit_series.tstarts.tolist())
+            values.append(pit_series.values.tolist())
         return (point_timestamps, values)
 
     def required_tags(self) -> set[str]:

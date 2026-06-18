@@ -140,3 +140,20 @@ def test_determine_metadata_df(spark):
     df = PointValueAggregator.determine_metadata_df(spark, [agg])
     assert df.count() == 1
     assert df.collect()[0]["agg_type"] == "point_value_aggregator"
+
+
+def test_get_expression_str():
+    s = _aggregator().get_expression_str()
+    assert isinstance(s, str)
+    assert s != "NA"
+    assert "PointValueAggregator" in s
+
+
+def test_empty_input_expressions_raises():
+    with pytest.raises(ValueError, match="At least one input expression"):
+        PointValueAggregator(
+            name="bad",
+            input_expressions=[],
+            channel_names=[],
+            event=_pit_event(),
+        )

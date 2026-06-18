@@ -891,3 +891,26 @@ class TestPersistFullDictHandling:
             # Should only include the non-None df
             assert isinstance(dfs_arg, list)
             assert len(dfs_arg) == 1
+
+    def test_persist_full_skips_when_all_dfs_none(self, spark):
+        """A type with neither changed nor unchanged dfs yields an empty grouped list,
+        so the per-table loop skips it and no write happens."""
+        report = _build_report(spark)
+
+        report.aggregation_dfs = {"HISTOGRAM": {"changed": None, "unchanged": None}}
+        report.aggregation_metadata_dfs = {}
+        report.event_dfs = {}
+        report.event_metadata_dfs = {}
+        report.container_dimension_df = None
+
+        with patch("impulse_reporting.core.report.WriterFactory") as mock_factory_cls:
+            mock_writer = MagicMock()
+            mock_writer.extract_fact_schema_and_output_uri.return_value = (
+                MagicMock(),
+                "catalog.gold.hist_fact",
+            )
+            mock_factory_cls.return_value.create_writer.return_value = mock_writer
+
+            report._persist_full()
+
+            mock_writer.write.assert_not_called()
