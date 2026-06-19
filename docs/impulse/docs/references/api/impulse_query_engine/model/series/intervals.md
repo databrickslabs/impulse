@@ -171,6 +171,30 @@ Returns an array of all end times.
 
 `numpy.ndarray`: Array of interval end times.
 
+#### start\_points
+
+```python
+def start_points() -> PointsInTime
+```
+
+Returns the start time of each interval as a PointsInTime.
+
+**Returns**:
+
+`PointsInTime`: Points in time, one at the start of each interval.
+
+#### end\_points
+
+```python
+def end_points() -> PointsInTime
+```
+
+Returns the end time of each interval as a PointsInTime.
+
+**Returns**:
+
+`PointsInTime`: Points in time, one at the end of each interval.
+
 #### start\_time
 
 ```python

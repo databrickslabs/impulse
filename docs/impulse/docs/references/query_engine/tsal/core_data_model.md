@@ -34,6 +34,7 @@ graph LR
   SS -->|"where(PointsInTime)"| PITS["PointsInTimeSeries"]
   SS -->|"min / max / mean / sum"| SC(["scalar"])
   IV -->|"intersect with PointsInTime"| PIT
+  IV -->|"start / end points"| PIT
   PIT -->|expand| IV
   PITS -->|compare| PIT
   PITS -->|"min / max / mean / sum"| SC
@@ -86,7 +87,8 @@ eng_rpm > 2000          # Intervals: every window where RPM exceeds 2000
 
 Key operations: `&` (intersection), `|` (union), `expand()` / `shrink()` (grow or contract window
 bounds), `merge_overlaps()` / `merge_intervals(gap)`, `debounce(d)`, and `filter(d)` (drop windows
-shorter than `d`). Intersecting `Intervals` with a `PointsInTime` keeps only the points that fall
+shorter than `d`). `start_points()` / `end_points()` turn the window boundaries into a
+`PointsInTime`. Intersecting `Intervals` with a `PointsInTime` keeps only the points that fall
 inside a window and returns a `PointsInTime`.
 
 → API: [`Intervals`](../../api/impulse_query_engine/model/series/intervals.md)
@@ -155,6 +157,7 @@ Operations move between the four classes (and scalars) in well-defined ways:
 | `SampleSeries`       | `sum()` / `min()` / `max()` / `mean()`         | scalar               |
 | `Intervals`          | `&` / `\|`                                     | `Intervals`          |
 | `Intervals`          | `& PointsInTime`                               | `PointsInTime`       |
+| `Intervals`          | `start_points()` / `end_points()`              | `PointsInTime`       |
 | `PointsInTime`       | `expand()` / `expand_left()` / `expand_right()`| `Intervals`          |
 | `PointsInTimeSeries` | `> >= < <= == !=`                              | `PointsInTime`       |
 | `PointsInTimeSeries` | `+ - * /`                                      | `PointsInTimeSeries` |

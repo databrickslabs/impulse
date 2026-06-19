@@ -91,6 +91,34 @@ def test_ends():
     nptest.assert_array_equal([0, 1], intvls.starts())
 
 
+def test_start_points_empty():
+    intvls = Intervals.empty()
+    result = intvls.start_points()
+    assert isinstance(result, PointsInTime)
+    assert len(result) == 0
+
+
+def test_start_points():
+    intvls = Intervals([0, 1], [1, 2])
+    result = intvls.start_points()
+    assert isinstance(result, PointsInTime)
+    nptest.assert_array_equal([0, 1], result.tstarts)
+
+
+def test_end_points_empty():
+    intvls = Intervals.empty()
+    result = intvls.end_points()
+    assert isinstance(result, PointsInTime)
+    assert len(result) == 0
+
+
+def test_end_points():
+    intvls = Intervals([0, 1], [1, 2])
+    result = intvls.end_points()
+    assert isinstance(result, PointsInTime)
+    nptest.assert_array_equal([1, 2], result.tstarts)
+
+
 def test_start_time_empty():
     intvls = Intervals.empty()
     assert np.isnan(intvls.start_time())
@@ -1013,3 +1041,35 @@ def test_plane_sweep_intervals_and_points_in_time():
     result = Intervals.plane_sweep(intervals1, points_in_time)
     expected = [(0, 0), (1, 1), (2, 2)]
     assert result == expected
+
+
+def test_timeseries_op_start_points(mocker):
+    """
+    (EngSpd > 2000).start_points() builds to a PointsInTime at each window start.
+
+    EngSpd > 2000 yields windows [1, 3), [5, 7), [8, 9); their starts are [1, 5, 8].
+    """
+    eng_spd = TimeSeriesSelector(TagSelector("channel_name") == "EngSpd")
+    expr = (eng_spd > 2000).start_points()
+
+    cache = _make_cache(mocker, _eng_spd_series())
+    result = expr.build(cache)
+
+    assert isinstance(result, PointsInTime)
+    nptest.assert_array_equal([1, 5, 8], result.tstarts)
+
+
+def test_timeseries_op_end_points(mocker):
+    """
+    (EngSpd > 2000).end_points() builds to a PointsInTime at each window end.
+
+    EngSpd > 2000 yields windows [1, 3), [5, 7), [8, 9); their ends are [3, 7, 9].
+    """
+    eng_spd = TimeSeriesSelector(TagSelector("channel_name") == "EngSpd")
+    expr = (eng_spd > 2000).end_points()
+
+    cache = _make_cache(mocker, _eng_spd_series())
+    result = expr.build(cache)
+
+    assert isinstance(result, PointsInTime)
+    nptest.assert_array_equal([3, 7, 9], result.tstarts)

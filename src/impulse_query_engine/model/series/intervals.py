@@ -254,6 +254,28 @@ class Intervals:
         """
         return self.tends
 
+    def start_points(self) -> PointsInTime:
+        """
+        Returns the start time of each interval as a PointsInTime.
+
+        Returns
+        -------
+        PointsInTime
+            Points in time, one at the start of each interval.
+        """
+        return PointsInTime(self.tstarts)
+
+    def end_points(self) -> PointsInTime:
+        """
+        Returns the end time of each interval as a PointsInTime.
+
+        Returns
+        -------
+        PointsInTime
+            Points in time, one at the end of each interval.
+        """
+        return PointsInTime(self.tends)
+
     def start_time(self) -> np.float64:
         """
         Returns the start time of the first interval.
