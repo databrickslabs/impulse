@@ -54,6 +54,10 @@ dev = [
     "setuptools==75.8.2",
     "black==26.3.1"
 ]
+# Test-only deps (not installed with the published wheel or local-dev extras).
+test = [
+    "asammdf==8.0.1",
+]
 
 # Setuptools options
 [tool.setuptools.dynamic]
@@ -134,7 +138,7 @@ ignore = [
 convention = "numpy"
 
 [tool.ruff.lint.isort]
-known-first-party = ["impulse_query_engine", "impulse_reporting"]
+known-first-party = ["impulse_query_engine", "impulse_reporting", "impulse_ds"]
 
 [tool.black]
 line-length = 99

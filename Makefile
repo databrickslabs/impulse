@@ -10,14 +10,14 @@ endif
 # Ensure that build-system requires are hash-verified when building.
 export UV_BUILD_CONSTRAINT := .build-constraints.txt
 
-UV_RUN := uv run --exact --all-extras
+UV_RUN := uv run --exact --all-extras --group test
 
 clean:
 	rm -fr .venv htmlcov .pytest_cache .ruff_cache .coverage coverage.xml test-results.xml
 	find . -name '__pycache__' -print0 | xargs -0 rm -fr
 
 dev:
-	uv sync --all-extras
+	uv sync --all-extras --group test
 
 lint:
 	$(UV_RUN) black --check src/ tests/
