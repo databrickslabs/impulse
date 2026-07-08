@@ -165,7 +165,7 @@ class DefaultSolver(QuerySolver):
         self.rle_encoder: RleEncoder = RleEncoder(
             config=self.config,
             timestamp_col_name="timestamp",
-            drop_implausible_data_points=self.drop_implausible_data
+            drop_implausible_data_points=self.drop_implausible_data,
         )
 
     # ------------------------------------------------------------------
