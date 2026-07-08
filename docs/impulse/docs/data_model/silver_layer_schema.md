@@ -341,9 +341,10 @@ interval `[tstart, tend)` with a constant value. Used when
 ### Raw format
 
 Raw timestamp-based data without RLE encoding — one row per sample. Used
-when `data_type: RAW` is set in the report config; the engine derives
-`tend` from subsequent timestamps and transforms the data into RLE before
-query execution.
+when `data_type: RAW` is set in the report config; the engine run-length
+encodes it before query execution — deriving `tend` from the next timestamp
+and collapsing consecutive equal values into a single `[tstart, tend)`
+interval per run.
 
 | Column         | Type     | Nullable | Description                      |
 |----------------|----------|----------|----------------------------------|

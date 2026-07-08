@@ -16,7 +16,7 @@ from impulse_query_engine.model.series.sample_series import SampleSeries
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
 from .solver_config import SolverConfig
-from .utils.interval_encoder import IntervalEncoder
+from .utils.rle_encoder import RleEncoder
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
@@ -162,9 +162,10 @@ class DefaultSolver(QuerySolver):
         self.spark = spark
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
-        self.interval_encoder: IntervalEncoder = IntervalEncoder(
+        self.rle_encoder: RleEncoder = RleEncoder(
+            config=self.config,
             timestamp_col_name="timestamp",
-            drop_implausible_data_points=self.drop_implausible_data,
+            drop_implausible_data_points=self.drop_implausible_data
         )
 
     # ------------------------------------------------------------------
@@ -931,8 +932,8 @@ class DefaultSolver(QuerySolver):
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
 
         if self.is_raw_data:
-            # Calculate the tend info and prepare the data for the solving step.
-            q = self.interval_encoder.prepare_channels_df(q)
+            # Run-length encode the raw samples into intervals for the solving step.
+            q = self.rle_encoder.prepare_channels_df(q)
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(

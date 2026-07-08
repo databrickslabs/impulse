@@ -385,7 +385,7 @@ class QueryEngine(BaseModel):
         """`drop_implausible_data=True` currently only takes effect with RAW data.
 
         The filter is applied inside the RAW -> RLE conversion path in
-        ``IntervalEncoder.prepare_channels_df``. RLE input short-circuits that
+        ``RleEncoder.prepare_channels_df``. RLE input short-circuits that
         path and the flag is silently ignored, so we reject the combination at
         config validation time.
         """
