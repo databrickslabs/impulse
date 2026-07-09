@@ -27,6 +27,11 @@ silver_rle_encoded_schema = T.StructType(
     ]
 )
 
+silver_schema_with_plausible = T.StructType(
+    silver_schema_without_rle.fields
+    + [T.StructField("is_plausible", T.BooleanType(), True)]
+)
+
 
 class TestRleEncoder:
     """Test class for RLE encoder functionality."""
@@ -460,7 +465,48 @@ class TestRleEncoder:
         )
 
         expected_result_data = [
-            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=3.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=2.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=3.0, tend=3.0, value=10.0)
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_keeps_implausible_when_disabled(self, spark: SparkSession):
+        """Test that an implausible point inside the df is kept when filtering is off.
+
+        Input (drop_implausible_data_points=False -- the default; the
+        ``is_plausible`` column is present but must NOT be consulted):
+            | container_id | channel_id | timestamp | value | is_plausible |
+            |--------------|------------|-----------|-------|--------------|
+            | c1           | ch1        | 0.0       | 10.0  | True         |
+            | c1           | ch1        | 1.0       | 10.0  | True         |
+            | c1           | ch1        | 2.0       | 999.0 | False        |  <-- implausible, mid-run
+            | c1           | ch1        | 3.0       | 10.0  | True         |
+
+        Expects 3 intervals: the implausible ``999.0`` sample is retained and
+        forms its own run, splitting the surrounding ``10.0`` run. The
+        ``is_plausible`` column is dropped from the output by the run aggregation.
+        """
+        schema = T.StructType(
+            silver_schema_without_rle.fields
+            + [T.StructField("is_plausible", T.BooleanType(), True)]
+        )
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
+            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=10.0, is_plausible=True),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=2.0, value=999.0, is_plausible=False
+            ),
+            Row(container_id="c1", channel_id="ch1", timestamp=3.0, value=10.0, is_plausible=True),
+        ]
+        df = spark.createDataFrame(data, schema)
+        # drop_implausible_data_points defaults to False
+        result = RleEncoder(SolverConfig()).prepare_channels_df(df)
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=2.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=2.0, tend=3.0, value=999.0),
+            Row(container_id="c1", channel_id="ch1", tstart=3.0, tend=3.0, value=10.0),
         ]
         expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
         assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
@@ -586,6 +632,296 @@ class TestRleEncoder:
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=2.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=2.0, tend=2.0, value=20.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_drops_implausible_same_value_splits_run(
+        self, spark: SparkSession
+    ):
+        """Test that dropping a same-valued implausible sample splits the interval.
+
+        This is the case that exercises the ``& is_plausible`` term in the
+        run-change condition of :meth:`_assign_run_ids`.  Without that term the
+        implausible sample would carry ``value_diff = 0`` (its value matches its
+        neighbours), so the surrounding samples would share a single run id and,
+        after the implausible row is dropped, be *bridged* into one interval.
+        With the term the implausible sample forces a run boundary, so dropping
+        it splits the run instead.
+
+        Input (drop_implausible_data_points=True):
+            | container_id | channel_id | timestamp | value | is_plausible |
+            |--------------|------------|-----------|-------|--------------|
+            | c1           | ch1        | 0.0       | 10.0  | True         |
+            | c1           | ch1        | 1.0       | 10.0  | True         |
+            | c1           | ch1        | 2.0       | 10.0  | False        |  <-- same value!
+            | c1           | ch1        | 3.0       | 10.0  | True         |
+
+        Expects 2 intervals -- NOT one merged interval.  If the encoder merged
+        across the dropped sample the result would instead be a single
+        ``(0.0, 3.0, 10.0)`` run, which this test guards against.
+        """
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
+            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=10.0, is_plausible=True),
+            Row(container_id="c1", channel_id="ch1", timestamp=2.0, value=10.0, is_plausible=False),
+            Row(container_id="c1", channel_id="ch1", timestamp=3.0, value=10.0, is_plausible=True),
+        ]
+        df = spark.createDataFrame(data, silver_schema_with_plausible)
+        result = RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(
+            df
+        )
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=2.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=3.0, tend=3.0, value=10.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_drops_implausible_tail_extends_tend(self, spark: SparkSession):
+        """Test that a run's ``tend`` bridges over a dropped trailing implausible sample.
+
+        A dropped implausible sample is removed *after* ``next_time`` is
+        computed, so the preceding run's ``tend`` still points at the dropped
+        sample's timestamp.  The final interval therefore extends up to the
+        instant the implausible reading occurred, rather than stopping at the
+        last plausible sample.  This test pins that behaviour down.
+
+        Input (drop_implausible_data_points=True):
+            | container_id | channel_id | timestamp | value  | is_plausible |
+            |--------------|------------|-----------|--------|--------------|
+            | c1           | ch1        | 0.0       | 10.0   | True         |
+            | c1           | ch1        | 1.0       | 10.0   | True         |
+            | c1           | ch1        | 2.0       | 999.0  | False        |  <-- trailing
+
+        Expects 1 interval ending at ``tend = 2.0`` (the dropped sample's
+        timestamp), even though the last plausible sample is at ``1.0``.
+        """
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
+            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=10.0, is_plausible=True),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=2.0, value=999.0, is_plausible=False
+            ),
+        ]
+        df = spark.createDataFrame(data, silver_schema_with_plausible)
+        result = RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(
+            df
+        )
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=2.0, value=10.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_drops_leading_implausible(self, spark: SparkSession):
+        """Test that a leading implausible sample is dropped and the rest collapse.
+
+        Input (drop_implausible_data_points=True):
+            | container_id | channel_id | timestamp | value  | is_plausible |
+            |--------------|------------|-----------|--------|--------------|
+            | c1           | ch1        | 0.0       | 999.0  | False        |  <-- leading
+            | c1           | ch1        | 1.0       | 10.0   | True         |
+            | c1           | ch1        | 2.0       | 10.0   | True         |
+
+        Expects 1 interval spanning the two surviving samples.
+        """
+        data = [
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=0.0, value=999.0, is_plausible=False
+            ),
+            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=10.0, is_plausible=True),
+            Row(container_id="c1", channel_id="ch1", timestamp=2.0, value=10.0, is_plausible=True),
+        ]
+        df = spark.createDataFrame(data, silver_schema_with_plausible)
+        result = RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(
+            df
+        )
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=1.0, tend=2.0, value=10.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_drops_consecutive_implausible(self, spark: SparkSession):
+        """Test that a run of consecutive implausible samples is fully removed.
+
+        Input (drop_implausible_data_points=True):
+            | container_id | channel_id | timestamp | value  | is_plausible |
+            |--------------|------------|-----------|--------|--------------|
+            | c1           | ch1        | 0.0       | 10.0   | True         |
+            | c1           | ch1        | 1.0       | 999.0  | False        |
+            | c1           | ch1        | 2.0       | 888.0  | False        |
+            | c1           | ch1        | 3.0       | 10.0   | True         |
+
+        Expects 2 intervals -- both implausible samples are removed and the
+        surrounding ``10.0`` samples are split (not bridged).
+        """
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=1.0, value=999.0, is_plausible=False
+            ),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=2.0, value=888.0, is_plausible=False
+            ),
+            Row(container_id="c1", channel_id="ch1", timestamp=3.0, value=10.0, is_plausible=True),
+        ]
+        df = spark.createDataFrame(data, silver_schema_with_plausible)
+        result = RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(
+            df
+        )
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=3.0, tend=3.0, value=10.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_drops_entire_partition_when_all_implausible(
+        self, spark: SparkSession
+    ):
+        """Test that a partition with only implausible samples vanishes from the output.
+
+        Input (drop_implausible_data_points=True):
+            | container_id | channel_id | timestamp | value  | is_plausible |
+            |--------------|------------|-----------|--------|--------------|
+            | c1           | ch1        | 0.0       | 10.0   | False        |  <-- all bad
+            | c1           | ch1        | 1.0       | 20.0   | False        |  <-- all bad
+            | c1           | ch2        | 0.0       | 5.0    | True         |
+            | c1           | ch2        | 1.0       | 5.0    | True         |
+
+        Expects only ch2 in the output; ch1 is dropped entirely.
+        """
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=False),
+            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False),
+            Row(container_id="c1", channel_id="ch2", timestamp=0.0, value=5.0, is_plausible=True),
+            Row(container_id="c1", channel_id="ch2", timestamp=1.0, value=5.0, is_plausible=True),
+        ]
+        df = spark.createDataFrame(data, silver_schema_with_plausible)
+        result = RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(
+            df
+        )
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch2", tstart=0.0, tend=1.0, value=5.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_drops_implausible_across_partitions(self, spark: SparkSession):
+        """Test that dropping is applied independently per container/channel.
+
+        Input (drop_implausible_data_points=True):
+            | container_id | channel_id | timestamp | value  | is_plausible |
+            |--------------|------------|-----------|--------|--------------|
+            | c1           | ch1        | 0.0       | 10.0   | True         |
+            | c1           | ch1        | 1.0       | 999.0  | False        |  <-- different value
+            | c1           | ch1        | 2.0       | 10.0   | True         |
+            | c2           | ch1        | 0.0       | 20.0   | True         |
+            | c2           | ch1        | 1.0       | 20.0   | False        |  <-- same value
+            | c2           | ch1        | 2.0       | 20.0   | True         |
+
+        Expects each partition split around its own dropped sample, with no
+        cross-partition leakage of run ids.
+        """
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=1.0, value=999.0, is_plausible=False
+            ),
+            Row(container_id="c1", channel_id="ch1", timestamp=2.0, value=10.0, is_plausible=True),
+            Row(container_id="c2", channel_id="ch1", timestamp=0.0, value=20.0, is_plausible=True),
+            Row(container_id="c2", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False),
+            Row(container_id="c2", channel_id="ch1", timestamp=2.0, value=20.0, is_plausible=True),
+        ]
+        df = spark.createDataFrame(data, silver_schema_with_plausible)
+        result = RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(
+            df
+        )
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=2.0, tend=2.0, value=10.0),
+            Row(container_id="c2", channel_id="ch1", tstart=0.0, tend=1.0, value=20.0),
+            Row(container_id="c2", channel_id="ch1", tstart=2.0, tend=2.0, value=20.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_drops_null_plausible_splits_run(self, spark: SparkSession):
+        """Test that a NULL ``is_plausible`` sample is dropped and splits the run.
+
+        A NULL flag is treated as not-plausible: the ``& is_plausible`` term
+        evaluates to NULL (falsy) so the sample forces a run boundary, and the
+        ``F.col("is_plausible")`` filter drops NULL rows.  The surrounding
+        same-valued samples are therefore split rather than bridged.
+
+        Input (drop_implausible_data_points=True):
+            | container_id | channel_id | timestamp | value | is_plausible |
+            |--------------|------------|-----------|-------|--------------|
+            | c1           | ch1        | 0.0       | 10.0  | True         |
+            | c1           | ch1        | 1.0       | 10.0  | None         |  <-- NULL
+            | c1           | ch1        | 2.0       | 10.0  | True         |
+
+        Expects 2 intervals.
+        """
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
+            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=10.0, is_plausible=None),
+            Row(container_id="c1", channel_id="ch1", timestamp=2.0, value=10.0, is_plausible=True),
+        ]
+        df = spark.createDataFrame(data, silver_schema_with_plausible)
+        result = RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(
+            df
+        )
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=2.0, tend=2.0, value=10.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_prepare_channels_df_drops_implausible_matching_following_value(
+        self, spark: SparkSession
+    ):
+        """Test dropping an implausible sample whose value equals the NEXT sample's.
+
+        The following plausible sample compares against the dropped sample's
+        value (its ``prev_value``); because they are equal it would carry
+        ``value_diff = 0``.  It nonetheless ends up in its own run: the
+        implausible sample already opened a fresh run id which the following
+        sample simply continues, and once the implausible row is filtered out
+        that run stands alone.
+
+        Input (drop_implausible_data_points=True):
+            | container_id | channel_id | timestamp | value | is_plausible |
+            |--------------|------------|-----------|-------|--------------|
+            | c1           | ch1        | 0.0       | 10.0  | True         |
+            | c1           | ch1        | 1.0       | 20.0  | False        |  <-- == next
+            | c1           | ch1        | 2.0       | 20.0  | True         |
+
+        Expects 2 intervals: ``10.0`` then ``20.0``.
+        """
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
+            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False),
+            Row(container_id="c1", channel_id="ch1", timestamp=2.0, value=20.0, is_plausible=True),
+        ]
+        df = spark.createDataFrame(data, silver_schema_with_plausible)
+        result = RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(
+            df
+        )
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
             Row(container_id="c1", channel_id="ch1", tstart=2.0, tend=2.0, value=20.0),
         ]
         expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)

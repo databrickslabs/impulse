@@ -58,20 +58,31 @@ class RleEncoder:
         pyspark.sql.DataFrame
             DataFrame with the container id and channel id columns, ``tstart``,
             ``tend`` and ``value`` -- one row per constant-value run.
+
+        Notes
+        -----
+        Run ids are assigned over the *full* input, so an implausible sample
+        still acts as a run boundary.  Implausible rows are only removed
+        afterwards (when ``drop_implausible_data_points`` is set), so a dropped
+        implausible sample splits the surrounding run rather than being bridged
+        over -- it simply is not emitted as its own interval.
         """
         return (
-            df.transform(self._remove_implausible_data_points)
-            .transform(self._assign_run_ids)
+            df.transform(self._assign_run_ids)
+            .transform(self._remove_implausible_data_points)
             .transform(self._aggregate_runs)
         )
 
     def _remove_implausible_data_points(self, df: DataFrame) -> DataFrame:
-        """Optionally drop rows flagged as implausible before run detection.
+        """Optionally drop rows flagged as implausible after run assignment.
 
         When ``drop_implausible_data_points`` is ``True``, filters out rows whose
-        ``is_plausible`` column is not ``True`` (dropping ``False`` and ``NULL``) so
-        that implausible samples do not split or extend a run.  When ``False``, the
-        DataFrame is returned unchanged.
+        ``is_plausible`` column is not ``True`` (dropping ``False`` and ``NULL``).
+        Because this runs *after* :meth:`_assign_run_ids`, the implausible sample
+        has already served as a run boundary: dropping it splits the surrounding
+        run in two rather than merging across it, and no interval is emitted for
+        the implausible value itself.  When ``False``, the DataFrame is returned
+        unchanged.
 
         Raises
         ------
@@ -114,9 +125,11 @@ class RleEncoder:
             F.lead(F.col(self.timestamp_col_name)).over(w), F.col(self.timestamp_col_name)
         )
 
-        value_diff = F.when(
-            F.col(self.config.value_col) == F.col("prev_value"), F.lit(0)
-        ).otherwise(F.lit(1))
+        if self.drop_implausible_data_points:
+            value_diff_condition = (F.col(self.config.value_col) == F.col("prev_value")) & (F.col("is_plausible"))
+        else:
+            value_diff_condition = F.col(self.config.value_col) == F.col("prev_value")
+        value_diff = F.when(value_diff_condition, F.lit(0)).otherwise(F.lit(1))
         value_id = F.sum(F.col("value_diff")).over(running_w)
 
         return (
