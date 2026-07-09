@@ -51,7 +51,11 @@ ingesting your own data, the required invariants are:
   has nothing to do with `channel_id = 1` in container B.
 - **`channels` supports two formats.** The query engine accepts either:
   - **Raw** — one row per sample: `(container_id, channel_id, timestamp,
-    value)`.
+    value)`. Set `data_type: "RAW"` in the report config; the engine
+    converts the samples to intervals at query time, either by run-length
+    encoding them (`raw_encoder: "RLE"`, the default) or by plain interval
+    derivation without merging equal-valued runs (`raw_encoder: "INTERVAL"`)
+    — see [query_engine](../config/configuration.md#query_engine-optional).
   - **RLE** — one row per stable interval: `(container_id, channel_id,
     tstart, tend, value)`. Run-length encoded data, where identical consecutive values are collapsed into intervals to significantly reduce processing time during analysis.
 

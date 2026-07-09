@@ -28,8 +28,7 @@ silver_rle_encoded_schema = T.StructType(
 )
 
 silver_schema_with_plausible = T.StructType(
-    silver_schema_without_rle.fields
-    + [T.StructField("is_plausible", T.BooleanType(), True)]
+    silver_schema_without_rle.fields + [T.StructField("is_plausible", T.BooleanType(), True)]
 )
 
 
@@ -466,7 +465,7 @@ class TestRleEncoder:
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=2.0, value=10.0),
-            Row(container_id="c1", channel_id="ch1", tstart=3.0, tend=3.0, value=10.0)
+            Row(container_id="c1", channel_id="ch1", tstart=3.0, tend=3.0, value=10.0),
         ]
         expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
         assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
@@ -665,7 +664,9 @@ class TestRleEncoder:
         data = [
             Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
             Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=10.0, is_plausible=True),
-            Row(container_id="c1", channel_id="ch1", timestamp=2.0, value=10.0, is_plausible=False),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=2.0, value=10.0, is_plausible=False
+            ),
             Row(container_id="c1", channel_id="ch1", timestamp=3.0, value=10.0, is_plausible=True),
         ]
         df = spark.createDataFrame(data, silver_schema_with_plausible)
@@ -799,8 +800,12 @@ class TestRleEncoder:
         Expects only ch2 in the output; ch1 is dropped entirely.
         """
         data = [
-            Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=False),
-            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=False
+            ),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False
+            ),
             Row(container_id="c1", channel_id="ch2", timestamp=0.0, value=5.0, is_plausible=True),
             Row(container_id="c1", channel_id="ch2", timestamp=1.0, value=5.0, is_plausible=True),
         ]
@@ -838,7 +843,9 @@ class TestRleEncoder:
             ),
             Row(container_id="c1", channel_id="ch1", timestamp=2.0, value=10.0, is_plausible=True),
             Row(container_id="c2", channel_id="ch1", timestamp=0.0, value=20.0, is_plausible=True),
-            Row(container_id="c2", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False),
+            Row(
+                container_id="c2", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False
+            ),
             Row(container_id="c2", channel_id="ch1", timestamp=2.0, value=20.0, is_plausible=True),
         ]
         df = spark.createDataFrame(data, silver_schema_with_plausible)
@@ -912,7 +919,9 @@ class TestRleEncoder:
         """
         data = [
             Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0, is_plausible=True),
-            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False),
+            Row(
+                container_id="c1", channel_id="ch1", timestamp=1.0, value=20.0, is_plausible=False
+            ),
             Row(container_id="c1", channel_id="ch1", timestamp=2.0, value=20.0, is_plausible=True),
         ]
         df = spark.createDataFrame(data, silver_schema_with_plausible)

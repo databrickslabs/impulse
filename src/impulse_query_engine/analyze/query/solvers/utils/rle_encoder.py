@@ -126,7 +126,9 @@ class RleEncoder:
         )
 
         if self.drop_implausible_data_points:
-            value_diff_condition = (F.col(self.config.value_col) == F.col("prev_value")) & (F.col("is_plausible"))
+            value_diff_condition = (F.col(self.config.value_col) == F.col("prev_value")) & (
+                F.col("is_plausible")
+            )
         else:
             value_diff_condition = F.col(self.config.value_col) == F.col("prev_value")
         value_diff = F.when(value_diff_condition, F.lit(0)).otherwise(F.lit(1))

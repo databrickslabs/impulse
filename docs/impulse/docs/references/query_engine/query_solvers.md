@@ -90,6 +90,12 @@ Solver tuning lives under the `query_engine` section of your report config:
   — the solver to use. Defaults to `"DefaultSolver"`. The values
   `"DeltaSolver"` and `"KeyValueStoreSolver"` are **deprecated aliases**
   retained for backward compatibility; both resolve to `DefaultSolver`.
+- [`query_engine.data_type` and `raw_encoder`](../../config/configuration.md#query_engine-optional)
+  — declare whether `channels` holds pre-encoded `[tstart, tend)` intervals
+  (`"RLE"`, the default) or raw point samples (`"RAW"`). For raw data,
+  `raw_encoder` selects how samples are converted to intervals at query
+  time: `"RLE"` (default) run-length encodes equal-valued runs into single
+  intervals; `"INTERVAL"` only derives `tend` and drops exact duplicates.
 - [Solver column mappings and filters](../../config/configuration.md#solver-column-mappings-and-filters)
   — adapt the solver to a silver layer whose physical column names
   diverge from Impulse's internal names, scope reads by `project_id`, or

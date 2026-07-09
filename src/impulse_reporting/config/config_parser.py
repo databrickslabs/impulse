@@ -5,7 +5,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
-from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
+from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
 
 
 def is_valid_table_name(table_name: str) -> str:
@@ -343,6 +343,13 @@ class QueryEngine(BaseModel):
     ----------
     solver : Solvers, default=Solvers.DEFAULT_SOLVER
         The solver type to use for query execution.
+    raw_encoder : RawEncoder, optional, default=None
+        Encoder used to convert RAW point data into intervals.  ``RLE``
+        collapses consecutive equal-valued samples into runs; ``INTERVAL``
+        only derives ``tend`` and drops exact duplicates.  Only takes effect
+        when ``data_type=RAW``; ignored for RLE input.  When omitted and
+        ``data_type=RAW``, it is resolved to ``RLE`` at validation time;
+        for RLE input the field stays ``None`` and is never consulted.
     solver_config : SolverConfig, optional
         Per-table column name mappings and filter configuration for
         the solver.  Use this when your silver-layer tables use
@@ -377,6 +384,7 @@ class QueryEngine(BaseModel):
     solver: Solvers = Solvers.DEFAULT_SOLVER
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
+    raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
     batch_size: int = 500
 
@@ -384,10 +392,10 @@ class QueryEngine(BaseModel):
     def validate_drop_implausible_data_requires_raw(self):
         """`drop_implausible_data=True` currently only takes effect with RAW data.
 
-        The filter is applied inside the RAW -> RLE conversion path in
-        ``RleEncoder.prepare_channels_df``. RLE input short-circuits that
-        path and the flag is silently ignored, so we reject the combination at
-        config validation time.
+        The filter is applied inside the RAW -> interval conversion path by the
+        selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).  RLE
+        input short-circuits that path and the flag is silently ignored, so we
+        reject the combination at config validation time.
         """
         if self.drop_implausible_data and self.data_type is not DataType.RAW:
             raise ValueError(
@@ -395,6 +403,13 @@ class QueryEngine(BaseModel):
                 "The implausible-data filter is only applied during the RAW -> RLE "
                 "conversion path; RLE input is passed through unchanged."
             )
+        return self
+
+    @model_validator(mode="after")
+    def default_raw_encoder_for_raw_data(self):
+        """When ``data_type=RAW`` and ``raw_encoder`` is unset, default to RLE."""
+        if self.data_type is DataType.RAW and self.raw_encoder is None:
+            self.raw_encoder = RawEncoder.RLE
         return self
 
 

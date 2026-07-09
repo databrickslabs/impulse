@@ -341,10 +341,16 @@ interval `[tstart, tend)` with a constant value. Used when
 ### Raw format
 
 Raw timestamp-based data without RLE encoding — one row per sample. Used
-when `data_type: RAW` is set in the report config; the engine run-length
-encodes it before query execution — deriving `tend` from the next timestamp
-and collapsing consecutive equal values into a single `[tstart, tend)`
-interval per run.
+when `data_type: RAW` is set in the report config; the engine converts it
+to `[tstart, tend)` intervals before query execution. The conversion
+strategy is selected by
+[`query_engine.raw_encoder`](../config/configuration.md#query_engine-optional):
+
+- **`RLE`** (the default) — derives `tend` from the next sample's timestamp
+  and collapses consecutive equal values into a single `[tstart, tend)`
+  interval per run.
+- **`INTERVAL`** — only derives `tend` and drops exact duplicate points;
+  equal-valued runs remain separate intervals.
 
 | Column         | Type     | Nullable | Description                      |
 |----------------|----------|----------|----------------------------------|
@@ -358,7 +364,8 @@ interval per run.
 An optional `is_plausible: boolean` column may be present on `channels`
 in either format. It is **only consulted** when the solver is
 constructed with `drop_implausible_data=True` — in that mode, samples
-with `is_plausible = False` are filtered before RLE encoding. If the
+with `is_plausible = False` are filtered during the raw→interval
+conversion (both `raw_encoder` variants honor the flag). If the
 flag is `False` (the default), the column is ignored and may be omitted.
 
 #### Internal columns referenced by the framework
@@ -377,7 +384,7 @@ when your physical column has a different name.
 
 For raw-format `channels`, the same internal names apply except that
 `timestamp` replaces the `tstart`/`tend` pair; the engine derives `tend`
-during raw→RLE conversion.
+during raw→interval conversion (see `query_engine.raw_encoder`).
 
 ---
 
