@@ -48,7 +48,7 @@ class TestRleEncoder:
             | c1           | ch1        | 4.0       | 20.0  |
             | c1           | ch1        | 5.0       | 30.0  |
 
-        Expects 3 intervals -- one per constant-value run.  Each run's ``tend``
+        Expects 3 intervals -- one per constant-value.  Each run's ``tend``
         is the timestamp at which the value next changes; the final run ends at
         its last observed timestamp.
         """
@@ -365,8 +365,8 @@ class TestRleEncoder:
         expected_result = spark.createDataFrame([], silver_rle_encoded_schema)
         assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
 
-    def test_assign_run_ids(self, spark: SparkSession):
-        """Test that _assign_run_ids tags each row with prev_value/next_time/run id.
+    def test_assign_interval_ids(self, spark: SparkSession):
+        """Test that _assign_interval_ids tags each row with prev_value/next_time/interval id.
 
         Input:
             | container_id | channel_id | timestamp | value |
@@ -378,7 +378,7 @@ class TestRleEncoder:
         Expected:
             prev_value = LAG(value); next_time = LEAD(timestamp) (own ts for the
             last row); value_diff = 1 on a change else 0; value_id = the running
-            sum of value_diff (constant within a run).
+            sum of value_diff (constant within an interval).
         """
         data = [
             Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=10.0),
@@ -386,7 +386,7 @@ class TestRleEncoder:
             Row(container_id="c1", channel_id="ch1", timestamp=3.0, value=20.0),
         ]
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = RleEncoder(SolverConfig())._assign_run_ids(df)
+        result = RleEncoder(SolverConfig())._assign_interval_ids(df)
 
         expected_schema = T.StructType(
             silver_schema_without_rle.fields
@@ -576,8 +576,8 @@ class TestRleEncoder:
         )._remove_implausible_data_points(df)
         assertDataFrameEqual(result, df)
 
-    def test_aggregate_runs(self, spark: SparkSession):
-        """Test that _aggregate_runs collapses tagged rows into one row per run.
+    def test_aggregate_intervals(self, spark: SparkSession):
+        """Test that _aggregate_intervals collapses tagged rows into one row per interval.
 
         Input (already tagged with next_time and value_id):
             | container_id | channel_id | timestamp | next_time | value | value_id |
@@ -587,8 +587,8 @@ class TestRleEncoder:
             | c1           | ch1        | 2.0       | 2.0       | 20.0  | 2        |
 
         Expected:
-            Run 1 -> tstart=min(0,1)=0, tend=max(1,2)=2, value=10;
-            Run 2 -> tstart=2, tend=2, value=20.  ``value_id`` is dropped.
+            Interval 1 -> tstart=min(0,1)=0, tend=max(1,2)=2, value=10;
+            Interval 2 -> tstart=2, tend=2, value=20.  ``value_id`` is dropped.
         """
         tagged_schema = T.StructType(
             [
@@ -627,7 +627,7 @@ class TestRleEncoder:
             ),
         ]
         df = spark.createDataFrame(data, tagged_schema)
-        result = RleEncoder(SolverConfig())._aggregate_runs(df)
+        result = RleEncoder(SolverConfig())._aggregate_intervals(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=2.0, value=10.0),
@@ -642,12 +642,12 @@ class TestRleEncoder:
         """Test that dropping a same-valued implausible sample splits the interval.
 
         This is the case that exercises the ``& is_plausible`` term in the
-        run-change condition of :meth:`_assign_run_ids`.  Without that term the
+        interval-change condition of :meth:`_assign_interval_ids`.  Without that term the
         implausible sample would carry ``value_diff = 0`` (its value matches its
-        neighbours), so the surrounding samples would share a single run id and,
+        neighbours), so the surrounding samples would share a single interval id and,
         after the implausible row is dropped, be *bridged* into one interval.
-        With the term the implausible sample forces a run boundary, so dropping
-        it splits the run instead.
+        With the term the implausible sample forces an interval boundary, so dropping
+        it splits the interval instead.
 
         Input (drop_implausible_data_points=True):
             | container_id | channel_id | timestamp | value | is_plausible |

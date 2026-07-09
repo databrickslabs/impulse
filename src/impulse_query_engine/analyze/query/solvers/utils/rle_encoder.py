@@ -44,7 +44,7 @@ class RleEncoder:
 
         Consecutive rows within the same container/channel that carry an identical
         ``value`` are merged into one interval spanning from the first timestamp of
-        the run (``tstart``) to the timestamp at which the value next changes
+        the interval (``tstart``) to the timestamp at which the value next changes
         (``tend``).
 
         Parameters
@@ -57,30 +57,30 @@ class RleEncoder:
         -------
         pyspark.sql.DataFrame
             DataFrame with the container id and channel id columns, ``tstart``,
-            ``tend`` and ``value`` -- one row per constant-value run.
+            ``tend`` and ``value`` -- one row per constant-value interval.
 
         Notes
         -----
-        Run ids are assigned over the *full* input, so an implausible sample
-        still acts as a run boundary.  Implausible rows are only removed
+        Interval ids are assigned over the *full* input, so an implausible sample
+        still acts as an interval boundary.  Implausible rows are only removed
         afterwards (when ``drop_implausible_data_points`` is set), so a dropped
-        implausible sample splits the surrounding run rather than being bridged
+        implausible sample splits the surrounding interval rather than being bridged
         over -- it simply is not emitted as its own interval.
         """
         return (
-            df.transform(self._assign_run_ids)
+            df.transform(self._assign_interval_ids)
             .transform(self._remove_implausible_data_points)
-            .transform(self._aggregate_runs)
+            .transform(self._aggregate_intervals)
         )
 
     def _remove_implausible_data_points(self, df: DataFrame) -> DataFrame:
-        """Optionally drop rows flagged as implausible after run assignment.
+        """Optionally drop rows flagged as implausible after interval assignment.
 
         When ``drop_implausible_data_points`` is ``True``, filters out rows whose
         ``is_plausible`` column is not ``True`` (dropping ``False`` and ``NULL``).
-        Because this runs *after* :meth:`_assign_run_ids`, the implausible sample
-        has already served as a run boundary: dropping it splits the surrounding
-        run in two rather than merging across it, and no interval is emitted for
+        Because this runs *after* :meth:`_assign_interval_ids`, the implausible sample
+        has already served as an interval boundary: dropping it splits the surrounding
+        interval in two rather than merging across it, and no interval is emitted for
         the implausible value itself.  When ``False``, the DataFrame is returned
         unchanged.
 
@@ -98,15 +98,15 @@ class RleEncoder:
             )
         return df.filter(F.col("is_plausible"))
 
-    def _assign_run_ids(self, df: DataFrame) -> DataFrame:
-        """Tag each row with the id of the run it belongs to.
+    def _assign_interval_ids(self, df: DataFrame) -> DataFrame:
+        """Tag each row with the id of the interval it belongs to.
 
-        A new run begins whenever ``value`` differs from the previous row's value
+        A new interval begins whenever ``value`` differs from the previous row's value
         (ordered by timestamp within each container/channel).  The running sum of
         these change flags yields a ``value_id`` that is constant for the duration
-        of a run.  ``next_time`` -- the following row's timestamp, or the row's own
-        timestamp for the last row in a partition -- is attached so the run's end
-        can be derived by :meth:`_aggregate_runs`.
+        of an interval.  ``next_time`` -- the following row's timestamp, or the row's own
+        timestamp for the last row in a partition -- is attached so the interval's end
+        can be derived by :meth:`_aggregate_intervals`.
 
         Returns
         -------
@@ -141,10 +141,10 @@ class RleEncoder:
             .withColumn("value_id", value_id)
         )
 
-    def _aggregate_runs(self, df: DataFrame) -> DataFrame:
-        """Collapse each run into a single ``(tstart, tend, value)`` interval.
+    def _aggregate_intervals(self, df: DataFrame) -> DataFrame:
+        """Collapse each interval's rows into a single ``(tstart, tend, value)`` row.
 
-        Groups the tagged rows by container/channel/run and reduces each run to its
+        Groups the tagged rows by container/channel/interval and reduces each interval to its
         start timestamp, end timestamp and (constant) value, dropping the
         intermediate ``value_id``.
 
