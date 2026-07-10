@@ -127,6 +127,53 @@ class TestTimeSeriesCache:
         assert quality[10] == "good"
         assert quality[20] == "ok"
 
+    def test_load_blob_missing_channel_returns_empty(self):
+        """Unknown (container_id, channel_id) yields an empty series."""
+        cache = TimeSeriesCache(_make_channel_pdf(), col_map=DEFAULT_COL_MAP)
+        assert len(cache.load_blob(1, 999)) == 0
+        assert len(cache.load_blob(999, 10)) == 0
+
+    def test_load_blob_applies_conversion_only_for_alias(self):
+        """The per-channel factor multiplies values for aliased reads only."""
+        pdf = _make_channel_pdf()
+        pdf["conversion_factor"] = [2.0, 2.0, 0.5, 0.5]
+        col_map = {**DEFAULT_COL_MAP, "conv": "conversion_factor"}
+        cache = TimeSeriesCache(pdf, col_map=col_map)
+        assert list(cache.load_blob(1, 10, uses_alias=True).values) == [2.0, 4.0]
+        assert list(cache.load_blob(1, 10, uses_alias=False).values) == [1.0, 2.0]
+        assert list(cache.load_blob(2, 20, uses_alias=True).values) == [1.5, 2.0]
+
+    def test_load_blob_nan_conversion_factor_is_noop(self):
+        """A null factor (no conversion resolved) leaves values unchanged."""
+        pdf = _make_channel_pdf()
+        pdf["conversion_factor"] = float("nan")
+        col_map = {**DEFAULT_COL_MAP, "conv": "conversion_factor"}
+        cache = TimeSeriesCache(pdf, col_map=col_map)
+        assert list(cache.load_blob(1, 10, uses_alias=True).values) == [1.0, 2.0]
+
+    def test_load_blob_preserves_input_order_for_duplicate_timestamps(self):
+        """The (cid, ch, tstart) sort must stay stable for equal timestamps."""
+        pdf = pd.DataFrame(
+            {
+                "container_id": [1, 1, 1],
+                "channel_id": [10, 10, 10],
+                "tstart": [0, 0, 100],
+                "tend": [100, 100, 200],
+                "value": [1.0, 2.0, 3.0],
+            }
+        )
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert list(cache.load_blob(1, 10).values) == [1.0, 2.0, 3.0]
+
+    def test_cache_handles_non_default_index(self):
+        """Duplicate / non-monotonic input index must not confuse mdf or load_blob."""
+        pdf = _make_channel_pdf()
+        pdf.index = [7, 3, 7, 5]
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert len(cache.mdf) == 2
+        assert list(cache.load_blob(1, 10).values) == [1.0, 2.0]
+        assert list(cache.load_blob(2, 20).values) == [3.0, 4.0]
+
     def test_pdf_sorted_correctly(self):
         """pdf should be sorted by (container_id, channel_id, tstart) within each group."""
         pdf = _make_channel_pdf()
@@ -275,6 +322,42 @@ class TestDefaultSolverEndToEndWideOnly:
         for container_id in base:
             assert extra[container_id] == pytest.approx(base[container_id])
         assert any(m is not None and m != 0 for m in base.values()), base
+
+    def test_solve_raw_point_data_with_extra_columns(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """is_raw_data=True works end-to-end with extra physical columns.
+
+        Also guards the ordering of the UDF-input projection in
+        ``DefaultSolver.solve``: it must run *after* the interval encoder,
+        which consumes ``timestamp`` / ``is_plausible``.
+        """
+        tables = dict(basic_narrow_db.config.debug_tables)
+        tables["channels"] = (
+            tables["channels"]
+            .select("container_id", "channel_id", F.col("tstart").alias("timestamp"), "value")
+            .withColumn("extra_col", F.lit("x"))
+            .withColumn("is_plausible", F.lit(True))
+        )
+        db_raw = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+        def _means(solver):
+            query = db_raw.query
+            result = query.select(
+                query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
+            ).solve(spark, solver=solver)
+            return {row.container_id: row.m for row in result.collect()}
+
+        raw = _means(DefaultSolver(spark, is_raw_data=True))
+        assert any(m is not None and m != 0 for m in raw.values()), raw
+
+        # All rows are plausible, so dropping implausible rows must not
+        # change the results (pins the is_plausible column surviving until
+        # the encoder's filter and being projected away afterwards).
+        dropped = _means(DefaultSolver(spark, is_raw_data=True, drop_implausible_data=True))
+        assert raw.keys() == dropped.keys()
+        for container_id in raw:
+            assert dropped[container_id] == pytest.approx(raw[container_id])
 
     def test_backward_compat_no_config_arg(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB
