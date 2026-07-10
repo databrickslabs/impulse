@@ -47,10 +47,8 @@ class TimeSeriesCache(SeriesCache):
         self._conv_col = col_map.get("conv")
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
-        # *pdf* holds a whole container, so avoid full-length intermediates:
-        # dedupe the metadata via a row mask (copies only one row per channel
-        # instead of an all-rows metadata frame) and sort without a second
-        # full-frame copy for the index reset.
+        # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
+        # Deduplicate the metadata via a row mask and sort the data without creating a second full-frame copy
         meta_cols = [
             c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
         ]
