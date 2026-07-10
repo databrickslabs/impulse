@@ -1,0 +1,29 @@
+[project]
+name = "mcp-impulse-agent"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "mcp>=1.0.0",
+    "databricks-connect==18.2.*",
+    "databricks-sdk==0.106.0",
+    "lz4==4.4.5",
+    "nptyping==2.5.0",
+    "pandas==2.2.3",
+    "pyarrow==19.0.1",
+    "pydantic==2.11.7",
+    "scipy==1.15.1",
+    "zstandard>=0.25.0",
+    "uvicorn>=0.30.0",
+    "starlette>=0.37.0",
+]
+
+[project.scripts]
+mcp-server = "server.main:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["server*", "impulse_reporting*", "impulse_query_engine*"]

@@ -1,0 +1,12 @@
+command: ['uv', 'run', 'mcp-server']
+# CATALOG/SCHEMA/TABLE_PREFIX must point at an already-loaded Impulse silver
+# layer. Replace these placeholders before deploying, or override them via
+# the app's "Environment variables" configuration in the Databricks Apps UI
+# without editing this file.
+env:
+  - name: CATALOG
+    value: "<your-catalog>"
+  - name: SCHEMA
+    value: "<your-schema>"
+  - name: TABLE_PREFIX
+    value: "<your-table-prefix>"

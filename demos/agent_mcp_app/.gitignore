@@ -1,0 +1,9 @@
+
+.databricks
+
+# Synced/built by build_wheel.sh from the repo's own src/ -- not checked in,
+# since they'd otherwise drift from the repo's actual source. Run
+# build_wheel.sh before deploying (see README.md).
+impulse_reporting/
+impulse_query_engine/
+wheels/*.whl
