@@ -61,10 +61,16 @@ class RleEncoder:
 
         Notes
         -----
-        Interval ids are assigned over the *full* input, so an implausible sample
-        still acts as an interval boundary.  Implausible rows are only removed
-        afterwards (when ``drop_implausible_data_points`` is set), so a dropped
-        implausible sample splits the surrounding interval rather than being bridged
+        With ``drop_implausible_data_points=False`` (the default), the
+        ``is_plausible`` column is ignored entirely: implausible samples are
+        encoded like any other sample and merge into the surrounding interval
+        when their value matches.
+
+        With ``drop_implausible_data_points=True``, an implausible sample
+        always forces an interval boundary, even when its value matches its
+        neighbours.  Because interval ids are assigned over the *full* input
+        and implausible rows are only removed afterwards, a dropped sample
+        splits the surrounding interval in two rather than being bridged
         over -- it simply is not emitted as its own interval.
         """
         return (
