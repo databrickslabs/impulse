@@ -1,0 +1,34 @@
+{
+  "name": "impulse",
+  "version": "0.1.0",
+  "description": "Impulse by Databricks Labs — AI assistant skills for analyzing large-scale time-series measurement data on Spark + Delta with TSAL, the query engine, and gold-layer reporting.",
+  "author": {
+    "name": "Databricks Labs",
+    "email": "labs@databricks.com"
+  },
+  "homepage": "https://databrickslabs.github.io/impulse",
+  "repository": "https://github.com/databrickslabs/impulse.git",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": [
+    "databricks",
+    "impulse",
+    "time-series",
+    "tsal",
+    "measurement-data",
+    "pyspark",
+    "delta",
+    "unity-catalog",
+    "automotive"
+  ],
+  "skills": [
+    "./impulse",
+    "./impulse-tsal",
+    "./impulse-data-model",
+    "./impulse-config",
+    "./impulse-events",
+    "./impulse-aggregations",
+    "./impulse-reporting",
+    "./impulse-analyze",
+    "./impulse-ml"
+  ]
+}
