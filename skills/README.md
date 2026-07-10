@@ -18,12 +18,49 @@ Each skill is a folder with a `SKILL.md` file that documents usage patterns. Sta
 | [`impulse-analyze`](./impulse-analyze/SKILL.md)          | Ad-hoc analysis — evaluating TSAL directly through the query engine and returning Spark or pandas DataFrames, no gold-layer write. |
 | [`impulse-ml`](./impulse-ml/SKILL.md)                    | Extracting event-scoped statistics as a flat feature matrix for MLflow / AutoML.                                  |
 
-## Install
+## Install the skills
 
-Impulse runs inside a Databricks notebook or job with an active `spark` session and a Databricks SDK `WorkspaceClient`. Install it one of two ways:
+These skills are **not** discovered from this `skills/` folder directly — an agent only reads them from its configured skills directory. Copy the skill folders into that directory once; do it again whenever you change a skill (the copy is a snapshot, not a live link back to this repo).
 
-- **Wheel** — `%pip install databricks-impulse[local-dev]` (the `local-dev` extra pulls in `pydantic`, `scipy`, and the other libraries that are otherwise assumed pre-installed on Databricks Serverless / DBR ML).
-- **Git folder** — clone `https://github.com/databrickslabs/impulse` into a Databricks Git folder and add the repo's `src/` directory to `sys.path`, as the demo notebooks do.
+### Databricks Genie Code
+
+Genie Code discovers skills from a `.assistant/skills/` directory. Choose one:
+
+- **User-level** (just you): `/Workspace/Users/<your-email>/.assistant/skills`
+- **Workspace-wide** (everyone in the workspace): `/Workspace/.assistant/skills`
+
+Import this folder with the Databricks CLI, run from the repo root:
+
+```bash
+# user-level
+databricks workspace import-dir skills /Workspace/Users/<your-email>/.assistant/skills
+
+# or workspace-wide
+databricks workspace import-dir skills /Workspace/.assistant/skills
+```
+
+Genie picks the skills up the next time you use it. Confirm with a prompt like *"List the Impulse skills you can use."*
+
+### Claude Code
+
+Copy the skill folders to `~/.claude/skills/` on your machine, keeping each `SKILL.md` at the top level of its folder (not nested deeper):
+
+```bash
+cp -R skills/impulse* ~/.claude/skills/
+```
+
+Claude Code also reads the `.claude-plugin/plugin.json` in this folder, so the family can alternatively be installed as a plugin. Genie Code ignores that file and reads each `SKILL.md` directly.
+
+### Other Agent Skills tools
+
+Place the skill folders in the tool's configured skills directory, keep `SKILL.md` at each folder's root, and restart the tool if it caches skills on startup.
+
+## Installing the Impulse library itself
+
+The skills teach an agent to *use* Impulse; they do not install it. Inside a Databricks notebook or job (with an active `spark` session and a Databricks SDK `WorkspaceClient`), install the library one of two ways:
+
+- **Wheel** — `%pip install databricks-impulse[local-dev]` (the `local-dev` extra pulls in `pydantic`, `scipy`, and the other libraries otherwise assumed pre-installed on Databricks Serverless / DBR ML).
+- **Git folder** — clone this repository into a Databricks Git folder and add its `src/` directory to `sys.path`, as the demo notebooks do.
 
 Impulse requires Python 3.12 (Serverless Environment Version 2+), PySpark 4.0, and Delta Lake 4.0. See [`impulse`](./impulse/SKILL.md) for the full setup snippet.
 
