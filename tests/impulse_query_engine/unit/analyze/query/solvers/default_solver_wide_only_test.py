@@ -12,6 +12,8 @@ Covers:
 """
 
 import pandas as pd
+import pyspark.sql.functions as F
+import pytest
 from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -25,7 +27,7 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
     SolverConfig,
     TableConfig,
 )
-from impulse_query_engine.measurement_db import MeasurementDB
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from tests.conftest import basic_narrow_db, spark
 
 # ---------------------------------------------------------------------------
@@ -114,6 +116,16 @@ class TestTimeSeriesCache:
         assert "t_start" not in cache.mdf.columns
         assert "t_stop" not in cache.mdf.columns
         assert "val" not in cache.mdf.columns
+
+    def test_mdf_keeps_first_row_per_channel(self):
+        """mdf keeps the first occurrence of per-channel metadata."""
+        pdf = _make_channel_pdf()
+        pdf["quality"] = ["good", "bad", "ok", "worse"]
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert len(cache.mdf) == 2
+        quality = cache.mdf.set_index("channel_id")["quality"]
+        assert quality[10] == "good"
+        assert quality[20] == "ok"
 
     def test_pdf_sorted_correctly(self):
         """pdf should be sorted by (container_id, channel_id, tstart) within each group."""
@@ -234,6 +246,35 @@ class TestDefaultSolverEndToEndWideOnly:
         assert result is not None
         assert "container_id" in result.columns
         assert result.count() > 0
+
+    def test_solve_ignores_extra_channels_columns(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """Extra physical columns on the channels table don't change solve() results.
+
+        Guards the UDF-input projection in ``DefaultSolver.solve``: only the
+        framework data columns may reach the grouped-map UDF, and results must
+        be identical with or without extra columns on the silver table.
+        """
+        tables = {
+            name: (df.withColumn("extra_col", F.lit("x")) if name == "channels" else df)
+            for name, df in basic_narrow_db.config.debug_tables.items()
+        }
+        db_extra = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+        def _means(db):
+            query = db.query
+            result = query.select(
+                query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
+            ).solve(spark, solver=DefaultSolver(spark))
+            return {row.container_id: row.m for row in result.collect()}
+
+        base = _means(basic_narrow_db)
+        extra = _means(db_extra)
+        assert base.keys() == extra.keys()
+        for container_id in base:
+            assert extra[container_id] == pytest.approx(base[container_id])
+        assert any(m is not None and m != 0 for m in base.values()), base
 
     def test_backward_compat_no_config_arg(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB

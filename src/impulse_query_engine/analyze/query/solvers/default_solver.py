@@ -47,9 +47,16 @@ class TimeSeriesCache(SeriesCache):
         self._conv_col = col_map.get("conv")
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
-        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
-        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
-        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
+        # *pdf* holds a whole container, so avoid full-length intermediates:
+        # dedupe the metadata via a row mask (copies only one row per channel
+        # instead of an all-rows metadata frame) and sort without a second
+        # full-frame copy for the index reset.
+        meta_cols = [
+            c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
+        ]
+        first_rows = ~pdf.duplicated(subset=[self._cid_col, self._ch_col])
+        self.mdf = pdf.loc[first_rows, meta_cols].reset_index(drop=True)
+        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col], ignore_index=True)
 
     def resolve(self, selection):
         """
@@ -872,9 +879,13 @@ class DefaultSolver(QuerySolver):
         pd.DataFrame
             DataFrame containing results for each selection.
         """
-        cache = TimeSeriesCache(pdf, col_map=col_map)
         cid_col = col_map["cid"]
         result = {cid_col: [pdf[cid_col].iloc[0]]}
+        cache = TimeSeriesCache(pdf, col_map=col_map)
+        # pyspark's grouped-map wrapper passes *pdf* as a temporary, so
+        # dropping the last reference frees the unsorted copy while the
+        # selections are evaluated against the cache.
+        del pdf
         for s in selections:
             res = s.build(cache)
             if hasattr(res, "serialize") and callable(res.serialize):
@@ -933,6 +944,17 @@ class DefaultSolver(QuerySolver):
         if self.is_raw_data:
             # Calculate the tend info and prepare the data for the solving step.
             q = self.interval_encoder.prepare_channels_df(q)
+
+        # Ship only the columns the UDF consumes; any extra physical columns
+        # on the channels table would otherwise cross Arrow into every group's
+        # pandas frame.
+        q = q.select(
+            self.config.container_id_col,
+            self.config.channel_id_col,
+            self.config.tstart_col,
+            self.config.tend_col,
+            self.config.value_col,
+        )
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
