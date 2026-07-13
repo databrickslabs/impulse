@@ -81,6 +81,22 @@ report.determine_report()
 report.persist_results()
 ```
 
+## AI Assistant Skills
+
+The [`skills/`](skills/) folder contains agent skills that teach AI assistants how to use Impulse. They work with [Databricks Genie Code](https://docs.databricks.com/aws/en/genie-code/skills) and any tool that follows the [Agent Skills](https://agentskills.io/) open standard, and cover the whole surface — TSAL expressions, the data model, configuration, events, aggregations, and the reporting, ad-hoc, and ML usage modes. See [`skills/README.md`](skills/README.md) for the full list.
+
+Skills are **not** discovered from the `skills/` folder directly; copy them into the agent's skills directory once. For Databricks Genie Code, import them into a `.assistant/skills/` path — run this from the repo root:
+
+```bash
+# user-level (just you)
+databricks workspace import-dir skills /Workspace/Users/<your-email>/.assistant/skills
+
+# or workspace-wide (everyone in the workspace)
+databricks workspace import-dir skills /Workspace/.assistant/skills
+```
+
+Genie picks them up on next use — verify with *"List the Impulse skills you can use."* For Claude Code and other tools (including how to refresh after edits), see [`skills/README.md`](skills/README.md).
+
 ## Requirements
 
 Python 3.12, PySpark 4.0, Delta Lake 4.0. The full dependency list is in [pyproject.toml](pyproject.toml).
