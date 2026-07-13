@@ -1,7 +1,7 @@
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, Window
 
-from impulse_query_engine.analyze.query.solvers import SolverConfig
+from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 
 
 class IntervalEncoder:
@@ -59,7 +59,7 @@ class IntervalEncoder:
             return df
 
         # if the data isn't RLE encoded we need a timestamp column to determine the tend info.
-        if self not in df.columns:
+        if self.config.timestamp_col not in df.columns:
             raise ValueError(
                 f"DataFrame must contain either a '{self.config.tend_col}' column (RLE format) "
                 f"or a '{self.config.timestamp_col}' column (raw point data)."
