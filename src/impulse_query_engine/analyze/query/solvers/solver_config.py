@@ -340,6 +340,17 @@ class SolverConfig(BaseModel):
         """Internal column name for the unit group id on the unit_conversion table."""
         return "group_id"
 
+
+    @property
+    def timestamp_col(self) -> str:
+        """Internal column name for the timestamp on the channels table for raw encoded channel data."""
+        return "timestamp"
+
+    @property
+    def is_plausible_col(self) -> str:
+        """Internal column name for the plausibility flag on the channels table for raw encoded channel data."""
+        return "is_plausible"
+
     @property
     def effective_alias_join_keys(self) -> list[tuple[str, str]]:
         """Return the resolved alias-resolution join keys as ``(mapping_col, metrics_col)`` tuples.

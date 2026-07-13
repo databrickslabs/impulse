@@ -15,7 +15,6 @@ class RleEncoder:
     def __init__(
         self,
         config: SolverConfig | None = None,
-        timestamp_col_name: str = "timestamp",
         drop_implausible_data_points: bool = False,
     ):
         """
@@ -24,9 +23,8 @@ class RleEncoder:
         Parameters
         ----------
         config : SolverConfig
-            Solver configuration providing the container id and channel id column names.
-        timestamp_col_name : str, optional
-            Name of the timestamp column in the input DataFrame.  Default is "timestamp".
+            Solver configuration providing the internal column names.
+
         drop_implausible_data_points : bool, optional
             Whether to drop implausible data points before encoding.  If True, rows
             where ``is_plausible`` is not True are removed.  Default is False.
@@ -36,7 +34,6 @@ class RleEncoder:
             raise ValueError("SolverConfig must be provided to RleEncoder.")
 
         self.config: SolverConfig = config
-        self.timestamp_col_name: str = timestamp_col_name
         self.drop_implausible_data_points: bool = drop_implausible_data_points
 
     def prepare_channels_df(self, df: DataFrame) -> DataFrame:
@@ -97,12 +94,12 @@ class RleEncoder:
         """
         if not self.drop_implausible_data_points:
             return df
-        if "is_plausible" not in df.columns:
+        if self.config.is_plausible_col not in df.columns:
             raise ValueError(
-                "DataFrame must contain an 'is_plausible' column "
+                f"DataFrame must contain an '{self.config.is_plausible_col}' column "
                 "to drop implausible data points."
             )
-        return df.filter(F.col("is_plausible"))
+        return df.filter(F.col(self.config.is_plausible_col))
 
     def _assign_interval_ids(self, df: DataFrame) -> DataFrame:
         """Tag each row with the id of the interval it belongs to.
@@ -122,13 +119,13 @@ class RleEncoder:
         """
         w = Window.partitionBy(
             F.col(self.config.container_id_col), F.col(self.config.channel_id_col)
-        ).orderBy(F.col(self.timestamp_col_name).asc())
+        ).orderBy(F.col(self.config.timestamp_col).asc())
 
         running_w = w.rowsBetween(Window.unboundedPreceding, Window.currentRow)
 
         prev_value = F.lag(F.col(self.config.value_col)).over(w)
         next_time = F.coalesce(
-            F.lead(F.col(self.timestamp_col_name)).over(w), F.col(self.timestamp_col_name)
+            F.lead(F.col(self.config.timestamp_col)).over(w), F.col(self.config.timestamp_col)
         )
 
         if self.drop_implausible_data_points:
@@ -167,7 +164,7 @@ class RleEncoder:
                 F.col("value_id"),
             )
             .agg(
-                F.min(F.col(self.timestamp_col_name)).alias(self.config.tstart_col),
+                F.min(F.col(self.config.timestamp_col)).alias(self.config.tstart_col),
                 F.max(F.col("next_time")).alias(self.config.tend_col),
                 F.first(F.col(self.config.value_col)).alias(self.config.value_col),
             )

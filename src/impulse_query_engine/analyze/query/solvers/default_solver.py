@@ -163,7 +163,7 @@ class DefaultSolver(QuerySolver):
         config: SolverConfig | None = None,
         is_raw_data: bool = False,
         drop_implausible_data: bool = False,
-        raw_encoder: RawEncoder = RawEncoder.RLE,
+        raw_encoder: RawEncoder = RawEncoder.RLE, #todo drop
     ):
         super().__init__(config=config)
         self.spark = spark
@@ -182,12 +182,12 @@ class DefaultSolver(QuerySolver):
         """
         if self.raw_encoder is RawEncoder.INTERVAL:
             return IntervalEncoder(
-                timestamp_col_name="timestamp",
+                timestamp_col_name=self.config.timestamp_col_name, #todo drop?
                 drop_implausible_data_points=self.drop_implausible_data,
             )
         return RleEncoder(
             config=self.config,
-            timestamp_col_name="timestamp",
+            timestamp_col_name=self.config.timestamp_col_name, #todo drop
             drop_implausible_data_points=self.drop_implausible_data,
         )
 
