@@ -5,6 +5,7 @@ import pytest
 from pyspark.sql import Row, SparkSession
 from pyspark.testing.utils import assertDataFrameEqual
 
+from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 from impulse_query_engine.analyze.query.solvers.utils.interval_encoder import IntervalEncoder
 
 silver_schema_without_rle = T.StructType(
@@ -1430,3 +1431,58 @@ class TestRLEEncoder:
 
         assertDataFrameEqual(result_with_filter, df)
         assertDataFrameEqual(result_without_filter, df)
+
+
+class _TsRawConfig(SolverConfig):
+    """SolverConfig with a non-default internal timestamp column name."""
+
+    @property
+    def timestamp_col(self) -> str:
+        return "ts_raw"
+
+
+class TestConfigDrivenColumnNames:
+    """The encoder retrieves all column names from the SolverConfig."""
+
+    def test_prepare_channels_df_with_custom_timestamp_col(self, spark: SparkSession):
+        """A config overriding ``timestamp_col`` drives the encoding.
+
+        Input (raw point data, timestamp column named ``ts_raw``):
+            | container_id | channel_id | ts_raw | value |
+            |--------------|------------|--------|-------|
+            | c1           | ch1        | 0.0    | 10.0  |
+            | c1           | ch1        | 1.0    | 20.0  |
+
+        Expected: standard RLE output (``tstart``/``tend``/``value``).
+        """
+        schema = T.StructType(
+            [
+                T.StructField("container_id", T.StringType(), True),
+                T.StructField("channel_id", T.StringType(), True),
+                T.StructField("ts_raw", T.DoubleType(), True),
+                T.StructField("value", T.DoubleType(), True),
+            ]
+        )
+        data = [
+            Row(container_id="c1", channel_id="ch1", ts_raw=0.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", ts_raw=1.0, value=20.0),
+        ]
+        df = spark.createDataFrame(data, schema)
+
+        result = IntervalEncoder(config=_TsRawConfig()).prepare_channels_df(df)
+
+        expected_result_data = [
+            Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
+            Row(container_id="c1", channel_id="ch1", tstart=1.0, tend=1.0, value=20.0),
+        ]
+        expected_result = spark.createDataFrame(expected_result_data, silver_rle_encoded_schema)
+        assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
+
+    def test_missing_timestamp_col_error_names_configured_column(self, spark: SparkSession):
+        """The missing-column error names the configured timestamp column."""
+        df = spark.createDataFrame(
+            [Row(container_id="c1", channel_id="ch1", timestamp=0.0, value=10.0)],
+            silver_schema_without_rle,
+        )
+        with pytest.raises(ValueError, match="'ts_raw' column"):
+            IntervalEncoder(config=_TsRawConfig()).prepare_channels_df(df)

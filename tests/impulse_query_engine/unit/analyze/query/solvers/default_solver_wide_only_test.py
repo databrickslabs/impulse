@@ -359,6 +359,32 @@ class TestDefaultSolverEndToEndWideOnly:
         for container_id in raw:
             assert dropped[container_id] == pytest.approx(raw[container_id])
 
+    def test_solve_raw_point_data_with_mapped_timestamp_column(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """RAW mode reaches the timestamp column through the config vocabulary.
+
+        The physical channels table carries ``ts_raw`` instead of
+        ``timestamp``; the per-table ``column_name_mapping`` renames it to
+        the internal name the IntervalEncoder retrieves from the
+        SolverConfig (``timestamp_col``).
+        """
+        tables = dict(basic_narrow_db.config.debug_tables)
+        tables["channels"] = tables["channels"].select(
+            "container_id", "channel_id", F.col("tstart").alias("ts_raw"), "value"
+        )
+        db_raw = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+        cfg = SolverConfig(channels=TableConfig(column_name_mapping={"ts_raw": "timestamp"}))
+        solver = DefaultSolver(spark, config=cfg, is_raw_data=True)
+
+        query = db_raw.query
+        result = query.select(
+            query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
+        ).solve(spark, solver=solver)
+        means = {row.container_id: row.m for row in result.collect()}
+        assert any(m is not None and m != 0 for m in means.values()), means
+
     def test_backward_compat_no_config_arg(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB
     ):

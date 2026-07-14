@@ -168,7 +168,7 @@ class DefaultSolver(QuerySolver):
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
         self.interval_encoder: IntervalEncoder = IntervalEncoder(
-            timestamp_col_name="timestamp",
+            config=self.config,
             drop_implausible_data_points=self.drop_implausible_data,
         )
 
