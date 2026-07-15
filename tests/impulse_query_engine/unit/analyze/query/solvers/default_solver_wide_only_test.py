@@ -174,6 +174,28 @@ class TestTimeSeriesCache:
         assert list(cache.load_blob(1, 10).values) == [1.0, 2.0]
         assert list(cache.load_blob(2, 20).values) == [3.0, 4.0]
 
+    def test_load_blob_with_string_container_id(self):
+        """The range index must work for any id type, including strings."""
+        pdf = pd.DataFrame(
+            {
+                "container_id": ["veh_b", "veh_a", "veh_a", "veh_b"],
+                "channel_id": [20, 10, 10, 20],
+                "tstart": [0, 100, 0, 200],
+                "tend": [200, 200, 100, 400],
+                "value": [3.0, 2.0, 1.0, 4.0],
+            }
+        )
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert list(cache.load_blob("veh_a", 10).values) == [1.0, 2.0]
+        assert list(cache.load_blob("veh_b", 20).values) == [3.0, 4.0]
+        assert len(cache.load_blob("veh_c", 10)) == 0
+
+    def test_cache_from_empty_frame(self):
+        """An empty input frame constructs and yields empty series."""
+        cache = TimeSeriesCache(_make_channel_pdf().head(0), col_map=DEFAULT_COL_MAP)
+        assert len(cache.mdf) == 0
+        assert len(cache.load_blob(1, 10)) == 0
+
     def test_mdf_from_metadata_bearing_rows_only(self):
         """Solve-shaped input: selector_ids carried by metadata-bearing rows.
 

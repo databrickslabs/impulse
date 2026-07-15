@@ -36,7 +36,9 @@ class TimeSeriesCache(SeriesCache):
             ``(cid, ch)`` slice are expected to share the same factor.
             The cache takes ownership of *pdf* and **sorts it in place**:
             the caller's frame is reordered by ``(cid, ch, ts)`` and its
-            index reset.
+            index reset.  The sort makes each channel's rows contiguous,
+            which the constructor exploits to build a ``(cid, ch)`` →
+            ``(start, stop)`` range index for :meth:`load_blob`.
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
@@ -66,6 +68,16 @@ class TimeSeriesCache(SeriesCache):
             [self._cid_col, self._ch_col, self._ts_col], inplace=True, ignore_index=True
         )
         self.pdf = pdf
+
+        # Each (cid, ch) group is a contiguous block after the sort, so its
+        # row positions collapse to a (start, stop) range; the per-group
+        # position arrays exist only transiently during construction.
+        self._ranges = {
+            key: (int(positions[0]), int(positions[-1]) + 1)
+            for key, positions in pdf.groupby(
+                [self._cid_col, self._ch_col], sort=False
+            ).indices.items()
+        }
 
     def resolve(self, selection):
         """
@@ -115,7 +127,8 @@ class TimeSeriesCache(SeriesCache):
         SampleSeries
             The loaded sample series object.
         """
-        s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
+        lo, hi = self._ranges.get((mid, cid), (0, 0))
+        s = self.pdf.iloc[lo:hi]
         values = s[self._val_col]
         if self._has_conversion and len(s) > 0 and uses_alias:
             factor = s[self._conv_col].iloc[0]
