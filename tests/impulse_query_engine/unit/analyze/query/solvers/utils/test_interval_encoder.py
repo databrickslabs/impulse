@@ -572,8 +572,7 @@ class TestRLEEncoder:
         ]
         df = spark.createDataFrame(data, is_plausible_schema)
         result = IntervalEncoder(
-            config=SolverConfig(),
-            drop_implausible_data_points=True
+            config=SolverConfig(), drop_implausible_data_points=True
         )._remove_implausible_data_points(df)
 
         expected_result_data = [
@@ -583,8 +582,7 @@ class TestRLEEncoder:
         assertDataFrameEqual(result, expected_result)
 
         result_no_filter = IntervalEncoder(
-            config=SolverConfig(),
-            drop_implausible_data_points=False
+            config=SolverConfig(), drop_implausible_data_points=False
         )._remove_implausible_data_points(df)
 
         assertDataFrameEqual(result_no_filter, df)
@@ -611,11 +609,12 @@ class TestRLEEncoder:
             ValueError,
             match="DataFrame must contain an 'is_plausible' column to drop implausible data points.",
         ):
-            IntervalEncoder(config=SolverConfig(), drop_implausible_data_points=True)._remove_implausible_data_points(df)
+            IntervalEncoder(
+                config=SolverConfig(), drop_implausible_data_points=True
+            )._remove_implausible_data_points(df)
 
         result = IntervalEncoder(
-            config=SolverConfig(),
-            drop_implausible_data_points=False
+            config=SolverConfig(), drop_implausible_data_points=False
         )._remove_implausible_data_points(df)
         assert result.isEmpty()
 
@@ -1362,8 +1361,7 @@ class TestRLEEncoder:
         df = spark.createDataFrame(data, is_plausible_schema)
 
         result = IntervalEncoder(
-            config=SolverConfig(),
-            drop_implausible_data_points=True
+            config=SolverConfig(), drop_implausible_data_points=True
         )._remove_implausible_data_points(df)
         assertDataFrameEqual(result, df)
 
@@ -1400,8 +1398,7 @@ class TestRLEEncoder:
         df = spark.createDataFrame(data, is_plausible_schema)
 
         result = IntervalEncoder(
-            config=SolverConfig(),
-            drop_implausible_data_points=True
+            config=SolverConfig(), drop_implausible_data_points=True
         )._remove_implausible_data_points(df)
         expected_result = spark.createDataFrame([], is_plausible_schema)
         assertDataFrameEqual(result, expected_result)
@@ -1428,12 +1425,10 @@ class TestRLEEncoder:
         df = spark.createDataFrame([], is_plausible_schema)
 
         result_with_filter = IntervalEncoder(
-            config=SolverConfig(),
-            drop_implausible_data_points=True
+            config=SolverConfig(), drop_implausible_data_points=True
         )._remove_implausible_data_points(df)
         result_without_filter = IntervalEncoder(
-            config=SolverConfig(),
-            drop_implausible_data_points=False
+            config=SolverConfig(), drop_implausible_data_points=False
         )._remove_implausible_data_points(df)
 
         assertDataFrameEqual(result_with_filter, df)

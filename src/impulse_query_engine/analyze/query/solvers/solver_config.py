@@ -340,7 +340,6 @@ class SolverConfig(BaseModel):
         """Internal column name for the unit group id on the unit_conversion table."""
         return "group_id"
 
-
     @property
     def timestamp_col(self) -> str:
         """Internal column name for the timestamp on the channels table for raw encoded channel data."""

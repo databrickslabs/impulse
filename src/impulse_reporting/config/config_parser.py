@@ -393,10 +393,8 @@ class QueryEngine(BaseModel):
         """`drop_implausible_data=True` currently only takes effect with RAW data.
 
         The filter is applied inside the RAW -> interval conversion path by the
-        selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).  RLE
-        input short-circuits that path and the flag is silently ignored, so we
-        reject the combination at config validation time.
-        """ #todo the short circuit comment is ambigious
+        selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).
+        """
         if self.drop_implausible_data and self.data_type is not DataType.RAW:
             raise ValueError(
                 "drop_implausible_data=True requires data_type=RAW. "

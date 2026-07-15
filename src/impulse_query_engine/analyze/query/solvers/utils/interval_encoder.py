@@ -21,9 +21,7 @@ class IntervalEncoder:
     """
 
     def __init__(
-        self,
-        config: SolverConfig | None = None,
-        drop_implausible_data_points: bool = False
+        self, config: SolverConfig | None = None, drop_implausible_data_points: bool = False
     ):
         """
         Initialize the IntervalEncoder.
@@ -116,7 +114,9 @@ class IntervalEncoder:
         The DataFrame must already contain a ``timestamp_of_next_data_point``
         column (added by ``_extract_next_data_point_info``).
         """
-        end_ts = F.coalesce(F.col("_timestamp_of_next_data_point"), F.col(self.config.timestamp_col))
+        end_ts = F.coalesce(
+            F.col("_timestamp_of_next_data_point"), F.col(self.config.timestamp_col)
+        )
         return (
             df.withColumn(self.config.tend_col, end_ts)
             .withColumnRenamed(self.config.timestamp_col, self.config.tstart_col)
@@ -138,9 +138,9 @@ class IntervalEncoder:
         Drops the intermediate ``_value_of_next_data_point`` column after
         filtering.
         """
-        is_duplicate = (F.col(self.config.value_col).eqNullSafe(F.col("_value_of_next_data_point"))) & (
-            F.col(self.config.timestamp_col).eqNullSafe(F.col("_timestamp_of_next_data_point"))
-        )
+        is_duplicate = (
+            F.col(self.config.value_col).eqNullSafe(F.col("_value_of_next_data_point"))
+        ) & (F.col(self.config.timestamp_col).eqNullSafe(F.col("_timestamp_of_next_data_point")))
         return (
             df.withColumn("is_duplicate", is_duplicate)
             .filter(~F.col("is_duplicate"))
@@ -160,9 +160,9 @@ class IntervalEncoder:
         These columns are consumed downstream by
         ``_drop_duplicate_data_points`` and ``_determine_end_timestamp``.
         """
-        ws = Window.partitionBy(F.col(self.config.container_id_col), F.col(self.config.channel_id_col)).orderBy(
-            F.col(self.config.timestamp_col).asc(), F.col(self.config.value_col).desc()
-        )
+        ws = Window.partitionBy(
+            F.col(self.config.container_id_col), F.col(self.config.channel_id_col)
+        ).orderBy(F.col(self.config.timestamp_col).asc(), F.col(self.config.value_col).desc())
 
         timestamp_of_next_data_point = F.lead(F.col(self.config.timestamp_col)).over(ws)
         value_of_next_data_point = F.lead(F.col((self.config.value_col))).over(ws)
