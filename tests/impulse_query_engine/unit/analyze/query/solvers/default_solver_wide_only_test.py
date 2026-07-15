@@ -174,6 +174,19 @@ class TestTimeSeriesCache:
         assert list(cache.load_blob(1, 10).values) == [1.0, 2.0]
         assert list(cache.load_blob(2, 20).values) == [3.0, 4.0]
 
+    def test_cache_sorts_input_frame_in_place(self):
+        """The cache takes ownership of the input frame and sorts it in place.
+
+        Pins the intentional side effect: constructing a cache reorders the
+        caller's frame (and resets its index) instead of keeping a copy.
+        """
+        pdf = _make_channel_pdf().sample(frac=1, random_state=0).reset_index(drop=True)
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert cache.pdf is pdf
+        assert list(pdf.index) == list(range(len(pdf)))
+        key_tuples = list(zip(pdf["container_id"], pdf["channel_id"], pdf["tstart"], strict=True))
+        assert key_tuples == sorted(key_tuples)
+
     def test_pdf_sorted_correctly(self):
         """pdf should be sorted by (container_id, channel_id, tstart) within each group."""
         pdf = _make_channel_pdf()

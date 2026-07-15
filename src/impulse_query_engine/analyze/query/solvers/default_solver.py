@@ -34,6 +34,9 @@ class TimeSeriesCache(SeriesCache):
             ``col_map["conv"]`` is present, :meth:`load_blob` multiplies the
             loaded values by that per-channel factor.  All rows of a given
             ``(cid, ch)`` slice are expected to share the same factor.
+            The cache takes ownership of *pdf* and **sorts it in place**:
+            the caller's frame is reordered by ``(cid, ch, ts)`` and its
+            index reset.
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
@@ -48,13 +51,16 @@ class TimeSeriesCache(SeriesCache):
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
-        # Deduplicate the metadata via a row mask and sort the data without creating a second full-frame copy
+        # mdf must be built before the sort: "first row per (cid, ch)" is defined in input order.
         meta_cols = [
             c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
         ]
         first_rows = ~pdf.duplicated(subset=[self._cid_col, self._ch_col])
         self.mdf = pdf.loc[first_rows, meta_cols].reset_index(drop=True)
-        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col], ignore_index=True)
+        pdf.sort_values(
+            [self._cid_col, self._ch_col, self._ts_col], inplace=True, ignore_index=True
+        )
+        self.pdf = pdf
 
     def resolve(self, selection):
         """
@@ -880,10 +886,6 @@ class DefaultSolver(QuerySolver):
         cid_col = col_map["cid"]
         result = {cid_col: [pdf[cid_col].iloc[0]]}
         cache = TimeSeriesCache(pdf, col_map=col_map)
-        # pyspark's grouped-map wrapper passes *pdf* as a temporary, so
-        # dropping the last reference frees the unsorted copy while the
-        # selections are evaluated against the cache.
-        del pdf
         for s in selections:
             res = s.build(cache)
             if hasattr(res, "serialize") and callable(res.serialize):
