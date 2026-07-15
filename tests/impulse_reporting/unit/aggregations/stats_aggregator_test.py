@@ -4,13 +4,18 @@ This module contains unit tests for the StatsAggregator class from impulse_repor
 Tests follow the same pattern as histogram_test.py.
 """
 
+import pyspark.sql.types as T
 import pytest
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
+from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+    CrossChannelStatistic,
+)
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.basic_event import BasicEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
+from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
 
 
 def test_as_spark_row():
@@ -673,3 +678,184 @@ def test_init_rejects_points_in_time_event():
             statistics=["min"],
             event=PointsInTimeEvent(name="p", expr=TimeSeriesSelector(None).rising_edges()),
         )
+
+
+# ---------------------------------------------------------------------------
+# Custom statistics (cross-channel and per-channel)
+# ---------------------------------------------------------------------------
+
+
+def _spread(series, t_start, t_end):
+    """Cross-channel test statistic."""
+    values = [v for s in series for v in s.values]
+    return float(max(values) - min(values)) if values else float("nan")
+
+
+def _ratio(series, t_start, t_end):
+    """Cross-channel test statistic."""
+    return 0.5
+
+
+def _rms(series, t_start, t_end):
+    """Per-channel test statistic."""
+    import numpy as np
+
+    return float(np.sqrt(np.nanmean(series.values**2))) if len(series) else float("nan")
+
+
+def _make_custom_stats_aggregator(name="my_stats"):
+    return StatsAggregator(
+        name=name,
+        input_expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        channel_names=["ch_a", "ch_b"],
+        statistics=["min"],
+        event=BasicEvent(name="test_event", expr=TimeSeriesSelector(None) > 0),
+        cross_channel_custom_statistics={
+            "spread": CrossChannelStatistic(
+                func=_spread, inputs=["ch_a", "ch_b"], channel_name="combined"
+            ),
+            "ratio": _ratio,
+        },
+        per_channel_custom_statistics={"rms": _rms},
+    )
+
+
+def test_custom_statistics_normalization_and_as_dict():
+    stats_agg = _make_custom_stats_aggregator()
+
+    # plain callables are normalized to CrossChannelStatistic descriptors
+    assert isinstance(stats_agg.cross_channel_custom_statistics["ratio"], CrossChannelStatistic)
+    assert stats_agg.cross_channel_custom_statistics["ratio"].channel_name is None
+    assert stats_agg.cross_channel_custom_statistics["spread"].channel_name == "combined"
+
+    stats_dict = stats_agg.as_dict()
+    assert stats_dict["statistics"] == ["min", "rms", "spread", "ratio"]
+
+    # as_spark_row still matches the dimension schema
+    row = stats_agg.as_spark_row()
+    assert set(row.asDict().keys()) == set(STATS_AGGREGATOR_DIMENSION_SCHEMA.fieldNames())
+
+
+def test_cross_channel_empty_channel_name_rejected():
+    with pytest.raises(ValueError, match="non-empty"):
+        StatsAggregator(
+            name="bad_channel_name",
+            input_expressions=[TimeSeriesSelector(None)],
+            channel_names=["ch_a"],
+            statistics=["min"],
+            cross_channel_custom_statistics={
+                "spread": CrossChannelStatistic(func=_spread, channel_name="")
+            },
+        )
+
+
+def test_cross_channel_unknown_input_rejected():
+    with pytest.raises(ValueError, match="unknown input"):
+        StatsAggregator(
+            name="bad_inputs",
+            input_expressions=[TimeSeriesSelector(None)],
+            channel_names=["ch_a"],
+            statistics=["min"],
+            cross_channel_custom_statistics={
+                "spread": CrossChannelStatistic(func=_spread, inputs=["missing"])
+            },
+        )
+
+
+def _build_solved_df(spark, stats_name):
+    """Hand-built solved wide DataFrame with the 4-field stats struct."""
+    value_type = T.StructType(
+        [
+            T.StructField("event_timestamps", T.ArrayType(T.ArrayType(T.DoubleType()))),
+            T.StructField(
+                "numeric_values",
+                T.ArrayType(T.ArrayType(T.MapType(T.StringType(), T.DoubleType()))),
+            ),
+            T.StructField(
+                "string_values",
+                T.ArrayType(T.ArrayType(T.MapType(T.StringType(), T.StringType()))),
+            ),
+            T.StructField(
+                "cross_channel_values", T.ArrayType(T.MapType(T.StringType(), T.DoubleType()))
+            ),
+        ]
+    )
+    schema = T.StructType(
+        [
+            T.StructField("container_id", T.IntegerType()),
+            T.StructField(stats_name, value_type),
+        ]
+    )
+    # 2 signals x 2 intervals; event_timestamps repeated per signal (series-major)
+    event_timestamps = [[0.0, 10.0], [10.0, 20.0], [0.0, 10.0], [10.0, 20.0]]
+    numeric_values = [
+        [{"min": 1.0, "rms": 1.5}, {"min": 2.0, "rms": 2.5}],
+        [{"min": 3.0, "rms": 3.5}, {"min": 4.0, "rms": 4.5}],
+    ]
+    string_values = []
+    cross_channel_values = [{"spread": 10.0, "ratio": 0.5}, {"spread": 20.0, "ratio": 0.6}]
+    return spark.createDataFrame(
+        [(1, (event_timestamps, numeric_values, string_values, cross_channel_values))],
+        schema,
+    )
+
+
+def test_determine_aggregations_with_custom_statistics(spark):
+    stats_agg = _make_custom_stats_aggregator()
+    solved_df = _build_solved_df(spark, stats_agg.get_name())
+
+    df = StatsAggregator.determine_aggregations(spark, [stats_agg], solved_df=solved_df)
+    rows = df.collect()
+
+    by_label = {}
+    for row in rows:
+        by_label.setdefault(row["aggregation_label"], []).append(row)
+
+    # per-channel rows (built-in + per-channel custom) under real channel names
+    assert {row["channel_name"] for row in by_label["min"]} == {"ch_a", "ch_b"}
+    assert {row["channel_name"] for row in by_label["rms"]} == {"ch_a", "ch_b"}
+    assert sorted(row["statistic_value"] for row in by_label["rms"]) == [1.5, 2.5, 3.5, 4.5]
+
+    # cross-channel rows: descriptor channel_name and stat-name default
+    assert {row["channel_name"] for row in by_label["spread"]} == {"combined"}
+    assert sorted(row["statistic_value"] for row in by_label["spread"]) == [10.0, 20.0]
+    assert {row["channel_name"] for row in by_label["ratio"]} == {"ratio"}
+    assert sorted(row["statistic_value"] for row in by_label["ratio"]) == [0.5, 0.6]
+
+    # cross-channel rows share the event_instance_id of the same interval's
+    # per-channel rows (joinable per interval instance)
+    instance_of_spread_0 = next(
+        row["event_instance_id"] for row in by_label["spread"] if row["statistic_value"] == 10.0
+    )
+    instance_of_min_interval_0 = {
+        row["event_instance_id"] for row in by_label["min"] if row["statistic_value"] in (1.0, 3.0)
+    }
+    assert instance_of_min_interval_0 == {instance_of_spread_0}
+    assert len({row["event_instance_id"] for row in rows}) == 2
+
+
+def test_determine_aggregations_without_custom_statistics_has_no_extra_rows(spark):
+    stats_agg = StatsAggregator(
+        name="plain_stats",
+        input_expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        channel_names=["ch_a", "ch_b"],
+        statistics=["min"],
+        event=BasicEvent(name="test_event", expr=TimeSeriesSelector(None) > 0),
+    )
+    value_type = stats_agg.get_expression().dtype()
+    schema = T.StructType(
+        [
+            T.StructField("container_id", T.IntegerType()),
+            T.StructField("plain_stats", value_type),
+        ]
+    )
+    event_timestamps = [[0.0, 10.0], [0.0, 10.0]]
+    numeric_values = [[{"min": 1.0}], [{"min": 3.0}]]
+    solved_df = spark.createDataFrame([(1, (event_timestamps, numeric_values, [], []))], schema)
+
+    df = StatsAggregator.determine_aggregations(spark, [stats_agg], solved_df=solved_df)
+    rows = df.collect()
+
+    assert len(rows) == 2
+    assert {row["channel_name"] for row in rows} == {"ch_a", "ch_b"}
+    assert {row["aggregation_label"] for row in rows} == {"min"}

@@ -9,14 +9,19 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import numpy.testing as nptest
+import pytest
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
+from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+    CrossChannelStatistic,
+)
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import (
     StatsAggregator,
 )
+from impulse_query_engine.model.series.intervals import Intervals
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 
@@ -309,6 +314,13 @@ def test_dtype_contains_expected_fields():
     assert "event_timestamps" in field_names
     assert "numeric_values" in field_names
     assert "string_values" in field_names
+    assert "cross_channel_values" in field_names
+    assert len(dtype.fields) == 4
+
+    import pyspark.sql.types as T
+
+    cross_channel_field = dtype["cross_channel_values"]
+    assert cross_channel_field.dataType == T.ArrayType(T.MapType(T.StringType(), T.DoubleType()))
 
 
 def test_required_tags_single_expression():
@@ -498,7 +510,9 @@ def test_build_with_none_event_expression_uses_synced_series_bounds():
         statistics=["start", "end"],
     )
 
-    event_timestamps, numeric_values, string_values = stats_agg.build(cache=None)
+    event_timestamps, numeric_values, string_values, cross_channel_values = stats_agg.build(
+        cache=None
+    )
 
     # event_timestamps is appended inside the per-expression loop in build(),
     # so for N=2 expressions with one synthetic event each the list has 2 entries.
@@ -509,6 +523,7 @@ def test_build_with_none_event_expression_uses_synced_series_bounds():
     assert numeric_values[0][0] == {"start": 1.0, "end": 3.0}
     assert numeric_values[1][0] == {"start": 10.0, "end": 20.0}
     assert string_values == []
+    assert cross_channel_values == []
 
 
 def test_has_required_methods():
@@ -578,3 +593,386 @@ def test_stats_aggregator_get_selectors_with_event():
     assert len(result) == 2
     assert sel in result
     assert evt in result
+
+
+# ---------------------------------------------------------------------------
+# Custom statistics (cross-channel and per-channel)
+# ---------------------------------------------------------------------------
+
+
+def _mock_expr(tstarts, tends, values):
+    """Mock TimeSeriesExpression whose build() returns a SampleSeries."""
+    expr = MagicMock()
+    expr.build.return_value = SampleSeries(
+        tstarts=np.array(tstarts), tends=np.array(tends), values=np.array(values)
+    )
+    return expr
+
+
+def _mock_event(tstarts, tends):
+    """Mock event expression whose build() returns Intervals."""
+    event = MagicMock()
+    event.build.return_value = Intervals(tstarts=tstarts, tends=tends)
+    return event
+
+
+def _spread(series, t_start, t_end):
+    """Cross-channel: max - min over all values of all series."""
+    values = np.concatenate([s.values for s in series]) if series else np.array([])
+    valid = values[~np.isnan(values)]
+    if valid.size == 0:
+        return float("nan")
+    return float(np.max(valid) - np.min(valid))
+
+
+def _total_sample_count(series, t_start, t_end):
+    """Cross-channel: total number of samples across all series."""
+    return float(sum(len(s) for s in series))
+
+
+def _rms(series, t_start, t_end):
+    """Per-channel: root mean square of the series values."""
+    if len(series) == 0:
+        return float("nan")
+    return float(np.sqrt(np.nanmean(series.values**2)))
+
+
+def _sample_count(series, t_start, t_end):
+    """Per-channel: number of samples in the series."""
+    return float(len(series))
+
+
+def test_build_cross_channel_stat_two_channels_two_intervals():
+    expr1 = _mock_expr([0.0, 2.0], [1.0, 3.0], [10.0, 30.0])
+    expr2 = _mock_expr([0.0, 2.0], [1.0, 3.0], [20.0, 50.0])
+    event = _mock_event([0.0, 2.0], [1.0, 3.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr1, expr2],
+        event_expression=event,
+        statistics=["min"],
+        cross_channel_custom_statistics={"spread": _spread},
+    )
+
+    _, numeric_values, _, cross_channel_values = stats_agg.build(cache=None)
+
+    assert len(cross_channel_values) == 2
+    assert len(cross_channel_values) == len(numeric_values[0])
+    nptest.assert_almost_equal(cross_channel_values[0]["spread"], 10.0)
+    nptest.assert_almost_equal(cross_channel_values[1]["spread"], 20.0)
+    # built-ins still computed per channel
+    assert numeric_values[0][0] == {"min": 10.0}
+    assert numeric_values[1][1] == {"min": 50.0}
+
+
+def test_build_multiple_cross_channel_stats():
+    expr = _mock_expr([0.0, 2.0], [1.0, 3.0], [10.0, 30.0])
+    event = _mock_event([0.0, 2.0], [1.0, 3.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        cross_channel_custom_statistics={"spread": _spread, "count": _total_sample_count},
+    )
+
+    _, _, _, cross_channel_values = stats_agg.build(cache=None)
+
+    assert len(cross_channel_values) == 2
+    for interval_map in cross_channel_values:
+        assert set(interval_map.keys()) == {"spread", "count"}
+        assert interval_map["count"] == 1.0
+
+
+def test_build_cross_channel_stat_without_event_expression():
+    expr1 = _mock_expr([0.0, 2.0], [2.0, 4.0], [1.0, 3.0])
+    expr2 = _mock_expr([1.0, 3.0], [3.0, 5.0], [10.0, 20.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr1, expr2],
+        event_expression=None,
+        cross_channel_custom_statistics={"spread": _spread},
+    )
+
+    _, _, _, cross_channel_values = stats_agg.build(cache=None)
+
+    assert len(cross_channel_values) == 1
+    nptest.assert_almost_equal(cross_channel_values[0]["spread"], 19.0)
+
+
+def test_cross_channel_inputs_subset_order_and_clipping():
+    expr_a = _mock_expr([0.0], [1.0], [1.0])
+    expr_b = _mock_expr([0.0], [1.0], [2.0])
+    # channel c has a sample spanning the interval boundary at t=1.0
+    expr_c = _mock_expr([0.5], [1.5], [3.0])
+    event = _mock_event([0.0], [1.0])
+
+    received = []
+
+    def capture(series, t_start, t_end):
+        received.append((series, t_start, t_end))
+        return 0.0
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr_a, expr_b, expr_c],
+        event_expression=event,
+        cross_channel_custom_statistics={
+            "captured": CrossChannelStatistic(func=capture, inputs=["c", "a"])
+        },
+        input_names=["a", "b", "c"],
+    )
+
+    stats_agg.build(cache=None)
+
+    assert len(received) == 1
+    series, t_start, t_end = received[0]
+    assert (t_start, t_end) == (0.0, 1.0)
+    # only the declared inputs, in declared order: c first, then a
+    assert len(series) == 2
+    nptest.assert_almost_equal(series[0].values, [3.0])
+    nptest.assert_almost_equal(series[1].values, [1.0])
+    # the boundary-spanning sample of c is truncated to the interval
+    assert np.all(series[0].tstarts >= t_start)
+    assert np.all(series[0].tends <= t_end)
+
+
+def test_cross_channel_stat_called_with_empty_series():
+    # channel has samples only within the first interval
+    expr = _mock_expr([0.0], [1.0], [10.0])
+    event = _mock_event([0.0, 2.0], [1.0, 3.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        cross_channel_custom_statistics={"spread": _spread, "count": _total_sample_count},
+    )
+
+    _, _, _, cross_channel_values = stats_agg.build(cache=None)
+
+    assert len(cross_channel_values) == 2
+    nptest.assert_almost_equal(cross_channel_values[0]["spread"], 0.0)
+    assert np.isnan(cross_channel_values[1]["spread"])
+    # count-like statistics can return 0 instead of NaN for empty intervals
+    assert cross_channel_values[1]["count"] == 0.0
+
+
+def test_build_degenerate_interval_skipped_for_cross_channel():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+    # trailing zero-length interval survives the Intervals constructor
+    event = _mock_event([0.0, 2.0], [1.0, 2.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        statistics=["min"],
+        cross_channel_custom_statistics={"count": _total_sample_count},
+    )
+
+    _, numeric_values, _, cross_channel_values = stats_agg.build(cache=None)
+
+    assert len(cross_channel_values) == 1
+    assert len(cross_channel_values) == len(numeric_values[0])
+
+
+def test_cross_channel_error_propagates_from_build():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    def broken(series, t_start, t_end):
+        raise RuntimeError("boom")
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        cross_channel_custom_statistics={"broken": broken},
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        stats_agg.build(cache=None)
+
+
+def test_cross_channel_non_scalar_return_raises_type_error():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    def returns_none(series, t_start, t_end):
+        return None
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        cross_channel_custom_statistics={"bad_stat": returns_none},
+    )
+
+    with pytest.raises(TypeError, match="bad_stat"):
+        stats_agg.build(cache=None)
+
+
+def test_build_custom_only_without_builtin_statistics():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+    event = _mock_event([0.0], [1.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        cross_channel_custom_statistics={"count": _total_sample_count},
+    )
+
+    _, numeric_values, _, cross_channel_values = stats_agg.build(cache=None)
+
+    assert numeric_values == [[{}]]
+    assert cross_channel_values == [{"count": 1.0}]
+
+
+def test_per_channel_custom_stat_alongside_builtins():
+    expr1 = _mock_expr([0.0, 2.0], [1.0, 3.0], [3.0, 4.0])
+    expr2 = _mock_expr([0.0, 2.0], [1.0, 3.0], [6.0, 8.0])
+    event = _mock_event([0.0, 2.0], [1.0, 3.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr1, expr2],
+        event_expression=event,
+        statistics=["min", "max"],
+        per_channel_custom_statistics={"rms": _rms},
+    )
+
+    _, numeric_values, _, _ = stats_agg.build(cache=None)
+
+    assert len(numeric_values) == 2
+    for signal_values in numeric_values:
+        assert len(signal_values) == 2
+        for interval_map in signal_values:
+            assert set(interval_map.keys()) == {"min", "max", "rms"}
+    # single-sample intervals: rms equals the absolute sample value
+    nptest.assert_almost_equal(numeric_values[0][0]["rms"], 3.0)
+    nptest.assert_almost_equal(numeric_values[0][1]["rms"], 4.0)
+    nptest.assert_almost_equal(numeric_values[1][0]["rms"], 6.0)
+    nptest.assert_almost_equal(numeric_values[1][1]["rms"], 8.0)
+
+
+def test_per_channel_custom_stat_called_for_empty_interval():
+    # samples only in the first interval; built-ins NaN-fill the second interval
+    expr = _mock_expr([0.0], [1.0], [10.0])
+    event = _mock_event([0.0, 2.0], [1.0, 3.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        statistics=["min"],
+        per_channel_custom_statistics={"count": _sample_count},
+    )
+
+    _, numeric_values, _, _ = stats_agg.build(cache=None)
+
+    assert np.isnan(numeric_values[0][1]["min"])
+    assert numeric_values[0][1]["count"] == 0.0
+    assert numeric_values[0][0]["count"] == 1.0
+
+
+def test_per_channel_custom_stat_receives_clipped_series():
+    expr = _mock_expr([0.5], [1.5], [3.0])
+    event = _mock_event([0.0], [1.0])
+
+    received = []
+
+    def capture(series, t_start, t_end):
+        received.append((series, t_start, t_end))
+        return 0.0
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        per_channel_custom_statistics={"captured": capture},
+    )
+
+    stats_agg.build(cache=None)
+
+    assert len(received) == 1
+    series, t_start, t_end = received[0]
+    assert isinstance(series, SampleSeries)
+    assert np.all(series.tstarts >= t_start)
+    assert np.all(series.tends <= t_end)
+
+
+def test_per_channel_non_scalar_return_raises_type_error():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    def returns_list(series, t_start, t_end):
+        return [1.0, 2.0]
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        per_channel_custom_statistics={"bad_stat": returns_list},
+    )
+
+    with pytest.raises(TypeError, match="bad_stat"):
+        stats_agg.build(cache=None)
+
+
+def test_custom_statistics_validation_errors():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    with pytest.raises(TypeError, match="cross_channel_custom_statistics"):
+        StatsAggregator([expr], cross_channel_custom_statistics=[_spread])
+
+    with pytest.raises(TypeError, match="per_channel_custom_statistics"):
+        StatsAggregator([expr], per_channel_custom_statistics={"rms": "not callable"})
+
+    with pytest.raises(TypeError, match="callable"):
+        StatsAggregator([expr], cross_channel_custom_statistics={"x": 42})
+
+    with pytest.raises(ValueError, match="non-empty"):
+        StatsAggregator([expr], cross_channel_custom_statistics={"": _spread})
+
+    with pytest.raises(ValueError, match="built-in"):
+        StatsAggregator([expr], cross_channel_custom_statistics={"mean": _spread})
+
+    with pytest.raises(ValueError, match="built-in"):
+        StatsAggregator([expr], per_channel_custom_statistics={"max": _rms})
+
+    with pytest.raises(ValueError, match="both"):
+        StatsAggregator(
+            [expr],
+            cross_channel_custom_statistics={"x": _spread},
+            per_channel_custom_statistics={"x": _rms},
+        )
+
+
+def test_cross_channel_inputs_validation_errors():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    with pytest.raises(ValueError, match="no input_names"):
+        StatsAggregator(
+            [expr],
+            cross_channel_custom_statistics={
+                "x": CrossChannelStatistic(func=_spread, inputs=["a"])
+            },
+        )
+
+    with pytest.raises(ValueError, match="unknown input"):
+        StatsAggregator(
+            [expr],
+            cross_channel_custom_statistics={
+                "x": CrossChannelStatistic(func=_spread, inputs=["missing"])
+            },
+            input_names=["a"],
+        )
+
+    with pytest.raises(ValueError, match="Length mismatch"):
+        StatsAggregator([expr], input_names=["a", "b"])
+
+    with pytest.raises(ValueError, match="unique"):
+        StatsAggregator([expr, expr], input_names=["a", "a"])
+
+
+def test_str_contains_custom_statistics():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        statistics=["min"],
+        cross_channel_custom_statistics={
+            "spread": CrossChannelStatistic(func=_spread, inputs=["a"])
+        },
+        per_channel_custom_statistics={"rms": _rms},
+        input_names=["a"],
+    )
+
+    str_repr = str(stats_agg)
+    assert "cross_channel_custom_statistics={'spread': ['a']}" in str_repr
+    assert "per_channel_custom_statistics=['rms']" in str_repr

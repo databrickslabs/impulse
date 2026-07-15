@@ -1,6 +1,12 @@
-"""Unit tests for definition hash methods in Histogram and Histogram2D."""
+"""Unit tests for definition hash methods in Histogram, Histogram2D, and StatsAggregator."""
+
+import functools
+import hashlib
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
+from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+    CrossChannelStatistic,
+)
 from impulse_reporting.aggregations.histogram import (
     HistogramDistance,
     HistogramDuration,
@@ -8,6 +14,7 @@ from impulse_reporting.aggregations.histogram import (
 from impulse_reporting.aggregations.histogram2d import (
     Histogram2DDuration,
 )
+from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.basic_event import BasicEvent
 
 
@@ -284,3 +291,139 @@ class TestHistogram2DDefinitionHash:
 
         assert "definition_hash" in result
         assert result["definition_hash"] == hist.determine_definition_hash()
+
+
+def _spread(series, t_start, t_end):
+    """Cross-channel test statistic."""
+    values = [v for s in series for v in s.values]
+    return float(max(values) - min(values)) if values else float("nan")
+
+
+def _spread_other_body(series, t_start, t_end):
+    """Same signature as _spread but a different implementation."""
+    values = [v for s in series for v in s.values]
+    return float(sum(values)) if values else float("nan")
+
+
+def _thresholded_count(series, t_start, t_end, threshold=0.0):
+    """Parameterized statistic for functools.partial tests."""
+    return float(sum((s.values > threshold).sum() for s in series))
+
+
+class TestStatsAggregatorDefinitionHash:
+    """Test suite for StatsAggregator.determine_definition_hash() with custom statistics."""
+
+    @staticmethod
+    def _make(name="stats", channel_names=None, **kwargs):
+        channel_names = channel_names if channel_names is not None else ["ch_a", "ch_b"]
+        return StatsAggregator(
+            name=name,
+            input_expressions=[TimeSeriesSelector(None) for _ in channel_names],
+            channel_names=channel_names,
+            statistics=["min", "max"],
+            event=BasicEvent(name="test_event", expr=TimeSeriesSelector(None) > 0),
+            **kwargs,
+        )
+
+    def test_hash_without_custom_stats_matches_legacy_formula(self):
+        """Aggregators without custom statistics keep their pre-existing hash."""
+        stats_agg = self._make()
+
+        event_expr_str = str(stats_agg.event.get_expression())
+        input_expr_strs = ",".join(str(expr) for expr in stats_agg.input_expressions)
+        stats_strs = ",".join(stats_agg.statistics)
+        hash_input = "::".join([input_expr_strs, stats_strs, event_expr_str])
+        expected = int.from_bytes(
+            hashlib.sha256(hash_input.encode()).digest()[:8], byteorder="big", signed=True
+        )
+
+        assert stats_agg.determine_definition_hash() == expected
+
+    def test_adding_custom_stat_changes_hash(self):
+        plain = self._make()
+        with_cross = self._make(cross_channel_custom_statistics={"spread": _spread})
+        with_per_channel = self._make(per_channel_custom_statistics={"spread": _spread})
+
+        assert plain.determine_definition_hash() != with_cross.determine_definition_hash()
+        assert plain.determine_definition_hash() != with_per_channel.determine_definition_hash()
+
+    def test_same_custom_stats_produce_same_hash(self):
+        agg1 = self._make(name="a", cross_channel_custom_statistics={"spread": _spread})
+        agg2 = self._make(name="b", cross_channel_custom_statistics={"spread": _spread})
+
+        assert agg1.determine_definition_hash() == agg2.determine_definition_hash()
+
+    def test_renamed_custom_stat_changes_hash(self):
+        agg1 = self._make(cross_channel_custom_statistics={"spread": _spread})
+        agg2 = self._make(cross_channel_custom_statistics={"spread_v2": _spread})
+
+        assert agg1.determine_definition_hash() != agg2.determine_definition_hash()
+
+    def test_different_function_body_changes_hash(self):
+        agg1 = self._make(cross_channel_custom_statistics={"spread": _spread})
+        agg2 = self._make(cross_channel_custom_statistics={"spread": _spread_other_body})
+
+        assert agg1.determine_definition_hash() != agg2.determine_definition_hash()
+
+    def test_partial_arguments_change_hash(self):
+        agg1 = self._make(
+            cross_channel_custom_statistics={
+                "count": functools.partial(_thresholded_count, threshold=1.0)
+            }
+        )
+        agg2 = self._make(
+            cross_channel_custom_statistics={
+                "count": functools.partial(_thresholded_count, threshold=2.0)
+            }
+        )
+
+        assert agg1.determine_definition_hash() != agg2.determine_definition_hash()
+
+    def test_kind_is_part_of_hash(self):
+        """The same name registered per-channel vs cross-channel hashes differently."""
+
+        def per_channel_spread(series, t_start, t_end):
+            return 0.0
+
+        agg_cross = self._make(cross_channel_custom_statistics={"x": per_channel_spread})
+        agg_per_channel = self._make(per_channel_custom_statistics={"x": per_channel_spread})
+
+        assert agg_cross.determine_definition_hash() != agg_per_channel.determine_definition_hash()
+
+    def test_channel_name_is_excluded_from_hash(self):
+        agg1 = self._make(
+            cross_channel_custom_statistics={
+                "spread": CrossChannelStatistic(func=_spread, channel_name="combined")
+            }
+        )
+        agg2 = self._make(
+            cross_channel_custom_statistics={
+                "spread": CrossChannelStatistic(func=_spread, channel_name="other_name")
+            }
+        )
+
+        assert agg1.determine_definition_hash() == agg2.determine_definition_hash()
+
+    def test_inputs_hash_uses_indices_not_names(self):
+        """Consistent channel renames keep the hash; rewiring inputs changes it."""
+        agg1 = self._make(
+            channel_names=["ch_a", "ch_b"],
+            cross_channel_custom_statistics={
+                "spread": CrossChannelStatistic(func=_spread, inputs=["ch_b"])
+            },
+        )
+        renamed = self._make(
+            channel_names=["ch_x", "ch_y"],
+            cross_channel_custom_statistics={
+                "spread": CrossChannelStatistic(func=_spread, inputs=["ch_y"])
+            },
+        )
+        rewired = self._make(
+            channel_names=["ch_a", "ch_b"],
+            cross_channel_custom_statistics={
+                "spread": CrossChannelStatistic(func=_spread, inputs=["ch_a"])
+            },
+        )
+
+        assert agg1.determine_definition_hash() == renamed.determine_definition_hash()
+        assert agg1.determine_definition_hash() != rewired.determine_definition_hash()

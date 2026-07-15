@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 from collections.abc import Callable
 
@@ -14,6 +15,10 @@ from pyspark.sql.types import (
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
+)
+from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+    CrossChannelStatistic,
+    normalize_cross_channel_statistics,
 )
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import (
     StatsAggregator as QueryEngineStatsAggregator,
@@ -47,6 +52,8 @@ class StatsAggregator(Aggregation):
         desc: str = None,
         agg_type: str = "stats_aggregator",
         values_unit: str = None,
+        cross_channel_custom_statistics: dict[str, Callable | CrossChannelStatistic] | None = None,
+        per_channel_custom_statistics: dict[str, Callable] | None = None,
     ):
         """
         Initialize a StatsAggregator object.
@@ -70,6 +77,17 @@ class StatsAggregator(Aggregation):
             Type of aggregation, defaults to "stats_aggregator".
         values_unit : str, optional
             Unit of the statistic values.
+        cross_channel_custom_statistics : dict, optional
+            Mapping of statistic name to a callable or ``CrossChannelStatistic``
+            descriptor, computed once per event interval across the descriptor's
+            declared input channels (referencing ``channel_names``; all channels
+            when none are declared). Fact rows carry the descriptor's
+            ``channel_name``, defaulting to the statistic's name. See
+            ``impulse_query_engine`` ``StatsAggregator`` for the callable contract.
+        per_channel_custom_statistics : dict, optional
+            Mapping of statistic name to a callable computed once per input
+            channel and event interval, exactly like a built-in statistic. Fact
+            rows carry the real channel names.
         """
         Aggregation.__init__(self, name)
         self.input_expressions = input_expressions
@@ -80,6 +98,11 @@ class StatsAggregator(Aggregation):
                 SampleSeries, owner="StatsAggregator", example="a channel selection"
             )
         self.statistics = statistics
+        self.cross_channel_custom_statistics = normalize_cross_channel_statistics(
+            cross_channel_custom_statistics
+        )
+        self._validate_cross_channel_channel_names()
+        self.per_channel_custom_statistics = per_channel_custom_statistics or {}
         self.event = event
         self._validate_event_evaluation_type(
             self.event, Intervals, example="(channel > 2000) & (channel < 5000)"
@@ -88,6 +111,24 @@ class StatsAggregator(Aggregation):
         self.agg_type = agg_type
         self.values_unit = values_unit
         self.expression = self._set_expression()
+
+    def _validate_cross_channel_channel_names(self) -> None:
+        """
+        Validate the ``channel_name`` of each cross-channel statistic descriptor.
+
+        Raises
+        ------
+        ValueError
+            If a descriptor's ``channel_name`` is set but not a non-empty string.
+        """
+        for name, statistic in self.cross_channel_custom_statistics.items():
+            if statistic.channel_name is None:
+                continue
+            if not isinstance(statistic.channel_name, str) or not statistic.channel_name:
+                raise ValueError(
+                    f"channel_name of cross-channel statistic '{name}' must be a "
+                    f"non-empty string, got {statistic.channel_name!r}"
+                )
 
     def _validate_channel_names(self) -> None:
         """
@@ -172,6 +213,9 @@ class StatsAggregator(Aggregation):
             input_expressions=self.input_expressions,
             statistics=self.statistics,
             event_expression=self.event.get_expression() if self.event else None,
+            cross_channel_custom_statistics=self.cross_channel_custom_statistics,
+            per_channel_custom_statistics=self.per_channel_custom_statistics,
+            input_names=self.channel_names,
         ).alias(self.name)
 
         return query_eng_stats_agg
@@ -192,7 +236,11 @@ class StatsAggregator(Aggregation):
             "page_number": self.page_number,
             "description": self.desc,
             "agg_type": self.agg_type if self.agg_type else "stats_aggregator",
-            "statistics": self.statistics,
+            "statistics": (
+                list(self.statistics)
+                + list(self.per_channel_custom_statistics)
+                + list(self.cross_channel_custom_statistics)
+            ),
             "channel_names": self.channel_names,
             "signal_expressions": [expr.__str__() for expr in self.input_expressions],
             "values_unit": self.values_unit,
@@ -254,13 +302,20 @@ class StatsAggregator(Aggregation):
 
         result = solved_df.select("container_id", *stats_names)
 
-        df = (
+        base = (
             result.transform(StatsAggregator._unpivot_measurement_info(stats_names))
             .transform(StatsAggregator._extract_stats_info)
             .transform(StatsAggregator._add_event_id_column(aggregations))
             .transform(StatsAggregator._add_event_name_column(aggregations))
-            .transform(StatsAggregator._explode_stats_values)
-            .transform(StatsAggregator._add_channel_name_column(aggregations))
+        )
+        per_channel_df = base.transform(StatsAggregator._explode_stats_values).transform(
+            StatsAggregator._add_channel_name_column(aggregations)
+        )
+        cross_channel_df = base.transform(StatsAggregator._explode_cross_channel_values).transform(
+            StatsAggregator._add_cross_channel_name_column(aggregations)
+        )
+        df = (
+            per_channel_df.unionByName(cross_channel_df)
             .transform(StatsAggregator._add_event_instance_id_column)
             .transform(StatsAggregator._add_visual_id_column(aggregations))
             .select(STATS_AGGREGATOR_FACT_SCHEMA.fieldNames())
@@ -312,6 +367,7 @@ class StatsAggregator(Aggregation):
             df.withColumn("event_timestamps", f.col("value.event_timestamps"))
             .withColumn("numeric_values", f.col("value.numeric_values"))
             .withColumn("string_values", f.col("value.string_values"))
+            .withColumn("cross_channel_values", f.col("value.cross_channel_values"))
         )
 
     @staticmethod
@@ -453,6 +509,119 @@ class StatsAggregator(Aggregation):
         )
 
     @staticmethod
+    def _explode_cross_channel_values(df: DataFrame) -> DataFrame:
+        """
+        Explode the cross-channel statistics values into one row per interval and statistic.
+
+        ``event_timestamps`` is repeated once per input expression (series-major
+        order) by the query engine, so its first ``size(cross_channel_values)``
+        entries are exactly the event intervals in order; they are sliced and
+        zipped with the per-interval statistics maps. Aggregations without
+        cross-channel statistics have an empty ``cross_channel_values`` array and
+        contribute no rows.
+
+        Parameters
+        ----------
+        df : pyspark.sql.DataFrame
+            DataFrame containing ``event_timestamps`` and ``cross_channel_values``.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            DataFrame with one row per cross-channel statistic and interval,
+            matching the column layout of ``_explode_stats_values``.
+        """
+        df_sliced = df.withColumn(
+            "cross_channel_event_timestamps",
+            f.slice(f.col("event_timestamps"), 1, f.size(f.col("cross_channel_values"))),
+        )
+
+        df_with_interval = df_sliced.select(
+            "container_id",
+            "stats_name",
+            "event_id",
+            "event_name",
+            f.posexplode(
+                f.arrays_zip(
+                    f.col("cross_channel_event_timestamps"), f.col("cross_channel_values")
+                )
+            ).alias("interval_index", "zipped"),
+        )
+
+        df_with_timestamps = df_with_interval.select(
+            "container_id",
+            "stats_name",
+            "event_id",
+            "event_name",
+            f.lit(-1).alias("signal_index"),
+            f.col("zipped.cross_channel_event_timestamps").getItem(0).alias("start_ts"),
+            f.col("zipped.cross_channel_event_timestamps").getItem(1).alias("end_ts"),
+            f.col("zipped.cross_channel_values").alias("statistics"),
+        )
+
+        return df_with_timestamps.select(
+            "container_id",
+            "stats_name",
+            "event_name",
+            "event_id",
+            "signal_index",
+            "start_ts",
+            "end_ts",
+            f.explode(f.col("statistics")).alias("aggregation_label", "statistic_value"),
+        )
+
+    @staticmethod
+    def _add_cross_channel_name_column(
+        aggregations: list[StatsAggregator],
+    ) -> Callable[..., DataFrame]:
+        """
+        Add a channel_name column for cross-channel statistic rows.
+
+        Descriptors with an explicit ``channel_name`` are mapped per
+        (aggregation, statistic); all other rows default to their
+        ``aggregation_label`` (the statistic's name), which is non-null and
+        stable as required by the fact table's merge keys. A ``channel_name``
+        equal to a real input channel name is allowed and pivots the statistic
+        into that channel's rows.
+
+        Parameters
+        ----------
+        aggregations : list of StatsAggregator
+            List of StatsAggregator visual aggregations.
+
+        Returns
+        -------
+        function
+            Function that adds the channel_name column to a DataFrame.
+        """
+
+        def _(df: DataFrame) -> DataFrame:
+            col_expr = None
+            for agg in aggregations:
+                if agg is None:
+                    continue
+                agg_name = agg.get_name()
+                for stat_name, statistic in agg.cross_channel_custom_statistics.items():
+                    if statistic.channel_name is None:
+                        continue
+                    condition = (f.col("stats_name") == f.lit(agg_name)) & (
+                        f.col("aggregation_label") == f.lit(stat_name)
+                    )
+                    if col_expr is None:
+                        col_expr = f.when(condition, f.lit(statistic.channel_name))
+                    else:
+                        col_expr = col_expr.when(condition, f.lit(statistic.channel_name))
+
+            channel_name_column = (
+                col_expr.otherwise(f.col("aggregation_label"))
+                if col_expr is not None
+                else f.col("aggregation_label")
+            )
+            return df.withColumn("channel_name", channel_name_column)
+
+        return _
+
+    @staticmethod
     def _add_channel_name_column(
         aggregations: list[StatsAggregator],
     ) -> Callable[..., DataFrame]:
@@ -572,8 +741,14 @@ class StatsAggregator(Aggregation):
         - input_expressions
         - statistics to be calculated
         - event expression if there is any
+        - custom statistics (name, kind, declared input indices, and function
+          bytecode, so implementation or input-wiring changes invalidate cached
+          results; only appended when custom statistics are configured so
+          aggregators without them keep their previous hash)
 
-        Excludes: name, desc, signal_name, units, page_number, report_id
+        Excludes: name, desc, signal_name, units, page_number, report_id, and the
+        cross-channel descriptors' channel_name (presentation metadata, like
+        channel_names).
 
         Returns
         -------
@@ -595,8 +770,71 @@ class StatsAggregator(Aggregation):
             stats_strs,  # statistics aggregation types
             event_expr_str,  # Event expression
         ]
+
+        custom_fingerprints = [
+            self._fingerprint_custom_statistic("per_channel", name, func, inputs_repr="")
+            for name, func in sorted(self.per_channel_custom_statistics.items())
+        ]
+        for name, statistic in sorted(self.cross_channel_custom_statistics.items()):
+            if statistic.inputs is None:
+                inputs_repr = "all"
+            else:
+                # indices, not names: consistent renames keep the hash stable
+                inputs_repr = repr([self.channel_names.index(ch) for ch in statistic.inputs])
+            custom_fingerprints.append(
+                self._fingerprint_custom_statistic(
+                    "cross_channel", name, statistic.func, inputs_repr=inputs_repr
+                )
+            )
+        if custom_fingerprints:
+            hash_components.append("|".join(custom_fingerprints))
+
         hash_input = "::".join(hash_components)
 
         # Use SHA-256 and return as int (truncated to fit LongType)
         hash_bytes = hashlib.sha256(hash_input.encode()).digest()
         return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
+
+    @staticmethod
+    def _fingerprint_custom_statistic(
+        kind: str, name: str, func: Callable, inputs_repr: str
+    ) -> str:
+        """
+        Build a stable fingerprint for a custom statistic.
+
+        The fingerprint covers the statistic's kind, name, declared input indices,
+        and the function's bytecode and constants. ``functools.partial`` wrappers
+        are unwrapped with their bound arguments included, so changed parameters
+        change the fingerprint. Note that bytecode hashing does not detect changes
+        inside helper functions called by the statistic, and is sensitive to the
+        Python version. Callables without ``__code__`` fall back to a name-only
+        fingerprint.
+
+        Parameters
+        ----------
+        kind : str
+            Either ``per_channel`` or ``cross_channel``.
+        name : str
+            The statistic's name.
+        func : Callable
+            The statistic's callable.
+        inputs_repr : str
+            Representation of the declared input indices.
+
+        Returns
+        -------
+        str
+            The fingerprint string.
+        """
+        partial_reprs = []
+        while isinstance(func, functools.partial):
+            partial_reprs.append(f"{func.args!r}:{sorted(func.keywords.items())!r}")
+            func = func.func
+        code = getattr(func, "__code__", None)
+        if code is None:
+            digest = "no-code"
+        else:
+            digest = hashlib.sha256(
+                code.co_code + repr(code.co_consts).encode() + "|".join(partial_reprs).encode()
+            ).hexdigest()
+        return f"{kind}:{name}:{inputs_repr}:{digest}"
