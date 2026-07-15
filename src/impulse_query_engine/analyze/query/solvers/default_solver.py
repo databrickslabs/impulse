@@ -161,15 +161,16 @@ class DefaultSolver(QuerySolver):
     def __init__(
         self,
         spark,
-        impulse_config: ImpulseConfig,
+        config: SolverConfig | None = None,
         is_raw_data: bool = False,
         drop_implausible_data: bool = False,
+        raw_encoder: RawEncoder = RawEncoder.RLE,
     ):
-        super().__init__(config=impulse_config.query_engine.solver_config)
-        self.impulse_config = impulse_config
+        super().__init__(config=config)
         self.spark = spark
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
+        self.raw_encoder: RawEncoder = raw_encoder
         self.channel_encoder: RleEncoder | IntervalEncoder = self._build_channel_encoder()
 
     def _build_channel_encoder(self) -> RleEncoder | IntervalEncoder:
@@ -180,9 +181,7 @@ class DefaultSolver(QuerySolver):
         consecutive samples are collapsed into a single run (RLE) or kept as
         separate intervals (INTERVAL).
         """
-
-
-        if self.impulse_config.query_engine.raw_encoder is RawEncoder.INTERVAL:
+        if self.raw_encoder is RawEncoder.INTERVAL:
             return IntervalEncoder(
                 config=self.config,
                 drop_implausible_data_points=self.drop_implausible_data,

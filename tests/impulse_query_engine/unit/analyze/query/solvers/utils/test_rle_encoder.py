@@ -553,13 +553,13 @@ class TestRleEncoder:
         )._remove_implausible_data_points(df)
         assertDataFrameEqual(result_no_filter, df)
 
-    def test_remove_implausible_data_points_missing_column(self, spark: SparkSession):
+    def test_check_required_column_exists_missing_column(self, spark: SparkSession):
         """Test that a ValueError is raised when is_plausible is missing but required.
 
         Input:
             (empty DataFrame without an ``is_plausible`` column)
 
-        With filtering enabled, expects ValueError; disabled, returns unchanged.
+        With filtering enabled, expects a friendly ValueError naming the column.
         """
         df = spark.createDataFrame([], silver_schema_without_rle)
 
@@ -569,12 +569,73 @@ class TestRleEncoder:
         ):
             RleEncoder(
                 SolverConfig(), drop_implausible_data_points=True
-            )._remove_implausible_data_points(df)
+            )._check_required_column_exists(df)
+
+    def test_check_required_column_exists_passthrough_when_column_present(
+        self, spark: SparkSession
+    ):
+        """Test that the check passes the DataFrame through when is_plausible exists.
+
+        Input:
+            (empty DataFrame with an ``is_plausible`` column, filtering enabled)
+
+        Expects the input DataFrame returned unchanged.
+        """
+        schema = T.StructType(
+            silver_schema_without_rle.fields
+            + [T.StructField("is_plausible", T.BooleanType(), True)]
+        )
+        df = spark.createDataFrame([], schema)
+
+        result = RleEncoder(
+            SolverConfig(), drop_implausible_data_points=True
+        )._check_required_column_exists(df)
+        assert result is df
+
+    def test_check_required_column_exists_disabled_ignores_missing_column(
+        self, spark: SparkSession
+    ):
+        """Test that the check is a no-op when filtering is disabled.
+
+        Input:
+            (empty DataFrame without an ``is_plausible`` column, filtering disabled)
+
+        Expects the input DataFrame returned unchanged -- the column is only
+        required when ``drop_implausible_data_points=True``.
+        """
+        df = spark.createDataFrame([], silver_schema_without_rle)
 
         result = RleEncoder(
             SolverConfig(), drop_implausible_data_points=False
-        )._remove_implausible_data_points(df)
-        assertDataFrameEqual(result, df)
+        )._check_required_column_exists(df)
+        assert result is df
+
+    def test_prepare_channels_df_missing_is_plausible_raises_friendly_error(
+        self, spark: SparkSession
+    ):
+        """Test that the friendly ValueError is reachable through prepare_channels_df.
+
+        Regression test: ``_assign_interval_ids`` references the
+        ``is_plausible`` column when filtering is enabled, so without the
+        up-front check a missing column surfaced as a cryptic Spark
+        ``AnalysisException`` before ``_remove_implausible_data_points`` ever
+        ran.  The check must fire first and raise the friendly ValueError.
+
+        Input:
+            | container_id | channel_id | timestamp | value |
+            |--------------|------------|-----------|-------|
+            | c1           | ch1        | 1.0       | 10.0  |
+        """
+        data = [
+            Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=10.0),
+        ]
+        df = spark.createDataFrame(data, silver_schema_without_rle)
+
+        with pytest.raises(
+            ValueError,
+            match="DataFrame must contain an 'is_plausible' column",
+        ):
+            RleEncoder(SolverConfig(), drop_implausible_data_points=True).prepare_channels_df(df)
 
     def test_aggregate_intervals(self, spark: SparkSession):
         """Test that _aggregate_intervals collapses tagged rows into one row per interval.

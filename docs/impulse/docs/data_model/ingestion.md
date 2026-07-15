@@ -56,6 +56,10 @@ ingesting your own data, the required invariants are:
     encoding them (`raw_encoder: "RLE"`, the default) or by plain interval
     derivation without merging equal-valued runs (`raw_encoder: "INTERVAL"`)
     — see [query_engine](../config/configuration.md#query_engine-optional).
+    Impulse considers a time series **valid within the calculated
+    intervals**, which is relevant for operations like time-series
+    synchronization — see
+    [How Impulse interprets intervals](silver_layer_schema.md#raw-format).
   - **RLE** — one row per stable interval: `(container_id, channel_id,
     tstart, tend, value)`. Run-length encoded data, where identical consecutive values are collapsed into intervals to significantly reduce processing time during analysis.
 

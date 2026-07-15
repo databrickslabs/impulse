@@ -96,6 +96,10 @@ Solver tuning lives under the `query_engine` section of your report config:
   `raw_encoder` selects how samples are converted to intervals at query
   time: `"RLE"` (default) run-length encodes equal-valued runs into single
   intervals; `"INTERVAL"` only derives `tend` and drops exact duplicates.
+  In both modes `tend` is derived from the **next sample's timestamp**
+  (the last sample falls back to its own timestamp) — see
+  [How Impulse interprets intervals](../../data_model/silver_layer_schema.md#raw-format)
+  for validity semantics and the definition of a duplicate point.
 - [Solver column mappings and filters](../../config/configuration.md#solver-column-mappings-and-filters)
   — adapt the solver to a silver layer whose physical column names
   diverge from Impulse's internal names, scope reads by `project_id`, or
