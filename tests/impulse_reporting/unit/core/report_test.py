@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 from unittest.mock import create_autospec
 
 import pytest
@@ -349,6 +350,31 @@ def test_create_solver_delta_with_solver_config():
     assert solver.config.tstart_col == "tstart"
     assert solver.config.tend_col == "tend"
     assert solver.config.value_col == "value"
+
+
+def test_create_solver_predicate_pushdown_flag():
+    """query_engine.enable_predicate_pushdown reaches the solver; defaults to off."""
+    from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=DUMMY_KEY_VALUE_STORE_CONFIG,
+    )
+    solver = report.get_solver()
+    assert isinstance(solver, DefaultSolver)
+    assert solver.enable_predicate_pushdown is False
+
+    pushdown_config = deepcopy(DUMMY_KEY_VALUE_STORE_CONFIG)
+    pushdown_config["query_engine"]["enable_predicate_pushdown"] = True
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=pushdown_config,
+    )
+    assert report.get_solver().enable_predicate_pushdown is True
 
 
 class TestValidateAggregationEvents:

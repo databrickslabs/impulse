@@ -343,6 +343,15 @@ class QueryEngine(BaseModel):
     ----------
     solver : Solvers, default=Solvers.DEFAULT_SOLVER
         The solver type to use for query execution.
+    enable_predicate_pushdown : bool, default=False
+        When True, the solver extracts value predicates from the report's
+        event and aggregation expressions (e.g. an event ``channel > 2000``
+        needs only rows with ``value > 2000``) and filters the channels
+        table before solving, reducing the data volume entering the solve
+        shuffle and UDF.  Results are identical to the unfiltered path,
+        with one caveat: a container whose every row is pruned produces no
+        output row, whereas the unfiltered path emits a row with empty
+        results (no events / empty aggregates).
     solver_config : SolverConfig, optional
         Per-table column name mappings and filter configuration for
         the solver.  Use this when your silver-layer tables use
@@ -377,6 +386,7 @@ class QueryEngine(BaseModel):
     solver: Solvers = Solvers.DEFAULT_SOLVER
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
+    enable_predicate_pushdown: bool = False
     solver_config: SolverConfig | None = None
     batch_size: int = 500
 
