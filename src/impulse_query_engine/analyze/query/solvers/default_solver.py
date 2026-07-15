@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import operator
 from collections.abc import Iterable
-from functools import partial
+from functools import partial, reduce
 from typing import TYPE_CHECKING
 
 import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pyspark.sql import DataFrame, Window
+from pyspark.sql import Column, DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
@@ -17,6 +18,7 @@ from .query_solver import QuerySolver
 from .series_cache import SeriesCache
 from .solver_config import SolverConfig
 from .utils.interval_encoder import IntervalEncoder
+from .utils.predicate_pushdown import ALL_ROWS, ValuePredicate, analyze_selections
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
@@ -149,6 +151,14 @@ class DefaultSolver(QuerySolver):
         Whether to drop data points marked as implausible before
         processing.  Requires an ``is_plausible`` column in the
         silver layer.
+    enable_predicate_pushdown : bool, optional
+        When True, value predicates extracted from the selections (e.g.
+        ``channel > 2000`` needs only rows with ``value > 2000``) are
+        applied as a filter on the channels table before solving,
+        reducing the data volume entering the solve shuffle and UDF.
+        Results are identical to the unfiltered path, with one caveat:
+        a container whose every row is pruned produces no output row,
+        whereas the unfiltered path emits a row with empty results.
     """
 
     def __init__(
@@ -157,11 +167,13 @@ class DefaultSolver(QuerySolver):
         config: SolverConfig | None = None,
         is_raw_data: bool = False,
         drop_implausible_data: bool = False,
+        enable_predicate_pushdown: bool = False,
     ):
         super().__init__(config=config)
         self.spark = spark
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
+        self.enable_predicate_pushdown: bool = enable_predicate_pushdown
         self.interval_encoder: IntervalEncoder = IntervalEncoder(
             timestamp_col_name="timestamp",
             drop_implausible_data_points=self.drop_implausible_data,
@@ -884,6 +896,47 @@ class DefaultSolver(QuerySolver):
             result[s._alias] = [res]
         return pd.DataFrame(result)
 
+    def _build_pushdown_filter(
+        self, df: DataFrame, needed: dict[int, ValuePredicate | None]
+    ) -> Column | None:
+        """
+        Build the row filter for the joined channels frame from the analyzer output.
+
+        One clause per selector: ``array_contains(selector_ids, id)`` AND-ed
+        with the selector's value predicate (if any), OR-ed together.  A row
+        survives when any selector whose id it carries may need it; selectors
+        without a predicate contribute a bare ``array_contains`` clause so
+        their channels stay unfiltered.
+
+        Parameters
+        ----------
+        df : DataFrame
+            Channels data joined with the matched-channels frame (must carry
+            the ``selector_ids`` array column).
+        needed : dict
+            Per-selector needed-rows predicates from ``analyze_selections``.
+
+        Returns
+        -------
+        Column or None
+            Boolean filter column, or None when no filtering is possible
+            (no ``selector_ids`` column, or no selector has a predicate).
+        """
+        if "selector_ids" not in df.columns:
+            return None
+        if not needed or all(pred is ALL_ROWS for pred in needed.values()):
+            return None
+        # CRC32 selector ids can exceed int32; match the array's element type.
+        element_type = df.schema["selector_ids"].dataType.elementType
+        value_col = F.col(self.config.value_col)
+        clauses = []
+        for selector_id, pred in needed.items():
+            clause = F.array_contains(F.col("selector_ids"), F.lit(selector_id).cast(element_type))
+            if pred is not ALL_ROWS:
+                clause = clause & pred.to_spark_column(value_col)
+            clauses.append(clause)
+        return reduce(operator.or_, clauses)
+
     def solve(self, query, channels_df, selections, dtypes) -> DataFrame:
         """
         Solve the query by grouping channels and applying selections.
@@ -943,6 +996,13 @@ class DefaultSolver(QuerySolver):
         df = q.join(
             F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
         )
+
+        if self.enable_predicate_pushdown:
+            needed = analyze_selections(selections)
+            if needed is not None:
+                pushdown_filter = self._build_pushdown_filter(df, needed)
+                if pushdown_filter is not None:
+                    df = df.where(pushdown_filter)
 
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         if container_count == 0:
