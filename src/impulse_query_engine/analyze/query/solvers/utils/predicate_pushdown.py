@@ -19,9 +19,23 @@ whitelist -- anything unrecognized degrades to "all rows needed":
   the needed rows but destroy exactness: gap-filled intervals may overlap
   spans of predicate-false rows, so later same-selector combinations must OR
   the operands' needs (always sound) instead of AND-refining.
-- Everything else -- raw series usage, aggregations, UDFs, ``where``,
-  arithmetic, alias selectors, unit-converted (``uses_alias``) selectors --
-  needs all rows of every selector it references.
+- ``series.where(gate)`` consumes *gate* only through its Intervals /
+  PointsInTime (``SampleSeries.where`` clips or samples; values pass through
+  unchanged), so the gate subtree is analyzed recursively while the series
+  operand needs all rows.
+- Event-gated aggregations (``StatsAggregator``, ``PointValueAggregator``)
+  likewise consume their ``event_expression`` only through the built
+  Intervals / PointsInTime: the event subtree is analyzed recursively while
+  every input expression needs all rows.
+- ``HistogramDuration`` ignores samples whose value falls outside
+  ``[bins[0], bins[-1]]`` (``np.histogram`` semantics), so a bare-selector
+  (or ``where``-gated bare-selector) selection needs only rows within the
+  outer bin edges.
+- Everything else -- raw series usage, other aggregations (custom-weight /
+  2-D histograms synchronize their series, so every row shifts the
+  resampling), UDFs, arithmetic, alias selectors, unit-converted
+  (``uses_alias``) selectors -- needs all rows of every selector it
+  references.
 
 Because all selections of a query share one scan and one per-container cache,
 the per-selector predicates of all selections are OR-merged: a row may only
@@ -51,6 +65,11 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesOp,
     TimeSeriesSelector,
 )
+from impulse_query_engine.analyze.query.aggregations.histogram import HistogramDuration
+from impulse_query_engine.analyze.query.aggregations.point_value_aggregator import (
+    PointValueAggregator,
+)
+from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
 
 #: Sentinel: every row of the selector's channel may be needed (no filter).
 ALL_ROWS = None
@@ -199,7 +218,76 @@ def _analyze_node(node: TimeSeriesExpression) -> _NodeAnalysis:
                 isinstance(a, TimeSeriesExpression) for a in (*extra, *node.kwargs.values())
             ):
                 return _NodeAnalysis(needed=_analyze_node(operand).needed, exact=None)
+        if (
+            node.optype == "cls"
+            and node.operation == "where"
+            and len(node.args) == 2
+            and not node.kwargs
+            and isinstance(node.args[0], TimeSeriesExpression)
+            and isinstance(node.args[1], TimeSeriesExpression)
+        ):
+            return _analyze_gated(node.args[:1], node.args[1])
+    if type(node) is StatsAggregator or type(node) is PointValueAggregator:
+        return _analyze_gated(node.input_expressions, node.event_expression)
+    if type(node) is HistogramDuration:
+        return _analyze_histogram_duration(node)
     return _opaque(node)
+
+
+def _analyze_gated(input_expressions: Iterable[Any], event_expression: Any) -> _NodeAnalysis:
+    """
+    Series inputs gated by an Intervals/PointsInTime expression.
+
+    The gate contributes only through the point set it builds
+    (``SampleSeries.where``, ``StatsAggregator.build``,
+    ``PointValueAggregator.build``), so it is analyzed recursively; the
+    inputs are consumed as full series and need all rows.
+    """
+    needed: dict[int, ValuePredicate | None] = {
+        s.selector_id: ALL_ROWS
+        for expr in input_expressions
+        if isinstance(expr, TimeSeriesExpression)
+        for s in expr.get_selectors()
+    }
+    if isinstance(event_expression, TimeSeriesExpression):
+        needed = _merge_or(needed, _analyze_node(event_expression).needed)
+    return _NodeAnalysis(needed=needed, exact=None)
+
+
+def _analyze_histogram_duration(node: HistogramDuration) -> _NodeAnalysis:
+    # np.histogram ignores values outside [bins[0], bins[-1]] (and NaN), so
+    # only rows within the outer edges can contribute to any bin.
+    range_pred = _bin_range_predicate(node.bins)
+    if range_pred is None:
+        return _opaque(node)
+    selection = node.selection
+    if _is_bare_selector(selection):
+        return _NodeAnalysis(needed={selection.selector_id: range_pred}, exact=None)
+    if (
+        type(selection) is TimeSeriesOp
+        and selection.optype == "cls"
+        and selection.operation == "where"
+        and len(selection.args) == 2
+        and not selection.kwargs
+        and _is_bare_selector(selection.args[0])
+        and isinstance(selection.args[1], TimeSeriesExpression)
+    ):
+        # where() only clips/samples in time; values pass through unchanged,
+        # so out-of-range rows of the series still contribute nothing.
+        needed = _merge_or(
+            {selection.args[0].selector_id: range_pred},
+            _analyze_node(selection.args[1]).needed,
+        )
+        return _NodeAnalysis(needed=needed, exact=None)
+    return _opaque(node)
+
+
+def _bin_range_predicate(bins: Any) -> ValuePredicate | None:
+    if not isinstance(bins, (list, tuple)) or len(bins) < 2:
+        return None
+    if not all(_is_supported_scalar(b) for b in bins):
+        return None
+    return ValueAnd(ValueComparison("ge", float(bins[0])), ValueComparison("le", float(bins[-1])))
 
 
 def _analyze_comparison(node: TimeSeriesOp, cmp_op: str) -> _NodeAnalysis:

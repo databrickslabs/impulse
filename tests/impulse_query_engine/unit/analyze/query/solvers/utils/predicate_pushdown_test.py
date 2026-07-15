@@ -9,6 +9,11 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesOp,
     TimeSeriesSelector,
 )
+from impulse_query_engine.analyze.query.aggregations.histogram import HistogramCustomWeights
+from impulse_query_engine.analyze.query.aggregations.point_value_aggregator import (
+    PointValueAggregator,
+)
+from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
 from impulse_query_engine.analyze.query.solvers.utils.predicate_pushdown import (
     ALL_ROWS,
     ValueAnd,
@@ -151,6 +156,99 @@ class TestOpaqueFallback:
         assert analyze_selections([alias]) == {
             a.selector_id: ALL_ROWS,
             b.selector_id: ALL_ROWS,
+        }
+
+
+class TestWhere:
+    def test_gate_is_analyzed_and_series_is_all_rows(self):
+        a, b = _selector("A"), _selector("B")
+        assert analyze_selections([a.where(b > 1)]) == {
+            a.selector_id: ALL_ROWS,
+            b.selector_id: ValueComparison("gt", 1.0),
+        }
+
+    def test_series_usage_absorbs_gate_predicate_on_same_selector(self):
+        ch = _selector()
+        assert analyze_selections([ch.where(ch > 1)]) == {ch.selector_id: ALL_ROWS}
+
+    def test_opaque_gate_stays_all_rows(self):
+        a, b = _selector("A"), _selector("B")
+        assert analyze_selections([a.where(b.rising_edges())]) == {
+            a.selector_id: ALL_ROWS,
+            b.selector_id: ALL_ROWS,
+        }
+
+
+class TestEventGatedAggregations:
+    def test_stats_aggregator_analyzes_event_expression(self):
+        inp, gate = _selector("A"), _selector("B")
+        agg = StatsAggregator(
+            input_expressions=[inp],
+            statistics=["min", "max"],
+            event_expression=(gate > 2000) & (gate < 4000),
+        )
+        assert analyze_selections([agg]) == {
+            inp.selector_id: ALL_ROWS,
+            gate.selector_id: ValueAnd(
+                ValueComparison("gt", 2000.0), ValueComparison("lt", 4000.0)
+            ),
+        }
+
+    def test_stats_aggregator_input_absorbs_shared_event_channel(self):
+        ch = _selector()
+        agg = StatsAggregator(
+            input_expressions=[ch], statistics=["mean"], event_expression=ch > 2000
+        )
+        assert analyze_selections([agg]) == {ch.selector_id: ALL_ROWS}
+
+    def test_stats_aggregator_without_event_expression(self):
+        ch = _selector()
+        agg = StatsAggregator(input_expressions=[ch], statistics=["mean"])
+        assert analyze_selections([agg]) == {ch.selector_id: ALL_ROWS}
+
+    def test_point_value_aggregator_analyzes_event_expression(self):
+        inp, gate = _selector("A"), _selector("B")
+        agg = PointValueAggregator(
+            input_expressions=[inp], event_expression=(gate > 1300).start_points()
+        )
+        assert analyze_selections([agg]) == {
+            inp.selector_id: ALL_ROWS,
+            gate.selector_id: ValueComparison("gt", 1300.0),
+        }
+
+
+class TestHistogramDuration:
+    def test_bare_selector_gets_bin_range_predicate(self):
+        ch = _selector()
+        assert analyze_selections([ch.histogram([800.0, 1000.0, 4000.0])]) == {
+            ch.selector_id: ValueAnd(ValueComparison("ge", 800.0), ValueComparison("le", 4000.0))
+        }
+
+    def test_where_gated_selection_combines_range_and_gate(self):
+        ch, gate = _selector(), _selector("B")
+        agg = ch.where(gate < 20).histogram([800.0, 4000.0])
+        assert analyze_selections([agg]) == {
+            ch.selector_id: ValueAnd(ValueComparison("ge", 800.0), ValueComparison("le", 4000.0)),
+            gate.selector_id: ValueComparison("lt", 20.0),
+        }
+
+    def test_nan_bin_edge_is_opaque(self):
+        ch = _selector()
+        assert analyze_selections([ch.histogram([float("nan"), 4000.0])]) == {
+            ch.selector_id: ALL_ROWS
+        }
+
+    def test_complex_selection_is_opaque(self):
+        ch = _selector()
+        assert analyze_selections([(ch * 2).histogram([0.0, 1.0])]) == {ch.selector_id: ALL_ROWS}
+
+    def test_custom_weights_histogram_is_opaque(self):
+        # Synchronization resamples both series; every row shifts the result.
+        ch, weights = _selector(), _selector("W")
+        agg = HistogramCustomWeights(selection=ch, weights=weights, bins=[0.0, 1.0])
+        assert analyze_selections([agg]) == {
+            ch.selector_id: ALL_ROWS,
+            weights.selector_id: ALL_ROWS,
         }
 
 
