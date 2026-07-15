@@ -6,6 +6,8 @@ off and on -- and asserts identical results, plus at least one expected
 literal value so the tests cannot pass vacuously on two empty results.
 """
 
+import math
+
 import pyspark.sql.functions as F
 import pytest
 from pyspark.sql import SparkSession
@@ -65,6 +67,17 @@ def _column_by_container(result_df, col: str) -> dict:
 
 def _struct_by_container(result_df, col: str) -> dict:
     return {row["container_id"]: row[col].asDict(recursive=True) for row in result_df.collect()}
+
+
+def _normalize_nan(obj):
+    """Replace NaN with None so structures compare by equality (NaN != NaN)."""
+    if isinstance(obj, float) and math.isnan(obj):
+        return None
+    if isinstance(obj, dict):
+        return {k: _normalize_nan(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_nan(v) for v in obj]
+    return obj
 
 
 # Engine RPM values in the fixture range ~800-3700; Ambient Air Temperature
@@ -274,6 +287,39 @@ class TestAggregationPushdownParity:
                 {"min": 19.0, "max": 19.0, "mean": 19.0},
             ]
         ]
+
+    def test_comparison_selection_with_aggregator_sharing_input_channel(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        """Selection A filters rpm > 1300; selection B aggregates the raw rpm series.
+
+        The shared rpm channel must stay unfiltered so B still sees samples
+        below A's threshold; only B's event channel (temp) gets a predicate.
+        """
+
+        def build(query):
+            rpm = query.channel(channel_name="Engine RPM")
+            temp = query.channel(channel_name="Ambient Air Temperature")
+            return [
+                (rpm > 1300).alias("iv"),
+                StatsAggregator(
+                    input_expressions=[rpm],
+                    statistics=["min", "max", "mean"],
+                    event_expression=temp < 20,
+                ).alias("stats"),
+            ]
+
+        off_df = _solve(spark, key_value_store_db, build, False)
+        on_df = _solve(spark, key_value_store_db, build, True)
+
+        assert _intervals_by_container(on_df, "iv") == _intervals_by_container(off_df, "iv")
+        off = _normalize_nan(_struct_by_container(off_df, "stats"))
+        on = _normalize_nan(_struct_by_container(on_df, "stats"))
+        assert on == off
+        # Proof the shared rpm channel was NOT filtered by selection A's
+        # predicate: within the temp<20 event interval of container 1 the rpm
+        # minimum (846 in the fixture) lies below A's 1300 threshold.
+        assert on[1]["numeric_values"][0][0]["min"] < 1300
 
     def test_point_value_aggregator_event_gate(
         self, spark: SparkSession, key_value_store_db: MeasurementDB

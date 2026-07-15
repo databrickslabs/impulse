@@ -206,6 +206,19 @@ class TestEventGatedAggregations:
         agg = StatsAggregator(input_expressions=[ch], statistics=["mean"])
         assert analyze_selections([agg]) == {ch.selector_id: ALL_ROWS}
 
+    def test_comparison_selection_does_not_filter_aggregator_input(self):
+        # Selection A: rpm > 500; selection B: stats of the raw rpm series
+        # gated by spd > 0.  B needs every rpm row, so the shared channel
+        # must end up unfiltered; only the event channel keeps a predicate.
+        rpm, spd = _selector("Eng_RPM"), _selector("Veh_Spd")
+        agg = StatsAggregator(
+            input_expressions=[rpm], statistics=["mean"], event_expression=spd > 0
+        )
+        assert analyze_selections([rpm > 500, agg]) == {
+            rpm.selector_id: ALL_ROWS,
+            spd.selector_id: ValueComparison("gt", 0.0),
+        }
+
     def test_point_value_aggregator_analyzes_event_expression(self):
         inp, gate = _selector("A"), _selector("B")
         agg = PointValueAggregator(
