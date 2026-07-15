@@ -4,7 +4,7 @@ import functools
 import hashlib
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
-from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     CrossChannelStatistic,
 )
 from impulse_reporting.aggregations.histogram import (
@@ -403,6 +403,28 @@ class TestStatsAggregatorDefinitionHash:
         )
 
         assert agg1.determine_definition_hash() == agg2.determine_definition_hash()
+
+    def test_params_change_hash(self):
+        agg_default = self._make(cross_channel_custom_statistics={"count": _thresholded_count})
+        agg1 = self._make(
+            cross_channel_custom_statistics={
+                "count": CrossChannelStatistic(func=_thresholded_count, params={"threshold": 1.0})
+            }
+        )
+        agg1_same = self._make(
+            cross_channel_custom_statistics={
+                "count": CrossChannelStatistic(func=_thresholded_count, params={"threshold": 1.0})
+            }
+        )
+        agg2 = self._make(
+            cross_channel_custom_statistics={
+                "count": CrossChannelStatistic(func=_thresholded_count, params={"threshold": 2.0})
+            }
+        )
+
+        assert agg1.determine_definition_hash() == agg1_same.determine_definition_hash()
+        assert agg1.determine_definition_hash() != agg2.determine_definition_hash()
+        assert agg_default.determine_definition_hash() != agg1.determine_definition_hash()
 
     def test_inputs_hash_uses_indices_not_names(self):
         """Consistent channel renames keep the hash; rewiring inputs changes it."""

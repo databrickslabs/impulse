@@ -16,9 +16,11 @@ from pyspark.sql.types import (
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
-from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     CrossChannelStatistic,
+    PerChannelStatistic,
     normalize_cross_channel_statistics,
+    normalize_per_channel_statistics,
 )
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import (
     StatsAggregator as QueryEngineStatsAggregator,
@@ -53,7 +55,7 @@ class StatsAggregator(Aggregation):
         agg_type: str = "stats_aggregator",
         values_unit: str = None,
         cross_channel_custom_statistics: dict[str, Callable | CrossChannelStatistic] | None = None,
-        per_channel_custom_statistics: dict[str, Callable] | None = None,
+        per_channel_custom_statistics: dict[str, Callable | PerChannelStatistic] | None = None,
     ):
         """
         Initialize a StatsAggregator object.
@@ -85,9 +87,11 @@ class StatsAggregator(Aggregation):
             ``channel_name``, defaulting to the statistic's name. See
             ``impulse_query_engine`` ``StatsAggregator`` for the callable contract.
         per_channel_custom_statistics : dict, optional
-            Mapping of statistic name to a callable computed once per input
-            channel and event interval, exactly like a built-in statistic. Fact
-            rows carry the real channel names.
+            Mapping of statistic name to a callable or ``PerChannelStatistic``
+            descriptor, computed once per input channel and event interval,
+            exactly like a built-in statistic. Fact rows carry the real channel
+            names. Descriptor ``params`` are passed to the callable as keyword
+            arguments.
         """
         Aggregation.__init__(self, name)
         self.input_expressions = input_expressions
@@ -102,7 +106,9 @@ class StatsAggregator(Aggregation):
             cross_channel_custom_statistics
         )
         self._validate_cross_channel_channel_names()
-        self.per_channel_custom_statistics = per_channel_custom_statistics or {}
+        self.per_channel_custom_statistics = normalize_per_channel_statistics(
+            per_channel_custom_statistics
+        )
         self.event = event
         self._validate_event_evaluation_type(
             self.event, Intervals, example="(channel > 2000) & (channel < 5000)"
@@ -772,8 +778,10 @@ class StatsAggregator(Aggregation):
         ]
 
         custom_fingerprints = [
-            self._fingerprint_custom_statistic("per_channel", name, func, inputs_repr="")
-            for name, func in sorted(self.per_channel_custom_statistics.items())
+            self._fingerprint_custom_statistic(
+                "per_channel", name, statistic.func, inputs_repr="", params=statistic.params
+            )
+            for name, statistic in sorted(self.per_channel_custom_statistics.items())
         ]
         for name, statistic in sorted(self.cross_channel_custom_statistics.items()):
             if statistic.inputs is None:
@@ -783,7 +791,11 @@ class StatsAggregator(Aggregation):
                 inputs_repr = repr([self.channel_names.index(ch) for ch in statistic.inputs])
             custom_fingerprints.append(
                 self._fingerprint_custom_statistic(
-                    "cross_channel", name, statistic.func, inputs_repr=inputs_repr
+                    "cross_channel",
+                    name,
+                    statistic.func,
+                    inputs_repr=inputs_repr,
+                    params=statistic.params,
                 )
             )
         if custom_fingerprints:
@@ -797,18 +809,18 @@ class StatsAggregator(Aggregation):
 
     @staticmethod
     def _fingerprint_custom_statistic(
-        kind: str, name: str, func: Callable, inputs_repr: str
+        kind: str, name: str, func: Callable, inputs_repr: str, params: dict | None = None
     ) -> str:
         """
         Build a stable fingerprint for a custom statistic.
 
         The fingerprint covers the statistic's kind, name, declared input indices,
-        and the function's bytecode and constants. ``functools.partial`` wrappers
-        are unwrapped with their bound arguments included, so changed parameters
-        change the fingerprint. Note that bytecode hashing does not detect changes
-        inside helper functions called by the statistic, and is sensitive to the
-        Python version. Callables without ``__code__`` fall back to a name-only
-        fingerprint.
+        provisioned params, and the function's bytecode and constants.
+        ``functools.partial`` wrappers are unwrapped with their bound arguments
+        included, so changed parameters change the fingerprint. Note that bytecode
+        hashing does not detect changes inside helper functions called by the
+        statistic, and is sensitive to the Python version. Callables without
+        ``__code__`` fall back to a name-only fingerprint.
 
         Parameters
         ----------
@@ -820,12 +832,15 @@ class StatsAggregator(Aggregation):
             The statistic's callable.
         inputs_repr : str
             Representation of the declared input indices.
+        params : dict, optional
+            The statistic's provisioned params.
 
         Returns
         -------
         str
             The fingerprint string.
         """
+        params_repr = repr(sorted((params or {}).items()))
         partial_reprs = []
         while isinstance(func, functools.partial):
             partial_reprs.append(f"{func.args!r}:{sorted(func.keywords.items())!r}")
@@ -837,4 +852,4 @@ class StatsAggregator(Aggregation):
             digest = hashlib.sha256(
                 code.co_code + repr(code.co_consts).encode() + "|".join(partial_reprs).encode()
             ).hexdigest()
-        return f"{kind}:{name}:{inputs_repr}:{digest}"
+        return f"{kind}:{name}:{inputs_repr}:{params_repr}:{digest}"

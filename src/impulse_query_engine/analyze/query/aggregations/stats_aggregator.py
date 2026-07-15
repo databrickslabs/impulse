@@ -16,9 +16,11 @@ from impulse_query_engine.model.series.intervals import Intervals
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .aggregation import Aggregation
-from .cross_channel_statistic import (
+from .custom_statistic import (
     CrossChannelStatistic,
+    PerChannelStatistic,
     normalize_cross_channel_statistics,
+    normalize_per_channel_statistics,
 )
 
 # Define supported statistics and their types
@@ -50,7 +52,7 @@ class StatsAggregator(Aggregation):
         statistics: list[str] | None = None,
         event_expression: TimeSeriesExpression = None,
         cross_channel_custom_statistics: dict[str, Callable | CrossChannelStatistic] | None = None,
-        per_channel_custom_statistics: dict[str, Callable] | None = None,
+        per_channel_custom_statistics: dict[str, Callable | PerChannelStatistic] | None = None,
         input_names: list[str] | None = None,
     ):
         """
@@ -72,18 +74,20 @@ class StatsAggregator(Aggregation):
         cross_channel_custom_statistics : dict, optional
             Mapping of statistic name to a callable or ``CrossChannelStatistic``
             descriptor. Each statistic is computed once per event interval:
-            ``func(series: list[SampleSeries], t_start: float, t_end: float) -> float``.
-            The series are clipped to the interval and ordered like the descriptor's
-            ``inputs`` declaration (all input expressions in input order when no
-            inputs are declared). Series may be empty; return ``float("nan")`` for
-            an undefined result. Exceptions propagate and fail the query. Callables
-            are cloudpickled to Spark executors — use module-level importable
-            functions (bind parameters via ``functools.partial``) and never capture
-            Spark objects.
+            ``func(series: list[SampleSeries], t_start: float, t_end: float,
+            **params) -> float``, where ``params`` is the descriptor's params
+            mapping (empty for plain callables). The series are clipped to the
+            interval and ordered like the descriptor's ``inputs`` declaration
+            (all input expressions in input order when no inputs are declared).
+            Series may be empty; return ``float("nan")`` for an undefined result.
+            Exceptions propagate and fail the query. Callables are cloudpickled
+            to Spark executors — use module-level importable functions and never
+            capture Spark objects.
         per_channel_custom_statistics : dict, optional
-            Mapping of statistic name to a callable computed once per input channel
-            and event interval, exactly like a built-in statistic:
-            ``func(series: SampleSeries, t_start: float, t_end: float) -> float``.
+            Mapping of statistic name to a callable or ``PerChannelStatistic``
+            descriptor, computed once per input channel and event interval,
+            exactly like a built-in statistic: ``func(series: SampleSeries,
+            t_start: float, t_end: float, **params) -> float``.
             The series is clipped to the interval and may be empty (unlike
             built-ins, the callable is invoked even for empty/all-NaN intervals).
             The same pickling guidance as for cross-channel statistics applies.
@@ -98,8 +102,8 @@ class StatsAggregator(Aggregation):
         self.cross_channel_custom_statistics = normalize_cross_channel_statistics(
             cross_channel_custom_statistics
         )
-        self.per_channel_custom_statistics = self._validate_custom_statistics(
-            per_channel_custom_statistics, "per_channel_custom_statistics"
+        self.per_channel_custom_statistics = normalize_per_channel_statistics(
+            per_channel_custom_statistics
         )
         self._validate_custom_statistic_names()
         self._validate_input_names()
@@ -110,43 +114,6 @@ class StatsAggregator(Aggregation):
             s for s in self.statistics if s in NUMERIC_STATISTICS or s in {"start", "end"}
         ]
         self._string_stats = [s for s in self.statistics if s in STRING_STATISTICS]
-
-    @staticmethod
-    def _validate_custom_statistics(
-        custom_statistics: dict[str, Callable] | None, param_name: str
-    ) -> dict[str, Callable]:
-        """
-        Validate a custom-statistics mapping of names to callables.
-
-        Parameters
-        ----------
-        custom_statistics : dict or None
-            Mapping of statistic name to callable.
-        param_name : str
-            Parameter name used in error messages.
-
-        Returns
-        -------
-        dict of str to Callable
-            The validated mapping; empty when the input is ``None``.
-        """
-        if custom_statistics is None:
-            return {}
-        if not isinstance(custom_statistics, dict):
-            raise TypeError(
-                f"{param_name} must be a dict mapping statistic names to callables, "
-                f"got {type(custom_statistics).__name__}"
-            )
-        for name, func in custom_statistics.items():
-            if not isinstance(name, str):
-                raise TypeError(f"{param_name} keys must be strings, got {name!r}")
-            if not name:
-                raise ValueError(f"{param_name} names must be non-empty strings")
-            if not callable(func):
-                raise TypeError(
-                    f"{param_name}['{name}'] must be callable, got {type(func).__name__}"
-                )
-        return dict(custom_statistics)
 
     def _validate_custom_statistic_names(self) -> None:
         """
@@ -439,9 +406,10 @@ class StatsAggregator(Aggregation):
 
         if self.per_channel_custom_statistics:
             channel_series = SampleSeries(tstarts=t_starts, tends=t_ends, values=values)
-            for name, func in self.per_channel_custom_statistics.items():
+            for name, statistic in self.per_channel_custom_statistics.items():
                 results[name] = self._coerce_stat_result(
-                    name, func(channel_series, t_start, t_end)
+                    name,
+                    statistic.func(channel_series, t_start, t_end, **(statistic.params or {})),
                 )
 
         return results
@@ -486,7 +454,8 @@ class StatsAggregator(Aggregation):
                 indices = range(len(series_list))
             statistic_series = [clip(i) for i in indices]
             results[name] = self._coerce_stat_result(
-                name, statistic.func(statistic_series, t_start, t_end)
+                name,
+                statistic.func(statistic_series, t_start, t_end, **(statistic.params or {})),
             )
         return results
 

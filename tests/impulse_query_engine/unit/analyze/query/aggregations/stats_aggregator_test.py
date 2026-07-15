@@ -15,8 +15,9 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
-from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     CrossChannelStatistic,
+    PerChannelStatistic,
 )
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import (
     StatsAggregator,
@@ -958,6 +959,80 @@ def test_cross_channel_inputs_validation_errors():
 
     with pytest.raises(ValueError, match="unique"):
         StatsAggregator([expr, expr], input_names=["a", "a"])
+
+
+def _count_above(series, t_start, t_end, threshold=0.0):
+    """Cross-channel: number of samples above a configurable threshold."""
+    return float(sum((s.values > threshold).sum() for s in series))
+
+
+def _scaled_rms(series, t_start, t_end, scale=1.0):
+    """Per-channel: scaled root mean square."""
+    if len(series) == 0:
+        return float("nan")
+    return float(scale * np.sqrt(np.nanmean(series.values**2)))
+
+
+def test_cross_channel_stat_with_params():
+    expr1 = _mock_expr([0.0, 1.0], [1.0, 2.0], [10.0, 30.0])
+    expr2 = _mock_expr([0.0, 1.0], [1.0, 2.0], [20.0, 40.0])
+    event = _mock_event([0.0], [2.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr1, expr2],
+        event_expression=event,
+        cross_channel_custom_statistics={
+            "count_default": _count_above,
+            "count_hi": CrossChannelStatistic(func=_count_above, params={"threshold": 25.0}),
+        },
+    )
+
+    _, _, _, cross_channel_values = stats_agg.build(cache=None)
+
+    assert len(cross_channel_values) == 1
+    # default threshold 0.0 counts all four samples
+    assert cross_channel_values[0]["count_default"] == 4.0
+    # provisioned threshold 25.0 counts only 30.0 and 40.0
+    assert cross_channel_values[0]["count_hi"] == 2.0
+
+
+def test_per_channel_stat_with_params():
+    expr = _mock_expr([0.0], [1.0], [3.0])
+    event = _mock_event([0.0], [1.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        per_channel_custom_statistics={
+            "rms": _scaled_rms,
+            "rms_x10": PerChannelStatistic(func=_scaled_rms, params={"scale": 10.0}),
+        },
+    )
+
+    _, numeric_values, _, _ = stats_agg.build(cache=None)
+
+    nptest.assert_almost_equal(numeric_values[0][0]["rms"], 3.0)
+    nptest.assert_almost_equal(numeric_values[0][0]["rms_x10"], 30.0)
+
+
+def test_custom_statistic_params_validation_errors():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    with pytest.raises(TypeError, match="params must be a dict"):
+        StatsAggregator(
+            [expr],
+            cross_channel_custom_statistics={
+                "x": CrossChannelStatistic(func=_count_above, params=[1, 2])
+            },
+        )
+
+    with pytest.raises(TypeError, match="identifiers"):
+        StatsAggregator(
+            [expr],
+            per_channel_custom_statistics={
+                "x": PerChannelStatistic(func=_scaled_rms, params={"not a name": 1.0})
+            },
+        )
 
 
 def test_str_contains_custom_statistics():

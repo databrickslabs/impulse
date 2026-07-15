@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     CrossChannelStatistic,
 )
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator

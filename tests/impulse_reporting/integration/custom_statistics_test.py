@@ -8,7 +8,7 @@ import numpy as np
 import pyspark.sql.functions as F
 from databricks.sdk import WorkspaceClient
 
-from impulse_query_engine.analyze.query.aggregations.cross_channel_statistic import (
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     CrossChannelStatistic,
 )
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
@@ -25,9 +25,9 @@ def _value_spread(series, t_start, t_end):
     return float(max(values) - min(values))
 
 
-def _total_sample_count(series, t_start, t_end):
-    """Cross-channel: total number of samples across all series."""
-    return float(sum(len(s) for s in series))
+def _count_above(series, t_start, t_end, threshold=0.0):
+    """Cross-channel: number of samples above a configurable threshold."""
+    return float(sum((s.values > threshold).sum() for s in series))
 
 
 def _rms(series, t_start, t_end):
@@ -72,7 +72,7 @@ def test_custom_statistics_report(spark):
                 inputs=["Engine RPM", "Vehicle Speed"],
                 channel_name="rpm_speed_spread",
             ),
-            "count": _total_sample_count,
+            "count": CrossChannelStatistic(func=_count_above, params={"threshold": 0.0}),
         },
         per_channel_custom_statistics={"rms": _rms},
     )
