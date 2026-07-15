@@ -174,6 +174,30 @@ class TestTimeSeriesCache:
         assert list(cache.load_blob(1, 10).values) == [1.0, 2.0]
         assert list(cache.load_blob(2, 20).values) == [3.0, 4.0]
 
+    def test_mdf_from_metadata_bearing_rows_only(self):
+        """Solve-shaped input: selector_ids carried by metadata-bearing rows.
+
+        Channel 20 carries its metadata on a non-first row (arrival order
+        after the shuffle is arbitrary — mdf selection must go by notna, not
+        position); channel 10 carries it on two rows (dedup must still apply
+        after the notna filter).
+        """
+        pdf = _make_channel_pdf()
+        pdf["selector_ids"] = [[111], [111], None, [222]]
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert len(cache.mdf) == 2
+        sel = cache.mdf.set_index("channel_id")["selector_ids"]
+        assert list(sel[10]) == [111]
+        assert list(sel[20]) == [222]
+
+        class _Selection:
+            selector_id = 222
+
+        resolved = cache.resolve(_Selection())
+        assert list(resolved.channel_id) == [20]
+        # data access is unaffected by the nulled metadata cells
+        assert list(cache.load_blob(1, 10).values) == [1.0, 2.0]
+
     def test_cache_sorts_input_frame_in_place(self):
         """The cache takes ownership of the input frame and sorts it in place.
 
@@ -186,19 +210,6 @@ class TestTimeSeriesCache:
         assert list(pdf.index) == list(range(len(pdf)))
         key_tuples = list(zip(pdf["container_id"], pdf["channel_id"], pdf["tstart"], strict=True))
         assert key_tuples == sorted(key_tuples)
-
-    def test_pdf_sorted_correctly(self):
-        """pdf should be sorted by (container_id, channel_id, tstart) within each group."""
-        pdf = _make_channel_pdf()
-        # Scramble order
-        pdf = pdf.sample(frac=1, random_state=0).reset_index(drop=True)
-        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
-        # Verify that for each (container_id, channel_id) group, tstarts are sorted
-        for (cid, chid), group in cache.pdf.groupby([cache._cid_col, cache._ch_col]):
-            ts_vals = list(group[cache._ts_col])
-            assert ts_vals == sorted(
-                ts_vals
-            ), f"tstart not sorted for container_id={cid}, channel_id={chid}: {ts_vals}"
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +408,41 @@ class TestDefaultSolverEndToEndWideOnly:
         ).solve(spark, solver=solver)
         means = {row.container_id: row.m for row in result.collect()}
         assert any(m is not None and m != 0 for m in means.values()), means
+
+    def test_solve_means_match_manual_computation(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """Solve results equal duration-weighted means computed directly in pandas.
+
+        Pins that the first-row metadata nulling in ``solve`` and the
+        notna-based mdf derivation reproduce the exact pre-change results.
+        """
+        metrics = basic_narrow_db.config.debug_tables["channel_metrics"].toPandas()
+        channels = basic_narrow_db.config.debug_tables["channels"].toPandas()
+        vss = metrics[metrics["channel_name"] == "Vehicle Speed Sensor"]
+        # Only containers with exactly one matching channel: for several
+        # candidates the engine's pick is arrival-order-dependent.
+        counts = vss.groupby("container_id").size()
+        unambiguous = set(counts[counts == 1].index)
+        assert unambiguous, "fixture must contain at least one unambiguous container"
+        expected = {}
+        for _, row in vss[vss["container_id"].isin(unambiguous)].iterrows():
+            s = channels[
+                (channels["container_id"] == row["container_id"])
+                & (channels["channel_id"] == row["channel_id"])
+            ]
+            d = s["tend"] - s["tstart"]
+            if d.sum() > 0:
+                expected[row["container_id"]] = float((s["value"] * d).sum() / d.sum())
+        assert expected
+
+        query = basic_narrow_db.query
+        result = query.select(
+            query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
+        ).solve(spark, solver=DefaultSolver(spark))
+        means = {r.container_id: r.m for r in result.collect()}
+        for container_id, exp in expected.items():
+            assert means[container_id] == pytest.approx(exp), container_id
 
     def test_backward_compat_no_config_arg(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB

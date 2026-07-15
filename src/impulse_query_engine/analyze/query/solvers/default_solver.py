@@ -52,11 +52,16 @@ class TimeSeriesCache(SeriesCache):
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
         # mdf must be built before the sort: "first row per (cid, ch)" is defined in input order.
+        # The solve path carries selector_ids on a single row per channel (the
+        # rest are null), so restrict the metadata source to those rows.
         meta_cols = [
             c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
         ]
-        first_rows = ~pdf.duplicated(subset=[self._cid_col, self._ch_col])
-        self.mdf = pdf.loc[first_rows, meta_cols].reset_index(drop=True)
+        meta_source = pdf
+        if "selector_ids" in pdf.columns:
+            meta_source = pdf.loc[pdf["selector_ids"].notna()]
+        first_rows = ~meta_source.duplicated(subset=[self._cid_col, self._ch_col])
+        self.mdf = meta_source.loc[first_rows, meta_cols].reset_index(drop=True)
         pdf.sort_values(
             [self._cid_col, self._ch_col, self._ts_col], inplace=True, ignore_index=True
         )
@@ -969,9 +974,20 @@ class DefaultSolver(QuerySolver):
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         if container_count == 0:
             return self.spark.createDataFrame([], schema=schema)
-        res = (
-            df.repartition(container_count, self.config.container_id_col)
-            .groupBy(self.config.container_id_col)
-            .apply(solve_udf)
+
+        # selector_ids is per-channel metadata; keep it on a single row per
+        # (container_id, channel_id) so the per-row array objects don't inflate
+        # every group's pandas frame.  The window must run after the repartition:
+        # hash partitioning on container_id already satisfies its distribution
+        # requirement, so no second shuffle is introduced.  Which row carries the
+        # metadata is irrelevant — the cache selects metadata rows by notna.
+        df = df.repartition(container_count, self.config.container_id_col)
+        w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
+            self.config.tstart_col
         )
-        return res
+        df = (
+            df.withColumn("_rn", F.row_number().over(w))
+            .withColumn("selector_ids", F.when(F.col("_rn") == 1, F.col("selector_ids")))
+            .drop("_rn")
+        )
+        return df.groupBy(self.config.container_id_col).apply(solve_udf)
