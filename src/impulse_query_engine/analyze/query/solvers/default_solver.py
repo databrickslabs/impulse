@@ -12,7 +12,6 @@ from pyspark.sql import DataFrame, Window
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.model.series.sample_series import SampleSeries
-from impulse_reporting.config.config_parser import ImpulseConfig
 
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
