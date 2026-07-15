@@ -44,6 +44,8 @@ in `source` (see `impulse-config`).
     processing time. Set `query_engine.data_type` to `"RAW"` or `"RLE"` to match (see `impulse-config`).
   - An optional boolean `is_plausible` column lets the solver drop implausible samples when
     `drop_implausible_data=True` (requires RAW).
+  - Extra columns on `channels` are ignored — the engine projects down to the columns above before
+    solving, so it is safe to keep additional bookkeeping columns on the table.
 - **Tag tables are strict EAV.** `query.channel(channel_name="Engine RPM")` looks up
   `channel_tags.value` where `key = 'channel_name'`. Without `channel_tags`, channel selectors match
   columns on `channel_metrics` instead.
@@ -141,6 +143,9 @@ the table is read; everything downstream uses the internal names. Set it under
     }
 }
 ```
+
+In RAW mode the `channels` internal names are `timestamp` and (optionally) `is_plausible` — remap
+them the same way (e.g. `{"ts_raw": "timestamp"}`).
 
 The underlying tables must still follow the silver-layer relationships (EAV tag tables,
 per-`(container_id, channel_id)` channel rows). The full `SolverConfig` schema — per-table `filters`,
