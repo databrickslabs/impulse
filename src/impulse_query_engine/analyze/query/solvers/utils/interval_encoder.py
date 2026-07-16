@@ -1,24 +1,44 @@
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, Window
 
+from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
+
 
 class IntervalEncoder:
-    """Utility class for encoding raw channel data into compatible format."""
+    """Convert RAW point samples into ``[tstart, tend)`` intervals, keeping every sample.
+
+    Within each ``(container_id, channel_id)`` the samples are ordered by
+    timestamp and each sample's ``tend`` is set to the *next* sample's
+    timestamp (via a ``LEAD`` window function).  The last sample has no
+    successor, so its ``tend`` coalesces to its own timestamp -- a
+    zero-length interval that carries no duration.
+
+    Only **duplicate points** are dropped: a row is a duplicate when both its
+    ``value`` and ``timestamp`` equal the next row's (compared with
+    ``eqNullSafe``, so two ``NULL`` values count as equal).  Every other
+    sample is kept as its own interval, so the original timestamps are
+    preserved.
+    """
 
     def __init__(
-        self, timestamp_col_name: str = "timestamp", drop_implausible_data_points: bool = False
+        self, config: SolverConfig | None = None, drop_implausible_data_points: bool = False
     ):
         """
         Initialize the IntervalEncoder.
         Parameters
         ----------
-        timestamp_col_name : str, optional
-            Name of the timestamp column in the input DataFrame when it is not already in RLE format.  Default is "timestamp".
+        config : SolverConfig
+            Solver configuration providing the internal column names.
+
         drop_implausible_data_points : bool, optional
             Whether to drop implausible data points before returning.  If True, data points where ``is_plausible``
             is not True will be removed.  Default is False.
         """
-        self.timestamp_col_name: str = timestamp_col_name
+
+        if config is None:
+            raise ValueError("SolverConfig must be provided to IntervalEncoder.")
+
+        self.config: SolverConfig = config
         self.drop_implausible_data_points: bool = drop_implausible_data_points
 
     def prepare_channels_df(self, df: DataFrame) -> DataFrame:
@@ -46,14 +66,14 @@ class IntervalEncoder:
         ValueError
             If the DataFrame has neither ``tend`` nor ``timestamp``.
         """
-        if "tend" in df.columns:
+        if self.config.tend_col in df.columns:
             return df
 
         # if the data isn't RLE encoded we need a timestamp column to determine the tend info.
-        if self.timestamp_col_name not in df.columns:
+        if self.config.timestamp_col not in df.columns:
             raise ValueError(
-                "DataFrame must contain either a 'tend' column (RLE format) "
-                "or a 'timestamp' column (raw point data)."
+                f"DataFrame must contain either a '{self.config.tend_col}' column (RLE format) "
+                f"or a '{self.config.timestamp_col}' column (raw point data)."
             )
         return (
             df.transform(self._extract_next_data_point_info)
@@ -69,12 +89,12 @@ class IntervalEncoder:
         """
 
         if self.drop_implausible_data_points:
-            if "is_plausible" not in df.columns:
+            if self.config.is_plausible_col not in df.columns:
                 raise ValueError(
-                    "DataFrame must contain an 'is_plausible' column "
+                    f"DataFrame must contain an '{self.config.is_plausible_col}' column "
                     "to drop implausible data points."
                 )
-            return df.filter(F.col("is_plausible"))
+            return df.filter(F.col(self.config.is_plausible_col))
         else:
             return df
 
@@ -94,10 +114,12 @@ class IntervalEncoder:
         The DataFrame must already contain a ``timestamp_of_next_data_point``
         column (added by ``_extract_next_data_point_info``).
         """
-        end_ts = F.coalesce(F.col("_timestamp_of_next_data_point"), F.col("timestamp"))
+        end_ts = F.coalesce(
+            F.col("_timestamp_of_next_data_point"), F.col(self.config.timestamp_col)
+        )
         return (
-            df.withColumn("tend", end_ts)
-            .withColumnRenamed(self.timestamp_col_name, "tstart")
+            df.withColumn(self.config.tend_col, end_ts)
+            .withColumnRenamed(self.config.timestamp_col, self.config.tstart_col)
             .drop("_timestamp_of_next_data_point")
         )
 
@@ -116,9 +138,9 @@ class IntervalEncoder:
         Drops the intermediate ``_value_of_next_data_point`` column after
         filtering.
         """
-        is_duplicate = (F.col("value").eqNullSafe(F.col("_value_of_next_data_point"))) & (
-            F.col(self.timestamp_col_name).eqNullSafe(F.col("_timestamp_of_next_data_point"))
-        )
+        is_duplicate = (
+            F.col(self.config.value_col).eqNullSafe(F.col("_value_of_next_data_point"))
+        ) & (F.col(self.config.timestamp_col).eqNullSafe(F.col("_timestamp_of_next_data_point")))
         return (
             df.withColumn("is_duplicate", is_duplicate)
             .filter(~F.col("is_duplicate"))
@@ -138,12 +160,12 @@ class IntervalEncoder:
         These columns are consumed downstream by
         ``_drop_duplicate_data_points`` and ``_determine_end_timestamp``.
         """
-        ws = Window.partitionBy(F.col("container_id"), F.col("channel_id")).orderBy(
-            F.col(self.timestamp_col_name).asc(), F.col("value").desc()
-        )
+        ws = Window.partitionBy(
+            F.col(self.config.container_id_col), F.col(self.config.channel_id_col)
+        ).orderBy(F.col(self.config.timestamp_col).asc(), F.col(self.config.value_col).desc())
 
-        timestamp_of_next_data_point = F.lead(F.col(self.timestamp_col_name)).over(ws)
-        value_of_next_data_point = F.lead(F.col("value")).over(ws)
+        timestamp_of_next_data_point = F.lead(F.col(self.config.timestamp_col)).over(ws)
+        value_of_next_data_point = F.lead(F.col((self.config.value_col))).over(ws)
 
         return (
             df.transform(self._drop_null_timestamps)
@@ -153,4 +175,4 @@ class IntervalEncoder:
 
     def _drop_null_timestamps(self, df: DataFrame) -> DataFrame:
         """Drop rows where the timestamp is NULL."""
-        return df.filter(F.col(self.timestamp_col_name).isNotNull())
+        return df.filter(F.col(self.config.timestamp_col).isNotNull())

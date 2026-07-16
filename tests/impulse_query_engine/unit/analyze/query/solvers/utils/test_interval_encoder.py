@@ -5,6 +5,7 @@ import pytest
 from pyspark.sql import Row, SparkSession
 from pyspark.testing.utils import assertDataFrameEqual
 
+from impulse_query_engine.analyze.query.solvers import SolverConfig
 from impulse_query_engine.analyze.query.solvers.utils.interval_encoder import IntervalEncoder
 
 silver_schema_without_rle = T.StructType(
@@ -48,7 +49,7 @@ class TestRLEEncoder:
             Row(container_id="c1", channel_id="ch2", tstart=0.0, tend=3.0, value=30.0),
         ]
         df = spark.createDataFrame(data, silver_rle_encoded_schema)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         assertDataFrameEqual(result, df)
 
@@ -75,7 +76,7 @@ class TestRLEEncoder:
         df = spark.createDataFrame(data, schema)
 
         with pytest.raises(ValueError, match="DataFrame must contain either a 'tend' column"):
-            IntervalEncoder().prepare_channels_df(df)
+            IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
     def test_prepare_channels_df_single_channel_rle_compression(self, spark: SparkSession):
         """Test point-to-interval conversion for a single channel with repeated values.
@@ -102,7 +103,7 @@ class TestRLEEncoder:
             Row(container_id="c1", channel_id="ch1", timestamp=5.0, value=30.0),
         ]
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
@@ -144,7 +145,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
@@ -182,7 +183,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
@@ -216,7 +217,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
@@ -245,7 +246,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=5.0, tend=5.0, value=42.0),
@@ -276,7 +277,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         assert result.count() == 4
 
@@ -289,7 +290,7 @@ class TestRLEEncoder:
         Expects an empty result with the RLE schema.
         """
         df = spark.createDataFrame([], silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result = spark.createDataFrame([], silver_rle_encoded_schema)
         assertDataFrameEqual(result, expected_result, ignoreColumnOrder=True)
@@ -319,7 +320,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
@@ -354,7 +355,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=10.0),
@@ -387,7 +388,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=-2.0, tend=-1.0, value=10.0),
@@ -420,7 +421,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=float("inf")),
@@ -460,7 +461,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         assert result.count() == 4
 
@@ -484,7 +485,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=None),
@@ -517,7 +518,7 @@ class TestRLEEncoder:
         ]
 
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder().prepare_channels_df(df)
+        result = IntervalEncoder(config=SolverConfig()).prepare_channels_df(df)
 
         expected_result_data = [
             Row(container_id="c1", channel_id="ch1", tstart=0.0, tend=1.0, value=0.0),
@@ -571,7 +572,7 @@ class TestRLEEncoder:
         ]
         df = spark.createDataFrame(data, is_plausible_schema)
         result = IntervalEncoder(
-            drop_implausible_data_points=True
+            config=SolverConfig(), drop_implausible_data_points=True
         )._remove_implausible_data_points(df)
 
         expected_result_data = [
@@ -581,7 +582,7 @@ class TestRLEEncoder:
         assertDataFrameEqual(result, expected_result)
 
         result_no_filter = IntervalEncoder(
-            drop_implausible_data_points=False
+            config=SolverConfig(), drop_implausible_data_points=False
         )._remove_implausible_data_points(df)
 
         assertDataFrameEqual(result_no_filter, df)
@@ -608,10 +609,12 @@ class TestRLEEncoder:
             ValueError,
             match="DataFrame must contain an 'is_plausible' column to drop implausible data points.",
         ):
-            IntervalEncoder(drop_implausible_data_points=True)._remove_implausible_data_points(df)
+            IntervalEncoder(
+                config=SolverConfig(), drop_implausible_data_points=True
+            )._remove_implausible_data_points(df)
 
         result = IntervalEncoder(
-            drop_implausible_data_points=False
+            config=SolverConfig(), drop_implausible_data_points=False
         )._remove_implausible_data_points(df)
         assert result.isEmpty()
 
@@ -636,7 +639,7 @@ class TestRLEEncoder:
             Row(container_id="c1", channel_id="ch1", timestamp=3.0, value=30.0),
         ]
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder()._extract_next_data_point_info(df)
+        result = IntervalEncoder(config=SolverConfig())._extract_next_data_point_info(df)
 
         expected_schema = T.StructType(
             silver_schema_without_rle.fields
@@ -697,7 +700,7 @@ class TestRLEEncoder:
             Row(container_id="c2", channel_id="ch1", timestamp=1.0, value=200.0),
         ]
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder()._extract_next_data_point_info(df)
+        result = IntervalEncoder(config=SolverConfig())._extract_next_data_point_info(df)
 
         expected_schema = T.StructType(
             silver_schema_without_rle.fields
@@ -764,7 +767,7 @@ class TestRLEEncoder:
             Row(container_id="c1", channel_id="ch1", timestamp=1.0, value=20.0),
         ]
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder()._extract_next_data_point_info(df)
+        result = IntervalEncoder(config=SolverConfig())._extract_next_data_point_info(df)
 
         expected_schema = T.StructType(
             silver_schema_without_rle.fields
@@ -813,7 +816,7 @@ class TestRLEEncoder:
             Empty DataFrame with additional columns for next data point info.
         """
         df = spark.createDataFrame([], silver_schema_without_rle)
-        result = IntervalEncoder()._extract_next_data_point_info(df)
+        result = IntervalEncoder(config=SolverConfig())._extract_next_data_point_info(df)
 
         expected_schema = T.StructType(
             silver_schema_without_rle.fields
@@ -845,7 +848,7 @@ class TestRLEEncoder:
             Row(container_id="c1", channel_id="ch1", timestamp=None, value=30.0),
         ]
         df = spark.createDataFrame(data, silver_schema_without_rle)
-        result = IntervalEncoder()._extract_next_data_point_info(df)
+        result = IntervalEncoder(config=SolverConfig())._extract_next_data_point_info(df)
 
         expected_schema = T.StructType(
             silver_schema_without_rle.fields
@@ -925,7 +928,7 @@ class TestRLEEncoder:
             ),
         ]
         df = spark.createDataFrame(data, schema_with_next_info)
-        result = IntervalEncoder()._drop_duplicate_data_points(df)
+        result = IntervalEncoder(config=SolverConfig())._drop_duplicate_data_points(df)
 
         expected_schema = T.StructType(
             [
@@ -1004,7 +1007,7 @@ class TestRLEEncoder:
             ),
         ]
         df = spark.createDataFrame(data, schema_with_next_info)
-        result = IntervalEncoder()._drop_duplicate_data_points(df)
+        result = IntervalEncoder(config=SolverConfig())._drop_duplicate_data_points(df)
 
         expected_schema = T.StructType(
             [
@@ -1090,7 +1093,7 @@ class TestRLEEncoder:
             ),
         ]
         df = spark.createDataFrame(data, schema_with_next_info)
-        result = IntervalEncoder()._drop_duplicate_data_points(df)
+        result = IntervalEncoder(config=SolverConfig())._drop_duplicate_data_points(df)
 
         expected_schema = T.StructType(
             [
@@ -1169,7 +1172,7 @@ class TestRLEEncoder:
             ),
         ]
         df = spark.createDataFrame(data, schema_with_next_info)
-        result = IntervalEncoder()._drop_duplicate_data_points(df)
+        result = IntervalEncoder(config=SolverConfig())._drop_duplicate_data_points(df)
 
         expected_schema = T.StructType(
             [
@@ -1225,7 +1228,7 @@ class TestRLEEncoder:
         )
 
         df = spark.createDataFrame([], schema_with_next_info)
-        result = IntervalEncoder()._drop_duplicate_data_points(df)
+        result = IntervalEncoder(config=SolverConfig())._drop_duplicate_data_points(df)
 
         expected_schema = T.StructType(
             [
@@ -1297,7 +1300,7 @@ class TestRLEEncoder:
             ),
         ]
         df = spark.createDataFrame(data, schema_with_next_info)
-        result = IntervalEncoder()._drop_duplicate_data_points(df)
+        result = IntervalEncoder(config=SolverConfig())._drop_duplicate_data_points(df)
 
         expected_schema = T.StructType(
             [
@@ -1358,7 +1361,7 @@ class TestRLEEncoder:
         df = spark.createDataFrame(data, is_plausible_schema)
 
         result = IntervalEncoder(
-            drop_implausible_data_points=True
+            config=SolverConfig(), drop_implausible_data_points=True
         )._remove_implausible_data_points(df)
         assertDataFrameEqual(result, df)
 
@@ -1395,7 +1398,7 @@ class TestRLEEncoder:
         df = spark.createDataFrame(data, is_plausible_schema)
 
         result = IntervalEncoder(
-            drop_implausible_data_points=True
+            config=SolverConfig(), drop_implausible_data_points=True
         )._remove_implausible_data_points(df)
         expected_result = spark.createDataFrame([], is_plausible_schema)
         assertDataFrameEqual(result, expected_result)
@@ -1422,10 +1425,10 @@ class TestRLEEncoder:
         df = spark.createDataFrame([], is_plausible_schema)
 
         result_with_filter = IntervalEncoder(
-            drop_implausible_data_points=True
+            config=SolverConfig(), drop_implausible_data_points=True
         )._remove_implausible_data_points(df)
         result_without_filter = IntervalEncoder(
-            drop_implausible_data_points=False
+            config=SolverConfig(), drop_implausible_data_points=False
         )._remove_implausible_data_points(df)
 
         assertDataFrameEqual(result_with_filter, df)

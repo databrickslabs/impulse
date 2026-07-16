@@ -19,6 +19,28 @@ filter application — uses the framework-internal column names exposed as
 properties on :class:`SolverConfig`.
 
 
+## RawEncoder
+
+```python
+class RawEncoder(StrEnum)
+```
+
+Encoder used to convert RAW point data into intervals for solving.
+
+Only relevant when the query engine operates on RAW (point) data; RLE input
+is passed through unchanged regardless of this setting.
+
+Values
+------
+RLE
+    Run-length encode: collapse consecutive samples that share the same
+    ``value`` within a container/channel into a single interval (see
+    :class:`~impulse_query_engine.analyze.query.solvers.utils.rle_encoder.RleEncoder`).
+INTERVAL
+    Derive ``tend`` from the following sample's timestamp, *without* merging equal-valued runs (see
+    :class:`~impulse_query_engine.analyze.query.solvers.utils.interval_encoder.IntervalEncoder`).
+
+
 ## TableConfig
 
 ```python

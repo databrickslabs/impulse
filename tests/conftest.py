@@ -29,6 +29,7 @@ def spark() -> SparkSession:
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver_narrow_db")
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver_key_value_store")
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver_key_value_store_alias")
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver_raw")
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.gold")
     return spark
 
@@ -151,6 +152,46 @@ def setup_basic_db(spark):
     channels.write.format("delta").mode("overwrite").saveAsTable("spark_catalog.silver.channels")
 
 
+@pytest.fixture(scope="session")
+def setup_raw_channels_db(spark):
+    """Setup silver tables with a RAW-format ``channels`` table.
+
+    ``channels`` holds raw ``(container_id, channel_id, timestamp, value)``
+    point samples instead of pre-encoded intervals, so the two RAW encoders
+    (``QueryEngineConfig.raw_encoder`` = ``RLE`` vs ``INTERVAL``) can be
+    compared on the same signal. The RPM samples in ``channels.csv`` contain
+    repeated consecutive values, so the RLE encoder genuinely merges runs
+    while the INTERVAL encoder keeps every sample -- see
+    ``raw_encoder_equivalence_test.py``. ``container_metrics`` and
+    ``channel_metrics`` are reused from ``basic_narrow_csv``.
+    """
+    silver_tables = spark.sql("SHOW TABLES IN spark_catalog.silver_raw").collect()
+    for table in silver_tables:
+        spark.sql(f"DROP TABLE IF EXISTS spark_catalog.silver_raw.{table.tableName} PURGE")
+
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    base_path = base_path[: base_path.find("tests")]
+
+    container_metric_path = f"{base_path}/tests/unit/data/basic_narrow_csv/container_metrics.csv"
+    channel_metric_path = f"{base_path}/tests/unit/data/basic_narrow_csv/channel_metrics.csv"
+    channels_path = f"{base_path}/tests/unit/data/raw_encoder_csv/channels.csv"
+
+    options = {"header": "True", "delimiter": ",", "inferSchema": "True"}
+    container_metrics = spark.read.options(**options).csv(container_metric_path)
+    channel_metrics = spark.read.options(**options).csv(channel_metric_path)
+    channels = spark.read.options(**options).csv(channels_path)
+
+    container_metrics.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver_raw.container_metrics"
+    )
+    channel_metrics.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver_raw.channel_metrics"
+    )
+    channels.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver_raw.channels"
+    )
+
+
 @pytest.fixture(scope="function", autouse=True)
 def cleanup_gold(request, spark):
     """Drop all gold tables after each test function."""
@@ -173,6 +214,7 @@ def cleanup_schemas(request, spark):
         spark.sql("DROP SCHEMA IF EXISTS spark_catalog.silver CASCADE")
         spark.sql("DROP SCHEMA IF EXISTS spark_catalog.silver_key_value_store CASCADE")
         spark.sql("DROP SCHEMA IF EXISTS spark_catalog.silver_key_value_store_alias CASCADE")
+        spark.sql("DROP SCHEMA IF EXISTS spark_catalog.silver_raw CASCADE")
         spark.sql("DROP SCHEMA IF EXISTS spark_catalog.gold CASCADE")
 
     request.addfinalizer(remove_test_dir)
