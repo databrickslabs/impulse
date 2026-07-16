@@ -165,6 +165,30 @@ channel_mapping_resolution_dimension {
     timestamp _created_at
 }
 
+calculated_channel_dimension {
+    long channel_id
+    int report_id
+    string channel_type
+    string channel_name
+    string channel_description
+    string channel_expression
+    map identity
+    long definition_hash
+    map attributes
+    timestamp _created_at
+}
+
+calculated_channel_fact {
+    int container_id FK
+    long channel_id FK
+    long tstart
+    long tend
+    double value
+    string channel_name
+    string data_key
+    timestamp _created_at
+}
+
 histogram_fact }o--|| event_dimension: event_id
 histogram2d_fact }o--|| event_dimension: event_id
 stats_aggregator_fact }o--|| event_instance_fact: event_instance_id
@@ -172,10 +196,12 @@ stats_aggregator_fact }o--|| event_instance_fact: event_instance_id
 histogram_dimension ||--o{ histogram_fact : by_visual_id
 histogram2d_dimension ||--o{ histogram2d_fact : by_visual_id
 stats_aggregator_dimension ||--o{ stats_aggregator_fact: by_visual_id
+calculated_channel_dimension ||--o{ calculated_channel_fact : by_channel_id
 
 measurement_dimension ||--o{ histogram_fact : container_id
 measurement_dimension ||--o{ histogram2d_fact : container_id
 measurement_dimension ||--o{ stats_aggregator_fact : container_id
+measurement_dimension ||--o{ calculated_channel_fact : container_id
 
 measurement_dimension ||--o{ channel_mapping_resolution_dimension : container_id
 
@@ -198,6 +224,7 @@ guaranteed.
 | `{prefix}_histogram2d_fact`      | `container_id`, `visual_id`, `event_id`, `x_bin_id`, `y_bin_id`                        | 2D histogram bin values per container.                       |
 | `{prefix}_stats_aggregator_fact` | `container_id`, `visual_id`, `event_instance_id`, `channel_name`, `aggregation_label`  | Statistics values per signal, event instance, and container. |
 | `{prefix}_event_instance_fact`   | `container_id`, `event_id`, `event_instance_id`                                        | Materialized event occurrences with start/end timestamps.    |
+| `{prefix}_calculated_channel_fact` | `container_id`, `channel_id`, `tstart`                                               | Materialized derived signal — one row per sample interval, in the silver `channels` shape (`tstart`, `tend`, `value`) plus identity columns. |
 
 ---
 
@@ -211,6 +238,7 @@ guaranteed.
 | `{prefix}_event_dimension`            | `event_id`, `report_id`  | Event definitions (name, expression, required channels).   |
 | `{prefix}_measurement_dimension`      | `container_id`           | Container metadata. Always carries `container_id`, `config_hash`, `_created_at`; additional columns are populated from [`config.measurement_dimensions`](../config/configuration.md#measurement_dimensions-optional). |
 | `{prefix}_channel_mapping_resolution_dimension` | `container_id`, `channel_id`, `channel_alias` | Resolves each channel alias to its physical channel per container (physical join keys, alias `priority`). Written only when the report uses aliased selectors. The `source_unit` / `target_unit` columns are present only when a [`config.unit_conversion_table`](../config/configuration.md) is configured. |
+| `{prefix}_calculated_channel_dimension` | `channel_id`, `report_id` | Calculated-channel definitions (name, TSAL expression, `identity`, `definition_hash`). Written only when the report defines calculated channels. See [Channels](../references/report/channel.md). |
 
 The `channel_mapping_resolution_dimension` table lets BI consumers join a fact
 back to the physical channel that an alias resolved to: join on

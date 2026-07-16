@@ -10,8 +10,11 @@ loaders:
       - impulse_reporting.aggregations.histogram
       - impulse_reporting.aggregations.histogram2d
       - impulse_reporting.aggregations.stats_aggregator
+      - impulse_reporting.channels.calculated_channel
+      - impulse_reporting.channels.channel_types
       - impulse_reporting.config.config_parser
       - impulse_query_engine.analyze.query.query_builder
+      - impulse_query_engine.analyze.query.channels.calculated_channel
       - impulse_query_engine.analyze.metadata.time_series_expression
       - impulse_query_engine.analyze.metadata.tag_expression
       - impulse_query_engine.analyze.metadata.metric_expression

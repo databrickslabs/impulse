@@ -211,8 +211,7 @@ def validate_drop_implausible_data_requires_raw()
 `drop_implausible_data=True` currently only takes effect with RAW data.
 
 The filter is applied inside the RAW -> interval conversion path by the
-selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``). 
-This only happens when ``data_type=RAW``; for RLE input the field is ignored.
+selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).
 
 
 #### default\_raw\_encoder\_for\_raw\_data

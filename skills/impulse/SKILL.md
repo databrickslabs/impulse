@@ -29,6 +29,7 @@ notebook or job.
 | **Channel**     | One sensor signal within a container — e.g. "Engine RPM". Selected by metadata tags, not columns. |
 | **Event**       | A time window of interest, defined by a TSAL condition or spanning the whole recording.       |
 | **Aggregation** | A computation over channel data within event windows — histogram, 2D histogram, or statistics. |
+| **Calculated channel** | A derived signal computed from existing channels and materialized as a new channel (same per-sample grain), not a summary. |
 | **Silver layer**| The input Delta tables Impulse reads (`container_metrics`, `channel_metrics`, `channels`, …).  |
 | **Gold layer**  | The output star schema Impulse writes (fact + dimension tables) for dashboards and apps.       |
 
@@ -48,6 +49,7 @@ All three build on the same foundation. Whichever mode, you will almost always a
 - **`impulse-config`** — the config dict that points Impulse at your tables.
 - **`impulse-data-model`** — the shape of the input tables and output star schema.
 - **`impulse-events`** and **`impulse-aggregations`** — the building blocks of reporting and ML.
+- **`impulse-channels`** — when the goal is to *materialize a derived signal* (a new channel) rather than summarize one.
 
 ## Setup (every mode)
 
@@ -136,6 +138,7 @@ report.persist_results()    # write the gold star schema
 - Building signal expressions → **`impulse-tsal`**
 - Defining event windows → **`impulse-events`**
 - Histograms / statistics → **`impulse-aggregations`**
+- Materializing a derived signal as a new channel → **`impulse-channels`**
 - The full reporting lifecycle and incremental runs → **`impulse-reporting`**
 - Notebook exploration without writes → **`impulse-analyze`**
 - ML feature matrices → **`impulse-ml`**

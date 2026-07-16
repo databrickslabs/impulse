@@ -179,6 +179,8 @@ that falls in a gap where the signal is not valid, so the result may be shorter 
 - **Events** (`impulse-events`): `BasicEvent` and `SequenceOfEvents` need **`Intervals`**;
   `PointsInTimeEvent` needs **`PointsInTime`**. Validated at construction — a wrong type raises `ValueError`.
 - **Aggregations** (`impulse-aggregations`): histogram/stats signal inputs must be **`SampleSeries`**.
+- **Calculated channels** (`impulse-channels`): the wrapped expression must evaluate to **`SampleSeries`**
+  (it materializes a derived signal). Validated at construction.
 
 ## Common virtual-signal recipes
 

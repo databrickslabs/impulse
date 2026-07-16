@@ -124,3 +124,22 @@ Each selected expression is typed by what it evaluates to (see `impulse-tsal` fo
 For scalar-per-container summaries (means, maxima, counts), `select()` the reducer expressions as
 above. When you want the results persisted as a star schema instead of returned inline, use
 `impulse-reporting`.
+
+## Solving calculated channels
+
+`solve()` returns one **wide** row per container. To get a **narrow**, silver-shaped result instead —
+one row per sample interval — use `solve_calculated_channels()` with `CalculatedChannel` selections (see
+`impulse-channels`). It requires a `DefaultSolver` (the default `BlobSolver` raises).
+
+```python
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+
+cc = CalculatedChannel(
+    db.query.channel(channel_name="Vehicle Speed Sensor") * 3.6,
+    {"channel_name": "speed_kmh", "data_key": "CALC"},
+)
+df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+# df: [container_id, channel_id, tstart, tend, value, channel_name, data_key]
+```
+
+All selections must be `CalculatedChannel`s sharing one identity key set.
