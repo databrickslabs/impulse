@@ -54,9 +54,6 @@ class TimeSeriesCache(SeriesCache):
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
-        # mdf must be built before the sort: "first row per (cid, ch)" is defined in input order.
-        # The solve path carries selector_ids on a single row per channel (the
-        # rest are null), so restrict the metadata source to those rows.
         meta_cols = [
             c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
         ]
@@ -71,8 +68,7 @@ class TimeSeriesCache(SeriesCache):
         self.pdf = pdf
 
         # Each (cid, ch) group is a contiguous block after the sort, so its
-        # row positions collapse to a (start, stop) range; the per-group
-        # position arrays exist only transiently during construction.
+        # row positions collapse to a (start, stop) range
         self._ranges = {
             key: (int(positions[0]), int(positions[-1]) + 1)
             for key, positions in pdf.groupby(
@@ -997,17 +993,6 @@ class DefaultSolver(QuerySolver):
             self.config.value_col,
         )
 
-        # Ship only the columns the UDF consumes; any extra physical columns
-        # on the channels table would otherwise cross Arrow into every group's
-        # pandas frame.
-        q = q.select(
-            self.config.container_id_col,
-            self.config.channel_id_col,
-            self.config.tstart_col,
-            self.config.tend_col,
-            self.config.value_col,
-        )
-
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
             partial(DefaultSolver._solve_udf, selections=selections, col_map=col_map),
@@ -1024,10 +1009,7 @@ class DefaultSolver(QuerySolver):
 
         # selector_ids is per-channel metadata; keep it on a single row per
         # (container_id, channel_id) so the per-row array objects don't inflate
-        # every group's pandas frame.  The window must run after the repartition:
-        # hash partitioning on container_id already satisfies its distribution
-        # requirement, so no second shuffle is introduced.  Which row carries the
-        # metadata is irrelevant — the cache selects metadata rows by notna.
+        # every group's pandas frame.
         df = df.repartition(container_count, self.config.container_id_col)
         w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
             self.config.tstart_col

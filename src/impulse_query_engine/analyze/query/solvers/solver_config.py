@@ -217,26 +217,6 @@ class SolverConfig(BaseModel):
         return "tend"
 
     @property
-    def timestamp_col(self) -> str:
-        """Internal column name for the raw data-point timestamp on the channels table.
-
-        Only consumed in RAW mode (``DefaultSolver(is_raw_data=True)``), where
-        the channels table carries one timestamp per data point instead of
-        ``tstart``/``tend`` intervals.  ``IntervalEncoder`` derives ``tend``
-        from this column and renames timestamp_col to ``tstart``.
-        """
-        return "timestamp"
-
-    @property
-    def is_plausible_col(self) -> str:
-        """Internal column name for the plausibility flag on the channels table.
-
-        Consumed by ``IntervalEncoder`` when ``drop_implausible_data_points``
-        is enabled: rows whose flag is not true are removed in RAW mode.
-        """
-        return "is_plausible"
-
-    @property
     def start_ts_col(self) -> str:
         """Internal column name for the measurement-start epoch timestamp on container_metrics."""
         return "start_ts"
