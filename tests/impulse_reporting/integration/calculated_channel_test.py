@@ -47,12 +47,12 @@ def _config(silver_table="container_metrics", is_enabled=False):
     )
 
 
-def _add_channel(report, factor=3.6, name="speed_kmh"):
+def _add_channel(report, factor=3.6, name="speed_kmh", identity=None):
     q = report.get_db().query
     ch = CalculatedChannel(
         name=name,
         expr=q.channel(channel_name="Vehicle Speed Sensor") * factor,
-        identity={"channel_name": name, "data_key": "CALC"},
+        identity=identity or {"channel_name": name, "data_key": "CALC"},
     )
     report.add_calculated_channel(ch)
     return ch
@@ -169,3 +169,46 @@ def test_incremental_changed_definition_replaces(spark):
     assert hash_after != hash_before
     # A single dimension row per channel_id (upsert, not append).
     assert dim.filter(F.col("channel_id") == ch2.get_id()).count() == 1
+
+
+def test_incremental_identity_reorder_does_not_reprocess(spark):
+    # Seed gold with identity keys in one order.
+    r1 = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config(is_enabled=False)),
+    )
+    ch1 = _add_channel(r1, factor=3.6, identity={"channel_name": "speed_kmh", "data_key": "CALC"})
+    r1.determine_report()
+    r1.persist_results()
+    count_before = spark.read.table(_FACT).count()
+    hash_before = (
+        spark.read.table(_DIM)
+        .filter(F.col("channel_id") == ch1.get_id())
+        .select("definition_hash")
+        .first()[0]
+    )
+
+    # Re-run incrementally with the SAME identity but reversed key insertion order
+    # and the same expression. This must NOT be seen as a definition change.
+    r2 = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config(is_enabled=True)),
+    )
+    ch2 = _add_channel(r2, factor=3.6, identity={"data_key": "CALC", "channel_name": "speed_kmh"})
+    assert ch2.get_id() == ch1.get_id()
+    r2.determine_report()
+    r2.persist_results()
+
+    # Stable hash → classified unchanged → idempotent upsert, no row growth.
+    hash_after = (
+        spark.read.table(_DIM)
+        .filter(F.col("channel_id") == ch2.get_id())
+        .select("definition_hash")
+        .first()[0]
+    )
+    assert hash_after == hash_before
+    assert spark.read.table(_FACT).count() == count_before

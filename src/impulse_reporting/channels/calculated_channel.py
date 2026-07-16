@@ -99,6 +99,15 @@ class CalculatedChannel:
         """Stable identity encoding (sorted keys), matching the query-engine layer."""
         return "&".join(f"{k}={self.identity[k]}" for k in sorted(self.identity))
 
+    def canonical_identity(self) -> str:
+        """Public, order-independent identity key.
+
+        Two channels with the same ``identity`` (regardless of key insertion
+        order) share this value and therefore the same ``channel_id``.  Used by
+        :class:`Report` to reject duplicate channel identities.
+        """
+        return self._canonical_identity()
+
     def get_name(self) -> str:
         """Return the channel name."""
         return self.name
@@ -131,12 +140,9 @@ class CalculatedChannel:
 
     def determine_definition_hash(self) -> int:
         """Hash of the computation-affecting definition (expression + identity).
-
-        Uses the wrapped-expression string, which encodes identity and the
-        expression but not name/description/report_id/attributes.  SHA-256, first
-        8 bytes as a signed int (fits ``LongType``) — same technique as events.
         """
-        hash_bytes = hashlib.sha256(self.get_expression_str().encode()).digest()
+        payload = f"{self._canonical_identity()}|{self.expression.expr}"
+        hash_bytes = hashlib.sha256(payload.encode()).digest()
         return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
 
     def as_dict(self) -> dict:

@@ -920,3 +920,49 @@ class TestPersistFullDictHandling:
             report._persist_full()
 
             mock_writer.write.assert_not_called()
+
+
+# ============================================================================
+# Tests: duplicate calculated-channel identity rejection
+# ============================================================================
+class TestDuplicateCalculatedChannelIdentities:
+    """determine_report must reject two calculated channels sharing an identity."""
+
+    @staticmethod
+    def _channel(name, identity):
+        from impulse_query_engine.analyze.metadata.time_series_expression import (
+            TimeSeriesSelector,
+        )
+        from impulse_reporting.channels.calculated_channel import CalculatedChannel
+
+        return CalculatedChannel(name=name, expr=TimeSeriesSelector(None) * 3.6, identity=identity)
+
+    def test_duplicate_identity_raises_from_determine_report(self, spark):
+        report = _build_report(spark)
+        identity = {"channel_name": "speed_kmh", "data_key": "CALC"}
+        # Same identity, different key order — must still be detected as duplicate.
+        report.calculated_channels = [
+            self._channel("a", dict(identity)),
+            self._channel("b", {"data_key": "CALC", "channel_name": "speed_kmh"}),
+        ]
+
+        with (
+            patch.object(report, "_gold_layer_exists", return_value=True),
+            patch.object(report, "_group_events_by_type", return_value={}),
+            patch.object(report, "_group_aggregations_by_type", return_value={}),
+            patch(
+                "impulse_reporting.core.report.ContainerDimension.get_dimension",
+                return_value=None,
+            ),
+            pytest.raises(ValueError, match="unique identities"),
+        ):
+            report.determine_report(is_incremental=False)
+
+    def test_distinct_identities_do_not_raise(self, spark):
+        report = _build_report(spark)
+        report.calculated_channels = [
+            self._channel("a", {"channel_name": "speed_kmh", "data_key": "CALC"}),
+            self._channel("b", {"channel_name": "rpm_x2", "data_key": "CALC"}),
+        ]
+        # Should not raise (validation passes); call the guard directly.
+        report._validate_unique_calculated_channels()

@@ -482,6 +482,41 @@ class Report:
                     break
         return channel_types
 
+    def _validate_unique_calculated_channels(self):
+        """
+        Reject calculated channels that share a canonical identity.
+
+        ``channel_id`` is derived from the identity, so two channels with the
+        same identity would collide on the fact-table merge key
+        ``(container_id, channel_id, tstart)`` and overwrite each other
+        non-deterministically. Fail fast, naming the colliding identity and the
+        offending channel names.
+
+        Raises
+        ------
+        ValueError
+            If any canonical identity appears on more than one registered
+            calculated channel.
+        """
+        names_by_identity: dict[str, list[str]] = {}
+        for channel in self.calculated_channels:
+            names_by_identity.setdefault(channel.canonical_identity(), []).append(
+                channel.get_name()
+            )
+
+        duplicates = {
+            identity: names for identity, names in names_by_identity.items() if len(names) > 1
+        }
+        if duplicates:
+            details = "; ".join(
+                f"identity [{identity}] used by channels {names}"
+                for identity, names in duplicates.items()
+            )
+            raise ValueError(
+                "Calculated channels must have unique identities — each identity maps "
+                f"to one channel_id and one set of fact rows. Duplicates found: {details}."
+            )
+
     def _group_aggregations_by_type(self):
         """
         Group aggregations by their type.
@@ -1175,6 +1210,7 @@ class Report:
         # Calculated channels: own narrow solve (not the wide solved_df).
         # Changed definitions recompute over all containers; unchanged ones over
         # the incrementally-detected subset.
+        self._validate_unique_calculated_channels()
         channels_by_type = self._group_calculated_channels_by_type()
         changed_channels_by_type, unchanged_channels_by_type, self._changed_channel_ids = (
             split_by_hash_change(

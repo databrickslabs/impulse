@@ -94,6 +94,26 @@ class TestMetadata:
         b = CalculatedChannel("a", TimeSeriesSelector(None) * 2.0, dict(_IDENTITY))
         assert a.determine_definition_hash() != b.determine_definition_hash()
 
+    def test_definition_hash_independent_of_identity_key_order(self):
+        # Same identity, different key insertion order → same hash (no spurious
+        # "changed" classification in incremental runs).
+        a = CalculatedChannel(
+            "a", TimeSeriesSelector(None) * 3.6, {"channel_name": "s", "data_key": "CALC"}
+        )
+        b = CalculatedChannel(
+            "a", TimeSeriesSelector(None) * 3.6, {"data_key": "CALC", "channel_name": "s"}
+        )
+        assert a.determine_definition_hash() == b.determine_definition_hash()
+
+    def test_definition_hash_changes_with_identity_value(self):
+        a = CalculatedChannel(
+            "a", TimeSeriesSelector(None) * 3.6, {"channel_name": "s", "data_key": "CALC"}
+        )
+        b = CalculatedChannel(
+            "a", TimeSeriesSelector(None) * 3.6, {"channel_name": "other", "data_key": "CALC"}
+        )
+        assert a.determine_definition_hash() != b.determine_definition_hash()
+
 
 class TestDetermineCalculatedChannels:
     def test_returns_none_when_empty(self, spark):
