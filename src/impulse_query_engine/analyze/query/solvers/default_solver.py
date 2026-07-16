@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 from functools import partial
 from typing import TYPE_CHECKING
@@ -937,6 +938,163 @@ class DefaultSolver(QuerySolver):
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
             partial(DefaultSolver._solve_udf, selections=selections, col_map=col_map),
+            schema,
+            F.PandasUDFType.GROUPED_MAP,
+        )
+        df = q.join(
+            F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
+        )
+
+        container_count = channels_df.select(self.config.container_id_col).distinct().count()
+        if container_count == 0:
+            return self.spark.createDataFrame([], schema=schema)
+        res = (
+            df.repartition(container_count, self.config.container_id_col)
+            .groupBy(self.config.container_id_col)
+            .apply(solve_udf)
+        )
+        return res
+
+    # ------------------------------------------------------------------
+    # Calculated channels (narrow output)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _calculated_channel_id(cc, channel_id_dtype: T.DataType):
+        """Resolve the output ``channel_id`` for a single ``CalculatedChannel``.
+
+        An explicit ``channel_id`` on the channel is used verbatim (an ``int``,
+        or ``None`` to emit a SQL null).  Otherwise a deterministic id is derived
+        from the channel's identity via a stable BLAKE2b digest (never the
+        process-randomized ``hash()``), sized to the source ``channel_id`` type:
+        signed int32 for ``IntegerType``, signed int64 otherwise.  Determinism
+        makes writes idempotent and joins predictable across runs.
+        """
+        from impulse_query_engine.analyze.query.aggregations.calculated_channel import _AUTO
+
+        if cc._explicit_channel_id is not _AUTO:
+            return cc._explicit_channel_id
+        digest = hashlib.blake2b(cc.canonical_identity().encode(), digest_size=8).digest()
+        if isinstance(channel_id_dtype, T.IntegerType):
+            return int.from_bytes(digest[:4], "big", signed=True)
+        return int.from_bytes(digest[:8], "big", signed=True)
+
+    @staticmethod
+    def _solve_calculated_channels_udf(
+        pdf, selections: Iterable, col_map: dict[str, str], identity_keys, channel_ids
+    ) -> pd.DataFrame:
+        """
+        UDF to solve calculated channels for a single container.
+
+        Unlike :meth:`_solve_udf` (one wide row per container), this emits many
+        narrow rows: each ``CalculatedChannel`` builds to a ``SampleSeries`` that
+        is exploded into ``(container_id, channel_id, tstart, tend, value)`` rows,
+        with the channel's identity values attached as string columns.
+
+        Parameters
+        ----------
+        pdf : pd.DataFrame
+            Rows for a single container (all input channels joined in).
+        selections : Iterable
+            The ``CalculatedChannel`` selections to evaluate.
+        col_map : dict[str, str]
+            Column-name mapping for the cache (cid/ch/ts/te/val/conv).
+        identity_keys : Iterable[str]
+            Identity column names shared by the selections (sorted upstream).
+        channel_ids : list
+            Output ``channel_id`` per selection, positionally paired with
+            *selections* (precomputed on the driver).
+
+        Returns
+        -------
+        pd.DataFrame
+            Narrow rows for this container; empty (but full-width) when no
+            calculated channel produced any samples.
+        """
+        cache = TimeSeriesCache(pdf, col_map=col_map)
+        cid_col = col_map["cid"]
+        ch_col = col_map["ch"]
+        container_id = pdf[cid_col].iloc[0]
+
+        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": []}
+        for key in identity_keys:
+            cols[key] = []
+
+        for cc, ch_id in zip(selections, channel_ids, strict=False):
+            series = cc.build(cache)
+            for tstart, tend, value in series.get_data():
+                cols[cid_col].append(container_id)
+                cols[ch_col].append(ch_id)
+                cols["tstart"].append(int(tstart))
+                cols["tend"].append(int(tend))
+                cols["value"].append(float(value))
+                for key in identity_keys:
+                    cols[key].append(cc.identity.get(key))
+
+        return pd.DataFrame(cols)
+
+    def solve_calculated_channels(self, query, channels_df, selections, dtypes=None) -> DataFrame:
+        """
+        Solve calculated channels by grouping channels and exploding each result.
+
+        Structurally parallels :meth:`solve` — same unit-conversion prelude,
+        same channel-data read and ``[container_id, channel_id]`` join — but the
+        grouped-map UDF emits narrow silver-shaped rows (many per container)
+        instead of one wide row.  Output columns are
+        ``[container_id, channel_id, tstart, tend, value, <identity…>]``.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object containing database and filter information.
+        channels_df : pyspark.sql.DataFrame
+            Channel-match DataFrame from the filter pipeline.
+        selections : list
+            List of ``CalculatedChannel`` selections to evaluate.
+        dtypes : list, optional
+            Unused (``value`` is always ``DoubleType``); accepted for signature
+            parity with :meth:`solve`.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            Narrow DataFrame of calculated-channel samples.
+        """
+        col_map = self.config.col_map
+        source_unit_col = self.config.source_unit_col
+        target_unit_col = self.config.target_unit_col
+
+        has_conversion_table = getattr(query.db.config, "unit_conversion_table", None) is not None
+        has_unit_cols = (
+            source_unit_col in channels_df.columns and target_unit_col in channels_df.columns
+        )
+
+        if has_conversion_table and has_unit_cols:
+            channels_df = self._compute_conversion_factors(self.spark, query, channels_df)
+
+        for col_name in (source_unit_col, target_unit_col):
+            if col_name in channels_df.columns:
+                channels_df = channels_df.drop(col_name)
+
+        q = query.db.channels(self.spark)
+        q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
+
+        if self.is_raw_data:
+            q = self.interval_encoder.prepare_channels_df(q)
+
+        identity_keys = sorted(set().union(*[set(cc.identity) for cc in selections]))
+        channel_id_dtype = q.schema[self.config.channel_id_col].dataType
+        channel_ids = [self._calculated_channel_id(cc, channel_id_dtype) for cc in selections]
+
+        schema = self._build_calculated_channels_output_schema(q, identity_keys)
+        solve_udf = F.pandas_udf(
+            partial(
+                DefaultSolver._solve_calculated_channels_udf,
+                selections=selections,
+                col_map=col_map,
+                identity_keys=identity_keys,
+                channel_ids=channel_ids,
+            ),
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )
