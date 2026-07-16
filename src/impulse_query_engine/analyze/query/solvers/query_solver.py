@@ -411,7 +411,7 @@ class QuerySolver(ABC):
         """
         pass
 
-    def solve_calculated_channels(self, query, channels_df, selections, dtypes=None) -> DataFrame:
+    def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
         """
         Solve calculated channels into a narrow, silver-shaped DataFrame.
 
@@ -428,9 +428,6 @@ class QuerySolver(ABC):
             Channel-match DataFrame from the filter pipeline.
         selections : list
             List of ``CalculatedChannel`` selections to evaluate.
-        dtypes : list, optional
-            Result data types (unused by the narrow path; ``value`` is always
-            ``DoubleType``).
 
         Returns
         -------

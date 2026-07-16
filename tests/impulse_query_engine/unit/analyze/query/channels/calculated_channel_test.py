@@ -13,7 +13,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.analyze.query.aggregations.aggregation import Aggregation
-from impulse_query_engine.analyze.query.aggregations.calculated_channel import (
+from impulse_query_engine.analyze.query.channels.calculated_channel import (
     _AUTO,
     CalculatedChannel,
 )
@@ -48,10 +48,12 @@ class _StubExpr(TimeSeriesExpression):
 
 
 class TestConstruction:
-    def test_is_aggregation(self):
+    def test_is_time_series_expression_not_aggregation(self):
+        # It builds to a SampleSeries (a labeled derived signal), so it is a
+        # plain TimeSeriesExpression, not an Aggregation (a reduction).
         cc = CalculatedChannel(_StubExpr(), {"channel_name": "speed_kmh"})
-        assert isinstance(cc, Aggregation)
         assert isinstance(cc, TimeSeriesExpression)
+        assert not isinstance(cc, Aggregation)
 
     def test_identity_stored(self):
         cc = CalculatedChannel(_StubExpr(), {"channel_name": "speed_kmh", "data_key": "CALC"})
@@ -119,9 +121,10 @@ class TestDelegation:
         assert cc.get_required_tag_exprs() == {"tag_expr"}
         assert cc.required_tags() == {"tag"}
 
-    def test_dtype_is_double(self):
+    def test_dtype_is_binary(self):
+        # Builds to a SampleSeries → BinaryType, matching TimeSeriesSelector.
         cc = CalculatedChannel(_StubExpr(), {"channel_name": "x"})
-        assert cc.dtype() == T.DoubleType()
+        assert cc.dtype() == T.BinaryType()
 
     def test_evaluation_type_is_sample_series(self):
         cc = CalculatedChannel(_StubExpr(), {"channel_name": "x"})

@@ -10,7 +10,7 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 import pytest
 
-from impulse_query_engine.analyze.query.aggregations.calculated_channel import (
+from impulse_query_engine.analyze.query.channels.calculated_channel import (
     CalculatedChannel,
 )
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import (

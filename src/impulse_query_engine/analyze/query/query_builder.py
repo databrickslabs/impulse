@@ -11,7 +11,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
     TimeSeriesSelector,
 )
-from impulse_query_engine.analyze.query.aggregations.calculated_channel import (
+from impulse_query_engine.analyze.query.channels.calculated_channel import (
     CalculatedChannel,
 )
 from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
@@ -324,16 +324,9 @@ class QueryBuilder:
         """
         self._validate_calculated_channels()
 
-        (
-            self.result_objects,
-            self.result_dtypes,
-        ) = self._determine_result_objects_dtypes()
-
         channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
 
-        return solver.solve_calculated_channels(
-            self, channel_metrics_df, self.selections, self.result_dtypes
-        )
+        return solver.solve_calculated_channels(self, channel_metrics_df, self.selections)
 
     def _validate_calculated_channels(self) -> None:
         """Validate the selections for :meth:`solve_calculated_channels`.

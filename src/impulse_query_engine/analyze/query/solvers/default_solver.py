@@ -970,7 +970,7 @@ class DefaultSolver(QuerySolver):
         signed int32 for ``IntegerType``, signed int64 otherwise.  Determinism
         makes writes idempotent and joins predictable across runs.
         """
-        from impulse_query_engine.analyze.query.aggregations.calculated_channel import _AUTO
+        from impulse_query_engine.analyze.query.channels.calculated_channel import _AUTO
 
         if cc._explicit_channel_id is not _AUTO:
             return cc._explicit_channel_id
@@ -1033,7 +1033,7 @@ class DefaultSolver(QuerySolver):
 
         return pd.DataFrame(cols)
 
-    def solve_calculated_channels(self, query, channels_df, selections, dtypes=None) -> DataFrame:
+    def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
         """
         Solve calculated channels by grouping channels and exploding each result.
 
@@ -1051,9 +1051,6 @@ class DefaultSolver(QuerySolver):
             Channel-match DataFrame from the filter pipeline.
         selections : list
             List of ``CalculatedChannel`` selections to evaluate.
-        dtypes : list, optional
-            Unused (``value`` is always ``DoubleType``); accepted for signature
-            parity with :meth:`solve`.
 
         Returns
         -------
