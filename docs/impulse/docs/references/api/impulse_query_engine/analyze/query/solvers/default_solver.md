@@ -44,6 +44,9 @@ rather than RLE format (tstart/tend columns).
 - `drop_implausible_data` (`bool`): Whether to drop data points marked as implausible before
 processing.  Requires an ``is_plausible`` column in the
 silver layer.
+- `raw_encoder` (`RawEncoder`): Which encoder converts RAW point data into intervals for solving.
+``RawEncoder.RLE`` (default) run-length encodes equal-valued runs;
+``RawEncoder.INTERVAL`` only derives ``tend``.  Only consulted when ``is_raw_data`` is ``True``.
 
 #### filter\_container\_tags
 

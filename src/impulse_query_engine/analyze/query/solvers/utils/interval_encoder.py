@@ -1,11 +1,24 @@
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, Window
 
-from ..solver_config import SolverConfig
+from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 
 
 class IntervalEncoder:
-    """Utility class for encoding raw channel data into compatible format."""
+    """Convert RAW point samples into ``[tstart, tend)`` intervals, keeping every sample.
+
+    Within each ``(container_id, channel_id)`` the samples are ordered by
+    timestamp and each sample's ``tend`` is set to the *next* sample's
+    timestamp (via a ``LEAD`` window function).  The last sample has no
+    successor, so its ``tend`` coalesces to its own timestamp -- a
+    zero-length interval that carries no duration.
+
+    Only **duplicate points** are dropped: a row is a duplicate when both its
+    ``value`` and ``timestamp`` equal the next row's (compared with
+    ``eqNullSafe``, so two ``NULL`` values count as equal).  Every other
+    sample is kept as its own interval, so the original timestamps are
+    preserved.
+    """
 
     def __init__(
         self, config: SolverConfig | None = None, drop_implausible_data_points: bool = False
@@ -14,16 +27,18 @@ class IntervalEncoder:
         Initialize the IntervalEncoder.
         Parameters
         ----------
-        config : SolverConfig, optional
-            Solver configuration providing the framework-internal column names
-            (``timestamp_col``, ``tstart_col``, ``tend_col``, ``value_col``,
-            ``container_id_col``, ``channel_id_col``, ``is_plausible_col``).
-            When *None* (default) a default :class:`SolverConfig` is used.
+        config : SolverConfig
+            Solver configuration providing the internal column names.
+
         drop_implausible_data_points : bool, optional
             Whether to drop implausible data points before returning.  If True, data points where
             the ``is_plausible_col`` column is not True will be removed.  Default is False.
         """
-        self.config: SolverConfig = config or SolverConfig()
+
+        if config is None:
+            raise ValueError("SolverConfig must be provided to IntervalEncoder.")
+
+        self.config: SolverConfig = config
         self.drop_implausible_data_points: bool = drop_implausible_data_points
 
     def prepare_channels_df(self, df: DataFrame) -> DataFrame:
@@ -152,7 +167,7 @@ class IntervalEncoder:
         ).orderBy(F.col(self.config.timestamp_col).asc(), F.col(self.config.value_col).desc())
 
         timestamp_of_next_data_point = F.lead(F.col(self.config.timestamp_col)).over(ws)
-        value_of_next_data_point = F.lead(F.col(self.config.value_col)).over(ws)
+        value_of_next_data_point = F.lead(F.col((self.config.value_col))).over(ws)
 
         return (
             df.transform(self._drop_null_timestamps)

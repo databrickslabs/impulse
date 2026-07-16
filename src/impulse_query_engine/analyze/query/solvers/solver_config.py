@@ -15,8 +15,31 @@ properties on :class:`SolverConfig`.
 """
 
 import json
+from enum import StrEnum
 
 from pydantic import BaseModel
+
+
+class RawEncoder(StrEnum):
+    """Encoder used to convert RAW point data into intervals for solving.
+
+    Only relevant when the query engine operates on RAW (point) data; RLE input
+    is passed through unchanged regardless of this setting.
+
+    Values
+    ------
+    RLE
+        Run-length encode: collapse consecutive samples that share the same
+        ``value`` within a container/channel into a single interval (see
+        :class:`~impulse_query_engine.analyze.query.solvers.utils.rle_encoder.RleEncoder`).
+    INTERVAL
+        Derive ``tend`` from the following sample's timestamp and drop exact
+        duplicate points, *without* merging equal-valued runs (see
+        :class:`~impulse_query_engine.analyze.query.solvers.utils.interval_encoder.IntervalEncoder`).
+    """
+
+    RLE = "RLE"
+    INTERVAL = "INTERVAL"
 
 
 class TableConfig(BaseModel):
@@ -336,6 +359,16 @@ class SolverConfig(BaseModel):
     def group_id_col(self) -> str:
         """Internal column name for the unit group id on the unit_conversion table."""
         return "group_id"
+
+    @property
+    def timestamp_col(self) -> str:
+        """Internal column name for the timestamp on the channels table for raw encoded channel data."""
+        return "timestamp"
+
+    @property
+    def is_plausible_col(self) -> str:
+        """Internal column name for the plausibility flag on the channels table for raw encoded channel data."""
+        return "is_plausible"
 
     @property
     def effective_alias_join_keys(self) -> list[tuple[str, str]]:
