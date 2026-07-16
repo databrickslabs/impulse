@@ -301,6 +301,7 @@ class TestPersistResultsIncrementalMode:
         report._is_incremental = True
         report._changed_aggregation_ids = {"HISTOGRAM": [1]}
         report._changed_event_ids = {"BASIC_EVENT": [2]}
+        report._changed_channel_ids = {"CALCULATED_CHANNEL": [3]}
 
         with (
             patch.object(report, "_persist_full") as mock_full,
@@ -308,7 +309,9 @@ class TestPersistResultsIncrementalMode:
         ):
             report.persist_results()
 
-            mock_incr.assert_called_once_with({"HISTOGRAM": [1]}, {"BASIC_EVENT": [2]})
+            mock_incr.assert_called_once_with(
+                {"HISTOGRAM": [1]}, {"BASIC_EVENT": [2]}, {"CALCULATED_CHANNEL": [3]}
+            )
             mock_full.assert_not_called()
 
     def test_persist_uses_tracked_state_from_determine_report(self, spark):
@@ -319,6 +322,7 @@ class TestPersistResultsIncrementalMode:
         report._is_incremental = True
         report._changed_aggregation_ids = {"HISTOGRAM": [100]}
         report._changed_event_ids = {"BASIC_EVENT": [200]}
+        report._changed_channel_ids = {"CALCULATED_CHANNEL": [300]}
 
         with (
             patch.object(report, "_persist_full") as mock_full,
@@ -327,7 +331,9 @@ class TestPersistResultsIncrementalMode:
             # Call with defaults - should use tracked state
             report.persist_results()
 
-            mock_incr.assert_called_once_with({"HISTOGRAM": [100]}, {"BASIC_EVENT": [200]})
+            mock_incr.assert_called_once_with(
+                {"HISTOGRAM": [100]}, {"BASIC_EVENT": [200]}, {"CALCULATED_CHANNEL": [300]}
+            )
             mock_full.assert_not_called()
 
 

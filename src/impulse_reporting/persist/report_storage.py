@@ -8,6 +8,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import StructType
 
 from impulse_reporting.aggregations.aggregation_types import AggregationType
+from impulse_reporting.channels.channel_types import ChannelType
 from impulse_reporting.events.event_types import EventType
 
 
@@ -26,13 +27,13 @@ class SinkConfig(ABC):
     table_prefix: str
 
     @abstractmethod
-    def get_output_uri_fact_table(self, element: AggregationType | EventType) -> str:
+    def get_output_uri_fact_table(self, element: AggregationType | EventType | ChannelType) -> str:
         """
         Get the corresponding output URI for the fact table.
 
         Parameters
         ----------
-        element : AggregationType | EventType
+        element : AggregationType | EventType | ChannelType
             The aggregation or event type to get the URI for.
 
         Returns
@@ -43,13 +44,15 @@ class SinkConfig(ABC):
         pass
 
     @abstractmethod
-    def get_output_uri_dimension_table(self, element: AggregationType | EventType) -> str:
+    def get_output_uri_dimension_table(
+        self, element: AggregationType | EventType | ChannelType
+    ) -> str:
         """
         Get the corresponding output URI for a dimension table.
 
         Parameters
         ----------
-        element : AggregationType | EventType
+        element : AggregationType | EventType | ChannelType
             The aggregation or event type to get the URI for.
 
         Returns
@@ -102,13 +105,13 @@ class UnitySinkConfig(SinkConfig):
     catalog_name: str
     schema_name: str
 
-    def get_output_uri_fact_table(self, element: AggregationType | EventType) -> str:
+    def get_output_uri_fact_table(self, element: AggregationType | EventType | ChannelType) -> str:
         """
         Get the output URI for a fact table in Unity Catalog format.
 
         Parameters
         ----------
-        element : AggregationType | EventType
+        element : AggregationType | EventType | ChannelType
             The aggregation or event type to get the URI for.
 
         Returns
@@ -123,13 +126,15 @@ class UnitySinkConfig(SinkConfig):
             uri = f"{self.catalog_name}.{self.schema_name}.{table_name}"
         return uri
 
-    def get_output_uri_dimension_table(self, element: AggregationType | EventType) -> str:
+    def get_output_uri_dimension_table(
+        self, element: AggregationType | EventType | ChannelType
+    ) -> str:
         """
         Get the output URI for the dimension table in Unity Catalog format.
 
         Parameters
         ----------
-        element : AggregationType | EventType
+        element : AggregationType | EventType | ChannelType
             The aggregation or event type to get the URI for.
 
         Returns
@@ -492,14 +497,14 @@ class ReportEntityWriter(ABC):
 
     @abstractmethod
     def extract_fact_schema_and_output_uri(
-        self, aggregation_type: AggregationType | EventType
+        self, aggregation_type: AggregationType | EventType | ChannelType
     ) -> tuple[StructType, str]:
         """
         Extract fact schema and output URI for the given aggregation or event type.
 
         Parameters
         ----------
-        aggregation_type : AggregationType | EventType
+        aggregation_type : AggregationType | EventType | ChannelType
             The aggregation or event type to extract information for.
 
         Returns
@@ -561,14 +566,14 @@ class DefaultReportEntityWriter(ReportEntityWriter):
         self.sink.store(df_enriched, uri)
 
     def extract_fact_schema_and_output_uri(
-        self, entity_type: AggregationType | EventType
+        self, entity_type: AggregationType | EventType | ChannelType
     ) -> tuple[StructType, str]:
         """
         Extract fact schema and output URI for the given aggregation type.
 
         Parameters
         ----------
-        entity_type : AggregationType | EventType
+        entity_type : AggregationType | EventType | ChannelType
             The aggregation or event type to extract information for.
 
         Returns
@@ -581,14 +586,14 @@ class DefaultReportEntityWriter(ReportEntityWriter):
         return schema, uri
 
     def extract_metadata_schema_and_output_uri(
-        self, entity_type: AggregationType | EventType
+        self, entity_type: AggregationType | EventType | ChannelType
     ) -> tuple[StructType, str]:
         """
         Extract metadata schema and output URI for the given aggregation type.
 
         Parameters
         ----------
-        entity_type : AggregationType | EventType
+        entity_type : AggregationType | EventType | ChannelType
             The aggregation type to extract information for.
 
         Returns
@@ -682,14 +687,16 @@ class WriterFactory:
         self.sink_config: SinkConfig = sink.config
         self._default_transformer = ReportEntityTransformer()
 
-    def create_writer(self, element: AggregationType | EventType) -> DefaultReportEntityWriter:
+    def create_writer(
+        self, element: AggregationType | EventType | ChannelType
+    ) -> DefaultReportEntityWriter:
         """
-        Get the appropriate writer for the given aggregation or event type.
+        Get the appropriate writer for the given aggregation, event, or channel type.
 
         Parameters
         ----------
-        element : AggregationType | EventType
-            The aggregation or event type to create a writer for.
+        element : AggregationType | EventType | ChannelType
+            The aggregation, event, or channel type to create a writer for.
 
         Returns
         -------
@@ -702,12 +709,13 @@ class WriterFactory:
             If the element type is not supported.
 
         """
-        if isinstance(element, AggregationType):
-            return DefaultReportEntityWriter(self.sink, self._default_transformer)
-        elif isinstance(element, EventType):
+        if isinstance(element, (AggregationType, EventType, ChannelType)):
             return DefaultReportEntityWriter(self.sink, self._default_transformer)
         else:
-            error_msg = f"No writer found for element: {element}. Supported types are: AggregationType and EventType"
+            error_msg = (
+                f"No writer found for element: {element}. Supported types are: "
+                "AggregationType, EventType and ChannelType"
+            )
             raise ValueError(error_msg)
 
     def create_container_dimension_writer(self) -> ContainerDimensionWriter:

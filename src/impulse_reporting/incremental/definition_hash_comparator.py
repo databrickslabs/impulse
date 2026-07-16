@@ -3,6 +3,7 @@
 from pyspark.sql import SparkSession
 
 from impulse_reporting.aggregations.aggregation import Aggregation
+from impulse_reporting.channels.calculated_channel import CalculatedChannel
 from impulse_reporting.events.event import Event
 
 
@@ -157,6 +158,58 @@ class DefinitionHashComparator:
             else:
                 # Definition unchanged
                 unchanged.append(agg)
+
+        return (changed, unchanged)
+
+    def group_calculated_channels_by_hash_change(
+        self,
+        channels: list[CalculatedChannel],
+        dimension_table: str,
+    ) -> tuple[list[CalculatedChannel], list[CalculatedChannel]]:
+        """
+        Group calculated channels into changed and unchanged based on definition hash.
+
+        Compares the current definition hash of each channel against the stored
+        hash in the gold layer dimension table (keyed on ``channel_id``). Channels
+        with different hashes (or new channels not in gold) are "changed" and need
+        full reprocessing of all containers.
+
+        Parameters
+        ----------
+        channels : List[CalculatedChannel]
+            Current calculated-channel definitions to check.
+        dimension_table : str
+            URI of the gold layer calculated-channel dimension table.
+
+        Returns
+        -------
+        Tuple[List[CalculatedChannel], List[CalculatedChannel]]
+            A tuple of (changed_channels, unchanged_channels).
+        """
+
+        if not self._table_exists(dimension_table):
+            # No gold table exists - all channels are "changed" (need full processing)
+            return (channels, [])
+
+        stored_hashes = (
+            self.spark.read.table(dimension_table)
+            .select("channel_id", "definition_hash")
+            .collect()
+        )
+        stored_hash_map = {row.channel_id: row.definition_hash for row in stored_hashes}
+
+        changed: list[CalculatedChannel] = []
+        unchanged: list[CalculatedChannel] = []
+
+        for channel in channels:
+            channel_id = channel.get_id()
+            current_hash = channel.determine_definition_hash()
+            stored_hash = stored_hash_map.get(channel_id)
+
+            if stored_hash is None or stored_hash != current_hash:
+                changed.append(channel)
+            else:
+                unchanged.append(channel)
 
         return (changed, unchanged)
 

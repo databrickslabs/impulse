@@ -14,6 +14,7 @@ from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSol
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_reporting.aggregations.aggregation_types import AggregationType
+from impulse_reporting.channels.channel_types import ChannelType
 from impulse_reporting.config.config_parser import (
     ImpulseConfig,
     Solvers,
@@ -24,6 +25,7 @@ from impulse_reporting.core.report_utils import (
     cleanup_temp_tables,
     collect_solvable_expressions,
     dispatch_aggregations,
+    dispatch_calculated_channels,
     dispatch_events,
     solve_expressions_batched,
     split_by_hash_change,
@@ -90,14 +92,18 @@ class Report:
 
         self.pages = []
         self.events = []
+        self.calculated_channels = []
 
         self.event_dfs = {}
         self.event_metadata_dfs = {}
         self.aggregation_dfs = {}
         self.aggregation_metadata_dfs = {}
+        self.calculated_channel_dfs = {}
+        self.calculated_channel_metadata_dfs = {}
         self.container_dimension_df = None
         self.channel_mapping_resolution_dimension_df = None
         self._is_incremental = None
+        self._changed_channel_ids = {}
 
         if config:
             self.config = Report.load_config_from_dict(config)
@@ -431,6 +437,50 @@ class Report:
                     break
         return event_types
 
+    def add_calculated_channel(self, channel):
+        """
+        Add a calculated channel to the report.
+
+        Parameters
+        ----------
+        channel : CalculatedChannel
+            The calculated channel to add.
+
+        Returns
+        -------
+        None
+        """
+        self.calculated_channels.append(channel)
+        channel.set_report_id(self.report_id)
+
+    def get_calculated_channels(self) -> list:
+        """
+        Get the list of calculated channels associated with the report.
+
+        Returns
+        -------
+        list of CalculatedChannel
+            List of calculated channels.
+        """
+        return self.calculated_channels
+
+    def _group_calculated_channels_by_type(self):
+        """
+        Group calculated channels by their type.
+
+        Returns
+        -------
+        dict
+            Dictionary mapping channel type names to lists of channels.
+        """
+        channel_types = {channel_type.name: [] for channel_type in ChannelType}
+        for channel in self.calculated_channels:
+            for channel_type in channel_types.keys():
+                if isinstance(channel, ChannelType[channel_type].value):
+                    channel_types[channel_type].append(channel)
+                    break
+        return channel_types
+
     def _group_aggregations_by_type(self):
         """
         Group aggregations by their type.
@@ -501,9 +551,12 @@ class Report:
         # Use tracked state from determine_report
         changed_aggregation_ids = getattr(self, "_changed_aggregation_ids", {})
         changed_event_ids = getattr(self, "_changed_event_ids", {})
+        changed_channel_ids = getattr(self, "_changed_channel_ids", {})
 
         if self._is_incremental:
-            self._persist_incremental(changed_aggregation_ids, changed_event_ids)
+            self._persist_incremental(
+                changed_aggregation_ids, changed_event_ids, changed_channel_ids
+            )
         else:
             self._persist_full()
 
@@ -596,6 +649,42 @@ class Report:
             schema, uri = writer.extract_metadata_schema_and_output_uri(event_type)
             writer.write(event_meta_dfs_list, schema=schema, uri=uri)
 
+        # calculated channel fact tables
+        channel_fact_by_table = {}
+        for channel_type_str, channel_dfs in self.calculated_channel_dfs.items():
+            table_name = ChannelType[channel_type_str].get_fact_table_name()
+            channel_fact_by_table.setdefault(table_name, [])
+            if isinstance(channel_dfs, dict):
+                if channel_dfs.get("changed") is not None:
+                    channel_fact_by_table[table_name].append(channel_dfs["changed"])
+                if channel_dfs.get("unchanged") is not None:
+                    channel_fact_by_table[table_name].append(channel_dfs["unchanged"])
+            elif channel_dfs is not None:
+                channel_fact_by_table[table_name].append(channel_dfs)
+
+        for table_name, channel_dfs_list in channel_fact_by_table.items():
+            if not channel_dfs_list:
+                continue
+            channel_type = ChannelType.get_any_for_fact_table(table_name)
+            writer = storage_factory.create_writer(channel_type)
+            schema, uri = writer.extract_fact_schema_and_output_uri(channel_type)
+            writer.write(channel_dfs_list, schema=schema, uri=uri)
+
+        # calculated channel dimension tables
+        channel_dim_by_table = {}
+        for channel_type_str, channel_metadata_df in self.calculated_channel_metadata_dfs.items():
+            table_name = ChannelType[channel_type_str].get_dimension_table_name()
+            channel_dim_by_table.setdefault(table_name, [])
+            channel_dim_by_table[table_name].append(channel_metadata_df)
+
+        for table_name, channel_meta_dfs_list in channel_dim_by_table.items():
+            if not channel_meta_dfs_list:
+                continue
+            channel_type = ChannelType.get_any_for_dimension_table(table_name)
+            writer = storage_factory.create_writer(channel_type)
+            schema, uri = writer.extract_metadata_schema_and_output_uri(channel_type)
+            writer.write(channel_meta_dfs_list, schema=schema, uri=uri)
+
         # persist measurement dimensions
         if self.container_dimension_df:
             writer = storage_factory.create_container_dimension_writer()
@@ -613,6 +702,7 @@ class Report:
         self,
         changed_aggregation_ids: dict[str, list[int]],
         changed_event_ids: dict[str, list[int]],
+        changed_channel_ids: dict[str, list[int]] = None,
     ):
         """
         Persist results using incremental strategy.
@@ -625,11 +715,14 @@ class Report:
             Mapping of aggregation type to list of visual_ids with changed definitions.
         changed_event_ids : dict[str, list[int]]
             Mapping of event type to list of event_ids with changed definitions.
+        changed_channel_ids : dict[str, list[int]], optional
+            Mapping of channel type to list of channel_ids with changed definitions.
 
         Returns
         -------
         None
         """
+        changed_channel_ids = changed_channel_ids or {}
         storage_factory = WriterFactory(self.sink)
         transformer = ReportEntityTransformer()
 
@@ -773,6 +866,49 @@ class Report:
                     solver_cfg.channel_alias_col,
                 ],
             )
+
+        # Persist calculated channel facts
+        for channel_type_str, channel_data in self.calculated_channel_dfs.items():
+            channel_type = ChannelType[channel_type_str]
+            writer = storage_factory.create_writer(channel_type)
+            schema, uri = writer.extract_fact_schema_and_output_uri(channel_type)
+            merge_keys = ["container_id", "channel_id", "tstart"]
+
+            if isinstance(channel_data, dict):
+                changed_df = channel_data.get("changed")
+                unchanged_df = channel_data.get("unchanged")
+
+                # Changed definitions: replaceWhere (atomic) over all containers
+                if changed_df is not None and channel_type_str in changed_channel_ids:
+                    changed_ids = changed_channel_ids[channel_type_str]
+                    df_enriched = self._transform_for_persistence(changed_df, schema, transformer)
+                    self.sink.replace_by_ids(
+                        df=df_enriched,
+                        uri=uri,
+                        id_column="channel_id",
+                        ids_to_replace=changed_ids,
+                    )
+
+                # Unchanged definitions: MERGE over the incremental subset
+                if unchanged_df is not None:
+                    df_enriched = self._transform_for_persistence(
+                        unchanged_df, schema, transformer
+                    )
+                    self.sink.upsert(df_enriched, uri, merge_keys)
+            elif channel_data is not None:
+                df_enriched = self._transform_for_persistence(channel_data, schema, transformer)
+                self.sink.upsert(df_enriched, uri, merge_keys)
+
+        # Persist calculated channel dimensions (always upsert by channel_id)
+        for (
+            channel_type_str,
+            channel_metadata_df,
+        ) in self.calculated_channel_metadata_dfs.items():
+            channel_type = ChannelType[channel_type_str]
+            writer = storage_factory.create_writer(channel_type)
+            schema, uri = writer.extract_metadata_schema_and_output_uri(channel_type)
+            df_enriched = self._transform_for_persistence(channel_metadata_df, schema, transformer)
+            self.sink.upsert(df_enriched, uri, ["channel_id"])
 
     def _transform_for_persistence(
         self,
@@ -929,7 +1065,7 @@ class Report:
         # Split changed/unchanged definitions
         changed_events_by_type, unchanged_events_by_type, self._changed_event_ids = (
             split_by_hash_change(
-                events_by_type, EventType, self.sink, self.spark, hash_comparator, is_event=True
+                events_by_type, EventType, self.sink, self.spark, hash_comparator, kind="event"
             )
         )
         changed_aggs_by_type, unchanged_aggs_by_type, self._changed_aggregation_ids = (
@@ -939,7 +1075,7 @@ class Report:
                 self.sink,
                 self.spark,
                 hash_comparator,
-                is_event=False,
+                kind="aggregation",
             )
         )
 
@@ -1034,6 +1170,58 @@ class Report:
 
         self.aggregation_dfs = aggregation_dfs
         self.aggregation_metadata_dfs = aggregation_metadata_dfs
+
+        # Calculated channels: own narrow solve (not the wide solved_df).
+        # Changed definitions recompute over all containers; unchanged ones over
+        # the incrementally-detected subset.
+        channels_by_type = self._group_calculated_channels_by_type()
+        changed_channels_by_type, unchanged_channels_by_type, self._changed_channel_ids = (
+            split_by_hash_change(
+                channels_by_type,
+                ChannelType,
+                self.sink,
+                self.spark,
+                hash_comparator,
+                kind="channel",
+            )
+        )
+        changed_channel_dfs = dispatch_calculated_channels(
+            self.spark,
+            changed_channels_by_type,
+            ChannelType,
+            self.query,
+            self.solver,
+            None,
+        )
+        unchanged_channel_dfs = dispatch_calculated_channels(
+            self.spark,
+            unchanged_channels_by_type,
+            ChannelType,
+            self.query,
+            self.solver,
+            pre_filtered_containers_df,
+        )
+        calculated_channel_dfs = {}
+        all_channel_types = set(
+            list(changed_channel_dfs.keys()) + list(unchanged_channel_dfs.keys())
+        )
+        for t in all_channel_types:
+            calculated_channel_dfs[t] = {
+                "changed": changed_channel_dfs.get(t),
+                "unchanged": unchanged_channel_dfs.get(t),
+            }
+
+        calculated_channel_metadata_dfs = {}
+        for channel_name, channel_list in channels_by_type.items():
+            if not channel_list:
+                continue
+            cls = ChannelType[channel_name].value
+            calculated_channel_metadata_dfs[channel_name] = cls.determine_metadata_df(
+                self.spark, channel_list
+            )
+
+        self.calculated_channel_dfs = calculated_channel_dfs
+        self.calculated_channel_metadata_dfs = calculated_channel_metadata_dfs
 
         # Determine container dimension
         self.container_dimension_df = ContainerDimension.get_dimension(

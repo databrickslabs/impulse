@@ -111,7 +111,7 @@ def split_by_hash_change(
     sink: Sink | None,
     spark: SparkSession,
     hash_comparator: DefinitionHashComparator,
-    is_event: bool = True,
+    kind: str = "event",
 ) -> tuple[dict[str, list], dict[str, list], dict[str, list[int]]]:
     """Split items into changed/unchanged using definition-hash comparison.
 
@@ -120,21 +120,31 @@ def split_by_hash_change(
     items_by_type : dict[str, list]
         ``{type_name: [items]}`` as returned by ``_group_*_by_type()``.
     type_enum : type
-        ``EventType`` or ``AggregationType`` enum class.
+        ``EventType``, ``AggregationType``, or ``ChannelType`` enum class.
     sink : Sink | None
         Report sink (``None`` in sinkless mode).
     spark : SparkSession
         Active Spark session.
     hash_comparator : DefinitionHashComparator
         Comparator instance.
-    is_event : bool
-        ``True`` for events, ``False`` for aggregations.
+    kind : str
+        One of ``"event"``, ``"aggregation"``, or ``"channel"`` — selects which
+        comparator method to use.
 
     Returns
     -------
     tuple[dict, dict, dict]
         ``(changed_by_type, unchanged_by_type, changed_ids)``
     """
+    comparators = {
+        "event": hash_comparator.group_events_by_hash_change,
+        "aggregation": hash_comparator.group_aggregations_by_hash_change,
+        "channel": hash_comparator.group_calculated_channels_by_hash_change,
+    }
+    if kind not in comparators:
+        raise ValueError(f"Unsupported kind '{kind}'; expected one of {sorted(comparators)}.")
+    compare = comparators[kind]
+
     changed_by_type: dict[str, list] = {}
     unchanged_by_type: dict[str, list] = {}
     changed_ids: dict[str, list[int]] = {}
@@ -150,13 +160,7 @@ def split_by_hash_change(
             continue
 
         dim_table = sink.config.get_output_uri_dimension_table(type_enum[type_name])
-
-        if is_event:
-            changed, unchanged = hash_comparator.group_events_by_hash_change(items, dim_table)
-        else:
-            changed, unchanged = hash_comparator.group_aggregations_by_hash_change(
-                items, dim_table
-            )
+        changed, unchanged = compare(items, dim_table)
 
         if changed:
             changed_by_type[type_name] = changed
@@ -292,6 +296,52 @@ def dispatch_aggregations(
         )
 
     return aggregation_dfs
+
+
+def dispatch_calculated_channels(
+    spark: SparkSession,
+    channels_by_type: dict[str, list],
+    type_enum,
+    query: QueryBuilder,
+    solver: QuerySolver,
+    pre_filtered_containers_df: DataFrame | None,
+) -> dict:
+    """Dispatch ``determine_calculated_channels`` calls per type.
+
+    Unlike events/aggregations, calculated channels never ride the wide
+    ``solved_df`` — each type drives its own narrow solve via
+    ``query.solve_calculated_channels`` (the ``ContainerEvent`` pattern), so this
+    always passes ``query``/``solver``/``pre_filtered_containers_df``.
+
+    Parameters
+    ----------
+    spark : SparkSession
+    channels_by_type : dict[str, list]
+    type_enum : ChannelType enum
+    query : QueryBuilder
+    solver : QuerySolver
+    pre_filtered_containers_df : DataFrame | None
+
+    Returns
+    -------
+    dict
+        ``channel_dfs``
+    """
+    channel_dfs: dict = {}
+
+    for type_name, channels in channels_by_type.items():
+        if not channels:
+            continue
+        cls = type_enum[type_name].value
+        channel_dfs[type_name] = cls.determine_calculated_channels(
+            spark,
+            channels,
+            query=query,
+            solver=solver,
+            pre_filtered_containers_df=pre_filtered_containers_df,
+        )
+
+    return channel_dfs
 
 
 def solve_expressions_batched(

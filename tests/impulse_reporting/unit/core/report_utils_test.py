@@ -193,7 +193,7 @@ class TestSplitByHashChange:
             sink=None,
             spark=MagicMock(),
             hash_comparator=MagicMock(),
-            is_event=True,
+            kind="event",
         )
 
         assert changed == {"BASIC_EVENT": [item1, item2]}
@@ -211,7 +211,7 @@ class TestSplitByHashChange:
             sink=None,
             spark=MagicMock(),
             hash_comparator=MagicMock(),
-            is_event=False,
+            kind="aggregation",
         )
 
         assert changed == {"HISTOGRAM": [item]}
@@ -253,7 +253,7 @@ class TestSplitByHashChange:
             sink=mock_sink,
             spark=MagicMock(),
             hash_comparator=mock_comparator,
-            is_event=True,
+            kind="event",
         )
 
         mock_comparator.group_events_by_hash_change.assert_called_once()
@@ -262,7 +262,7 @@ class TestSplitByHashChange:
         assert changed_ids == {"BASIC_EVENT": [10]}
 
     def test_with_sink_delegates_to_group_aggregations_by_hash_change(self):
-        """When is_event=False, group_aggregations_by_hash_change is called."""
+        """When kind="aggregation", group_aggregations_by_hash_change is called."""
         item = MagicMock()
         item.get_id.return_value = 42
 
@@ -278,7 +278,7 @@ class TestSplitByHashChange:
             sink=mock_sink,
             spark=MagicMock(),
             hash_comparator=mock_comparator,
-            is_event=False,
+            kind="aggregation",
         )
 
         mock_comparator.group_aggregations_by_hash_change.assert_called_once()
@@ -301,7 +301,7 @@ class TestSplitByHashChange:
             sink=mock_sink,
             spark=MagicMock(),
             hash_comparator=mock_comparator,
-            is_event=True,
+            kind="event",
         )
 
         assert changed == {}
@@ -335,7 +335,7 @@ class TestSplitByHashChange:
             sink=mock_sink,
             spark=MagicMock(),
             hash_comparator=mock_comparator,
-            is_event=True,
+            kind="event",
         )
 
         assert call_count[0] == 2

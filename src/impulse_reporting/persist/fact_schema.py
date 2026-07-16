@@ -58,3 +58,19 @@ STATS_AGGREGATOR_FACT_SCHEMA = StructType(
         StructField("statistic_value", DoubleType(), False),
     ]
 )
+
+# Narrow, silver-shaped facts for calculated channels. Mirrors the query engine's
+# solve_calculated_channels() output: one row per RLE sample interval, plus the
+# identity columns. Field *types* are cosmetic — persistence projects by name only
+# and the real container_id/channel_id types flow from the solved DataFrame.
+CALCULATED_CHANNEL_FACT_SCHEMA = StructType(
+    [
+        StructField("container_id", IntegerType(), False),
+        StructField("channel_id", LongType(), False),
+        StructField("tstart", LongType(), False),
+        StructField("tend", LongType(), False),
+        StructField("value", DoubleType(), False),
+        StructField("channel_name", StringType(), False),
+        StructField("data_key", StringType(), False),
+    ]
+)
