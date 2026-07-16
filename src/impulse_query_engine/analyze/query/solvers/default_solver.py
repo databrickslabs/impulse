@@ -1009,10 +1009,14 @@ class DefaultSolver(QuerySolver):
 
         # selector_ids is per-channel metadata; keep it on a single row per
         # (container_id, channel_id) so the per-row array objects don't inflate
-        # every group's pandas frame.
+        # every group's pandas frame.  ``selector_ids`` is identical across a
+        # channel's rows and the cache selects the surviving row by notna (not
+        # by position), so the order is arbitrary — order by a constant to
+        # avoid an unnecessary per-channel sort (row_number just requires
+        # *some* ordering).
         df = df.repartition(container_count, self.config.container_id_col)
         w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
-            self.config.tstart_col
+            F.lit(1)
         )
         df = (
             df.withColumn("_rn", F.row_number().over(w))
