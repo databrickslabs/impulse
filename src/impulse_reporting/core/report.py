@@ -328,6 +328,7 @@ class Report:
                     config=config.query_engine.solver_config,
                     is_raw_data=config.query_engine.data_type is DataType.RAW,
                     drop_implausible_data=config.query_engine.drop_implausible_data,
+                    raw_encoder=config.query_engine.raw_encoder,
                 )
             case _:
                 raise ValueError(

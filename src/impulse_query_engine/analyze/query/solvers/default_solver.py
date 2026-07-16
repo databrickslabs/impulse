@@ -16,8 +16,9 @@ from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
-from .solver_config import SolverConfig
+from .solver_config import RawEncoder, SolverConfig
 from .utils.interval_encoder import IntervalEncoder
+from .utils.rle_encoder import RleEncoder
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
@@ -150,6 +151,11 @@ class DefaultSolver(QuerySolver):
         Whether to drop data points marked as implausible before
         processing.  Requires an ``is_plausible`` column in the
         silver layer.
+    raw_encoder : RawEncoder, optional
+        Which encoder converts RAW point data into intervals for solving.
+        ``RawEncoder.RLE`` (default) run-length encodes equal-valued runs;
+        ``RawEncoder.INTERVAL`` only derives ``tend`` and drops exact
+        duplicates.  Only consulted when ``is_raw_data`` is ``True``.
     """
 
     def __init__(
@@ -158,13 +164,30 @@ class DefaultSolver(QuerySolver):
         config: SolverConfig | None = None,
         is_raw_data: bool = False,
         drop_implausible_data: bool = False,
+        raw_encoder: RawEncoder = RawEncoder.RLE,
     ):
         super().__init__(config=config)
         self.spark = spark
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
-        self.interval_encoder: IntervalEncoder = IntervalEncoder(
-            timestamp_col_name="timestamp",
+        self.raw_encoder: RawEncoder = raw_encoder
+        self.channel_encoder: RleEncoder | IntervalEncoder = self._build_channel_encoder()
+
+    def _build_channel_encoder(self) -> RleEncoder | IntervalEncoder:
+        """Construct the raw -> interval encoder selected by ``raw_encoder``.
+
+        Both encoders expose ``prepare_channels_df`` and honor
+        ``drop_implausible_data``; they differ only in whether equal-valued
+        consecutive samples are collapsed into a single run (RLE) or kept as
+        separate intervals (INTERVAL).
+        """
+        if self.raw_encoder is RawEncoder.INTERVAL:
+            return IntervalEncoder(
+                config=self.config,
+                drop_implausible_data_points=self.drop_implausible_data,
+            )
+        return RleEncoder(
+            config=self.config,
             drop_implausible_data_points=self.drop_implausible_data,
         )
 
@@ -932,8 +955,8 @@ class DefaultSolver(QuerySolver):
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
 
         if self.is_raw_data:
-            # Calculate the tend info and prepare the data for the solving step.
-            q = self.interval_encoder.prepare_channels_df(q)
+            # Encode the raw samples into intervals (RLE or interval) for the solving step.
+            q = self.channel_encoder.prepare_channels_df(q)
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
