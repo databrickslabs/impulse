@@ -7,6 +7,7 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
+    VariantType,
 )
 
 HISTOGRAM_DIMENSION_SCHEMA = StructType(
@@ -83,17 +84,17 @@ STATS_AGGREGATOR_DIMENSION_SCHEMA = StructType(
 
 # Metadata for calculated channels. ``channel_id`` is the deterministic entity id
 # (identical to the fact's channel_id), ``definition_hash`` drives incremental
-# reprocessing, and ``identity`` retains the full identity dict (the fact keeps
-# only the fixed identity columns).
+# reprocessing, and ``identity`` is a VARIANT holding the full identity dict —
+# the same self-describing representation as the fact table (no fixed per-key
+# columns).
 CALCULATED_CHANNEL_DIMENSION_SCHEMA = StructType(
     [
         StructField("channel_id", LongType(), False),
         StructField("report_id", IntegerType(), False),
         StructField("channel_type", StringType(), True),
-        StructField("channel_name", StringType(), True),
         StructField("channel_description", StringType(), True),
         StructField("channel_expression", StringType(), True),
-        StructField("identity", MapType(StringType(), StringType()), True),
+        StructField("identity", VariantType(), True),
         StructField("definition_hash", LongType(), True),
         StructField("attributes", MapType(StringType(), StringType()), True),
     ]

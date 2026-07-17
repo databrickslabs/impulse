@@ -26,19 +26,19 @@ class CalculatedChannel(TimeSeriesExpression):
     it is a plain ``TimeSeriesExpression`` rather than an ``Aggregation``.
     :meth:`QueryBuilder.solve_calculated_channels` explodes that series into
     narrow rows matching the silver ``channel_data`` shape
-    (``container_id, channel_id, tstart, tend, value``) plus one string column
-    per identity entry.
+    (``container_id, channel_id, tstart, tend, value``) plus a single
+    ``identity`` ``VARIANT`` column holding the whole identity dict.
 
     Parameters
     ----------
     expr : TimeSeriesExpression
         The wrapped expression; must ``build()`` to a ``SampleSeries``.
     identity : dict of str
-        Identity columns for the output rows, e.g.
-        ``{"channel_name": "Eng_RPM", "data_key": "TM"}``.  Each key becomes a
-        ``StringType`` output column and each value is emitted as a literal on
-        every row of this channel.  Must be non-empty; the identity also seeds
-        the deterministic ``channel_id`` hash.
+        Identity for the output rows, e.g.
+        ``{"channel_name": "Eng_RPM", "data_key": "TM"}``.  The whole dict is
+        emitted per row in a single ``identity`` ``VARIANT`` column (keys are
+        arbitrary).  Must be non-empty; the identity also seeds the
+        deterministic ``channel_id`` hash.
     channel_id : int or None, optional
         Output ``channel_id`` for every emitted row.  When omitted (the
         ``_AUTO`` sentinel) a deterministic id is derived from the identity by
@@ -52,7 +52,7 @@ class CalculatedChannel(TimeSeriesExpression):
     chain ``.alias(...)``: reading a missing ``_alias`` would trigger
     ``TimeSeriesExpression.__getattr__`` and silently return a callable instead
     of raising.  The alias is not consumed by the calculated-channels solve path
-    (that emits the identity columns directly); it exists so the object stays a
+    (that emits the identity column directly); it exists so the object stays a
     well-formed ``TimeSeriesExpression``.  A later ``.alias(...)`` still overrides
     it.
 

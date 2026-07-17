@@ -5,6 +5,7 @@ import zlib
 from collections.abc import Mapping
 
 import pyspark.sql.functions as f
+import pyspark.sql.types as T
 from pyspark.sql import DataFrame, Row, SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -18,11 +19,6 @@ from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.persist.dimension_schema import CALCULATED_CHANNEL_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import CALCULATED_CHANNEL_FACT_SCHEMA
-
-# Identity keys required on every reporting-layer calculated channel. Fixed so the
-# gold fact table has a single, stable schema whose identity columns are named
-# ``channel_name`` and ``data_key`` (see CALCULATED_CHANNEL_FACT_SCHEMA).
-_REQUIRED_IDENTITY_KEYS = {"channel_name", "data_key"}
 
 
 class CalculatedChannel:
@@ -48,9 +44,9 @@ class CalculatedChannel:
     expr : TimeSeriesExpression
         The wrapped expression; must evaluate to a ``SampleSeries``.
     identity : Mapping[str, str]
-        Output identity columns.  Must contain exactly the keys
-        ``{"channel_name", "data_key"}``; the values are emitted as literals on
-        every fact row and seed the deterministic ``channel_id``.
+        Output identity.  Any non-empty set of keys; the whole dict is emitted
+        per fact row in a single ``identity`` ``VARIANT`` column and seeds the
+        deterministic ``channel_id``.
     desc : str, optional
         Human-readable description (stored on the dimension row, excluded from the
         definition hash).
@@ -77,11 +73,11 @@ class CalculatedChannel:
         )
 
         self.identity = {str(k): str(v) for k, v in identity.items()}
-        if set(self.identity) != _REQUIRED_IDENTITY_KEYS:
+        if not self.identity:
             raise ValueError(
-                "CalculatedChannel identity must contain exactly the keys "
-                f"{sorted(_REQUIRED_IDENTITY_KEYS)}; got {sorted(self.identity)}. "
-                "These become the fixed identity columns of the gold fact table."
+                "CalculatedChannel requires a non-empty identity dict "
+                "(e.g. {'channel_name': 'speed_kmh', 'data_key': 'CALC'}); it defines "
+                "the output identity and seeds the deterministic channel_id."
             )
 
         normalized_attributes: dict[str, str] = {}
@@ -139,19 +135,22 @@ class CalculatedChannel:
         return "CALCULATED_CHANNEL"
 
     def determine_definition_hash(self) -> int:
-        """Hash of the computation-affecting definition (expression + identity).
-        """
+        """Hash of the computation-affecting definition (expression + identity)."""
         payload = f"{self._canonical_identity()}|{self.expression.expr}"
         hash_bytes = hashlib.sha256(payload.encode()).digest()
         return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
 
     def as_dict(self) -> dict:
-        """Dictionary representation matching ``CALCULATED_CHANNEL_DIMENSION_SCHEMA``."""
+        """Dictionary representation of the dimension metadata.
+
+        ``identity`` is emitted as a plain dict here; ``determine_metadata_df``
+        converts it to a ``VARIANT`` column so the dimension identity mirrors the
+        fact identity (no fixed per-key columns).
+        """
         return {
             "channel_id": self.get_id(),
             "report_id": self.report_id,
             "channel_type": self.get_channel_type_str(),
-            "channel_name": self.identity.get("channel_name"),
             "channel_description": self.description,
             "channel_expression": self.get_expression_str(),
             "identity": self.identity,
@@ -186,7 +185,7 @@ class CalculatedChannel:
         spark : SparkSession
             Spark session (unused directly; kept for interface parity).
         channels : list of CalculatedChannel
-            Channels to solve; all share the same identity key set.
+            Channels to solve; identity keys may differ across channels.
         query : QueryBuilder
             Query builder used to select and solve the channels.
         solver : QuerySolver
@@ -210,6 +209,23 @@ class CalculatedChannel:
 
     @classmethod
     def determine_metadata_df(cls, spark: SparkSession, channels: list[CalculatedChannel]):
-        """Create the dimension DataFrame for the given channels."""
+        """Create the dimension DataFrame for the given channels.
+
+        ``identity`` in ``CALCULATED_CHANNEL_DIMENSION_SCHEMA`` is a ``VARIANT``,
+        which ``createDataFrame`` cannot build from a Python dict directly.  So
+        the frame is staged with ``identity`` as a ``MapType`` (matching the plain
+        dict from :meth:`as_dict`) and then converted to ``VARIANT`` via
+        :func:`pyspark.sql.functions.to_variant_object` — mirroring the fact-side
+        conversion in the solver.
+        """
         rows = [channel.as_spark_row() for channel in channels]
-        return spark.createDataFrame(rows, schema=CALCULATED_CHANNEL_DIMENSION_SCHEMA)
+        staging_fields = [
+            (
+                T.StructField("identity", T.MapType(T.StringType(), T.StringType()))
+                if field.name == "identity"
+                else field
+            )
+            for field in CALCULATED_CHANNEL_DIMENSION_SCHEMA.fields
+        ]
+        df = spark.createDataFrame(rows, schema=T.StructType(staging_fields))
+        return df.withColumn("identity", f.to_variant_object(f.col("identity")))

@@ -1004,7 +1004,7 @@ class DefaultSolver(QuerySolver):
 
     @staticmethod
     def _solve_calculated_channels_udf(
-        pdf, selections: Iterable, col_map: dict[str, str], identity_keys, channel_ids
+        pdf, selections: Iterable, col_map: dict[str, str], channel_ids
     ) -> pd.DataFrame:
         """
         UDF to solve calculated channels for a single container.
@@ -1012,7 +1012,9 @@ class DefaultSolver(QuerySolver):
         Unlike :meth:`_solve_udf` (one wide row per container), this emits many
         narrow rows: each ``CalculatedChannel`` builds to a ``SampleSeries`` that
         is exploded into ``(container_id, channel_id, tstart, tend, value)`` rows,
-        with the channel's identity values attached as string columns.
+        with the channel's whole identity dict attached in a single ``identity``
+        map column.  The map is converted to a ``VARIANT`` by the caller (a pandas
+        UDF cannot emit ``VARIANT`` directly, since it is not Arrow-representable).
 
         Parameters
         ----------
@@ -1022,8 +1024,6 @@ class DefaultSolver(QuerySolver):
             The ``CalculatedChannel`` selections to evaluate.
         col_map : dict[str, str]
             Column-name mapping for the cache (cid/ch/ts/te/val/conv).
-        identity_keys : Iterable[str]
-            Identity column names shared by the selections (sorted upstream).
         channel_ids : list
             Output ``channel_id`` per selection, positionally paired with
             *selections* (precomputed on the driver).
@@ -1039,9 +1039,7 @@ class DefaultSolver(QuerySolver):
         ch_col = col_map["ch"]
         container_id = pdf[cid_col].iloc[0]
 
-        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": []}
-        for key in identity_keys:
-            cols[key] = []
+        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": [], "identity": []}
 
         for cc, ch_id in zip(selections, channel_ids, strict=False):
             series = cc.build(cache)
@@ -1051,8 +1049,7 @@ class DefaultSolver(QuerySolver):
                 cols["tstart"].append(int(tstart))
                 cols["tend"].append(int(tend))
                 cols["value"].append(float(value))
-                for key in identity_keys:
-                    cols[key].append(cc.identity.get(key))
+                cols["identity"].append(dict(cc.identity))
 
         return pd.DataFrame(cols)
 
@@ -1064,7 +1061,8 @@ class DefaultSolver(QuerySolver):
         same channel-data read and ``[container_id, channel_id]`` join — but the
         grouped-map UDF emits narrow silver-shaped rows (many per container)
         instead of one wide row.  Output columns are
-        ``[container_id, channel_id, tstart, tend, value, <identity…>]``.
+        ``[container_id, channel_id, tstart, tend, value, identity]`` where
+        ``identity`` is a ``VARIANT`` holding the channel's identity dict.
 
         Parameters
         ----------
@@ -1100,19 +1098,17 @@ class DefaultSolver(QuerySolver):
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
 
         if self.is_raw_data:
-            q = self.interval_encoder.prepare_channels_df(q)
+            q = self.channel_encoder.prepare_channels_df(q)
 
-        identity_keys = sorted(set().union(*[set(cc.identity) for cc in selections]))
         channel_id_dtype = q.schema[self.config.channel_id_col].dataType
         channel_ids = [self._calculated_channel_id(cc, channel_id_dtype) for cc in selections]
 
-        schema = self._build_calculated_channels_output_schema(q, identity_keys)
+        schema = self._build_calculated_channels_output_schema(q)
         solve_udf = F.pandas_udf(
             partial(
                 DefaultSolver._solve_calculated_channels_udf,
                 selections=selections,
                 col_map=col_map,
-                identity_keys=identity_keys,
                 channel_ids=channel_ids,
             ),
             schema,
@@ -1124,10 +1120,14 @@ class DefaultSolver(QuerySolver):
 
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         if container_count == 0:
-            return self.spark.createDataFrame([], schema=schema)
-        res = (
-            df.repartition(container_count, self.config.container_id_col)
-            .groupBy(self.config.container_id_col)
-            .apply(solve_udf)
-        )
-        return res
+            res = self.spark.createDataFrame([], schema=schema)
+        else:
+            res = (
+                df.repartition(container_count, self.config.container_id_col)
+                .groupBy(self.config.container_id_col)
+                .apply(solve_udf)
+            )
+        # The grouped-map UDF emits ``identity`` as a MapType column (Arrow-safe);
+        # convert it to a self-describing VARIANT here so both the populated and
+        # empty branches return an identical schema.
+        return res.withColumn("identity", F.to_variant_object(F.col("identity")))

@@ -1,6 +1,7 @@
 # pylint: disable=missing-function-docstring
 """Unit tests for the reporting-layer CalculatedChannel class."""
 
+import pyspark.sql.types as T
 import pytest
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
@@ -48,14 +49,17 @@ class TestConstruction:
                 name="bad", expr=(TimeSeriesSelector(None) > 0), identity=dict(_IDENTITY)
             )
 
-    def test_rejects_wrong_identity_keys(self):
-        with pytest.raises(ValueError, match="identity must contain exactly"):
-            CalculatedChannel(
-                name="bad", expr=(TimeSeriesSelector(None) * 2), identity={"channel_name": "x"}
-            )
+    def test_accepts_arbitrary_identity_keys(self):
+        # Identity persists as a VARIANT, so any non-empty key set is valid.
+        ch = CalculatedChannel(
+            name="ok",
+            expr=(TimeSeriesSelector(None) * 2),
+            identity={"sensor_id": "s1", "unit": "rpm"},
+        )
+        assert ch.identity == {"sensor_id": "s1", "unit": "rpm"}
 
     def test_rejects_empty_identity(self):
-        with pytest.raises(ValueError, match="identity must contain exactly"):
+        with pytest.raises(ValueError, match="non-empty identity"):
             CalculatedChannel(name="bad", expr=(TimeSeriesSelector(None) * 2), identity={})
 
 
@@ -67,7 +71,6 @@ class TestMetadata:
             "channel_id",
             "report_id",
             "channel_type",
-            "channel_name",
             "channel_description",
             "channel_expression",
             "identity",
@@ -77,12 +80,11 @@ class TestMetadata:
         assert d["channel_id"] == ch.get_id()
         assert d["report_id"] == -1
         assert d["channel_type"] == "CALCULATED_CHANNEL"
-        assert d["channel_name"] == "speed_kmh"
         assert d["identity"] == _IDENTITY
         assert isinstance(d["definition_hash"], int)
 
     def test_as_spark_row_field_count(self):
-        assert len(_channel().as_spark_row()) == 9
+        assert len(_channel().as_spark_row()) == 8
 
     def test_definition_hash_ignores_name_and_desc(self):
         a = CalculatedChannel("a", TimeSeriesSelector(None) * 3.6, dict(_IDENTITY), desc="one")
@@ -138,8 +140,8 @@ class TestDetermineCalculatedChannels:
             "tstart",
             "tend",
             "value",
-            "channel_name",
-            "data_key",
+            "identity",
         ]
+        assert df.schema["identity"].dataType == T.VariantType()
         ids = {r["channel_id"] for r in df.select("channel_id").distinct().collect()}
         assert ids == {ch.get_id()}

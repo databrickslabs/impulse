@@ -99,48 +99,49 @@ class QuerySolver(ABC):
             entries.append(T.StructField(s._alias, dtype))
         return T.StructType(entries)
 
-    def _build_calculated_channels_output_schema(
-        self, channels: DataFrame, identity_keys
-    ) -> T.StructType:
+    def _build_calculated_channels_output_schema(self, channels: DataFrame) -> T.StructType:
         """Build the narrow grouped-map output schema for calculated channels.
 
         The output mirrors the silver ``channel_data`` table
-        (``container_id, channel_id, tstart, tend, value``) plus one
-        ``StringType`` identity column per key in *identity_keys* (emitted in
-        sorted order for a stable schema).  The ``container_id`` and
-        ``channel_id`` field types are derived from *channels* (the
-        column-mapped channels DataFrame) so they match the physical source
-        types instead of being hardcoded.
+        (``container_id, channel_id, tstart, tend, value``) plus a single
+        ``identity`` column holding each channel's identity dict as a
+        ``MapType(string, string)``.  This is the **grouped-map UDF** schema; the
+        map is Arrow-representable so the pandas UDF can emit it directly.  The
+        solver converts the map to a ``VARIANT`` on the returned DataFrame (via
+        :func:`pyspark.sql.functions.to_variant_object`), so the identity is
+        self-describing and no gold column depends on the identity key set.
+
+        The ``container_id`` and ``channel_id`` field types are derived from
+        *channels* (the column-mapped channels DataFrame) so they match the
+        physical source types instead of being hardcoded.
 
         Parameters
         ----------
         channels : pyspark.sql.DataFrame
             The column-mapped channels DataFrame whose ``container_id`` /
             ``channel_id`` column types are authoritative.
-        identity_keys : Iterable[str]
-            Identity column names shared by the calculated channels.
 
         Returns
         -------
         pyspark.sql.types.StructType
-            ``[container_id, channel_id, tstart, tend, value, <identity…>]``.
+            ``[container_id, channel_id, tstart, tend, value, identity]``.
         """
-        entries = [
-            T.StructField(
-                self.config.container_id_col,
-                channels.schema[self.config.container_id_col].dataType,
-            ),
-            T.StructField(
-                self.config.channel_id_col,
-                channels.schema[self.config.channel_id_col].dataType,
-            ),
-            T.StructField(self.config.tstart_col, T.LongType()),
-            T.StructField(self.config.tend_col, T.LongType()),
-            T.StructField(self.config.value_col, T.DoubleType()),
-        ]
-        for key in sorted(identity_keys):
-            entries.append(T.StructField(key, T.StringType()))
-        return T.StructType(entries)
+        return T.StructType(
+            [
+                T.StructField(
+                    self.config.container_id_col,
+                    channels.schema[self.config.container_id_col].dataType,
+                ),
+                T.StructField(
+                    self.config.channel_id_col,
+                    channels.schema[self.config.channel_id_col].dataType,
+                ),
+                T.StructField(self.config.tstart_col, T.LongType()),
+                T.StructField(self.config.tend_col, T.LongType()),
+                T.StructField(self.config.value_col, T.DoubleType()),
+                T.StructField("identity", T.MapType(T.StringType(), T.StringType())),
+            ]
+        )
 
     def _empty_channel_match_df(self, spark, db: MeasurementDB) -> DataFrame:
         """Return an empty ``(container_id, channel_id, selector_ids)`` DataFrame.

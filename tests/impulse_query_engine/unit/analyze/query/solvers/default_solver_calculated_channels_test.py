@@ -27,6 +27,13 @@ _C1_RPM_TSTART = 1499929245761999
 _C1_RPM_VALUE = 1081.0
 
 
+def _id_str(col="identity", key=None):
+    """Extract identity as a JSON string, or a single key's string value, from VARIANT."""
+    if key is None:
+        return F.to_json(F.col(col))
+    return F.variant_get(F.col(col), f"$.{key}", "string")
+
+
 def _recast_container_id(db: MeasurementDB, cid_type: T.DataType) -> MeasurementDB:
     """Clone a ``for_debug`` db, casting ``container_id`` on every table."""
     tables = {
@@ -49,13 +56,19 @@ class TestCalculatedChannelValues:
         )
         result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
 
-        row = result.filter(
-            (F.col("container_id") == 1) & (F.col("tstart") == _C1_RPM_TSTART)
-        ).collect()
+        row = (
+            result.filter((F.col("container_id") == 1) & (F.col("tstart") == _C1_RPM_TSTART))
+            .select(
+                "value",
+                _id_str(key="channel_name").alias("cn"),
+                _id_str(key="data_key").alias("dk"),
+            )
+            .collect()
+        )
         assert len(row) == 1
         assert row[0]["value"] == pytest.approx(_C1_RPM_VALUE * 2)
-        assert row[0]["channel_name"] == "rpm_x2"
-        assert row[0]["data_key"] == "CALC"
+        assert row[0]["cn"] == "rpm_x2"
+        assert row[0]["dk"] == "CALC"
 
     def test_all_rows_carry_identity(self, spark, basic_narrow_db):
         q = basic_narrow_db.query
@@ -64,11 +77,24 @@ class TestCalculatedChannelValues:
             {"channel_name": "rpm_plus_1", "data_key": "CALC"},
         )
         result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        distinct_names = {r["channel_name"] for r in result.select("channel_name").collect()}
-        distinct_keys = {r["data_key"] for r in result.select("data_key").collect()}
-        assert distinct_names == {"rpm_plus_1"}
-        assert distinct_keys == {"CALC"}
+        distinct = {r["j"] for r in result.select(_id_str().alias("j")).collect()}
+        assert distinct == {'{"channel_name":"rpm_plus_1","data_key":"CALC"}'}
         assert result.count() > 0
+
+    def test_arbitrary_identity_keys_round_trip(self, spark, basic_narrow_db):
+        # Identity is a self-describing VARIANT, so non-{channel_name,data_key} keys work.
+        q = basic_narrow_db.query
+        cc = CalculatedChannel(
+            q.channel(channel_name="Engine RPM") * 2,
+            {"sensor_id": "s1", "unit": "rpm"},
+        )
+        result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+        assert result.schema["identity"].dataType == T.VariantType()
+        row = result.select(
+            _id_str(key="sensor_id").alias("sid"), _id_str(key="unit").alias("unit")
+        ).first()
+        assert row["sid"] == "s1"
+        assert row["unit"] == "rpm"
 
     def test_multi_channel_sync_matches_core_model(self, spark, basic_narrow_db):
         """A two-channel sum matches an in-process SampleSeries synchronization."""
@@ -113,19 +139,18 @@ class TestOutputSchema:
             {"channel_name": "rpm_x2", "data_key": "CALC"},
         )
         result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        # Identity columns appear in sorted order after the fixed silver columns.
+        # Identity is a single self-describing VARIANT column after the silver columns.
         assert result.columns == [
             "container_id",
             "channel_id",
             "tstart",
             "tend",
             "value",
-            "channel_name",
-            "data_key",
+            "identity",
         ]
         assert result.schema["tstart"].dataType == T.LongType()
         assert result.schema["value"].dataType == T.DoubleType()
-        assert result.schema["channel_name"].dataType == T.StringType()
+        assert result.schema["identity"].dataType == T.VariantType()
 
     @pytest.mark.parametrize(
         "cid_type", [T.StringType(), T.IntegerType(), T.LongType()], ids=lambda t: t.simpleString()
@@ -163,8 +188,10 @@ class TestChannelId:
         cc_b = CalculatedChannel(q.channel(channel_name="Engine RPM") * 3, {"channel_name": "b"})
         result = q.select(cc_a, cc_b).solve_calculated_channels(spark, solver=DefaultSolver(spark))
         by_name = {
-            r["channel_name"]: r["channel_id"]
-            for r in result.select("channel_name", "channel_id").distinct().collect()
+            r["cn"]: r["channel_id"]
+            for r in result.select(_id_str(key="channel_name").alias("cn"), "channel_id")
+            .distinct()
+            .collect()
         }
         assert by_name["a"] != by_name["b"]
 
@@ -203,15 +230,16 @@ class TestValidation:
         with pytest.raises(ValueError, match="requires all selections to be"):
             q.solve_calculated_channels(spark, solver=DefaultSolver(spark))
 
-    def test_mismatched_identity_keys_rejected(self, spark, basic_narrow_db):
+    def test_mismatched_identity_keys_allowed(self, spark, basic_narrow_db):
+        # Identity is a self-describing VARIANT, so heterogeneous key sets are fine.
         q = basic_narrow_db.query
         cc_a = CalculatedChannel(q.channel(channel_name="Engine RPM") * 2, {"channel_name": "a"})
         cc_b = CalculatedChannel(
             q.channel(channel_name="Engine RPM") * 3, {"channel_name": "b", "data_key": "CALC"}
         )
-        q.select(cc_a, cc_b)
-        with pytest.raises(ValueError, match="same identity keys"):
-            q.solve_calculated_channels(spark, solver=DefaultSolver(spark))
+        result = q.select(cc_a, cc_b).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+        assert result.schema["identity"].dataType == T.VariantType()
+        assert result.count() > 0
 
 
 class TestEmptyResults:
@@ -229,9 +257,10 @@ class TestEmptyResults:
             "tstart",
             "tend",
             "value",
-            "channel_name",
-            "data_key",
+            "identity",
         ]
+        # Empty branch funnels through the same parse → identity is VARIANT too.
+        assert result.schema["identity"].dataType == T.VariantType()
 
     def test_base_solver_not_supported(self, spark, basic_narrow_db):
         from impulse_query_engine.analyze.query.solvers.blob_solver import BlobSolver

@@ -10,18 +10,21 @@ re-run behavior (idempotent unchanged upsert; changed-definition replace).
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
 import pytest
 from databricks.sdk import WorkspaceClient
 
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
 from impulse_reporting.config.config_parser import (
+    DataType,
     ImpulseConfig,
     IncrementalConfig,
+    QueryEngine,
     Source,
     UnitySink,
 )
 from impulse_reporting.core.report import Report
-from tests.conftest import spark  # noqa: F401  (pytest fixture)
+from tests.conftest import setup_raw_channels_db, spark  # noqa: F401  (pytest fixtures)
 
 _FACT = "spark_catalog.gold.evaluation_calculated_channel_fact"
 _DIM = "spark_catalog.gold.evaluation_calculated_channel_dimension"
@@ -78,11 +81,24 @@ def test_persist_calculated_channel_full(spark):
     # channel_id in the fact matches the reporting entity id.
     ids = {r["channel_id"] for r in fact.select("channel_id").distinct().collect()}
     assert ids == {ch.get_id()}
-    # identity columns carried through.
-    assert {r["channel_name"] for r in fact.select("channel_name").distinct().collect()} == {
-        "speed_kmh"
+    # identity is a single VARIANT column carrying the whole identity dict.
+    assert fact.schema["identity"].dataType == T.VariantType()
+    id_names = {
+        r["cn"]
+        for r in fact.select(
+            F.variant_get(F.col("identity"), "$.channel_name", "string").alias("cn")
+        )
+        .distinct()
+        .collect()
     }
-    assert {r["data_key"] for r in fact.select("data_key").distinct().collect()} == {"CALC"}
+    id_keys = {
+        r["dk"]
+        for r in fact.select(F.variant_get(F.col("identity"), "$.data_key", "string").alias("dk"))
+        .distinct()
+        .collect()
+    }
+    assert id_names == {"speed_kmh"}
+    assert id_keys == {"CALC"}
 
     # Values are the derived signal: compare against the raw source scaled by 3.6.
     raw = (
@@ -101,7 +117,12 @@ def test_persist_calculated_channel_full(spark):
     assert calc_sum == pytest.approx(raw_sum * 3.6)
 
     dim = spark.read.table(_DIM)
-    assert dim.filter(F.col("channel_name") == "speed_kmh").count() == 1
+    assert (
+        dim.filter(
+            F.variant_get(F.col("identity"), "$.channel_name", "string") == "speed_kmh"
+        ).count()
+        == 1
+    )
     assert dim.filter(F.col("definition_hash").isNotNull()).count() == 1
 
 
@@ -212,3 +233,42 @@ def test_incremental_identity_reorder_does_not_reprocess(spark):
     )
     assert hash_after == hash_before
     assert spark.read.table(_FACT).count() == count_before
+
+
+def test_calculated_channel_raw_mode(spark, setup_raw_channels_db):
+    """A calculated channel solves over RAW (point-sample) silver data.
+
+    In RAW mode the solver run-length/interval-encodes the point samples before
+    the calc-channel grouped-map UDF runs — exercising the ``is_raw_data`` branch
+    of ``DefaultSolver.solve_calculated_channels``.
+    """
+    config = ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver_raw.container_metrics",
+            channel_metrics_table="spark_catalog.silver_raw.channel_metrics",
+            channels_uri="spark_catalog.silver_raw.channels",
+        ),
+        query_engine=QueryEngine(data_type=DataType.RAW),
+    )
+    report = Report(
+        name="calc_channel_raw_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(config),
+    )
+    q = report.get_db().query
+    ch = CalculatedChannel(
+        name="rpm_x2",
+        expr=q.channel(channel_name="Engine RPM") * 2,
+        identity={"channel_name": "rpm_x2", "data_key": "CALC"},
+    )
+    report.add_calculated_channel(ch)
+
+    # This is the branch that regressed: RAW-mode solve must not raise.
+    df = CalculatedChannel.determine_calculated_channels(
+        spark, [ch], query=q, solver=report.get_solver()
+    )
+    assert df.count() > 0
+    assert df.schema["identity"].dataType == T.VariantType()
+    ids = {r["channel_id"] for r in df.select("channel_id").distinct().collect()}
+    assert ids == {ch.get_id()}

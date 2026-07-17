@@ -294,8 +294,8 @@ class QueryBuilder:
         metadata filter pipeline as :meth:`solve` (resolving the input channels
         each calculated channel depends on), then evaluates each calculated
         channel per container and emits rows in the silver ``channel_data`` shape
-        — ``container_id, channel_id, tstart, tend, value`` — plus one string
-        column per identity kwarg shared by the selections.
+        — ``container_id, channel_id, tstart, tend, value`` — plus a single
+        ``identity`` ``VARIANT`` column holding each channel's identity dict.
 
         Parameters
         ----------
@@ -313,14 +313,13 @@ class QueryBuilder:
         -------
         pyspark.sql.DataFrame
             Narrow DataFrame ``[container_id, channel_id, tstart, tend, value,
-            <identity columns…>]``.
+            identity]``.
 
         Raises
         ------
         ValueError
-            If any selection is not a ``CalculatedChannel``, if the selections
-            declare inconsistent identity-key sets, or if a wrapped expression
-            does not evaluate to a ``SampleSeries``.
+            If any selection is not a ``CalculatedChannel``, or if a wrapped
+            expression does not evaluate to a ``SampleSeries``.
         """
         self._validate_calculated_channels()
 
@@ -331,9 +330,10 @@ class QueryBuilder:
     def _validate_calculated_channels(self) -> None:
         """Validate the selections for :meth:`solve_calculated_channels`.
 
-        Every selection must be a ``CalculatedChannel``, all must declare the
-        same set of identity keys (so the narrow output has a single, stable
-        schema), and each wrapped expression must evaluate to a ``SampleSeries``.
+        Every selection must be a ``CalculatedChannel`` and each wrapped
+        expression must evaluate to a ``SampleSeries``.  Identity key sets need
+        not match across selections — the identity is emitted as a single
+        self-describing ``VARIANT`` column, so heterogeneous keys are fine.
         """
         if not self.selections:
             raise ValueError(
@@ -346,14 +346,6 @@ class QueryBuilder:
                     "solve_calculated_channels() requires all selections to be "
                     f"CalculatedChannel; got {type(s).__name__} at index {i}."
                 )
-
-        key_sets = {frozenset(s.identity) for s in self.selections}
-        if len(key_sets) > 1:
-            rendered = ", ".join(sorted(str(sorted(ks)) for ks in key_sets))
-            raise ValueError(
-                "All CalculatedChannels in one solve_calculated_channels() call must "
-                f"declare the same identity keys; got differing key sets: {rendered}."
-            )
 
         for s in self.selections:
             s.expr.require_evaluation_type(
