@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Silver Layer Schema | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Silver Layer Schema | Impulse"><meta data-rh="true" name="description" content="The Silver layer stores measurement data in a normalized model: time-series"><meta data-rh="true" property="og:description" content="The Silver layer stores measurement data in a normalized model: time-series"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Silver Layer Schema","item":"https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.4a8d811a.css">
-<script src="/impulse/assets/js/runtime~main.6a897647.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.bb44c7c5.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.c213d6d3.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.f7fbdcca.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -604,9 +604,36 @@ interval <code>[tstart, tend)</code> with a constant value. Used when
 <table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Parent container identifier.</td></tr><tr><td><code>channel_id</code></td><td><code>int</code></td><td>No</td><td>Channel identifier.</td></tr><tr><td><code>tstart</code></td><td><code>long</code></td><td>No</td><td>Sample start timestamp (microseconds).</td></tr><tr><td><code>tend</code></td><td><code>long</code></td><td>No</td><td>Sample end timestamp (microseconds).</td></tr><tr><td><code>value</code></td><td><code>double</code></td><td>Yes</td><td>Sample value.</td></tr></tbody></table>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="raw-format">Raw format<a href="#raw-format" class="hash-link" aria-label="Direct link to Raw format" title="Direct link to Raw format" translate="no">​</a></h3>
 <p>Raw timestamp-based data without RLE encoding — one row per sample. Used
-when <code>data_type: RAW</code> is set in the report config; the engine derives
-<code>tend</code> from subsequent timestamps and transforms the data into RLE before
-query execution.</p>
+when <code>data_type: RAW</code> is set in the report config; the engine converts it
+to <code>[tstart, tend)</code> intervals before query execution. The conversion
+strategy is selected by
+<a class="" href="/impulse/docs/config/configuration#query_engine-optional"><code>query_engine.raw_encoder</code></a>:</p>
+<ul>
+<li class=""><strong><code>RLE</code></strong> (the default) — derives <code>tend</code> from the next sample&#x27;s timestamp
+and collapses consecutive equal values into a single <code>[tstart, tend)</code>
+interval per run.</li>
+<li class=""><strong><code>INTERVAL</code></strong> — only derives <code>tend</code> and drops exact duplicate points;
+equal-valued runs remain separate intervals.</li>
+</ul>
+<div class="theme-admonition theme-admonition-note admonition_xJq3 alert alert--secondary"><div class="admonitionHeading_Gvgb"><span class="admonitionIcon_Rf37"><svg viewBox="0 0 14 16"><path fill-rule="evenodd" d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path></svg></span>How Impulse interprets intervals</div><div class="admonitionContent_BuS1"><ul>
+<li class="">A time series is considered <strong>valid within its <code>[tstart, tend)</code>
+intervals</strong>. Operations like time-series synchronization use these
+validity windows.</li>
+<li class=""><strong>Deriving <code>tend</code>.</strong> Within each <code>(container_id, channel_id)</code>, samples
+are ordered by timestamp and each sample&#x27;s <code>tend</code> is set to the <em>next</em>
+sample&#x27;s timestamp. The last sample in a channel has no successor, so
+its <code>tend</code> falls back to its own timestamp.</li>
+<li class=""><strong>Identifying redundancy differs by encoder.</strong> <code>INTERVAL</code> drops a
+<strong>duplicate point</strong> — a row whose timestamp <em>and</em> value both equal the
+next row&#x27;s — and keeps every other sample as its own interval. <code>RLE</code>
+instead merges a <strong>run</strong> — consecutive samples that share the same
+value — into a single <code>[tstart, tend)</code> interval, regardless of their
+timestamps.</li>
+<li class=""><code>RLE</code> (default) does this merging <strong>on the fly to reduce memory
+consumption</strong>; <code>INTERVAL</code> keeps <strong>every original sample</strong> and only adds
+<code>tend</code> — choose it when downstream analysis needs all original
+timestamps.</li>
+</ul></div></div>
 
 
 
@@ -647,7 +674,8 @@ query execution.</p>
 <p>An optional <code>is_plausible: boolean</code> column may be present on <code>channels</code>
 in either format. It is <strong>only consulted</strong> when the solver is
 constructed with <code>drop_implausible_data=True</code> — in that mode, samples
-with <code>is_plausible = False</code> are filtered before RLE encoding. If the
+with <code>is_plausible = False</code> are filtered during the raw→interval
+conversion (both <code>raw_encoder</code> variants honor the flag). If the
 flag is <code>False</code> (the default), the column is ignored and may be omitted.</p>
 <h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-4">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-4" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
 <p>Map any silver column to these via
@@ -685,7 +713,7 @@ when your physical column has a different name.</p>
 <table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Composite key joining samples back to their container</td></tr><tr><td><code>channel_id</code></td><td>Composite key joining samples back to their channel</td></tr><tr><td><code>tstart</code></td><td>Sample interval start (RLE format) — consumed by the solve UDF</td></tr><tr><td><code>tend</code></td><td>Sample interval end (RLE format) — consumed by the solve UDF</td></tr><tr><td><code>value</code></td><td>Sample value — consumed by the solve UDF and aggregations</td></tr></tbody></table>
 <p>For raw-format <code>channels</code>, the same internal names apply except that
 <code>timestamp</code> replaces the <code>tstart</code>/<code>tend</code> pair; the engine derives <code>tend</code>
-during raw→RLE conversion.</p>
+during raw→interval conversion (see <code>query_engine.raw_encoder</code>).</p>
 <hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_mapping-optional">channel_mapping (optional)<a href="#channel_mapping-optional" class="hash-link" aria-label="Direct link to channel_mapping (optional)" title="Direct link to channel_mapping (optional)" translate="no">​</a></h2>
 <p>Alias-resolution table used by <code>DefaultSolver</code> when selectors are

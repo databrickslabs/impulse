@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">impulse_reporting.config.config_parser | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="impulse_reporting.config.config_parser | Impulse"><meta data-rh="true" name="description" content="is\valid\table\_name"><meta data-rh="true" property="og:description" content="is\valid\table\_name"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Reference","item":"https://databrickslabs.github.io/impulse/docs/references/"},{"@type":"ListItem","position":2,"name":"Api","item":"https://databrickslabs.github.io/impulse/docs/references/api"},{"@type":"ListItem","position":3,"name":"config_parser","item":"https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/config/config_parser"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.4a8d811a.css">
-<script src="/impulse/assets/js/runtime~main.6a897647.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.bb44c7c5.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.c213d6d3.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.f7fbdcca.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -128,6 +128,14 @@ The resulting group expressions are then OR-combined.</p>
 <p><code>solver</code> (<code>Solvers, default=Solvers.DEFAULT_SOLVER</code>): The solver type to use for query execution.</p>
 </li>
 <li class="">
+<p><code>raw_encoder</code> (<code>RawEncoder, optional, default=None</code>): Encoder used to convert RAW point data into intervals.  <code>RLE</code>
+collapses consecutive equal-valued samples into runs; <code>INTERVAL</code>
+only derives <code>tend</code> and drops exact duplicates.  Only takes effect
+when <code>data_type=RAW</code>; ignored for RLE input.  When omitted and
+<code>data_type=RAW</code>, it is resolved to <code>RLE</code> at validation time;
+for RLE input the field stays <code>None</code> and is never consulted.</p>
+</li>
+<li class="">
 <p><code>solver_config</code> (<code>SolverConfig</code>): Per-table column name mappings and filter configuration for
 the solver.  Use this when your silver-layer tables use
 non-default column names or when you need project/toolbox
@@ -150,10 +158,12 @@ project/toolbox filtering is applied.</p>
 <h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="validate_drop_implausible_data_requires_raw">validate_drop_implausible_data_requires_raw<a href="#validate_drop_implausible_data_requires_raw" class="hash-link" aria-label="Direct link to validate_drop_implausible_data_requires_raw" title="Direct link to validate_drop_implausible_data_requires_raw" translate="no">​</a></h4>
 <div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">def</span><span class="token plain"> </span><span class="token function" style="color:hsl(207, 82%, 66%)">validate_drop_implausible_data_requires_raw</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><br></span></code></pre></div></div>
 <p><code>drop_implausible_data=True</code> currently only takes effect with RAW data.</p>
-<p>The filter is applied inside the RAW -&gt; RLE conversion path in
-<code>IntervalEncoder.prepare_channels_df</code>. RLE input short-circuits that
-path and the flag is silently ignored, so we reject the combination at
-config validation time.</p>
+<p>The filter is applied inside the RAW -&gt; interval conversion path by the
+selected <code>raw_encoder</code> (<code>RleEncoder</code> / <code>IntervalEncoder</code>).
+This only happens when <code>data_type=RAW</code>; for RLE input the field is ignored.</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="default_raw_encoder_for_raw_data">default_raw_encoder_for_raw_data<a href="#default_raw_encoder_for_raw_data" class="hash-link" aria-label="Direct link to default_raw_encoder_for_raw_data" title="Direct link to default_raw_encoder_for_raw_data" translate="no">​</a></h4>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">def</span><span class="token plain"> </span><span class="token function" style="color:hsl(207, 82%, 66%)">default_raw_encoder_for_raw_data</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><br></span></code></pre></div></div>
+<p>When <code>data_type=RAW</code> and <code>raw_encoder</code> is unset, default to RLE.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="incrementalconfig">IncrementalConfig<a href="#incrementalconfig" class="hash-link" aria-label="Direct link to IncrementalConfig" title="Direct link to IncrementalConfig" translate="no">​</a></h2>
 <div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">class</span><span class="token plain"> </span><span class="token class-name" style="color:hsl(29, 54%, 61%)">IncrementalConfig</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token plain">BaseModel</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><br></span></code></pre></div></div>
 <p>Configuration for incremental processing behavior.</p>

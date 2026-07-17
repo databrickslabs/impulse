@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Ingestion | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/ingestion"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Ingestion | Impulse"><meta data-rh="true" name="description" content="Impulse&#x27;s DefaultSolver reads from a"><meta data-rh="true" property="og:description" content="Impulse&#x27;s DefaultSolver reads from a"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/ingestion"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/ingestion" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/ingestion" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Ingestion","item":"https://databrickslabs.github.io/impulse/docs/data_model/ingestion"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.4a8d811a.css">
-<script src="/impulse/assets/js/runtime~main.6a897647.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.bb44c7c5.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.c213d6d3.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.f7fbdcca.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -54,7 +54,15 @@ has nothing to do with <code>channel_id = 1</code> in container B.</p>
 <li class="">
 <p><strong><code>channels</code> supports two formats.</strong> The query engine accepts either:</p>
 <ul>
-<li class=""><strong>Raw</strong> — one row per sample: <code>(container_id, channel_id, timestamp, value)</code>.</li>
+<li class=""><strong>Raw</strong> — one row per sample: <code>(container_id, channel_id, timestamp, value)</code>. Set <code>data_type: &quot;RAW&quot;</code> in the report config; the engine
+converts the samples to intervals at query time, either by run-length
+encoding them (<code>raw_encoder: &quot;RLE&quot;</code>, the default) or by plain interval
+derivation without merging equal-valued runs (<code>raw_encoder: &quot;INTERVAL&quot;</code>)
+— see <a class="" href="/impulse/docs/config/configuration#query_engine-optional">query_engine</a>.
+Impulse considers a time series <strong>valid within the calculated
+intervals</strong>, which is relevant for operations like time-series
+synchronization — see
+<a class="" href="/impulse/docs/data_model/silver_layer_schema#raw-format">How Impulse interprets intervals</a>.</li>
 <li class=""><strong>RLE</strong> — one row per stable interval: <code>(container_id, channel_id, tstart, tend, value)</code>. Run-length encoded data, where identical consecutive values are collapsed into intervals to significantly reduce processing time during analysis.</li>
 </ul>
 <p>An optional boolean <code>is_plausible</code> column lets the solver drop implausible
