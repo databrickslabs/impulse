@@ -107,6 +107,10 @@ renames each table at read time. Each silver table has a section with:
 - `column_name_mapping` (`{physical: internal}`) — applied once, when the table is read.
 - `filters` (`{internal: literal}`) — equality filters applied **after** renaming (e.g. project scoping).
 
+With `data_type="RAW"`, the `channels` table additionally uses the internal names `timestamp` (the
+per-sample timestamp) and — only when `drop_implausible_data` is on — `is_plausible`. Remap them the
+same way, e.g. `"channels": {"column_name_mapping": {"ts_raw": "timestamp"}}`.
+
 Top-level `project_id` (str, optional) applies an equality filter on the `project_id` column of every
 table that has one (`container_tags`, `container_metrics`, `channel_mapping`). Omit if not needed.
 

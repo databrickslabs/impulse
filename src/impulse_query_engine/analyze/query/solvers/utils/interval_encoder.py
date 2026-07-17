@@ -31,8 +31,8 @@ class IntervalEncoder:
             Solver configuration providing the internal column names.
 
         drop_implausible_data_points : bool, optional
-            Whether to drop implausible data points before returning.  If True, data points where ``is_plausible``
-            is not True will be removed.  Default is False.
+            Whether to drop implausible data points before returning.  If True, data points where
+            the ``is_plausible_col`` column is not True will be removed.  Default is False.
         """
 
         if config is None:
@@ -44,27 +44,29 @@ class IntervalEncoder:
     def prepare_channels_df(self, df: DataFrame) -> DataFrame:
         """Normalize a channels DataFrame to interval format.
 
-        If the DataFrame already contains a ``tend`` column it is returned
-        unchanged.  Otherwise ``tend`` is derived from ``timestamp`` using
-        the ``LEAD`` window function and the column is renamed to ``tstart``.
+        If the DataFrame already contains a ``tend_col`` column it is returned
+        unchanged.  Otherwise ``tend_col`` is derived from ``timestamp_col``
+        using the ``LEAD`` window function and the column is renamed to
+        ``tstart_col``.
 
         Parameters
         ----------
         df : pyspark.sql.DataFrame
-            Channel data.  Must contain ``container_id``, ``channel_id``,
-            ``value`` and either ``tend`` (already RLE) or ``timestamp``
-            (raw point data).
+            Channel data.  Must contain ``container_id_col``, ``channel_id_col``,
+            ``value_col`` and either ``tend_col`` (already RLE) or
+            ``timestamp_col`` (raw point data), as named by the configured
+            :class:`SolverConfig`.
 
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame with columns ``container_id``, ``channel_id``,
-            ``tstart``, ``tend``, ``value``.
+            DataFrame with columns ``container_id_col``, ``channel_id_col``,
+            ``tstart_col``, ``tend_col``, ``value_col``.
 
         Raises
         ------
         ValueError
-            If the DataFrame has neither ``tend`` nor ``timestamp``.
+            If the DataFrame has neither ``tend_col`` nor ``timestamp_col``.
         """
         if self.config.tend_col in df.columns:
             return df
@@ -84,8 +86,8 @@ class IntervalEncoder:
 
     def _remove_implausible_data_points(self, df) -> DataFrame:
         """
-        If ``drop_implausible_data_points`` is ``True``, return a transform that filters out rows where the
-        ``is_plausible`` column is not ``True``.
+        If ``drop_implausible_data_points`` is ``True``, return a transform that filters out rows
+        where the ``is_plausible_col`` column is not ``True``.
         """
 
         if self.drop_implausible_data_points:
@@ -99,19 +101,19 @@ class IntervalEncoder:
             return df
 
     def _determine_end_timestamp(self, df: DataFrame) -> DataFrame:
-        """Convert the pre-computed next-timestamp column into ``tend``.
+        """Convert the pre-computed next-timestamp column into ``tend_col``.
 
-        Sets ``tend = COALESCE(_timestamp_of_next_data_point, timestamp)`` so
-        that every row except the last one in a partition gets the next row's
-        timestamp as its end.  The last row falls back to its own timestamp
-        (``tend = tstart``).
+        Sets ``tend_col = COALESCE(_timestamp_of_next_data_point, timestamp_col)``
+        so that every row except the last one in a partition gets the next
+        row's timestamp as its end.  The last row falls back to its own
+        timestamp (``tend_col = tstart_col``).
 
-        Renames ``timestamp`` to ``tstart`` and drops the intermediate
+        Renames ``timestamp_col`` to ``tstart_col`` and drops the intermediate
         ``_timestamp_of_next_data_point`` column.
 
         Requires
         --------
-        The DataFrame must already contain a ``timestamp_of_next_data_point``
+        The DataFrame must already contain a ``_timestamp_of_next_data_point``
         column (added by ``_extract_next_data_point_info``).
         """
         end_ts = F.coalesce(
@@ -126,8 +128,8 @@ class IntervalEncoder:
     def _drop_duplicate_data_points(self, df: DataFrame) -> DataFrame:
         """Remove exact duplicate data points.
 
-        A row is considered a duplicate when both its ``value`` and
-        ``timestamp`` are identical to the *next* row's (as determined by
+        A row is considered a duplicate when both its ``value_col`` and
+        ``timestamp_col`` are identical to the *next* row's (as determined by
         ``LEAD`` over ``WS``).  The comparison uses ``eqNullSafe`` so that
         two ``NULL`` values are treated as equal.
 
@@ -152,9 +154,9 @@ class IntervalEncoder:
 
         Uses ``LEAD`` over the window to add:
 
-        * ``timestamp_of_next_data_point`` -- the next row's ``timestamp``,
+        * ``_timestamp_of_next_data_point`` -- the next row's ``timestamp_col``,
           or ``NULL`` for the last row in each partition.
-        * ``value_of_next_data_point`` -- the next row's ``value``, or
+        * ``_value_of_next_data_point`` -- the next row's ``value_col``, or
           ``NULL`` for the last row in each partition.
 
         These columns are consumed downstream by
