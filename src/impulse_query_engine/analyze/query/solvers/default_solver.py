@@ -1022,10 +1022,8 @@ class DefaultSolver(QuerySolver):
         narrow rows: each ``CalculatedChannel`` builds to a ``SampleSeries`` that
         is exploded into ``(container_id, channel_id, tstart, tend, value)`` rows,
         with the channel's whole identity dict attached in a single ``identity``
-        map column.  Each channel supplies its own deterministic ``channel_id``
-        (:attr:`CalculatedChannel.channel_id`).  The map is converted to a
-        ``VARIANT`` by the caller (a pandas UDF cannot emit ``VARIANT`` directly,
-        since it is not Arrow-representable).
+        ``MapType(string, string)`` column.  Each channel supplies its own
+        deterministic ``channel_id`` (:attr:`CalculatedChannel.channel_id`).
 
         Parameters
         ----------
@@ -1070,7 +1068,8 @@ class DefaultSolver(QuerySolver):
         tail — but the grouped-map UDF emits narrow silver-shaped rows (many per
         container) instead of one wide row.  Output columns are
         ``[container_id, channel_id, tstart, tend, value, identity]`` where
-        ``identity`` is a ``VARIANT`` holding the channel's identity dict.
+        ``identity`` is a ``MapType(string, string)`` holding the channel's
+        identity dict.
 
         Parameters
         ----------
@@ -1099,8 +1098,4 @@ class DefaultSolver(QuerySolver):
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )
-        res = self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
-        # The grouped-map UDF emits ``identity`` as a MapType column (Arrow-safe);
-        # convert it to a self-describing VARIANT here so both the populated and
-        # empty branches return an identical schema.
-        return res.withColumn("identity", F.to_variant_object(F.col("identity")))
+        return self._apply_grouped_map(joined_df, container_count, schema, solve_udf)

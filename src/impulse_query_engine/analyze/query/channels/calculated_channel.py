@@ -24,7 +24,8 @@ class CalculatedChannel(TimeSeriesExpression):
     :meth:`QueryBuilder.solve_calculated_channels` explodes that series into
     narrow rows matching the silver ``channel_data`` shape
     (``container_id, channel_id, tstart, tend, value``) plus a single
-    ``identity`` ``VARIANT`` column holding the whole identity dict.
+    ``identity`` ``MapType(string, string)`` column holding the whole identity
+    dict.
 
     Parameters
     ----------
@@ -33,9 +34,9 @@ class CalculatedChannel(TimeSeriesExpression):
     identity : dict of str
         Identity for the output rows, e.g.
         ``{"channel_name": "Eng_RPM", "data_key": "TM"}``.  The whole dict is
-        emitted per row in a single ``identity`` ``VARIANT`` column (keys are
-        arbitrary).  Must be non-empty; the identity also seeds the
-        deterministic :attr:`channel_id`.
+        emitted per row in a single ``identity`` ``MapType(string, string)``
+        column (keys are arbitrary).  Must be non-empty; the identity also seeds
+        the deterministic :attr:`channel_id`.
 
     Notes
     -----

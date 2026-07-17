@@ -27,11 +27,9 @@ _C1_RPM_TSTART = 1499929245761999
 _C1_RPM_VALUE = 1081.0
 
 
-def _id_str(col="identity", key=None):
-    """Extract identity as a JSON string, or a single key's string value, from VARIANT."""
-    if key is None:
-        return F.to_json(F.col(col))
-    return F.variant_get(F.col(col), f"$.{key}", "string")
+def _id_val(key, col="identity"):
+    """Extract a single identity key's value from the ``MapType`` identity column."""
+    return F.col(col).getItem(key)
 
 
 def _recast_container_id(db: MeasurementDB, cid_type: T.DataType) -> MeasurementDB:
@@ -60,8 +58,8 @@ class TestCalculatedChannelValues:
             result.filter((F.col("container_id") == 1) & (F.col("tstart") == _C1_RPM_TSTART))
             .select(
                 "value",
-                _id_str(key="channel_name").alias("cn"),
-                _id_str(key="data_key").alias("dk"),
+                _id_val("channel_name").alias("cn"),
+                _id_val("data_key").alias("dk"),
             )
             .collect()
         )
@@ -77,21 +75,21 @@ class TestCalculatedChannelValues:
             {"channel_name": "rpm_plus_1", "data_key": "CALC"},
         )
         result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        distinct = {r["j"] for r in result.select(_id_str().alias("j")).collect()}
-        assert distinct == {'{"channel_name":"rpm_plus_1","data_key":"CALC"}'}
+        distinct = {tuple(sorted(r["identity"].items())) for r in result.collect()}
+        assert distinct == {(("channel_name", "rpm_plus_1"), ("data_key", "CALC"))}
         assert result.count() > 0
 
     def test_arbitrary_identity_keys_round_trip(self, spark, basic_narrow_db):
-        # Identity is a self-describing VARIANT, so non-{channel_name,data_key} keys work.
+        # Identity is a self-describing map, so non-{channel_name,data_key} keys work.
         q = basic_narrow_db.query
         cc = CalculatedChannel(
             q.channel(channel_name="Engine RPM") * 2,
             {"sensor_id": "s1", "unit": "rpm"},
         )
         result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        assert result.schema["identity"].dataType == T.VariantType()
+        assert result.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
         row = result.select(
-            _id_str(key="sensor_id").alias("sid"), _id_str(key="unit").alias("unit")
+            _id_val("sensor_id").alias("sid"), _id_val("unit").alias("unit")
         ).first()
         assert row["sid"] == "s1"
         assert row["unit"] == "rpm"
@@ -139,7 +137,7 @@ class TestOutputSchema:
             {"channel_name": "rpm_x2", "data_key": "CALC"},
         )
         result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        # Identity is a single self-describing VARIANT column after the silver columns.
+        # Identity is a single self-describing map column after the silver columns.
         assert result.columns == [
             "container_id",
             "channel_id",
@@ -150,7 +148,7 @@ class TestOutputSchema:
         ]
         assert result.schema["tstart"].dataType == T.LongType()
         assert result.schema["value"].dataType == T.DoubleType()
-        assert result.schema["identity"].dataType == T.VariantType()
+        assert result.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
 
     @pytest.mark.parametrize(
         "cid_type", [T.StringType(), T.IntegerType(), T.LongType()], ids=lambda t: t.simpleString()
@@ -189,7 +187,7 @@ class TestChannelId:
         result = q.select(cc_a, cc_b).solve_calculated_channels(spark, solver=DefaultSolver(spark))
         by_name = {
             r["cn"]: r["channel_id"]
-            for r in result.select(_id_str(key="channel_name").alias("cn"), "channel_id")
+            for r in result.select(_id_val("channel_name").alias("cn"), "channel_id")
             .distinct()
             .collect()
         }
@@ -224,14 +222,14 @@ class TestValidation:
             q.solve_calculated_channels(spark, solver=DefaultSolver(spark))
 
     def test_mismatched_identity_keys_allowed(self, spark, basic_narrow_db):
-        # Identity is a self-describing VARIANT, so heterogeneous key sets are fine.
+        # Identity is a self-describing map, so heterogeneous key sets are fine.
         q = basic_narrow_db.query
         cc_a = CalculatedChannel(q.channel(channel_name="Engine RPM") * 2, {"channel_name": "a"})
         cc_b = CalculatedChannel(
             q.channel(channel_name="Engine RPM") * 3, {"channel_name": "b", "data_key": "CALC"}
         )
         result = q.select(cc_a, cc_b).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        assert result.schema["identity"].dataType == T.VariantType()
+        assert result.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
         assert result.count() > 0
 
 
@@ -252,8 +250,8 @@ class TestEmptyResults:
             "value",
             "identity",
         ]
-        # Empty branch funnels through the same parse → identity is VARIANT too.
-        assert result.schema["identity"].dataType == T.VariantType()
+        # Empty branch returns the same schema → identity is a map too.
+        assert result.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
 
     def test_base_solver_not_supported(self, spark, basic_narrow_db):
         from impulse_query_engine.analyze.query.solvers.blob_solver import BlobSolver

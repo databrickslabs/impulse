@@ -101,15 +101,15 @@ def test_persist_calculated_channel_full(spark):
     calc_sum = fact.select(F.sum("value")).first()[0]
     assert calc_sum == pytest.approx(raw_sum * 3.6)
 
-    # The dimension carries the identity (VARIANT), keyed by channel_id — the join
+    # The dimension carries the identity (a map), keyed by channel_id — the join
     # target for the fact. Confirm the fact's channel_id resolves to the identity.
     dim = spark.read.table(_DIM)
-    assert dim.schema["identity"].dataType == T.VariantType()
+    assert dim.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
     dim_row = (
         dim.filter(F.col("channel_id") == ch.get_id())
         .select(
-            F.variant_get(F.col("identity"), "$.channel_name", "string").alias("cn"),
-            F.variant_get(F.col("identity"), "$.data_key", "string").alias("dk"),
+            F.col("identity").getItem("channel_name").alias("cn"),
+            F.col("identity").getItem("data_key").alias("dk"),
             "definition_hash",
         )
         .collect()

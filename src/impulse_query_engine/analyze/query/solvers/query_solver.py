@@ -105,11 +105,10 @@ class QuerySolver(ABC):
         The output mirrors the silver ``channel_data`` table
         (``container_id, channel_id, tstart, tend, value``) plus a single
         ``identity`` column holding each channel's identity dict as a
-        ``MapType(string, string)``.  This is the **grouped-map UDF** schema; the
-        map is Arrow-representable so the pandas UDF can emit it directly.  The
-        solver converts the map to a ``VARIANT`` on the returned DataFrame (via
-        :func:`pyspark.sql.functions.to_variant_object`), so the identity is
-        self-describing and no gold column depends on the identity key set.
+        ``MapType(string, string)``.  The map is Arrow-representable so the
+        grouped-map pandas UDF emits it directly, and it is the DataFrame's final
+        identity type — self-describing, so no gold column depends on the
+        identity key set.
 
         The ``container_id`` and ``channel_id`` field types are derived from
         *channels* (the column-mapped channels DataFrame) so they match the
@@ -434,7 +433,7 @@ class QuerySolver(ABC):
         -------
         pyspark.sql.DataFrame
             Narrow ``[container_id, channel_id, tstart, tend, value,
-            <identity…>]`` DataFrame.
+            identity]`` DataFrame (``identity`` is a ``MapType(string, string)``).
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support calculated channels"

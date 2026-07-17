@@ -49,7 +49,7 @@ class TestConstruction:
             )
 
     def test_accepts_arbitrary_identity_keys(self):
-        # Identity persists as a VARIANT, so any non-empty key set is valid.
+        # Identity persists as a map, so any non-empty key set is valid.
         ch = CalculatedChannel(
             name="ok",
             expr=(TimeSeriesSelector(None) * 2),

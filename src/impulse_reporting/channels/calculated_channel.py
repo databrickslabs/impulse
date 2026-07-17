@@ -3,8 +3,6 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 
-import pyspark.sql.functions as f
-import pyspark.sql.types as T
 from pyspark.sql import DataFrame, Row, SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -44,8 +42,8 @@ class CalculatedChannel:
         The wrapped expression; must evaluate to a ``SampleSeries``.
     identity : Mapping[str, str]
         Output identity.  Any non-empty set of keys; the whole dict is emitted
-        per fact row in a single ``identity`` ``VARIANT`` column and seeds the
-        deterministic ``channel_id``.
+        per fact row in a single ``identity`` ``MapType(string, string)`` column
+        and seeds the deterministic ``channel_id``.
     desc : str, optional
         Human-readable description (stored on the dimension row, excluded from the
         definition hash).
@@ -138,9 +136,8 @@ class CalculatedChannel:
     def as_dict(self) -> dict:
         """Dictionary representation of the dimension metadata.
 
-        ``identity`` is emitted as a plain dict here; ``determine_metadata_df``
-        converts it to a ``VARIANT`` column so the dimension identity mirrors the
-        fact identity (no fixed per-key columns).
+        ``identity`` is a plain dict, persisted as a ``MapType(string, string)``
+        column that mirrors the fact identity (no fixed per-key columns).
         """
         return {
             "channel_id": self.get_id(),
@@ -206,21 +203,9 @@ class CalculatedChannel:
     def determine_metadata_df(cls, spark: SparkSession, channels: list[CalculatedChannel]):
         """Create the dimension DataFrame for the given channels.
 
-        ``identity`` in ``CALCULATED_CHANNEL_DIMENSION_SCHEMA`` is a ``VARIANT``,
-        which ``createDataFrame`` cannot build from a Python dict directly.  So
-        the frame is staged with ``identity`` as a ``MapType`` (matching the plain
-        dict from :meth:`as_dict`) and then converted to ``VARIANT`` via
-        :func:`pyspark.sql.functions.to_variant_object` — mirroring the fact-side
-        conversion in the solver.
+        ``identity`` is a ``MapType(string, string)`` (same self-describing
+        representation as the fact table), which ``createDataFrame`` builds
+        directly from the plain dict returned by :meth:`as_dict`.
         """
         rows = [channel.as_spark_row() for channel in channels]
-        staging_fields = [
-            (
-                T.StructField("identity", T.MapType(T.StringType(), T.StringType()))
-                if field.name == "identity"
-                else field
-            )
-            for field in CALCULATED_CHANNEL_DIMENSION_SCHEMA.fields
-        ]
-        df = spark.createDataFrame(rows, schema=T.StructType(staging_fields))
-        return df.withColumn("identity", f.to_variant_object(f.col("identity")))
+        return spark.createDataFrame(rows, schema=CALCULATED_CHANNEL_DIMENSION_SCHEMA)

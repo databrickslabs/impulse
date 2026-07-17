@@ -295,7 +295,8 @@ class QueryBuilder:
         each calculated channel depends on), then evaluates each calculated
         channel per container and emits rows in the silver ``channel_data`` shape
         — ``container_id, channel_id, tstart, tend, value`` — plus a single
-        ``identity`` ``VARIANT`` column holding each channel's identity dict.
+        ``identity`` ``MapType(string, string)`` column holding each channel's
+        identity dict.
 
         Parameters
         ----------
@@ -333,7 +334,7 @@ class QueryBuilder:
         Every selection must be a ``CalculatedChannel`` and each wrapped
         expression must evaluate to a ``SampleSeries``.  Identity key sets need
         not match across selections — the identity is emitted as a single
-        self-describing ``VARIANT`` column, so heterogeneous keys are fine.
+        self-describing ``MapType`` column, so heterogeneous keys are fine.
         """
         if not self.selections:
             raise ValueError(
