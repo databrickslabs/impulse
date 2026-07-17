@@ -38,6 +38,15 @@ class TestConstruction:
         # Channels drive their own solve, so they are excluded from the batch solve.
         assert _channel().get_expression() is None
 
+    def test_get_expression_str_returns_str_for_expression(self):
+        assert _channel().get_expression_str() != "NA"
+
+    def test_get_expression_str_na_when_not_expression(self):
+        # Defensive branch: if the wrapped object isn't a TimeSeriesExpression.
+        ch = _channel()
+        ch.expression = object()
+        assert ch.get_expression_str() == "NA"
+
     def test_channel_type_str(self):
         assert _channel().get_channel_type_str() == "CALCULATED_CHANNEL"
 

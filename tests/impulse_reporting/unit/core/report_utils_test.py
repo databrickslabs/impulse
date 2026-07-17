@@ -1,5 +1,6 @@
 """Unit tests for report_utils helper functions."""
 
+from enum import Enum
 from unittest.mock import MagicMock, create_autospec, patch
 
 from databricks.sdk import WorkspaceClient
@@ -8,7 +9,14 @@ from pyspark.sql import DataFrame
 from impulse_reporting.core.report import Report
 from impulse_reporting.core.report_utils import (
     build_batches,
+    build_metadata_dfs,
     dispatch_events,
+    group_selectables_by_type,
+    merge_changed_unchanged,
+    persist_dimensions_full,
+    persist_dimensions_incremental,
+    persist_facts_full,
+    persist_facts_incremental,
     split_by_hash_change,
 )
 
@@ -715,3 +723,280 @@ class TestSolveExpressionsBatched:
 
         report.query.select.assert_called_once_with(expr)
         report.query.select.return_value.solve.assert_called_once()
+
+
+# ============================================================================
+# Fixtures for the generic entity orchestration/persistence helpers
+# ============================================================================
+class _FooEntity:
+    pass
+
+
+class _BarEntity:
+    pass
+
+
+class _FakeType(Enum):
+    """Two-member entity type-enum mirroring ChannelType's resolver shape.
+
+    FOO and BAR intentionally share a fact table (``shared_fact``) but have
+    distinct dimension tables, so grouping-by-output-table is exercised.
+    """
+
+    FOO = _FooEntity
+    BAR = _BarEntity
+
+    def get_fact_table_name(self):
+        return "shared_fact"
+
+    def get_dimension_table_name(self):
+        return {"FOO": "foo_dim", "BAR": "bar_dim"}[self.name]
+
+    @classmethod
+    def get_any_for_fact_table(cls, table_name):
+        for member in cls:
+            if member.get_fact_table_name() == table_name:
+                return member
+        raise ValueError(f"no type for fact table {table_name}")
+
+    @classmethod
+    def get_any_for_dimension_table(cls, table_name):
+        for member in cls:
+            if member.get_dimension_table_name() == table_name:
+                return member
+        raise ValueError(f"no type for dimension table {table_name}")
+
+
+class TestGroupSelectablesByType:
+    def test_buckets_by_isinstance(self):
+        foo1, bar, foo2 = _FooEntity(), _BarEntity(), _FooEntity()
+        result = group_selectables_by_type([foo1, bar, foo2], _FakeType)
+        assert result["FOO"] == [foo1, foo2]
+        assert result["BAR"] == [bar]
+
+    def test_every_member_gets_a_bucket_even_when_empty(self):
+        result = group_selectables_by_type([], _FakeType)
+        assert set(result) == {"FOO", "BAR"}
+        assert result["FOO"] == [] and result["BAR"] == []
+
+    def test_item_matching_no_type_is_dropped(self):
+        # An item that isn't an instance of any member's class lands in no bucket.
+        result = group_selectables_by_type([object()], _FakeType)
+        assert result == {"FOO": [], "BAR": []}
+
+
+class TestMergeChangedUnchanged:
+    def test_only_changed(self):
+        df = MagicMock()
+        result = merge_changed_unchanged({"FOO": df}, {})
+        assert result == {"FOO": {"changed": df, "unchanged": None}}
+
+    def test_only_unchanged(self):
+        df = MagicMock()
+        result = merge_changed_unchanged({}, {"FOO": df})
+        assert result == {"FOO": {"changed": None, "unchanged": df}}
+
+    def test_both_sides_present(self):
+        c, u = MagicMock(), MagicMock()
+        result = merge_changed_unchanged({"FOO": c}, {"FOO": u})
+        assert result == {"FOO": {"changed": c, "unchanged": u}}
+
+
+class TestBuildMetadataDfs:
+    def test_non_empty_types_build_metadata(self):
+        meta = MagicMock()
+        cls = MagicMock()
+        cls.determine_metadata_df.return_value = meta
+        type_enum = MagicMock()
+        type_enum.__getitem__.return_value.value = cls
+        spark = MagicMock()
+        items = [MagicMock()]
+
+        result = build_metadata_dfs({"FOO": items}, type_enum, spark)
+
+        cls.determine_metadata_df.assert_called_once_with(spark, items)
+        assert result == {"FOO": meta}
+
+    def test_empty_types_skipped(self):
+        type_enum = MagicMock()
+        result = build_metadata_dfs({"FOO": []}, type_enum, MagicMock())
+        assert result == {}
+
+
+class TestPersistFactsFull:
+    def test_groups_by_table_and_flattens_dict_and_bare(self):
+        bare, changed, unchanged = MagicMock(), MagicMock(), MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+
+        persist_facts_full(
+            {"FOO": bare, "BAR": {"changed": changed, "unchanged": unchanged}},
+            _FakeType,
+            factory,
+        )
+
+        # FOO + BAR share "shared_fact" → a single write with all three dfs.
+        writer.write.assert_called_once()
+        written = writer.write.call_args.args[0]
+        assert written == [bare, changed, unchanged]
+
+    def test_none_entries_dropped(self):
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+
+        persist_facts_full({"FOO": {"changed": None, "unchanged": None}}, _FakeType, factory)
+        # Nothing to write → no write call.
+        writer.write.assert_not_called()
+
+
+class TestPersistDimensionsFull:
+    def test_writes_each_dimension_table(self):
+        foo_meta, bar_meta = MagicMock(), MagicMock()
+        writer = MagicMock()
+        writer.extract_metadata_schema_and_output_uri.return_value = ("schema", "uri")
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+
+        persist_dimensions_full({"FOO": foo_meta, "BAR": bar_meta}, _FakeType, factory)
+
+        # Distinct dim tables (foo_dim, bar_dim) → one write each.
+        assert writer.write.call_count == 2
+
+
+class TestPersistFactsIncremental:
+    def _patch_factory(self, writer):
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+        return patch(
+            "impulse_reporting.persist.report_storage.WriterFactory", return_value=factory
+        )
+
+    def test_changed_replaced_and_unchanged_upserted(self):
+        changed, unchanged = MagicMock(), MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": changed, "unchanged": unchanged}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["container_id", "channel_id", "tstart"],
+                changed_ids={"FOO": [1, 2]},
+            )
+
+        sink.replace_by_ids.assert_called_once_with(
+            df=changed, uri="uri", id_column="channel_id", ids_to_replace=[1, 2]
+        )
+        sink.upsert.assert_called_once_with(
+            unchanged, "uri", ["container_id", "channel_id", "tstart"]
+        )
+
+    def test_changed_skipped_when_type_not_in_changed_ids(self):
+        changed = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": changed, "unchanged": None}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+            )
+
+        sink.replace_by_ids.assert_not_called()
+        sink.upsert.assert_not_called()
+
+    def test_none_value_is_a_noop(self):
+        # A type whose fact value is None triggers neither replace nor upsert.
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": None},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+            )
+
+        sink.replace_by_ids.assert_not_called()
+        sink.upsert.assert_not_called()
+
+    def test_bare_df_is_upserted(self):
+        bare = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": bare},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+            )
+
+        sink.upsert.assert_called_once_with(bare, "uri", ["channel_id"])
+
+    def test_callable_merge_keys_resolved_per_type(self):
+        unchanged = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        def keys_for(entity_type):
+            return ["container_id", entity_type.name.lower()]
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": None, "unchanged": unchanged}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="id",
+                merge_keys=keys_for,
+                changed_ids={},
+            )
+
+        sink.upsert.assert_called_once_with(unchanged, "uri", ["container_id", "foo"])
+
+
+class TestPersistDimensionsIncremental:
+    def test_upserts_each_type_with_merge_keys(self):
+        foo_meta = MagicMock()
+        writer = MagicMock()
+        writer.extract_metadata_schema_and_output_uri.return_value = ("schema", "uri")
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+        sink = MagicMock()
+
+        with patch("impulse_reporting.persist.report_storage.WriterFactory", return_value=factory):
+            persist_dimensions_incremental(
+                {"FOO": foo_meta},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                merge_keys=["channel_id"],
+            )
+
+        sink.upsert.assert_called_once_with(foo_meta, "uri", ["channel_id"])

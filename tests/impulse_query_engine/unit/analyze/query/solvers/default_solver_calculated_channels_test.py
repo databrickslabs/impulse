@@ -6,6 +6,7 @@ Exercises the narrow calculated-channel output against the wide-only
 channel_id, dynamic container_id typing, validation, and empty results.
 """
 
+import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 import pytest
@@ -20,6 +21,45 @@ from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSol
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from tests.conftest import basic_narrow_db, spark  # noqa: F401  (pytest fixtures)
+
+_UDF_COL_MAP = {
+    "cid": "container_id",
+    "ch": "channel_id",
+    "ts": "tstart",
+    "te": "tend",
+    "val": "value",
+    "conv": "conversion_factor",
+}
+
+
+def _udf_input_pdf():
+    """A tiny single-container joined channel frame for the grouped-map UDF."""
+    return pd.DataFrame(
+        {
+            "container_id": [1, 1],
+            "channel_id": [10, 10],
+            "tstart": [0, 100],
+            "tend": [100, 200],
+            "value": [3.0, 4.0],
+        }
+    )
+
+
+class _MockCalcChannel:
+    """Stands in for a query-engine CalculatedChannel in direct UDF tests.
+
+    ``build`` ignores the cache and returns fixed ``(tstarts, tends, values)``
+    arrays, mirroring the real channel's raw-array contract.
+    """
+
+    def __init__(self, channel_id, arrays, identity=None):
+        self.channel_id = channel_id
+        self._arrays = arrays
+        self.identity = identity or {"channel_name": "mock"}
+
+    def build(self, cache):
+        return self._arrays
+
 
 # Known datum from tests/unit/data/basic_narrow_csv/channel_data.csv:
 # container 1, channel 5 (Engine RPM), second RLE row.
@@ -293,3 +333,61 @@ class TestEmptyResults:
         q.select(cc)
         with pytest.raises(NotImplementedError, match="calculated channels"):
             q.solve_calculated_channels(spark, solver=BlobSolver())
+
+
+class TestSolveCalculatedChannelsUdf:
+    """Direct unit tests for the grouped-map UDF body.
+
+    Calls ``DefaultSolver._solve_calculated_channels_udf`` with a plain pandas
+    DataFrame — it normally runs inside a Spark pandas-UDF worker process, so
+    exercising it directly is what actually covers the explode loop.  Identity is
+    intentionally absent from the UDF output (attached later by
+    ``solve_calculated_channels``).
+    """
+
+    def test_explodes_arrays_into_narrow_rows(self):
+        cc = _MockCalcChannel(channel_id=10, arrays=([0, 100], [100, 200], [3.0, 4.0]))
+        result = DefaultSolver._solve_calculated_channels_udf(
+            _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
+        )
+        assert list(result.columns) == ["container_id", "channel_id", "tstart", "tend", "value"]
+        assert "identity" not in result.columns
+        assert list(result["container_id"]) == [1, 1]
+        assert list(result["channel_id"]) == [10, 10]
+        assert list(result["tstart"]) == [0, 100]
+        assert list(result["tend"]) == [100, 200]
+        assert list(result["value"]) == [3.0, 4.0]
+
+    def test_tstart_tend_cast_to_int_value_to_float(self):
+        # Float tstart/tend arrays (as SampleSeries stores them) are truncated to
+        # integer columns; the value column stays floating point.
+        cc = _MockCalcChannel(channel_id=7, arrays=([0.5], [100.9], [5]))
+        result = DefaultSolver._solve_calculated_channels_udf(
+            _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
+        )
+        # int(0.5) == 0, int(100.9) == 100 → truncation happened.
+        assert result["tstart"].iloc[0] == 0
+        assert result["tend"].iloc[0] == 100
+        assert pd.api.types.is_integer_dtype(result["tstart"])
+        assert pd.api.types.is_integer_dtype(result["tend"])
+        assert result["value"].iloc[0] == 5.0
+        assert pd.api.types.is_float_dtype(result["value"])
+
+    def test_empty_arrays_produce_zero_rows_full_width(self):
+        cc = _MockCalcChannel(channel_id=10, arrays=([], [], []))
+        result = DefaultSolver._solve_calculated_channels_udf(
+            _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
+        )
+        assert len(result) == 0
+        assert list(result.columns) == ["container_id", "channel_id", "tstart", "tend", "value"]
+
+    def test_multi_channel_emits_rows_per_channel_id(self):
+        cc_a = _MockCalcChannel(channel_id=10, arrays=([0], [100], [3.0]))
+        cc_b = _MockCalcChannel(channel_id=20, arrays=([0, 100], [100, 200], [1.0, 2.0]))
+        result = DefaultSolver._solve_calculated_channels_udf(
+            _udf_input_pdf(), selections=[cc_a, cc_b], col_map=_UDF_COL_MAP
+        )
+        by_channel = result.groupby("channel_id").size().to_dict()
+        assert by_channel == {10: 1, 20: 2}
+        # Every emitted row carries this container's id.
+        assert set(result["container_id"]) == {1}
