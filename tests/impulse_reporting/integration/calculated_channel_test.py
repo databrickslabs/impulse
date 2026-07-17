@@ -81,24 +81,9 @@ def test_persist_calculated_channel_full(spark):
     # channel_id in the fact matches the reporting entity id.
     ids = {r["channel_id"] for r in fact.select("channel_id").distinct().collect()}
     assert ids == {ch.get_id()}
-    # identity is a single VARIANT column carrying the whole identity dict.
-    assert fact.schema["identity"].dataType == T.VariantType()
-    id_names = {
-        r["cn"]
-        for r in fact.select(
-            F.variant_get(F.col("identity"), "$.channel_name", "string").alias("cn")
-        )
-        .distinct()
-        .collect()
-    }
-    id_keys = {
-        r["dk"]
-        for r in fact.select(F.variant_get(F.col("identity"), "$.data_key", "string").alias("dk"))
-        .distinct()
-        .collect()
-    }
-    assert id_names == {"speed_kmh"}
-    assert id_keys == {"CALC"}
+    # Identity is NOT on the fact — it lives on the dimension, joined via channel_id.
+    assert "identity" not in fact.columns
+    assert fact.columns == ["container_id", "channel_id", "tstart", "tend", "value", "_created_at"]
 
     # Values are the derived signal: compare against the raw source scaled by 3.6.
     raw = (
@@ -116,14 +101,23 @@ def test_persist_calculated_channel_full(spark):
     calc_sum = fact.select(F.sum("value")).first()[0]
     assert calc_sum == pytest.approx(raw_sum * 3.6)
 
+    # The dimension carries the identity (VARIANT), keyed by channel_id — the join
+    # target for the fact. Confirm the fact's channel_id resolves to the identity.
     dim = spark.read.table(_DIM)
-    assert (
-        dim.filter(
-            F.variant_get(F.col("identity"), "$.channel_name", "string") == "speed_kmh"
-        ).count()
-        == 1
+    assert dim.schema["identity"].dataType == T.VariantType()
+    dim_row = (
+        dim.filter(F.col("channel_id") == ch.get_id())
+        .select(
+            F.variant_get(F.col("identity"), "$.channel_name", "string").alias("cn"),
+            F.variant_get(F.col("identity"), "$.data_key", "string").alias("dk"),
+            "definition_hash",
+        )
+        .collect()
     )
-    assert dim.filter(F.col("definition_hash").isNotNull()).count() == 1
+    assert len(dim_row) == 1
+    assert dim_row[0]["cn"] == "speed_kmh"
+    assert dim_row[0]["dk"] == "CALC"
+    assert dim_row[0]["definition_hash"] is not None
 
 
 def test_incremental_unchanged_is_idempotent(spark):
@@ -269,6 +263,7 @@ def test_calculated_channel_raw_mode(spark, setup_raw_channels_db):
         spark, [ch], query=q, solver=report.get_solver()
     )
     assert df.count() > 0
-    assert df.schema["identity"].dataType == T.VariantType()
+    # Identity is dimension-only; the fact projection carries just the silver columns.
+    assert "identity" not in df.columns
     ids = {r["channel_id"] for r in df.select("channel_id").distinct().collect()}
     assert ids == {ch.get_id()}

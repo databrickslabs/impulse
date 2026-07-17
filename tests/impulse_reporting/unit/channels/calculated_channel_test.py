@@ -1,7 +1,6 @@
 # pylint: disable=missing-function-docstring
 """Unit tests for the reporting-layer CalculatedChannel class."""
 
-import pyspark.sql.types as T
 import pytest
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
@@ -134,14 +133,13 @@ class TestDetermineCalculatedChannels:
         df = CalculatedChannel.determine_calculated_channels(
             spark, [ch], query=q, solver=DefaultSolver(spark)
         )
+        # Identity lives on the dimension (joined via channel_id), not the fact.
         assert df.columns == [
             "container_id",
             "channel_id",
             "tstart",
             "tend",
             "value",
-            "identity",
         ]
-        assert df.schema["identity"].dataType == T.VariantType()
         ids = {r["channel_id"] for r in df.select("channel_id").distinct().collect()}
         assert ids == {ch.get_id()}

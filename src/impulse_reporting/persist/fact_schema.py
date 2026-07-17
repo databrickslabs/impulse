@@ -5,7 +5,6 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
-    VariantType,
 )
 
 HISTOGRAM_FACT_SCHEMA = StructType(
@@ -60,11 +59,11 @@ STATS_AGGREGATOR_FACT_SCHEMA = StructType(
     ]
 )
 
-# Narrow, silver-shaped facts for calculated channels. Mirrors the query engine's
-# solve_calculated_channels() output: one row per RLE sample interval, plus a single
-# ``identity`` VARIANT column holding the channel's identity dict (no fixed per-key
-# columns). Field *types* are cosmetic — persistence projects by name only and the
-# real container_id/channel_id/identity types flow from the solved DataFrame.
+# Narrow, silver-shaped facts for calculated channels: one row per RLE sample
+# interval. The channel's identity lives on ``calculated_channel_dimension`` (joined
+# via ``channel_id``), so it is intentionally absent here. Field *types* are cosmetic
+# — persistence projects by name only and the real container_id/channel_id types flow
+# from the solved DataFrame.
 CALCULATED_CHANNEL_FACT_SCHEMA = StructType(
     [
         StructField("container_id", IntegerType(), False),
@@ -72,6 +71,5 @@ CALCULATED_CHANNEL_FACT_SCHEMA = StructType(
         StructField("tstart", LongType(), False),
         StructField("tend", LongType(), False),
         StructField("value", DoubleType(), False),
-        StructField("identity", VariantType(), False),
     ]
 )
