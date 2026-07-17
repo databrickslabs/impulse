@@ -1019,9 +1019,10 @@ class DefaultSolver(QuerySolver):
         UDF to solve calculated channels for a single container.
 
         Unlike :meth:`_solve_udf` (one wide row per container), this emits many
-        narrow rows: each ``CalculatedChannel`` builds to a ``SampleSeries`` that
-        is exploded into ``(container_id, channel_id, tstart, tend, value)`` rows,
-        with the channel's whole identity dict attached in a single ``identity``
+        narrow rows: each ``CalculatedChannel`` builds to its raw
+        ``(tstarts, tends, values)`` arrays that are exploded into
+        ``(container_id, channel_id, tstart, tend, value)`` rows, with the
+        channel's whole identity dict attached in a single ``identity``
         ``MapType(string, string)`` column.  Each channel supplies its own
         deterministic ``channel_id`` (:attr:`CalculatedChannel.channel_id`).
 
@@ -1048,8 +1049,8 @@ class DefaultSolver(QuerySolver):
         cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": [], "identity": []}
 
         for cc in selections:
-            series = cc.build(cache)
-            for tstart, tend, value in series.get_data():
+            tstarts, tends, values = cc.build(cache)
+            for tstart, tend, value in zip(tstarts, tends, values, strict=False):
                 cols[cid_col].append(container_id)
                 cols[ch_col].append(cc.channel_id)
                 cols["tstart"].append(int(tstart))

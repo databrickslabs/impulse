@@ -110,10 +110,13 @@ class TestCanonicalIdentity:
 
 
 class TestDelegation:
-    def test_build_returns_wrapped_series(self):
+    def test_build_returns_raw_arrays(self):
         series = SampleSeries([0, 100], [100, 200], [3.0, 4.0])
         cc = CalculatedChannel(_StubExpr(series), {"channel_name": "x"})
-        assert cc.build(cache=None) is series
+        tstarts, tends, values = cc.build(cache=None)
+        assert list(tstarts) == [0, 100]
+        assert list(tends) == [100, 200]
+        assert list(values) == [3.0, 4.0]
 
     def test_get_selectors_delegates(self):
         expr = _StubExpr()
@@ -126,11 +129,19 @@ class TestDelegation:
         assert cc.get_required_tag_exprs() == {"tag_expr"}
         assert cc.required_tags() == {"tag"}
 
-    def test_dtype_is_binary(self):
-        # Builds to a SampleSeries → BinaryType, matching TimeSeriesSelector.
+    def test_dtype_is_struct_of_arrays(self):
+        # build() returns the raw (tstarts, tends, values) arrays → a struct of
+        # three arrays (long, long, double) mirroring the narrow output.
         cc = CalculatedChannel(_StubExpr(), {"channel_name": "x"})
-        assert cc.dtype() == T.BinaryType()
+        assert cc.dtype() == T.StructType(
+            [
+                T.StructField("tstarts", T.ArrayType(T.LongType())),
+                T.StructField("tends", T.ArrayType(T.LongType())),
+                T.StructField("values", T.ArrayType(T.DoubleType())),
+            ]
+        )
 
-    def test_evaluation_type_is_sample_series(self):
+    def test_evaluation_type_is_tuple(self):
+        # build() now yields a (tstarts, tends, values) tuple, not a SampleSeries.
         cc = CalculatedChannel(_StubExpr(), {"channel_name": "x"})
-        assert cc.evaluation_type() is SampleSeries
+        assert cc.evaluation_type() is tuple

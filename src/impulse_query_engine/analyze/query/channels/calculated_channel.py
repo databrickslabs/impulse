@@ -13,42 +13,22 @@ from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
 
 
 class CalculatedChannel(TimeSeriesExpression):
-    """A derived channel: a wrapped time-series expression plus output identity.
+    """A derived channel: a wrapped ``TimeSeriesExpression`` plus output identity.
 
-    A ``CalculatedChannel`` wraps an arbitrary :class:`TimeSeriesExpression`
-    built from the operator DSL (e.g. ``q.channel(channel_name="raw_speed") * 3.6``
-    or ``rpm + speed``).  Like the other ``TimeSeriesExpression`` leaves/nodes
-    (``TimeSeriesSelector``, ``TimeSeriesOp``) it ``build()``s to a
-    :class:`SampleSeries` — it is a *labeled derived signal*, not a reduction, so
-    it is a plain ``TimeSeriesExpression`` rather than an ``Aggregation``.
-    :meth:`QueryBuilder.solve_calculated_channels` explodes that series into
-    narrow rows matching the silver ``channel_data`` shape
-    (``container_id, channel_id, tstart, tend, value``) plus a single
-    ``identity`` ``MapType(string, string)`` column holding the whole identity
-    dict.
+    Wraps an expression built from the operator DSL (e.g. ``rpm * 3.6``) that must
+    evaluate to a :class:`SampleSeries`.  ``build()`` returns that series' raw
+    ``(tstarts, tends, values)`` arrays, which
+    :meth:`QueryBuilder.solve_calculated_channels` explodes into narrow
+    silver-shaped rows plus an ``identity`` ``MapType`` column.
 
     Parameters
     ----------
     expr : TimeSeriesExpression
         The wrapped expression; must ``build()`` to a ``SampleSeries``.
     identity : dict of str
-        Identity for the output rows, e.g.
-        ``{"channel_name": "Eng_RPM", "data_key": "TM"}``.  The whole dict is
-        emitted per row in a single ``identity`` ``MapType(string, string)``
-        column (keys are arbitrary).  Must be non-empty; the identity also seeds
-        the deterministic :attr:`channel_id`.
-
-    Notes
-    -----
-    ``_alias`` is set in ``__init__`` (via ``super().__init__(alias=...)``) — as
-    the identity values joined by ``"::"`` (e.g. ``"Eng_RPM::TM"``) — rather than
-    left for the caller to chain ``.alias(...)``: reading a missing ``_alias``
-    would trigger
-    ``TimeSeriesExpression.__getattr__`` and silently return a callable instead
-    of raising.  The alias is not consumed by the calculated-channels solve path
-    (that emits the identity column directly); it exists so the object stays a
-    well-formed ``TimeSeriesExpression``.  A later ``.alias(...)`` still overrides
-    it.
+        Non-empty identity dict (arbitrary keys, e.g.
+        ``{"channel_name": "Eng_RPM", "data_key": "TM"}``), emitted per row and
+        used to seed the deterministic :attr:`channel_id`.
 
     Examples
     --------
@@ -71,6 +51,9 @@ class CalculatedChannel(TimeSeriesExpression):
                 "defines the output identifier columns and seeds the "
                 "deterministic channel_id."
             )
+        # Set _alias eagerly (identity values joined by "::"): a missing _alias
+        # would hit TimeSeriesExpression.__getattr__ and return a callable instead
+        # of raising. The solve path ignores it; a later .alias(...) overrides it.
         super().__init__(
             alias=self._IDENTITY_SEPARATOR.join(str(v) for v in identity.values()),
             is_single_signal=getattr(expr, "is_single_signal", True),
@@ -105,19 +88,33 @@ class CalculatedChannel(TimeSeriesExpression):
         return zlib.crc32(self.canonical_identity().encode()) & 0x7FFFFFFF
 
     def build(self, cache: SeriesCache):
-        """Evaluate the wrapped expression against the cache (yields a SampleSeries)."""
-        return self.expr.build(cache)
+        """Evaluate the wrapped expression and return its raw ``(tstarts, tends, values)``.
+
+        Unlike a typical ``TimeSeriesExpression`` (whose ``build`` yields a
+        ``SampleSeries``), this returns the three parallel ``float64`` arrays
+        underlying that series, since the calculated-channels solve path consumes
+        the raw samples directly.
+        """
+        series = self.expr.build(cache)
+        return series.tstarts, series.tends, series.values
 
     def dtype(self) -> T.DataType:
-        """Spark type of ``build()``'s result: a serialized ``SampleSeries``.
+        """Spark type of ``build()``'s output: the raw ``(tstarts, tends, values)`` arrays.
 
-        Matches :meth:`TimeSeriesSelector.dtype` (``BinaryType``), since the
-        wrapped expression evaluates to a ``SampleSeries``.  The narrow
-        calculated-channels solve path does not consume this — it emits its own
-        ``container_id, channel_id, tstart, tend, value`` schema — but keeping it
-        honest makes the expression safe if ever routed through ``solve()``.
+        A struct of three arrays mirroring the tuple ``build()`` returns, with
+        element types matching the narrow calculated-channels output
+        (``tstart``/``tend`` are ``long``, ``value`` is ``double``).  The narrow
+        solve path does not consume this — it builds its own schema via
+        ``_build_calculated_channels_output_schema`` — but keeping it honest
+        describes the expression's actual output type.
         """
-        return T.BinaryType()
+        return T.StructType(
+            [
+                T.StructField("tstarts", T.ArrayType(T.LongType())),
+                T.StructField("tends", T.ArrayType(T.LongType())),
+                T.StructField("values", T.ArrayType(T.DoubleType())),
+            ]
+        )
 
     def get_selectors(self) -> list[TimeSeriesSelector]:
         return self.expr.get_selectors()
