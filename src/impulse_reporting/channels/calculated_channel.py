@@ -175,7 +175,7 @@ class CalculatedChannel:
         Parameters
         ----------
         spark : SparkSession
-            Spark session (unused directly; kept for interface parity).
+            Spark session, forwarded to ``QueryBuilder.solve_calculated_channels``.
         channels : list of CalculatedChannel
             Channels to solve; identity keys may differ across channels.
         query : QueryBuilder

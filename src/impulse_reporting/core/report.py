@@ -22,11 +22,18 @@ from impulse_reporting.config.config_parser import (
 )
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report_utils import (
+    build_metadata_dfs,
     cleanup_temp_tables,
     collect_solvable_expressions,
     dispatch_aggregations,
     dispatch_calculated_channels,
     dispatch_events,
+    group_selectables_by_type,
+    merge_changed_unchanged,
+    persist_dimensions_full,
+    persist_dimensions_incremental,
+    persist_facts_full,
+    persist_facts_incremental,
     solve_expressions_batched,
     split_by_hash_change,
 )
@@ -465,23 +472,6 @@ class Report:
         """
         return self.calculated_channels
 
-    def _group_calculated_channels_by_type(self):
-        """
-        Group calculated channels by their type.
-
-        Returns
-        -------
-        dict
-            Dictionary mapping channel type names to lists of channels.
-        """
-        channel_types = {channel_type.name: [] for channel_type in ChannelType}
-        for channel in self.calculated_channels:
-            for channel_type in channel_types.keys():
-                if isinstance(channel, ChannelType[channel_type].value):
-                    channel_types[channel_type].append(channel)
-                    break
-        return channel_types
-
     def _validate_unique_calculated_channels(self):
         """
         Reject calculated channels that share a canonical identity.
@@ -685,41 +675,9 @@ class Report:
             schema, uri = writer.extract_metadata_schema_and_output_uri(event_type)
             writer.write(event_meta_dfs_list, schema=schema, uri=uri)
 
-        # calculated channel fact tables
-        channel_fact_by_table = {}
-        for channel_type_str, channel_dfs in self.calculated_channel_dfs.items():
-            table_name = ChannelType[channel_type_str].get_fact_table_name()
-            channel_fact_by_table.setdefault(table_name, [])
-            if isinstance(channel_dfs, dict):
-                if channel_dfs.get("changed") is not None:
-                    channel_fact_by_table[table_name].append(channel_dfs["changed"])
-                if channel_dfs.get("unchanged") is not None:
-                    channel_fact_by_table[table_name].append(channel_dfs["unchanged"])
-            elif channel_dfs is not None:
-                channel_fact_by_table[table_name].append(channel_dfs)
-
-        for table_name, channel_dfs_list in channel_fact_by_table.items():
-            if not channel_dfs_list:
-                continue
-            channel_type = ChannelType.get_any_for_fact_table(table_name)
-            writer = storage_factory.create_writer(channel_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(channel_type)
-            writer.write(channel_dfs_list, schema=schema, uri=uri)
-
-        # calculated channel dimension tables
-        channel_dim_by_table = {}
-        for channel_type_str, channel_metadata_df in self.calculated_channel_metadata_dfs.items():
-            table_name = ChannelType[channel_type_str].get_dimension_table_name()
-            channel_dim_by_table.setdefault(table_name, [])
-            channel_dim_by_table[table_name].append(channel_metadata_df)
-
-        for table_name, channel_meta_dfs_list in channel_dim_by_table.items():
-            if not channel_meta_dfs_list:
-                continue
-            channel_type = ChannelType.get_any_for_dimension_table(table_name)
-            writer = storage_factory.create_writer(channel_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(channel_type)
-            writer.write(channel_meta_dfs_list, schema=schema, uri=uri)
+        # calculated channel fact + dimension tables
+        persist_facts_full(self.calculated_channel_dfs, ChannelType, storage_factory)
+        persist_dimensions_full(self.calculated_channel_metadata_dfs, ChannelType, storage_factory)
 
         # persist measurement dimensions
         if self.container_dimension_df:
@@ -903,48 +861,26 @@ class Report:
                 ],
             )
 
-        # Persist calculated channel facts
-        for channel_type_str, channel_data in self.calculated_channel_dfs.items():
-            channel_type = ChannelType[channel_type_str]
-            writer = storage_factory.create_writer(channel_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(channel_type)
-            merge_keys = ["container_id", "channel_id", "tstart"]
+        # Persist calculated channel facts + dimensions
+        def _transform(df, schema):
+            return self._transform_for_persistence(df, schema, transformer)
 
-            if isinstance(channel_data, dict):
-                changed_df = channel_data.get("changed")
-                unchanged_df = channel_data.get("unchanged")
-
-                # Changed definitions: replaceWhere (atomic) over all containers
-                if changed_df is not None and channel_type_str in changed_channel_ids:
-                    changed_ids = changed_channel_ids[channel_type_str]
-                    df_enriched = self._transform_for_persistence(changed_df, schema, transformer)
-                    self.sink.replace_by_ids(
-                        df=df_enriched,
-                        uri=uri,
-                        id_column="channel_id",
-                        ids_to_replace=changed_ids,
-                    )
-
-                # Unchanged definitions: MERGE over the incremental subset
-                if unchanged_df is not None:
-                    df_enriched = self._transform_for_persistence(
-                        unchanged_df, schema, transformer
-                    )
-                    self.sink.upsert(df_enriched, uri, merge_keys)
-            elif channel_data is not None:
-                df_enriched = self._transform_for_persistence(channel_data, schema, transformer)
-                self.sink.upsert(df_enriched, uri, merge_keys)
-
-        # Persist calculated channel dimensions (always upsert by channel_id)
-        for (
-            channel_type_str,
-            channel_metadata_df,
-        ) in self.calculated_channel_metadata_dfs.items():
-            channel_type = ChannelType[channel_type_str]
-            writer = storage_factory.create_writer(channel_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(channel_type)
-            df_enriched = self._transform_for_persistence(channel_metadata_df, schema, transformer)
-            self.sink.upsert(df_enriched, uri, ["channel_id"])
+        persist_facts_incremental(
+            self.calculated_channel_dfs,
+            ChannelType,
+            self.sink,
+            _transform,
+            id_column="channel_id",
+            merge_keys=["container_id", "channel_id", "tstart"],
+            changed_ids=changed_channel_ids,
+        )
+        persist_dimensions_incremental(
+            self.calculated_channel_metadata_dfs,
+            ChannelType,
+            self.sink,
+            _transform,
+            merge_keys=["channel_id"],
+        )
 
     def _transform_for_persistence(
         self,
@@ -1211,7 +1147,7 @@ class Report:
         # Changed definitions recompute over all containers; unchanged ones over
         # the incrementally-detected subset.
         self._validate_unique_calculated_channels()
-        channels_by_type = self._group_calculated_channels_by_type()
+        channels_by_type = group_selectables_by_type(self.calculated_channels, ChannelType)
         changed_channels_by_type, unchanged_channels_by_type, self._changed_channel_ids = (
             split_by_hash_change(
                 channels_by_type,
@@ -1238,27 +1174,12 @@ class Report:
             self.solver,
             pre_filtered_containers_df,
         )
-        calculated_channel_dfs = {}
-        all_channel_types = set(
-            list(changed_channel_dfs.keys()) + list(unchanged_channel_dfs.keys())
+        self.calculated_channel_dfs = merge_changed_unchanged(
+            changed_channel_dfs, unchanged_channel_dfs
         )
-        for t in all_channel_types:
-            calculated_channel_dfs[t] = {
-                "changed": changed_channel_dfs.get(t),
-                "unchanged": unchanged_channel_dfs.get(t),
-            }
-
-        calculated_channel_metadata_dfs = {}
-        for channel_name, channel_list in channels_by_type.items():
-            if not channel_list:
-                continue
-            cls = ChannelType[channel_name].value
-            calculated_channel_metadata_dfs[channel_name] = cls.determine_metadata_df(
-                self.spark, channel_list
-            )
-
-        self.calculated_channel_dfs = calculated_channel_dfs
-        self.calculated_channel_metadata_dfs = calculated_channel_metadata_dfs
+        self.calculated_channel_metadata_dfs = build_metadata_dfs(
+            channels_by_type, ChannelType, self.spark
+        )
 
         # Determine container dimension
         self.container_dimension_df = ContainerDimension.get_dimension(
