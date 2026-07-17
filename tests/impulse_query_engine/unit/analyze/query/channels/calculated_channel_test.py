@@ -1,10 +1,12 @@
 # pylint: disable=missing-function-docstring
 """Unit tests for the CalculatedChannel aggregation class.
 
-Covers construction (identity storage, the `_alias` rule, the channel_id
-sentinel), the `canonical_identity` encoding, delegation of the expression
+Covers construction (identity storage, the `_alias` rule, the deterministic
+`channel_id`), the `canonical_identity` encoding, delegation of the expression
 interface to the wrapped expression, and validation.
 """
+
+import zlib
 
 import pyspark.sql.types as T
 import pytest
@@ -14,7 +16,6 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.analyze.query.aggregations.aggregation import Aggregation
 from impulse_query_engine.analyze.query.channels.calculated_channel import (
-    _AUTO,
     CalculatedChannel,
 )
 from impulse_query_engine.model.series.sample_series import SampleSeries
@@ -72,18 +73,22 @@ class TestConstruction:
         cc.alias("renamed")
         assert cc._alias == "renamed"
 
-    def test_channel_id_defaults_to_auto_sentinel(self):
+    def test_channel_id_deterministic_from_identity(self):
         cc = CalculatedChannel(_StubExpr(), {"channel_name": "x"})
-        assert cc._explicit_channel_id is _AUTO
+        expected = zlib.crc32(cc.canonical_identity().encode()) & 0x7FFFFFFF
+        assert cc.channel_id == expected
 
-    def test_explicit_channel_id_stored(self):
-        cc = CalculatedChannel(_StubExpr(), {"channel_name": "x"}, channel_id=999)
-        assert cc._explicit_channel_id == 999
+    def test_channel_id_positive_int32(self):
+        cc = CalculatedChannel(_StubExpr(), {"channel_name": "x"})
+        assert 0 <= cc.channel_id <= 0x7FFFFFFF
 
-    def test_explicit_none_channel_id_stored(self):
-        cc = CalculatedChannel(_StubExpr(), {"channel_name": "x"}, channel_id=None)
-        assert cc._explicit_channel_id is None
-        assert cc._explicit_channel_id is not _AUTO
+    def test_channel_id_identity_derived_not_name(self):
+        # Same identity (any key order) → same id; different identity → different id.
+        a = CalculatedChannel(_StubExpr(), {"channel_name": "s", "data_key": "CALC"})
+        b = CalculatedChannel(_StubExpr(), {"data_key": "CALC", "channel_name": "s"})
+        c = CalculatedChannel(_StubExpr(), {"channel_name": "other", "data_key": "CALC"})
+        assert a.channel_id == b.channel_id
+        assert a.channel_id != c.channel_id
 
     def test_empty_identity_raises(self):
         with pytest.raises(ValueError, match="non-empty identity"):
@@ -94,7 +99,7 @@ class TestCanonicalIdentity:
     def test_sorted_and_stable(self):
         cc1 = CalculatedChannel(_StubExpr(), {"channel_name": "s", "data_key": "CALC"})
         cc2 = CalculatedChannel(_StubExpr(), {"data_key": "CALC", "channel_name": "s"})
-        assert cc1.canonical_identity() == "channel_name=s&data_key=CALC"
+        assert cc1.canonical_identity() == "channel_name=s::data_key=CALC"
         # Order-independent: same identity, different key order → same encoding.
         assert cc1.canonical_identity() == cc2.canonical_identity()
 

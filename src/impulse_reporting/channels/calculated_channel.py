@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import zlib
 from collections.abc import Mapping
 
 import pyspark.sql.functions as f
@@ -85,24 +84,20 @@ class CalculatedChannel:
             normalized_attributes = {str(k): str(v) for k, v in attributes.items()}
         self.attributes = normalized_attributes
 
-        # Deterministic entity id from the identity (same canonical encoding the
-        # query-engine layer uses). Passed explicitly to the query-engine channel
-        # so fact.channel_id == get_id() == dimension.channel_id.
-        self._entity_id = zlib.crc32(self._canonical_identity().encode()) & 0x7FFFFFFF
-        self.expression = QeCalculatedChannel(expr, self.identity, channel_id=self._entity_id)
-
-    def _canonical_identity(self) -> str:
-        """Stable identity encoding (sorted keys), matching the query-engine layer."""
-        return "&".join(f"{k}={self.identity[k]}" for k in sorted(self.identity))
+        # The wrapped query-engine channel owns the deterministic id and the
+        # canonical identity encoding, so fact.channel_id == get_id() ==
+        # dimension.channel_id with a single source of truth.
+        self.expression = QeCalculatedChannel(expr, self.identity)
 
     def canonical_identity(self) -> str:
         """Public, order-independent identity key.
 
         Two channels with the same ``identity`` (regardless of key insertion
         order) share this value and therefore the same ``channel_id``.  Used by
-        :class:`Report` to reject duplicate channel identities.
+        :class:`Report` to reject duplicate channel identities.  Delegates to the
+        wrapped query-engine channel so both layers encode identity identically.
         """
-        return self._canonical_identity()
+        return self.expression.canonical_identity()
 
     def get_name(self) -> str:
         """Return the channel name."""
@@ -114,7 +109,7 @@ class CalculatedChannel:
 
     def get_id(self) -> int:
         """Return the deterministic entity id (also the fact/dimension ``channel_id``)."""
-        return self._entity_id
+        return self.expression.channel_id
 
     def get_expression(self) -> TimeSeriesExpression | None:
         """Return ``None`` — calculated channels drive their own narrow solve.
@@ -136,7 +131,7 @@ class CalculatedChannel:
 
     def determine_definition_hash(self) -> int:
         """Hash of the computation-affecting definition (expression + identity)."""
-        payload = f"{self._canonical_identity()}|{self.expression.expr}"
+        payload = f"{self.canonical_identity()}|{self.expression.expr}"
         hash_bytes = hashlib.sha256(payload.encode()).digest()
         return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
 

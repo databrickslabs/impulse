@@ -195,23 +195,16 @@ class TestChannelId:
         }
         assert by_name["a"] != by_name["b"]
 
-    def test_explicit_channel_id_honored(self, spark, basic_narrow_db):
+    def test_emitted_id_matches_channel_property(self, spark, basic_narrow_db):
+        # The solver emits the channel's own deterministic channel_id — no
+        # separate id derivation in the solver.
         q = basic_narrow_db.query
         cc = CalculatedChannel(
-            q.channel(channel_name="Engine RPM") * 2, {"channel_name": "rpm_x2"}, channel_id=999
+            q.channel(channel_name="Engine RPM") * 2, {"channel_name": "rpm_x2"}
         )
         result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
         ids = {r["channel_id"] for r in result.select("channel_id").distinct().collect()}
-        assert ids == {999}
-
-    def test_explicit_none_channel_id_emits_null(self, spark, basic_narrow_db):
-        q = basic_narrow_db.query
-        cc = CalculatedChannel(
-            q.channel(channel_name="Engine RPM") * 2, {"channel_name": "rpm_x2"}, channel_id=None
-        )
-        result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        ids = {r["channel_id"] for r in result.select("channel_id").distinct().collect()}
-        assert ids == {None}
+        assert ids == {cc.channel_id}
 
 
 class TestValidation:

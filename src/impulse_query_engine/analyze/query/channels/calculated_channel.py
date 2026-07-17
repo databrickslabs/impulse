@@ -1,5 +1,7 @@
 """CalculatedChannel: a labeled derived time-series channel."""
 
+import zlib
+
 import pyspark.sql.types as T
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
@@ -8,11 +10,6 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
 from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
-
-# Sentinel distinguishing "derive a deterministic channel_id" (the default) from
-# an explicit ``channel_id=None`` (emit a SQL null).  A plain default of ``None``
-# could not tell these two intents apart.
-_AUTO = object()
 
 
 class CalculatedChannel(TimeSeriesExpression):
@@ -38,18 +35,14 @@ class CalculatedChannel(TimeSeriesExpression):
         ``{"channel_name": "Eng_RPM", "data_key": "TM"}``.  The whole dict is
         emitted per row in a single ``identity`` ``VARIANT`` column (keys are
         arbitrary).  Must be non-empty; the identity also seeds the
-        deterministic ``channel_id`` hash.
-    channel_id : int or None, optional
-        Output ``channel_id`` for every emitted row.  When omitted (the
-        ``_AUTO`` sentinel) a deterministic id is derived from the identity by
-        the solver, typed to match the source ``channel_id`` column.  Pass an
-        ``int`` to use it verbatim, or ``None`` to emit a SQL null.
+        deterministic :attr:`channel_id`.
 
     Notes
     -----
-    ``_alias`` is set explicitly in ``__init__`` — as the identity values joined
-    by ``"::"`` (e.g. ``"Eng_RPM::TM"``) — rather than left for the caller to
-    chain ``.alias(...)``: reading a missing ``_alias`` would trigger
+    ``_alias`` is set in ``__init__`` (via ``super().__init__(alias=...)``) — as
+    the identity values joined by ``"::"`` (e.g. ``"Eng_RPM::TM"``) — rather than
+    left for the caller to chain ``.alias(...)``: reading a missing ``_alias``
+    would trigger
     ``TimeSeriesExpression.__getattr__`` and silently return a callable instead
     of raising.  The alias is not consumed by the calculated-channels solve path
     (that emits the identity column directly); it exists so the object stays a
@@ -63,14 +56,12 @@ class CalculatedChannel(TimeSeriesExpression):
         CalculatedChannel(rpm * 3.6, {"channel_name": "speed_kmh", "data_key": "CALC"})
     """
 
-    _ALIAS_SEPARATOR = "::"
+    _IDENTITY_SEPARATOR = "::"
 
     def __init__(
         self,
         expr: TimeSeriesExpression,
         identity: dict[str, str],
-        *,
-        channel_id=_AUTO,
     ):
         if not identity:
             raise ValueError(
@@ -79,12 +70,13 @@ class CalculatedChannel(TimeSeriesExpression):
                 "defines the output identifier columns and seeds the "
                 "deterministic channel_id."
             )
+        super().__init__(
+            alias=self._IDENTITY_SEPARATOR.join(str(v) for v in identity.values()),
+            is_single_signal=getattr(expr, "is_single_signal", True),
+            requires_udf=getattr(expr, "requires_udf", False),
+        )
         self.expr = expr
         self.identity = dict(identity)
-        self._explicit_channel_id = channel_id
-        self._alias = self._ALIAS_SEPARATOR.join(str(v) for v in identity.values())
-        self.is_single_signal = getattr(expr, "is_single_signal", True)
-        self.requires_udf = getattr(expr, "requires_udf", False)
 
     def __str__(self) -> str:
         return f"<CalculatedChannel identity={self.identity}, expr={self.expr}>"
@@ -95,7 +87,21 @@ class CalculatedChannel(TimeSeriesExpression):
         Keys are sorted so the encoding (and the derived ``channel_id``) is
         independent of kwarg order.
         """
-        return "&".join(f"{k}={self.identity[k]}" for k in sorted(self.identity))
+        return self._IDENTITY_SEPARATOR.join(
+            f"{k}={self.identity[k]}" for k in sorted(self.identity)
+        )
+
+    @property
+    def channel_id(self) -> int:
+        """Deterministic output ``channel_id`` derived from the identity.
+
+        A CRC32 of :meth:`canonical_identity` masked to a positive int32, so the
+        value is stable across runs/processes and fits both ``IntegerType`` and
+        ``LongType`` source ``channel_id`` columns.  Determinism makes writes
+        idempotent and joins predictable; sharing this one derivation across the
+        query-engine and reporting layers keeps their ids in lockstep.
+        """
+        return zlib.crc32(self.canonical_identity().encode()) & 0x7FFFFFFF
 
     def build(self, cache: SeriesCache):
         """Evaluate the wrapped expression against the cache (yields a SampleSeries)."""
