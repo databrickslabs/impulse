@@ -99,16 +99,15 @@ class QuerySolver(ABC):
             entries.append(T.StructField(s._alias, dtype))
         return T.StructType(entries)
 
-    def _build_calculated_channels_output_schema(self, channels: DataFrame) -> T.StructType:
-        """Build the narrow grouped-map output schema for calculated channels.
+    def _build_calculated_channels_udf_schema(self, channels: DataFrame) -> T.StructType:
+        """Build the grouped-map UDF return schema for calculated channels.
 
-        The output mirrors the silver ``channel_data`` table
-        (``container_id, channel_id, tstart, tend, value``) plus a single
-        ``identity`` column holding each channel's identity dict as a
-        ``MapType(string, string)``.  The map is Arrow-representable so the
-        grouped-map pandas UDF emits it directly, and it is the DataFrame's final
-        identity type — self-describing, so no gold column depends on the
-        identity key set.
+        This describes what :meth:`DefaultSolver._solve_calculated_channels_udf`
+        returns — the narrow silver ``channel_data`` columns
+        (``container_id, channel_id, tstart, tend, value``).  The ``identity``
+        map is *not* part of this schema: it is constant per ``channel_id`` and
+        appended by :meth:`solve_calculated_channels` after the UDF runs, so it
+        never crosses the Arrow boundary.
 
         The ``container_id`` and ``channel_id`` field types are derived from
         *channels* (the column-mapped channels DataFrame) so they match the
@@ -123,7 +122,7 @@ class QuerySolver(ABC):
         Returns
         -------
         pyspark.sql.types.StructType
-            ``[container_id, channel_id, tstart, tend, value, identity]``.
+            ``[container_id, channel_id, tstart, tend, value]``.
         """
         return T.StructType(
             [
@@ -138,7 +137,6 @@ class QuerySolver(ABC):
                 T.StructField(self.config.tstart_col, T.LongType()),
                 T.StructField(self.config.tend_col, T.LongType()),
                 T.StructField(self.config.value_col, T.DoubleType()),
-                T.StructField("identity", T.MapType(T.StringType(), T.StringType())),
             ]
         )
 

@@ -87,7 +87,10 @@ class TestCalculatedChannelValues:
             {"sensor_id": "s1", "unit": "rpm"},
         )
         result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        assert result.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
+        # create_map builds a map whose values are never null (valueContainsNull=False).
+        assert result.schema["identity"].dataType == T.MapType(
+            T.StringType(), T.StringType(), False
+        )
         row = result.select(
             _id_val("sensor_id").alias("sid"), _id_val("unit").alias("unit")
         ).first()
@@ -148,7 +151,10 @@ class TestOutputSchema:
         ]
         assert result.schema["tstart"].dataType == T.LongType()
         assert result.schema["value"].dataType == T.DoubleType()
-        assert result.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
+        # create_map builds a map whose values are never null (valueContainsNull=False).
+        assert result.schema["identity"].dataType == T.MapType(
+            T.StringType(), T.StringType(), False
+        )
 
     @pytest.mark.parametrize(
         "cid_type", [T.StringType(), T.IntegerType(), T.LongType()], ids=lambda t: t.simpleString()
@@ -204,6 +210,26 @@ class TestChannelId:
         ids = {r["channel_id"] for r in result.select("channel_id").distinct().collect()}
         assert ids == {cc.channel_id}
 
+    def test_identity_resolves_per_channel_id(self, spark, basic_narrow_db):
+        # Identity is attached post-UDF via a channel_id-keyed CASE, so each row's
+        # identity must match its own channel's identity (not another channel's).
+        q = basic_narrow_db.query
+        cc_a = CalculatedChannel(
+            q.channel(channel_name="Engine RPM") * 2, {"channel_name": "a", "data_key": "CALC"}
+        )
+        cc_b = CalculatedChannel(
+            q.channel(channel_name="Engine RPM") * 3, {"channel_name": "b", "data_key": "CALC"}
+        )
+        result = q.select(cc_a, cc_b).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+        by_id = {
+            r["channel_id"]: r["cn"]
+            for r in result.select("channel_id", _id_val("channel_name").alias("cn"))
+            .distinct()
+            .collect()
+        }
+        assert by_id[cc_a.channel_id] == "a"
+        assert by_id[cc_b.channel_id] == "b"
+
 
 class TestValidation:
     def test_plain_selector_rejected(self, spark, basic_narrow_db):
@@ -229,7 +255,10 @@ class TestValidation:
             q.channel(channel_name="Engine RPM") * 3, {"channel_name": "b", "data_key": "CALC"}
         )
         result = q.select(cc_a, cc_b).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-        assert result.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
+        # create_map builds a map whose values are never null (valueContainsNull=False).
+        assert result.schema["identity"].dataType == T.MapType(
+            T.StringType(), T.StringType(), False
+        )
         assert result.count() > 0
 
 
@@ -251,7 +280,10 @@ class TestEmptyResults:
             "identity",
         ]
         # Empty branch returns the same schema → identity is a map too.
-        assert result.schema["identity"].dataType == T.MapType(T.StringType(), T.StringType())
+        # create_map builds a map whose values are never null (valueContainsNull=False).
+        assert result.schema["identity"].dataType == T.MapType(
+            T.StringType(), T.StringType(), False
+        )
 
     def test_base_solver_not_supported(self, spark, basic_narrow_db):
         from impulse_query_engine.analyze.query.solvers.blob_solver import BlobSolver

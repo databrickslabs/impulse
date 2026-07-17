@@ -1021,10 +1021,11 @@ class DefaultSolver(QuerySolver):
         Unlike :meth:`_solve_udf` (one wide row per container), this emits many
         narrow rows: each ``CalculatedChannel`` builds to its raw
         ``(tstarts, tends, values)`` arrays that are exploded into
-        ``(container_id, channel_id, tstart, tend, value)`` rows, with the
-        channel's whole identity dict attached in a single ``identity``
-        ``MapType(string, string)`` column.  Each channel supplies its own
-        deterministic ``channel_id`` (:attr:`CalculatedChannel.channel_id`).
+        ``(container_id, channel_id, tstart, tend, value)`` rows.  Each channel
+        supplies its own deterministic ``channel_id``
+        (:attr:`CalculatedChannel.channel_id`); the identity map is *not* emitted
+        here — it is constant per ``channel_id`` and attached afterward by
+        :meth:`solve_calculated_channels` to keep the UDF's Arrow payload small.
 
         Parameters
         ----------
@@ -1046,7 +1047,7 @@ class DefaultSolver(QuerySolver):
         ch_col = col_map["ch"]
         container_id = pdf[cid_col].iloc[0]
 
-        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": [], "identity": []}
+        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": []}
 
         for cc in selections:
             tstarts, tends, values = cc.build(cache)
@@ -1056,7 +1057,6 @@ class DefaultSolver(QuerySolver):
                 cols["tstart"].append(int(tstart))
                 cols["tend"].append(int(tend))
                 cols["value"].append(float(value))
-                cols["identity"].append(dict(cc.identity))
 
         return pd.DataFrame(cols)
 
@@ -1089,7 +1089,7 @@ class DefaultSolver(QuerySolver):
         col_map = self.config.col_map
         q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
 
-        schema = self._build_calculated_channels_output_schema(q)
+        schema = self._build_calculated_channels_udf_schema(q)
         solve_udf = F.pandas_udf(
             partial(
                 DefaultSolver._solve_calculated_channels_udf,
@@ -1099,4 +1099,20 @@ class DefaultSolver(QuerySolver):
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )
-        return self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
+        res = self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
+
+        # Identity is constant per channel_id, so attach it here via a
+        # channel_id-keyed CASE instead of the UDF shipping a copy per row.
+        channel_id_col = self.config.channel_id_col
+        identity_expr = None
+        for cc in selections:
+            id_map = F.create_map(
+                *[F.lit(x) for k, v in cc.identity.items() for x in (str(k), str(v))]
+            )
+            branch = F.col(channel_id_col) == F.lit(cc.channel_id)
+            identity_expr = (
+                F.when(branch, id_map)
+                if identity_expr is None
+                else identity_expr.when(branch, id_map)
+            )
+        return res.withColumn("identity", identity_expr)

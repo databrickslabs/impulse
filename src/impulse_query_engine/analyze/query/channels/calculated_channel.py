@@ -103,10 +103,7 @@ class CalculatedChannel(TimeSeriesExpression):
 
         A struct of three arrays mirroring the tuple ``build()`` returns, with
         element types matching the narrow calculated-channels output
-        (``tstart``/``tend`` are ``long``, ``value`` is ``double``).  The narrow
-        solve path does not consume this — it builds its own schema via
-        ``_build_calculated_channels_output_schema`` — but keeping it honest
-        describes the expression's actual output type.
+        (``tstart``/``tend`` are ``long``, ``value`` is ``double``).
         """
         return T.StructType(
             [
