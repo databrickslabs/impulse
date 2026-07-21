@@ -119,9 +119,7 @@ class CalculatedChannel:
 
     def get_expression_str(self) -> str:
         """String form of the wrapped expression (identity + expr, no name/desc)."""
-        if isinstance(self.expression, TimeSeriesExpression):
-            return self.expression.__str__()
-        return "NA"
+        return str(self.expression)
 
     def get_channel_type_str(self) -> str:
         """Channel type string, matching the ``ChannelType`` enum member name."""

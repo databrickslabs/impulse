@@ -1060,6 +1060,12 @@ class DefaultSolver(QuerySolver):
 
         return pd.DataFrame(cols)
 
+    @staticmethod
+    def _identity_map_expr(identity: dict[str, str]) -> "F.Column":
+        """Build a ``map<string,string>`` literal column from an identity dict."""
+        kv_literals = [F.lit(str(x)) for k, v in identity.items() for x in (k, v)]
+        return F.create_map(*kv_literals)
+
     def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
         """
         Solve calculated channels by grouping channels and exploding each result.
@@ -1106,10 +1112,8 @@ class DefaultSolver(QuerySolver):
         channel_id_col = self.config.channel_id_col
         identity_expr = None
         for cc in selections:
-            id_map = F.create_map(
-                *[F.lit(x) for k, v in cc.identity.items() for x in (str(k), str(v))]
-            )
             branch = F.col(channel_id_col) == F.lit(cc.channel_id)
+            id_map = self._identity_map_expr(cc.identity)
             identity_expr = (
                 F.when(branch, id_map)
                 if identity_expr is None

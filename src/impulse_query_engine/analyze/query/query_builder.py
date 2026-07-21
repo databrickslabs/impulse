@@ -347,8 +347,6 @@ class QueryBuilder:
                     "solve_calculated_channels() requires all selections to be "
                     f"CalculatedChannel; got {type(s).__name__} at index {i}."
                 )
-
-        for s in self.selections:
             s.expr.require_evaluation_type(
                 SampleSeries,
                 owner="CalculatedChannel",
