@@ -980,6 +980,61 @@ class TestPersistFactsIncremental:
 
         sink.upsert.assert_called_once_with(unchanged, "uri", ["container_id", "foo"])
 
+    def test_shared_table_changed_types_union_into_one_replace(self):
+        # FOO and BAR share `shared_fact`: their changed DFs are unioned and
+        # rewritten in a single replace_by_ids with the combined ids.
+        foo_changed, bar_changed, unioned = MagicMock(), MagicMock(), MagicMock()
+        foo_changed.unionByName.return_value = unioned
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {
+                    "FOO": {"changed": foo_changed, "unchanged": None},
+                    "BAR": {"changed": bar_changed, "unchanged": None},
+                },
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="visual_id",
+                merge_keys=["visual_id"],
+                changed_ids={"FOO": [1], "BAR": [2]},
+            )
+
+        # Single replace over the shared table with unioned DF + combined ids.
+        foo_changed.unionByName.assert_called_once_with(bar_changed)
+        sink.replace_by_ids.assert_called_once_with(
+            df=unioned, uri="uri", id_column="visual_id", ids_to_replace=[1, 2]
+        )
+
+    def test_shared_table_unchanged_types_each_upserted(self):
+        # FOO and BAR unchanged dfs both target `shared_fact` → one upsert each.
+        foo_unchanged, bar_unchanged = MagicMock(), MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {
+                    "FOO": {"changed": None, "unchanged": foo_unchanged},
+                    "BAR": {"changed": None, "unchanged": bar_unchanged},
+                },
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="visual_id",
+                merge_keys=["visual_id"],
+                changed_ids={},
+            )
+
+        sink.replace_by_ids.assert_not_called()
+        assert sink.upsert.call_count == 2
+        upserted = {call.args[0] for call in sink.upsert.call_args_list}
+        assert upserted == {foo_unchanged, bar_unchanged}
+
 
 class TestPersistDimensionsIncremental:
     def test_upserts_each_type_with_merge_keys(self):

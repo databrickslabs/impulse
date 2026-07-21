@@ -7,6 +7,7 @@ and reduce its size.
 from __future__ import annotations
 
 import uuid
+from functools import reduce
 from typing import TYPE_CHECKING
 
 from pyspark.sql import DataFrame, SparkSession
@@ -632,11 +633,18 @@ def persist_facts_incremental(
     merge_keys: list[str] | Callable[[object], list[str]],
     changed_ids: dict[str, list[int]],
 ) -> None:
-    """Incremental persist of fact DataFrames, per type.
+    """Incremental persist of fact DataFrames, grouped by output table.
 
-    Changed definitions are rewritten atomically via ``replace_by_ids`` over all
-    containers; unchanged definitions are ``upsert``-ed (MERGE) over the
-    incremental container subset.
+    Per-type facts are grouped by their fact-table name, so entity types that
+    share a table (e.g. ``StatsAggregator`` + ``PointValueAggregator`` →
+    ``stats_aggregator_fact``, or mixed event types → ``event_instance_fact``)
+    are persisted together with no clobber.  For each table:
+
+    - **Changed** definitions (only types listed in *changed_ids*) are
+      ``unionByName``-combined and rewritten atomically in a single
+      ``replace_by_ids`` over all containers.
+    - **Unchanged** definitions are ``upsert``-ed (MERGE) over the incremental
+      container subset.
 
     Parameters
     ----------
@@ -652,7 +660,7 @@ def persist_facts_incremental(
         Prepares a DataFrame for persistence (column projection + metadata).
     id_column : str
         Column ``replace_by_ids`` targets for changed definitions (e.g.
-        ``"channel_id"``).
+        ``"channel_id"``, ``"visual_id"``, ``"event_id"``).
     merge_keys : list[str] or Callable
         MERGE keys for unchanged upserts; a callable is resolved per entity type
         (mirrors ``Report._get_aggregation_merge_keys``).
@@ -661,28 +669,48 @@ def persist_facts_incremental(
     """
     from impulse_reporting.persist.report_storage import WriterFactory
 
-    factory = WriterFactory(sink)
+    # Group per-type facts by output table so shared-table types persist together.
+    changed_by_table: dict[str, list[DataFrame]] = {}
+    unchanged_by_table: dict[str, list[DataFrame]] = {}
+    changed_ids_by_table: dict[str, list[int]] = {}
     for type_name, data in dfs_by_type.items():
-        entity_type = type_enum[type_name]
+        table_name = type_enum[type_name].get_fact_table_name()
+        if isinstance(data, dict):
+            changed_df = data.get("changed")
+            unchanged_df = data.get("unchanged")
+            if changed_df is not None and type_name in changed_ids:
+                changed_by_table.setdefault(table_name, []).append(changed_df)
+                changed_ids_by_table.setdefault(table_name, []).extend(changed_ids[type_name])
+            if unchanged_df is not None:
+                unchanged_by_table.setdefault(table_name, []).append(unchanged_df)
+        elif data is not None:
+            unchanged_by_table.setdefault(table_name, []).append(data)
+
+    factory = WriterFactory(sink)
+    for table_name in set(changed_by_table) | set(unchanged_by_table):
+        entity_type = type_enum.get_any_for_fact_table(table_name)
         writer = factory.create_writer(entity_type)
         schema, uri = writer.extract_fact_schema_and_output_uri(entity_type)
         keys = _resolve_merge_keys(merge_keys, entity_type)
 
-        if isinstance(data, dict):
-            changed_df = data.get("changed")
-            unchanged_df = data.get("unchanged")
+        # Changed definitions: union then a single atomic replaceWhere.
+        changed_dfs = changed_by_table.get(table_name, [])
+        table_changed_ids = changed_ids_by_table.get(table_name, [])
+        if changed_dfs and table_changed_ids:
+            combined = reduce(
+                lambda a, b: a.unionByName(b),
+                (transform_fn(cdf, schema) for cdf in changed_dfs),
+            )
+            sink.replace_by_ids(
+                df=combined,
+                uri=uri,
+                id_column=id_column,
+                ids_to_replace=table_changed_ids,
+            )
 
-            if changed_df is not None and type_name in changed_ids:
-                sink.replace_by_ids(
-                    df=transform_fn(changed_df, schema),
-                    uri=uri,
-                    id_column=id_column,
-                    ids_to_replace=changed_ids[type_name],
-                )
-            if unchanged_df is not None:
-                sink.upsert(transform_fn(unchanged_df, schema), uri, keys)
-        elif data is not None:
-            sink.upsert(transform_fn(data, schema), uri, keys)
+        # Unchanged definitions: MERGE over the incremental subset.
+        for udf in unchanged_by_table.get(table_name, []):
+            sink.upsert(transform_fn(udf, schema), uri, keys)
 
 
 def persist_dimensions_incremental(

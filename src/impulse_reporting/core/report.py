@@ -1,6 +1,5 @@
 import json
 import zlib
-from functools import reduce
 from typing import Any
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
@@ -437,13 +436,7 @@ class Report:
         dict
             Dictionary mapping event type names to lists of events.
         """
-        event_types = {event_type.name: [] for event_type in EventType}
-        for event in self.events:
-            for event_type in event_types.keys():
-                if isinstance(event, EventType[event_type].value):
-                    event_types[event_type].append(event)
-                    break
-        return event_types
+        return group_selectables_by_type(self.events, EventType)
 
     def add_calculated_channel(self, channel):
         """
@@ -516,14 +509,8 @@ class Report:
         dict
             Dictionary mapping aggregation type names to lists of aggregations.
         """
-        agg_types = {agg_type.name: [] for agg_type in AggregationType}
-        for page in self.pages:
-            for aggregation in page.aggregations:
-                for agg_type in agg_types.keys():
-                    if isinstance(aggregation, AggregationType[agg_type].value):
-                        agg_types[agg_type].append(aggregation)
-                        break
-        return agg_types
+        aggregations = [agg for page in self.pages for agg in page.aggregations]
+        return group_selectables_by_type(aggregations, AggregationType)
 
     def _validate_aggregation_events(self) -> None:
         """
@@ -596,84 +583,16 @@ class Report:
         """
         storage_factory = WriterFactory(self.sink)
 
-        # aggregation fact tables — group by output table to handle shared tables
-        # (e.g. StatsAggregator and PointValueAggregator both write stats_aggregator_fact)
-        agg_fact_by_table = {}
-        for aggregation_type_str, aggregation_dfs in self.aggregation_dfs.items():
-            table_name = AggregationType[aggregation_type_str].get_fact_table_name()
-            agg_fact_by_table.setdefault(table_name, [])
+        # aggregation fact + dimension tables — grouped by output table so shared
+        # tables (e.g. StatsAggregator + PointValueAggregator → stats_aggregator_fact)
+        # are written together.
+        persist_facts_full(self.aggregation_dfs, AggregationType, storage_factory)
+        persist_dimensions_full(self.aggregation_metadata_dfs, AggregationType, storage_factory)
 
-            # Handle both dict format (from incremental mode) and DataFrame format
-            if isinstance(aggregation_dfs, dict):
-                if aggregation_dfs.get("changed") is not None:
-                    agg_fact_by_table[table_name].append(aggregation_dfs["changed"])
-                if aggregation_dfs.get("unchanged") is not None:
-                    agg_fact_by_table[table_name].append(aggregation_dfs["unchanged"])
-            else:
-                agg_fact_by_table[table_name].append(aggregation_dfs)
-
-        for table_name, agg_dfs_list in agg_fact_by_table.items():
-            if not agg_dfs_list:
-                continue
-            aggregation_type = AggregationType.get_any_for_fact_table(table_name)
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(aggregation_type)
-            writer.write(agg_dfs_list, schema=schema, uri=uri)
-
-        # aggregation dimension tables — group by output table to handle shared tables
-        agg_dim_by_table = {}
-        for (
-            aggregation_type_str,
-            aggregation_metadata_dfs,
-        ) in self.aggregation_metadata_dfs.items():
-            table_name = AggregationType[aggregation_type_str].get_dimension_table_name()
-            agg_dim_by_table.setdefault(table_name, [])
-            agg_dim_by_table[table_name].append(aggregation_metadata_dfs)
-
-        for table_name, agg_meta_dfs_list in agg_dim_by_table.items():
-            if not agg_meta_dfs_list:
-                continue
-            aggregation_type = AggregationType.get_any_for_dimension_table(table_name)
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(aggregation_type)
-            writer.write(agg_meta_dfs_list, schema=schema, uri=uri)
-
-        # event fact tables — group by output table to handle mixed event types
-        event_fact_by_table = {}
-        for event_type_str, event_dfs in self.event_dfs.items():
-            table_name = EventType[event_type_str].get_fact_table_name()
-            event_fact_by_table.setdefault(table_name, [])
-
-            if isinstance(event_dfs, dict):
-                if event_dfs.get("changed") is not None:
-                    event_fact_by_table[table_name].append(event_dfs["changed"])
-                if event_dfs.get("unchanged") is not None:
-                    event_fact_by_table[table_name].append(event_dfs["unchanged"])
-            else:
-                event_fact_by_table[table_name].append(event_dfs)
-
-        for table_name, event_dfs_list in event_fact_by_table.items():
-            if not event_dfs_list:
-                continue
-            event_type = EventType.get_any_for_fact_table(table_name)
-            writer = storage_factory.create_writer(event_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(event_type)
-            writer.write(event_dfs_list, schema=schema, uri=uri)
-
-        # event dimension tables — group by output table to handle mixed event types
-        event_dim_by_table = {}
-        for event_type_str, event_metadata_dfs in self.event_metadata_dfs.items():
-            table_name = EventType[event_type_str].get_dimension_table_name()
-            event_dim_by_table.setdefault(table_name, [])
-            event_dim_by_table[table_name].append(event_metadata_dfs)
-
-        for table_name, event_meta_dfs_list in event_dim_by_table.items():
-            if not event_meta_dfs_list:
-                continue
-            event_type = EventType.get_any_for_dimension_table(table_name)
-            writer = storage_factory.create_writer(event_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(event_type)
-            writer.write(event_meta_dfs_list, schema=schema, uri=uri)
+        # event fact + dimension tables — grouped by output table to handle mixed
+        # event types sharing a table.
+        persist_facts_full(self.event_dfs, EventType, storage_factory)
+        persist_dimensions_full(self.event_metadata_dfs, EventType, storage_factory)
 
         # calculated channel fact + dimension tables
         persist_facts_full(self.calculated_channel_dfs, ChannelType, storage_factory)
@@ -720,119 +639,48 @@ class Report:
         storage_factory = WriterFactory(self.sink)
         transformer = ReportEntityTransformer()
 
-        # Persist aggregation facts
-        for aggregation_type_str, agg_data in self.aggregation_dfs.items():
-            aggregation_type = AggregationType[aggregation_type_str]
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(aggregation_type)
-            merge_keys = self._get_aggregation_merge_keys(aggregation_type)
+        def _transform(df, schema):
+            return self._transform_for_persistence(df, schema, transformer)
 
-            if isinstance(agg_data, dict):
-                # Structured format: {'changed': df, 'unchanged': df}
-                changed_df = agg_data.get("changed")
-                unchanged_df = agg_data.get("unchanged")
+        # Persist aggregation facts + dimensions. StatsAggregator and
+        # PointValueAggregator share stats_aggregator_fact, so facts group by
+        # table; merge keys are per-type (via _get_aggregation_merge_keys).
+        persist_facts_incremental(
+            self.aggregation_dfs,
+            AggregationType,
+            self.sink,
+            _transform,
+            id_column="visual_id",
+            merge_keys=self._get_aggregation_merge_keys,
+            changed_ids=changed_aggregation_ids,
+        )
+        persist_dimensions_incremental(
+            self.aggregation_metadata_dfs,
+            AggregationType,
+            self.sink,
+            _transform,
+            merge_keys=["visual_id"],
+        )
 
-                # Changed definitions: replaceWhere (atomic)
-                if changed_df is not None and aggregation_type_str in changed_aggregation_ids:
-                    changed_ids = changed_aggregation_ids[aggregation_type_str]
-                    # Transform and enrich the DataFrame before persisting
-                    df_enriched = self._transform_for_persistence(changed_df, schema, transformer)
-                    self.sink.replace_by_ids(
-                        df=df_enriched,
-                        uri=uri,
-                        id_column="visual_id",
-                        ids_to_replace=changed_ids,
-                    )
-
-                # Unchanged definitions: MERGE
-                if unchanged_df is not None:
-                    df_enriched = self._transform_for_persistence(
-                        unchanged_df, schema, transformer
-                    )
-                    self.sink.upsert(df_enriched, uri, merge_keys)
-            else:
-                # Backward compatibility: single DataFrame - use MERGE
-                df_enriched = self._transform_for_persistence(agg_data, schema, transformer)
-                self.sink.upsert(df_enriched, uri, merge_keys)
-
-        # Persist aggregation dimensions (always upsert by visual_id)
-        for (
-            aggregation_type_str,
-            aggregation_metadata_df,
-        ) in self.aggregation_metadata_dfs.items():
-            aggregation_type = AggregationType[aggregation_type_str]
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(aggregation_type)
-            df_enriched = self._transform_for_persistence(
-                aggregation_metadata_df, schema, transformer
-            )
-            self.sink.upsert(df_enriched, uri, ["visual_id"])
-
-        # Persist event facts — group by output table to handle mixed event types
-        event_fact_changed_by_table: dict[str, list] = {}
-        event_fact_unchanged_by_table: dict[str, list] = {}
-        event_changed_ids_by_table: dict[str, list[int]] = {}
-        for event_type_str, event_data in self.event_dfs.items():
-            table_name = EventType[event_type_str].get_fact_table_name()
-
-            if isinstance(event_data, dict):
-                changed_df = event_data.get("changed")
-                unchanged_df = event_data.get("unchanged")
-
-                if changed_df is not None and event_type_str in changed_event_ids:
-                    event_fact_changed_by_table.setdefault(table_name, []).append(changed_df)
-                    event_changed_ids_by_table.setdefault(table_name, []).extend(
-                        changed_event_ids[event_type_str]
-                    )
-
-                if unchanged_df is not None:
-                    event_fact_unchanged_by_table.setdefault(table_name, []).append(unchanged_df)
-            else:
-                event_fact_unchanged_by_table.setdefault(table_name, []).append(event_data)
-
-        for table_name in set(
-            list(event_fact_changed_by_table.keys()) + list(event_fact_unchanged_by_table.keys())
-        ):
-            event_type = EventType.get_any_for_fact_table(table_name)
-            writer = storage_factory.create_writer(event_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(event_type)
-            merge_keys = ["container_id", "event_id", "event_instance_id"]
-
-            # Changed definitions: replaceWhere (atomic)
-            changed_dfs = event_fact_changed_by_table.get(table_name, [])
-            changed_ids = event_changed_ids_by_table.get(table_name, [])
-            if changed_dfs and changed_ids:
-                transformed = [
-                    self._transform_for_persistence(cdf, schema, transformer)
-                    for cdf in changed_dfs
-                ]
-                combined_df = reduce(lambda a, b: a.unionByName(b), transformed)
-                self.sink.replace_by_ids(
-                    df=combined_df,
-                    uri=uri,
-                    id_column="event_id",
-                    ids_to_replace=changed_ids,
-                )
-
-            # Unchanged definitions: MERGE
-            unchanged_dfs = event_fact_unchanged_by_table.get(table_name, [])
-            for udf in unchanged_dfs:
-                df_enriched = self._transform_for_persistence(udf, schema, transformer)
-                self.sink.upsert(df_enriched, uri, merge_keys)
-
-        # Persist event dimensions — group by output table to handle mixed event types
-        event_dim_by_table: dict[str, list] = {}
-        for event_type_str, event_metadata_df in self.event_metadata_dfs.items():
-            table_name = EventType[event_type_str].get_dimension_table_name()
-            event_dim_by_table.setdefault(table_name, []).append(event_metadata_df)
-
-        for table_name, event_meta_dfs_list in event_dim_by_table.items():
-            event_type = EventType.get_any_for_dimension_table(table_name)
-            writer = storage_factory.create_writer(event_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(event_type)
-            for mdf in event_meta_dfs_list:
-                df_enriched = self._transform_for_persistence(mdf, schema, transformer)
-                self.sink.upsert(df_enriched, uri, ["event_id"])
+        # Persist event facts + dimensions. Mixed event types share
+        # event_instance_fact, so facts group by table and union changed defs
+        # before a single replaceWhere.
+        persist_facts_incremental(
+            self.event_dfs,
+            EventType,
+            self.sink,
+            _transform,
+            id_column="event_id",
+            merge_keys=["container_id", "event_id", "event_instance_id"],
+            changed_ids=changed_event_ids,
+        )
+        persist_dimensions_incremental(
+            self.event_metadata_dfs,
+            EventType,
+            self.sink,
+            _transform,
+            merge_keys=["event_id"],
+        )
 
         # Persist measurement dimension (upsert by container_id)
         if self.container_dimension_df:
@@ -862,9 +710,6 @@ class Report:
             )
 
         # Persist calculated channel facts + dimensions
-        def _transform(df, schema):
-            return self._transform_for_persistence(df, schema, transformer)
-
         persist_facts_incremental(
             self.calculated_channel_dfs,
             ChannelType,
@@ -1089,25 +934,10 @@ class Report:
             ContainerEvent,
         )
 
-        # Merge event results into {type: {"changed": df, "unchanged": df}}
-        event_dfs = {}
-        all_event_types = set(list(changed_event_dfs.keys()) + list(unchanged_event_dfs.keys()))
-        for t in all_event_types:
-            event_dfs[t] = {
-                "changed": changed_event_dfs.get(t),
-                "unchanged": unchanged_event_dfs.get(t),
-            }
-
-        # Metadata: merge from all events (changed + unchanged)
-        event_metadata_dfs = {}
-        for event_name, events_list in events_by_type.items():
-            if not events_list:
-                continue
-            cls = EventType[event_name].value
-            event_metadata_dfs[event_name] = cls.determine_metadata_df(self.spark, events_list)
-
-        self.event_dfs = event_dfs
-        self.event_metadata_dfs = event_metadata_dfs
+        # Merge event results into {type: {"changed": df, "unchanged": df}} and
+        # build event dimensions from all (changed + unchanged) events.
+        self.event_dfs = merge_changed_unchanged(changed_event_dfs, unchanged_event_dfs)
+        self.event_metadata_dfs = build_metadata_dfs(events_by_type, EventType, self.spark)
 
         # Dispatch aggregations
         changed_agg_dfs = dispatch_aggregations(
@@ -1123,25 +953,11 @@ class Report:
             unchanged_solved_df,
         )
 
-        # Merge aggregation results
-        aggregation_dfs = {}
-        all_agg_types = set(list(changed_agg_dfs.keys()) + list(unchanged_agg_dfs.keys()))
-        for t in all_agg_types:
-            aggregation_dfs[t] = {
-                "changed": changed_agg_dfs.get(t),
-                "unchanged": unchanged_agg_dfs.get(t),
-            }
-
-        # Metadata: merge from all aggregations
-        aggregation_metadata_dfs = {}
-        for agg_name, agg_list in aggs_by_type.items():
-            if not agg_list:
-                continue
-            cls = AggregationType[agg_name].value
-            aggregation_metadata_dfs[agg_name] = cls.determine_metadata_df(self.spark, agg_list)
-
-        self.aggregation_dfs = aggregation_dfs
-        self.aggregation_metadata_dfs = aggregation_metadata_dfs
+        # Merge aggregation results and build aggregation dimensions from all.
+        self.aggregation_dfs = merge_changed_unchanged(changed_agg_dfs, unchanged_agg_dfs)
+        self.aggregation_metadata_dfs = build_metadata_dfs(
+            aggs_by_type, AggregationType, self.spark
+        )
 
         # Calculated channels: own narrow solve (not the wide solved_df).
         # Changed definitions recompute over all containers; unchanged ones over
