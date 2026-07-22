@@ -30,8 +30,8 @@ class CalculatedChannel:
     Structurally parallels :class:`BasicEvent` (holds an aliased expression,
     name-derived id, SHA-256 definition hash) but — like ``ContainerEvent`` — it
     drives its own solve via ``QueryBuilder.solve_calculated_channels`` rather than
-    riding the centralized wide ``solved_df``.  Accordingly :meth:`get_expression`
-    returns ``None`` so it is excluded from the batch solve.
+    riding the centralized wide ``solved_df``.  It is dispatched separately from
+    the batch solve (never passed to ``collect_solvable_expressions``).
 
     Parameters
     ----------
@@ -110,13 +110,11 @@ class CalculatedChannel:
         """Return the deterministic entity id (also the fact/dimension ``channel_id``)."""
         return self.expression.channel_id
 
-    def get_expression(self) -> TimeSeriesExpression | None:
-        """Return ``None`` — calculated channels drive their own narrow solve.
-
-        Returning ``None`` keeps this channel out of the centralized wide batch
-        solve (``collect_solvable_expressions``), mirroring ``ContainerEvent``.
+    def get_expression(self) -> TimeSeriesExpression:
         """
-        return None
+        Return the wrapped query-engine ``CalculatedChannel`` expression.
+        """
+        return self.expression
 
     def get_expression_str(self) -> str:
         """String form of the wrapped expression (identity + expr, no name/desc)."""

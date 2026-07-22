@@ -48,9 +48,12 @@ class TestConstruction:
         ch = _channel()
         assert 0 <= ch.get_id() <= 0x7FFFFFFF
 
-    def test_get_expression_is_none(self):
-        # Channels drive their own solve, so they are excluded from the batch solve.
-        assert _channel().get_expression() is None
+    def test_get_expression_returns_wrapped_expression(self):
+        # Returns the wrapped query-engine CalculatedChannel expression. Channels are
+        # dispatched via their own narrow solve, not collect_solvable_expressions, so
+        # this is never passed to the wide batch solve.
+        ch = _channel()
+        assert ch.get_expression() is ch.expression
 
     def test_get_expression_str_is_wrapped_expression_str(self):
         ch = _channel()
