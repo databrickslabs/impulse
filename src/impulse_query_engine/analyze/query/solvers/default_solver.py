@@ -35,6 +35,11 @@ class TimeSeriesCache(SeriesCache):
             ``col_map["conv"]`` is present, :meth:`load_blob` multiplies the
             loaded values by that per-channel factor.  All rows of a given
             ``(cid, ch)`` slice are expected to share the same factor.
+            The cache takes ownership of *pdf* and **sorts it in place**:
+            the caller's frame is reordered by ``(cid, ch, ts)`` and its
+            index reset.  The sort makes each channel's rows contiguous,
+            which the constructor exploits to build a ``(cid, ch)`` →
+            ``(start, stop)`` range index for :meth:`load_blob`.
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
@@ -48,9 +53,28 @@ class TimeSeriesCache(SeriesCache):
         self._conv_col = col_map.get("conv")
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
-        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
-        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
-        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
+        # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
+        meta_cols = [
+            c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
+        ]
+        meta_source = pdf
+        if "selector_ids" in pdf.columns:
+            meta_source = pdf.loc[pdf["selector_ids"].notna()]
+        first_rows = ~meta_source.duplicated(subset=[self._cid_col, self._ch_col])
+        self.mdf = meta_source.loc[first_rows, meta_cols].reset_index(drop=True)
+        pdf.sort_values(
+            [self._cid_col, self._ch_col, self._ts_col], inplace=True, ignore_index=True
+        )
+        self.pdf = pdf
+
+        # Each (cid, ch) group is a contiguous block after the sort, so its
+        # row positions collapse to a (start, stop) range
+        self._ranges = {
+            key: (int(positions[0]), int(positions[-1]) + 1)
+            for key, positions in pdf.groupby(
+                [self._cid_col, self._ch_col], sort=False
+            ).indices.items()
+        }
 
     def resolve(self, selection):
         """
@@ -100,7 +124,8 @@ class TimeSeriesCache(SeriesCache):
         SampleSeries
             The loaded sample series object.
         """
-        s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
+        lo, hi = self._ranges.get((mid, cid), (0, 0))
+        s = self.pdf.iloc[lo:hi]
         values = s[self._val_col]
         if self._has_conversion and len(s) > 0 and uses_alias:
             factor = s[self._conv_col].iloc[0]
@@ -895,9 +920,9 @@ class DefaultSolver(QuerySolver):
         pd.DataFrame
             DataFrame containing results for each selection.
         """
-        cache = TimeSeriesCache(pdf, col_map=col_map)
         cid_col = col_map["cid"]
         result = {cid_col: [pdf[cid_col].iloc[0]]}
+        cache = TimeSeriesCache(pdf, col_map=col_map)
         for s in selections:
             res = s.build(cache)
             if hasattr(res, "serialize") and callable(res.serialize):
@@ -990,6 +1015,17 @@ class DefaultSolver(QuerySolver):
             # Encode the raw samples into intervals (RLE or interval) for the solving step.
             q = self.channel_encoder.prepare_channels_df(q)
 
+        # Ship only the columns the UDF consumes; any extra physical columns
+        # on the channels table would otherwise cross Arrow into every group's
+        # pandas frame.
+        q = q.select(
+            self.config.container_id_col,
+            self.config.channel_id_col,
+            self.config.tstart_col,
+            self.config.tend_col,
+            self.config.value_col,
+        )
+
         joined_df = q.join(
             F.broadcast(channels_df),
             on=[self.config.container_id_col, self.config.channel_id_col],
@@ -1001,11 +1037,24 @@ class DefaultSolver(QuerySolver):
         """Run *solve_udf* per container, or return an empty frame when none match."""
         if container_count == 0:
             return self.spark.createDataFrame([], schema=schema)
-        return (
-            joined_df.repartition(container_count, self.config.container_id_col)
-            .groupBy(self.config.container_id_col)
-            .apply(solve_udf)
+
+        # selector_ids is per-channel metadata; keep it on a single row per
+        # (container_id, channel_id) so the per-row array objects don't inflate
+        # every group's pandas frame.  ``selector_ids`` is identical across a
+        # channel's rows and the cache selects the surviving row by notna (not
+        # by position), so the order is arbitrary — order by a constant to
+        # avoid an unnecessary per-channel sort (row_number just requires
+        # *some* ordering).
+        df = joined_df.repartition(container_count, self.config.container_id_col)
+        w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
+            F.lit(1)
         )
+        df = (
+            df.withColumn("_rn", F.row_number().over(w))
+            .withColumn("selector_ids", F.when(F.col("_rn") == 1, F.col("selector_ids")))
+            .drop("_rn")
+        )
+        return df.groupBy(self.config.container_id_col).apply(solve_udf)
 
     # ------------------------------------------------------------------
     # Calculated channels (narrow output)
