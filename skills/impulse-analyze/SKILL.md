@@ -92,12 +92,16 @@ pdf = db.query.select(eng_rpm.mean().alias("rpm_mean")).toPandas(spark, solver=D
 `DefaultSolver(spark)` reads your silver layer. Constructor:
 
 ```python
-DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False)
+DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False, raw_encoder=RawEncoder.RLE)
 ```
 
 - `is_raw_data=True` when `channels` stores raw `(timestamp, value)` samples (default `False` expects
   RLE `[tstart, tend)` intervals). This is the ad-hoc equivalent of `query_engine.data_type` in a report
   config.
+- `raw_encoder` (`RawEncoder.RLE` default, or `RawEncoder.INTERVAL`) chooses how raw points become
+  intervals — RLE collapses equal-valued runs, INTERVAL keeps every sample. Only used when
+  `is_raw_data=True`; the ad-hoc equivalent of `query_engine.raw_encoder`. Import from
+  `impulse_query_engine.analyze.query.solvers.solver_config`.
 - `drop_implausible_data=True` drops rows where `is_plausible = false` (requires `is_raw_data=True`).
 - `config` takes a `SolverConfig` for column-name remapping / project scoping — the same object
   described under `solver_config` in `impulse-config`.

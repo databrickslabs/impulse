@@ -172,8 +172,9 @@ Every selection must be a :class:`CalculatedChannel`.  This runs the same
 metadata filter pipeline as :meth:`solve` (resolving the input channels
 each calculated channel depends on), then evaluates each calculated
 channel per container and emits rows in the silver ``channel_data`` shape
-— ``container_id, channel_id, tstart, tend, value`` — plus one string
-column per identity kwarg shared by the selections.
+— ``container_id, channel_id, tstart, tend, value`` — plus a single
+``identity`` ``MapType(string, string)`` column holding each channel's
+identity dict.
 
 **Arguments**:
 
@@ -186,14 +187,13 @@ containers matching the query filters are processed.
 
 **Raises**:
 
-- `ValueError`: If any selection is not a ``CalculatedChannel``, if the selections
-declare inconsistent identity-key sets, or if a wrapped expression
-does not evaluate to a ``SampleSeries``.
+- `ValueError`: If any selection is not a ``CalculatedChannel``, or if a wrapped
+expression does not evaluate to a ``SampleSeries``.
 
 **Returns**:
 
 `pyspark.sql.DataFrame`: Narrow DataFrame ``[container_id, channel_id, tstart, tend, value,
-<identity columns…>]``.
+identity]``.
 
 #### toPandas
 

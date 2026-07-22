@@ -27,10 +27,11 @@ my_report.add_calculated_channel(my_channel)
 
 ## CalculatedChannel
 
-A `CalculatedChannel` couples a TSAL expression with an **identity** — the set of identifier columns
-(`channel_name`, `data_key`) emitted on every output row. When the report is solved, the wrapped
+A `CalculatedChannel` couples a TSAL expression with an **identity** — an arbitrary key-value dict that
+identifies the channel and seeds its deterministic `channel_id`. When the report is solved, the wrapped
 expression is evaluated per measurement container and exploded into narrow rows matching the silver
-`channels` shape.
+`channels` shape. The identity itself is stored once on the channel dimension (as a `map`), not repeated
+on every fact row.
 
 ```python
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
@@ -49,7 +50,7 @@ speed_kmh = CalculatedChannel(
 |--------------|------------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `name`       | `str`                  | Yes      | Human-readable channel name, stored in the channel dimension table.                                                                                                     |
 | `expr`       | `TimeSeriesExpression` | Yes      | TSAL expression defining the derived signal. Must evaluate to `SampleSeries`; validated at construction (raises `ValueError` otherwise).                                 |
-| `identity`   | `dict[str, str]`       | Yes      | Output identifier columns. Must contain **exactly** the keys `{"channel_name", "data_key"}`. Values are emitted as literals on every fact row and seed the `channel_id`. |
+| `identity`   | `dict[str, str]`       | Yes      | Channel identity. Any **non-empty** dict (keys are arbitrary, e.g. `channel_name` / `data_key`). Seeds the deterministic `channel_id` and is stored as a `map` on `calculated_channel_dimension` (joined to the fact via `channel_id`); not repeated on fact rows. |
 | `desc`       | `str`                  | No       | Human-readable description stored in the channel dimension table.                                                                                                       |
 | `attributes` | `Mapping[str, str]`    | No       | Free-form key-value metadata stored in the channel dimension table. Values are coerced to strings.                                                                       |
 
@@ -57,7 +58,7 @@ speed_kmh = CalculatedChannel(
 
 1. The `expr` is evaluated per measurement container by the solver, yielding a `SampleSeries` for each container.
 2. Calculated channels take their **own narrow solve path** (`QueryBuilder.solve_calculated_channels`), distinct from the wide batch solve used by events and aggregations. Multi-channel expressions (e.g. `rpm + speed`) are time-base synchronized automatically; emitted intervals are the intersection.
-3. Each series is exploded into one row per sample interval: `container_id, channel_id, tstart, tend, value`, with the `identity` values attached as columns.
+3. Each series is exploded into one row per sample interval: `container_id, channel_id, tstart, tend, value`. The `identity` is **not** on the fact — it lives on the dimension, joined via `channel_id`.
 4. The `channel_id` is a deterministic hash of the sorted `identity` — the same value appears in both the fact and dimension tables, so they join directly.
 5. The sample rows are written to the `calculated_channel_fact` table; the channel definition (name, description, expression, identity) is written to the `calculated_channel_dimension` table.
 

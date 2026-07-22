@@ -113,10 +113,11 @@ with `DefaultSolver` and `data_type = "RLE"`.
 The standard `solve()` produces a **wide** result — one row per container, one column per selection.
 `DefaultSolver.solve_calculated_channels` is a parallel entry point that produces a **narrow**,
 silver-shaped result instead: it explodes each selection's `SampleSeries` into one row per sample
-interval, emitting `container_id, channel_id, tstart, tend, value` plus the identity columns.
+interval, emitting `container_id, channel_id, tstart, tend, value` plus a single self-describing
+`identity` `map` column.
 
-Every selection must be a [`CalculatedChannel`](../report/channel.md) (all sharing the same identity
-key set), and each wrapped expression must evaluate to a `SampleSeries`. The stage reuses the same
+Every selection must be a [`CalculatedChannel`](../report/channel.md) (identity keys are arbitrary and
+need not match across selections), and each wrapped expression must evaluate to a `SampleSeries`. The stage reuses the same
 metadata filter pipeline as `solve()` to resolve the input channels, then runs a grouped-map UDF per
 container. Only `DefaultSolver` implements it — the base `QuerySolver` raises `NotImplementedError`.
 

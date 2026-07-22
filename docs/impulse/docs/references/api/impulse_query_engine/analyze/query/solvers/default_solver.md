@@ -297,11 +297,13 @@ def solve_calculated_channels(query, channels_df, selections) -> DataFrame
 
 Solve calculated channels by grouping channels and exploding each result.
 
-Structurally parallels :meth:`solve` — same unit-conversion prelude,
-same channel-data read and ``[container_id, channel_id]`` join — but the
-grouped-map UDF emits narrow silver-shaped rows (many per container)
-instead of one wide row.  Output columns are
-``[container_id, channel_id, tstart, tend, value, <identity…>]``.
+Structurally parallels :meth:`solve` — sharing the
+:meth:`_prepare_channels_join` prelude and :meth:`_apply_grouped_map`
+tail — but the grouped-map UDF emits narrow silver-shaped rows (many per
+container) instead of one wide row.  Output columns are
+``[container_id, channel_id, tstart, tend, value, identity]`` where
+``identity`` is a ``MapType(string, string)`` holding the channel's
+identity dict.
 
 **Arguments**:
 

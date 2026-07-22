@@ -224,5 +224,5 @@ instead of one wide row.  Solvers that support calculated channels
 **Returns**:
 
 `pyspark.sql.DataFrame`: Narrow ``[container_id, channel_id, tstart, tend, value,
-<identity…>]`` DataFrame.
+identity]`` DataFrame (``identity`` is a ``MapType(string, string)``).
 

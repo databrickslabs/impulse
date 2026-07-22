@@ -41,9 +41,10 @@ class CalculatedChannel:
     expr : TimeSeriesExpression
         The wrapped expression; must evaluate to a ``SampleSeries``.
     identity : Mapping[str, str]
-        Output identity.  Any non-empty set of keys; the whole dict is emitted
-        per fact row in a single ``identity`` ``MapType(string, string)`` column
-        and seeds the deterministic ``channel_id``.
+        Channel identity.  Any non-empty set of keys; seeds the deterministic
+        ``channel_id`` and is stored once on ``calculated_channel_dimension`` as a
+        ``MapType(string, string)`` column (joined to the fact via ``channel_id``,
+        not repeated on fact rows).
     desc : str, optional
         Human-readable description (stored on the dimension row, excluded from the
         definition hash).
@@ -134,8 +135,8 @@ class CalculatedChannel:
     def as_dict(self) -> dict:
         """Dictionary representation of the dimension metadata.
 
-        ``identity`` is a plain dict, persisted as a ``MapType(string, string)``
-        column that mirrors the fact identity (no fixed per-key columns).
+        ``identity`` is a plain dict, persisted on the dimension as a
+        ``MapType(string, string)`` column (no fixed per-key columns).
         """
         return {
             "channel_id": self.get_id(),
@@ -201,9 +202,9 @@ class CalculatedChannel:
     def determine_metadata_df(cls, spark: SparkSession, channels: list[CalculatedChannel]):
         """Create the dimension DataFrame for the given channels.
 
-        ``identity`` is a ``MapType(string, string)`` (same self-describing
-        representation as the fact table), which ``createDataFrame`` builds
-        directly from the plain dict returned by :meth:`as_dict`.
+        ``identity`` is a self-describing ``MapType(string, string)`` column,
+        which ``createDataFrame`` builds directly from the plain dict returned by
+        :meth:`as_dict`.
         """
         rows = [channel.as_spark_row() for channel in channels]
         return spark.createDataFrame(rows, schema=CALCULATED_CHANNEL_DIMENSION_SCHEMA)

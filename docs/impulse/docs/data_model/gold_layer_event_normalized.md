@@ -169,7 +169,6 @@ calculated_channel_dimension {
     long channel_id
     int report_id
     string channel_type
-    string channel_name
     string channel_description
     string channel_expression
     map identity
@@ -184,8 +183,6 @@ calculated_channel_fact {
     long tstart
     long tend
     double value
-    string channel_name
-    string data_key
     timestamp _created_at
 }
 
@@ -224,7 +221,7 @@ guaranteed.
 | `{prefix}_histogram2d_fact`      | `container_id`, `visual_id`, `event_id`, `x_bin_id`, `y_bin_id`                        | 2D histogram bin values per container.                       |
 | `{prefix}_stats_aggregator_fact` | `container_id`, `visual_id`, `event_instance_id`, `channel_name`, `aggregation_label`  | Statistics values per signal, event instance, and container. |
 | `{prefix}_event_instance_fact`   | `container_id`, `event_id`, `event_instance_id`                                        | Materialized event occurrences with start/end timestamps.    |
-| `{prefix}_calculated_channel_fact` | `container_id`, `channel_id`, `tstart`                                               | Materialized derived signal — one row per sample interval, in the silver `channels` shape (`tstart`, `tend`, `value`) plus identity columns. |
+| `{prefix}_calculated_channel_fact` | `container_id`, `channel_id`, `tstart`                                               | Materialized derived signal — one row per sample interval, in the silver `channels` shape (`tstart`, `tend`, `value`). The channel's identity lives on `calculated_channel_dimension`, joined via `channel_id`. |
 
 ---
 

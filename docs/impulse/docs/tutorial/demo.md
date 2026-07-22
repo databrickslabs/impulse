@@ -277,8 +277,9 @@ my_report.add_calculated_channel(avg_temp_channel)
 ```
 
 - The wrapped expression must evaluate to a `SampleSeries` (a signal), not `Intervals`.
-- `identity` must contain exactly `channel_name` and `data_key`; these become columns on every output row
-  and seed the deterministic `channel_id`.
+- `identity` is any non-empty dict (keys are arbitrary, e.g. `channel_name` / `data_key`); it seeds the
+  deterministic `channel_id` and is stored on `calculated_channel_dimension` (as a `map`, joined to the
+  fact via `channel_id`) — not repeated on every fact row.
 - Registration mirrors events: `add_calculated_channel()` before `determine_report()`.
 
 ---

@@ -28,12 +28,25 @@ returns ``None`` so it is excluded from the batch solve.
 - `name` (`str`): Name of the calculated channel (used as the entity id seed's fallback and
 stored on the dimension row).
 - `expr` (`TimeSeriesExpression`): The wrapped expression; must evaluate to a ``SampleSeries``.
-- `identity` (`Mapping[str, str]`): Output identity columns.  Must contain exactly the keys
-``{"channel_name", "data_key"}``; the values are emitted as literals on
-every fact row and seed the deterministic ``channel_id``.
+- `identity` (`Mapping[str, str]`): Channel identity.  Any non-empty set of keys; seeds the deterministic
+``channel_id`` and is stored once on ``calculated_channel_dimension`` as a
+``MapType(string, string)`` column (joined to the fact via ``channel_id``,
+not repeated on fact rows).
 - `desc` (`str`): Human-readable description (stored on the dimension row, excluded from the
 definition hash).
 - `attributes` (`Mapping[str, str]`): Key-value metadata stored on the dimension row.
+
+#### canonical\_identity
+
+```python
+def canonical_identity() -> str
+```
+
+Public, order-independent identity key.
+
+Two channels with the same ``identity`` (regardless of key insertion
+order) share this value and therefore the same ``channel_id``.  Used by
+
 
 #### get\_name
 
@@ -100,10 +113,6 @@ def determine_definition_hash() -> int
 
 Hash of the computation-affecting definition (expression + identity).
 
-Uses the wrapped-expression string, which encodes identity and the
-expression but not name/description/report_id/attributes.  SHA-256, first
-8 bytes as a signed int (fits ``LongType``) — same technique as events.
-
 
 #### as\_dict
 
@@ -111,7 +120,10 @@ expression but not name/description/report_id/attributes.  SHA-256, first
 def as_dict() -> dict
 ```
 
-Dictionary representation matching ``CALCULATED_CHANNEL_DIMENSION_SCHEMA``.
+Dictionary representation of the dimension metadata.
+
+``identity`` is a plain dict, persisted on the dimension as a
+``MapType(string, string)`` column (no fixed per-key columns).
 
 
 #### as\_spark\_row
@@ -146,8 +158,8 @@ needed.
 
 **Arguments**:
 
-- `spark` (`SparkSession`): Spark session (unused directly; kept for interface parity).
-- `channels` (`list of CalculatedChannel`): Channels to solve; all share the same identity key set.
+- `spark` (`SparkSession`): Spark session, forwarded to ``QueryBuilder.solve_calculated_channels``.
+- `channels` (`list of CalculatedChannel`): Channels to solve; identity keys may differ across channels.
 - `query` (`QueryBuilder`): Query builder used to select and solve the channels.
 - `solver` (`QuerySolver`): Solver implementing ``solve_calculated_channels`` (a ``DefaultSolver``).
 - `pre_filtered_containers_df` (`DataFrame`): Incremental container subset; ``None`` processes all containers.
@@ -164,5 +176,8 @@ def determine_metadata_df(cls, spark: SparkSession,
 ```
 
 Create the dimension DataFrame for the given channels.
+
+``identity`` is a self-describing ``MapType(string, string)`` column,
+which ``createDataFrame`` builds directly from the plain dict returned by
 
 
