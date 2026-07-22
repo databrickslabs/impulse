@@ -1103,9 +1103,9 @@ class DefaultSolver(QuerySolver):
             for tstart, tend, value in zip(tstarts, tends, values, strict=False):
                 cols[cid_col].append(container_id)
                 cols[ch_col].append(cc.channel_id)
-                cols["tstart"].append(int(tstart))
-                cols["tend"].append(int(tend))
-                cols["value"].append(float(value))
+                cols["tstart"].append(tstart)
+                cols["tend"].append(tend)
+                cols["value"].append(value)
 
         return pd.DataFrame(cols)
 

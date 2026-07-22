@@ -109,15 +109,15 @@ class QuerySolver(ABC):
         appended by :meth:`solve_calculated_channels` after the UDF runs, so it
         never crosses the Arrow boundary.
 
-        The ``container_id`` and ``channel_id`` field types are derived from
-        *channels* (the column-mapped channels DataFrame) so they match the
-        physical source types instead of being hardcoded.
+        The ``container_id``, ``channel_id``, ``tstart``, and ``tend`` field types
+        are derived from *channels* (the column-mapped channels DataFrame) so they
+        match the physical source types.
 
         Parameters
         ----------
         channels : pyspark.sql.DataFrame
             The column-mapped channels DataFrame whose ``container_id`` /
-            ``channel_id`` column types are authoritative.
+            ``channel_id`` / ``tstart`` / ``tend`` column types are authoritative.
 
         Returns
         -------
@@ -134,8 +134,14 @@ class QuerySolver(ABC):
                     self.config.channel_id_col,
                     channels.schema[self.config.channel_id_col].dataType,
                 ),
-                T.StructField(self.config.tstart_col, T.LongType()),
-                T.StructField(self.config.tend_col, T.LongType()),
+                T.StructField(
+                    self.config.tstart_col,
+                    channels.schema[self.config.tstart_col].dataType,
+                ),
+                T.StructField(
+                    self.config.tend_col,
+                    channels.schema[self.config.tend_col].dataType,
+                ),
                 T.StructField(self.config.value_col, T.DoubleType()),
             ]
         )

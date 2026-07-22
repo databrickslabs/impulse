@@ -85,6 +85,24 @@ def _recast_container_id(db: MeasurementDB, cid_type: T.DataType) -> Measurement
     return MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=db.ws)
 
 
+def _recast_channel_time(
+    db: MeasurementDB, ts_type: T.DataType, offset: float = 0.0
+) -> MeasurementDB:
+    """Clone a ``for_debug`` db, casting ``tstart``/``tend`` on the channels table.
+
+    ``offset`` is added after the cast — use a fractional value (e.g. ``0.5``) to
+    inject sub-unit precision that a long output would truncate away.
+    """
+    tables = {}
+    for name, df in db.config.debug_tables.items():
+        if "tstart" in df.columns and "tend" in df.columns:
+            df = df.withColumn("tstart", F.col("tstart").cast(ts_type) + F.lit(offset)).withColumn(
+                "tend", F.col("tend").cast(ts_type) + F.lit(offset)
+            )
+        tables[name] = df
+    return MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=db.ws)
+
+
 class TestCalculatedChannelValues:
     def test_scaling_produces_real_values(self, spark, basic_narrow_db):
         q = basic_narrow_db.query
@@ -210,6 +228,36 @@ class TestOutputSchema:
         # channel_id type follows the source channels table (IntegerType here).
         assert result.schema["channel_id"].dataType == T.IntegerType()
         assert result.count() > 0
+
+    def test_double_tstart_tend_preserved(self, spark, basic_narrow_db):
+        # A silver channels table with double tstart/tend (e.g. relative seconds)
+        # must be preserved on the output, not truncated to long.
+        db = _recast_channel_time(basic_narrow_db, T.DoubleType())
+        q = db.query
+        cc = CalculatedChannel(
+            q.channel(channel_name="Engine RPM") * 2, {"channel_name": "rpm_x2"}
+        )
+        result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+        assert result.schema["tstart"].dataType == T.DoubleType()
+        assert result.schema["tend"].dataType == T.DoubleType()
+        assert result.count() > 0
+
+    def test_fractional_tstart_survives(self, spark, basic_narrow_db):
+        # Inject a fractional offset into double tstart/tend and confirm it
+        # round-trips end to end (a long output would truncate the .5 to 0).
+        db = _recast_channel_time(basic_narrow_db, T.DoubleType(), offset=0.5)
+        q = db.query
+        cc = CalculatedChannel(
+            q.channel(channel_name="Engine RPM") * 2, {"channel_name": "rpm_x2"}
+        )
+        result = q.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+        assert result.schema["tstart"].dataType == T.DoubleType()
+        # Every tstart keeps its fractional part (== .5), proving no truncation.
+        fracs = {
+            round(r["frac"], 6)
+            for r in result.select((F.col("tstart") % 1).alias("frac")).distinct().collect()
+        }
+        assert fracs == {0.5}
 
 
 class TestChannelId:
@@ -358,20 +406,18 @@ class TestSolveCalculatedChannelsUdf:
         assert list(result["tend"]) == [100, 200]
         assert list(result["value"]) == [3.0, 4.0]
 
-    def test_tstart_tend_cast_to_int_value_to_float(self):
-        # Float tstart/tend arrays (as SampleSeries stores them) are truncated to
-        # integer columns; the value column stays floating point.
-        cc = _MockCalcChannel(channel_id=7, arrays=([0.5], [100.9], [5]))
+    def test_udf_preserves_native_values_no_truncation(self):
+        # The UDF no longer casts: it emits the native SampleSeries values, and the
+        # grouped-map output schema (source-derived) drives the final coercion.
+        # So fractional tstart/tend survive here — truncation, if any, happens at
+        # the Spark schema boundary, not in the UDF.
+        cc = _MockCalcChannel(channel_id=7, arrays=([0.5], [100.9], [5.0]))
         result = DefaultSolver._solve_calculated_channels_udf(
             _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
         )
-        # int(0.5) == 0, int(100.9) == 100 → truncation happened.
-        assert result["tstart"].iloc[0] == 0
-        assert result["tend"].iloc[0] == 100
-        assert pd.api.types.is_integer_dtype(result["tstart"])
-        assert pd.api.types.is_integer_dtype(result["tend"])
+        assert result["tstart"].iloc[0] == 0.5
+        assert result["tend"].iloc[0] == 100.9
         assert result["value"].iloc[0] == 5.0
-        assert pd.api.types.is_float_dtype(result["value"])
 
     def test_empty_arrays_produce_zero_rows_full_width(self):
         cc = _MockCalcChannel(channel_id=10, arrays=([], [], []))
