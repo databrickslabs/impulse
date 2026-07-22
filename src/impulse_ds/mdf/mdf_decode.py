@@ -3,6 +3,9 @@ Decode raw MDF4 record bytes into float64 value / timestamp arrays: data-type
 interpretation, CC (channel conversion) scaling, and invalidation-bit handling.
 Vectorised with numpy; no file I/O.
 """
+import struct
+from typing import Dict, Optional, Tuple, Union
+
 import numpy as np
 
 
@@ -215,6 +218,111 @@ def apply_cc_conversion(values, cc_type, cc_params):
         )
         return result
     return values
+
+
+_RECORD_ID_FMT = {1: "<B", 2: "<H", 4: "<I", 8: "<Q"}
+
+
+def storage_record_id(record_id: int, rec_id_size: int) -> int:
+    """Return the record ID as stored in the leading bytes of each unsorted record."""
+    if rec_id_size <= 0:
+        return 0
+    if rec_id_size >= 8:
+        return record_id
+    mask = (1 << (8 * rec_id_size)) - 1
+    return record_id & mask
+
+
+def read_record_id(buf: Union[bytes, memoryview], offset: int, rec_id_size: int) -> int:
+    """Read a little-endian unsigned record ID from ``buf`` at ``offset``."""
+    if rec_id_size <= 0:
+        return 0
+    fmt = _RECORD_ID_FMT.get(rec_id_size)
+    if fmt is None:
+        raise ValueError(f"Unsupported rec_id_size: {rec_id_size}")
+    return struct.unpack_from(fmt, buf, offset)[0]
+
+
+def filter_unsorted_records(
+    raw_data: bytes,
+    rec_id_size: int,
+    target_record_id: int,
+    cg_record_sizes: Dict[int, int],
+) -> bytes:
+    """Extract records belonging to ``target_record_id`` from an interleaved block."""
+    if rec_id_size <= 0:
+        return raw_data
+    target_record_id = storage_record_id(target_record_id, rec_id_size)
+    out = bytearray()
+    pos = 0
+    n = len(raw_data)
+    while pos < n:
+        if pos + rec_id_size > n:
+            break
+        rid = read_record_id(raw_data, pos, rec_id_size)
+        rec_size = cg_record_sizes.get(rid)
+        if rec_size is None:
+            break
+        if pos + rec_size > n:
+            break
+        if rid == target_record_id:
+            out.extend(raw_data[pos:pos + rec_size])
+        pos += rec_size
+    return bytes(out)
+
+
+def prepare_cg_records(
+    raw_data: bytes,
+    *,
+    record_size: int,
+    rec_id_size: int = 0,
+    record_id: int = 0,
+    cg_record_sizes: Optional[Dict[int, int]] = None,
+    row_start: Optional[int] = None,
+    row_end: Optional[int] = None,
+) -> Tuple[bytes, int]:
+    """Filter unsorted interleaved records and optionally slice by logical row range.
+
+    Returns ``(prepared_bytes, index_offset)`` where ``index_offset`` is the
+    logical sample index of the first record (for virtual masters).
+    """
+    if rec_id_size > 0:
+        if not cg_record_sizes:
+            return b"", 0
+        # JSON partition specs stringify dict keys; normalize back to int.
+        cg_sizes = {int(k): v for k, v in cg_record_sizes.items()}
+        raw_data = filter_unsorted_records(
+            raw_data, rec_id_size, record_id, cg_sizes,
+        )
+
+    if record_size <= 0:
+        return b"", 0
+
+    actual = len(raw_data) // record_size
+    if actual == 0:
+        return b"", 0
+
+    lo = 0 if row_start is None else max(0, min(row_start, actual))
+    hi = actual if row_end is None else max(lo, min(row_end, actual))
+    if hi <= lo:
+        return b"", lo
+
+    start = lo * record_size
+    end = hi * record_size
+    return raw_data[start:end], lo
+
+
+def unsorted_fields_from_ctx(dg_block_addr: int, record_id: int, unsorted_dg_ctx: dict) -> dict:
+    """Build unsorted read kwargs from scan-time DG context and channel record_id."""
+    ctx = unsorted_dg_ctx.get(dg_block_addr) if unsorted_dg_ctx else None
+    if not ctx or ctx.get("rec_id_size", 0) == 0:
+        return {"rec_id_size": 0, "record_id": 0, "cg_record_sizes": None}
+    rec_id_size = ctx["rec_id_size"]
+    return {
+        "rec_id_size": rec_id_size,
+        "record_id": storage_record_id(record_id, rec_id_size),
+        "cg_record_sizes": ctx["cg_sizes"],
+    }
 
 
 def extract_signal(raw_data, record_size, ch_spec):

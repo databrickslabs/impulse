@@ -34,6 +34,12 @@ coverage:
 	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=html
 	open htmlcov/index.html
 
+mdf-coverage:
+	$(UV_RUN) coverage run -m pytest tests/impulse_ds/mdf -q --no-cov
+	$(UV_RUN) coverage report --include='src/impulse_ds/mdf/*' \
+	  --omit='src/impulse_ds/mdf/converter.py' \
+	  --fail-under=95 --precision=1
+
 build:
 	uv build --require-hashes --build-constraints=.build-constraints.txt
 

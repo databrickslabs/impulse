@@ -289,7 +289,8 @@ def dt_data_extent(f, data_block_addr):
 
 
 def _read_block_chunks(f, data_block_addr, record_size, sample_count,
-                       row_start, row_end, prof, log):
+                       row_start, row_end, prof, log,
+                       rec_id_size=0, record_id=0, cg_record_sizes=None):
     """Yield (raw_bytes, start_record) for records [row_start, row_end) of one
     data block, using the SAME read strategy as the signals core: stream an
     uncompressed ##DT in record-aligned chunks, read only the overlapping
@@ -297,8 +298,27 @@ def _read_block_chunks(f, data_block_addr, record_size, sample_count,
     slice. row_start/row_end None => the whole block. Shared by the master decoder
     so it inherits the streaming/coalescing behaviour without duplicating it."""
     import time
+    from .mdf_decode import prepare_cg_records
+
     _now = time.perf_counter_ns
     _CHUNK_BYTES = 256 * 1024 * 1024
+
+    if rec_id_size > 0:
+        t0 = _now()
+        raw = read_raw_data(f, data_block_addr, record_size, sample_count)
+        prof["read"] += _now() - t0
+        raw, start = prepare_cg_records(
+            raw,
+            record_size=record_size,
+            rec_id_size=rec_id_size,
+            record_id=record_id,
+            cg_record_sizes=cg_record_sizes,
+            row_start=row_start,
+            row_end=row_end,
+        )
+        if record_size and len(raw) // record_size:
+            yield raw, start
+        return
 
     try:
         extent = dt_data_extent(f, data_block_addr)

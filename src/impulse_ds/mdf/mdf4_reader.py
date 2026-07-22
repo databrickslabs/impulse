@@ -127,6 +127,7 @@ class MDF4Reader:
         self.file_path = file_path
         self._file_bytes = file_bytes
         self._data_groups: Optional[List[DataGroupInfo]] = None
+        self._unsorted_dg_ctx: Dict[int, dict] = {}
         self._text_cache: Dict[int, str] = {}  # address -> TX/MD text (immutable per file)
 
     def _open(self):
@@ -293,6 +294,7 @@ class MDF4Reader:
         reading actual signal data. Returns list of ChannelInfo objects.
         """
         channels = []
+        self._unsorted_dg_ctx = {}
         with self._open() as f:
             # Verify MDF4 signature
             f.seek(0)
@@ -339,6 +341,7 @@ class MDF4Reader:
                 dg_rec_id_size = struct.unpack("<B", f.read(1))[0]
                 # skip remaining 7 reserved bytes
                 f.read(7)
+                dg_cg_sizes: Dict[int, int] = {}
 
                 # Traverse CG linked list
                 cg_addr = first_cg_addr
@@ -366,6 +369,9 @@ class MDF4Reader:
                     cg_invalidation_bytes = struct.unpack("<I", f.read(4))[0]
 
                     record_size = dg_rec_id_size + cg_data_bytes + cg_invalidation_bytes
+                    if dg_rec_id_size > 0:
+                        from .mdf_decode import storage_record_id
+                        dg_cg_sizes[storage_record_id(cg_record_id, dg_rec_id_size)] = record_size
 
                     # Traverse CN linked list
                     channel_idx = 0
@@ -465,6 +471,12 @@ class MDF4Reader:
                     cg_addr = next_cg_addr
                     group_idx += 1
 
+                if dg_rec_id_size > 0:
+                    self._unsorted_dg_ctx[dg_addr] = {
+                        "rec_id_size": dg_rec_id_size,
+                        "cg_sizes": dg_cg_sizes,
+                    }
+
                 dg_addr = next_dg_addr
 
         return channels
@@ -486,6 +498,9 @@ class MDF4Reader:
         data_bytes: int = 0,
         cc_type: int = -1,
         cc_params: tuple = (),
+        rec_id_size: int = 0,
+        record_id: int = 0,
+        cg_record_sizes: Optional[dict] = None,
         f: Optional[BinaryIO] = None,
     ) -> np.ndarray:
         """
@@ -499,7 +514,7 @@ class MDF4Reader:
         This delegates to the executor-side decode functions in udf_helpers so
         that this reference API exercises the exact code path used in Spark.
         """
-        from .udf_helpers import read_raw_data, extract_signal
+        from .udf_helpers import read_raw_data, extract_signal, prepare_cg_records
 
         ch_spec = {
             "channel_type": channel_type,
@@ -517,6 +532,13 @@ class MDF4Reader:
         }
 
         def _extract(raw_data):
+            raw_data, _ = prepare_cg_records(
+                raw_data,
+                record_size=record_size,
+                rec_id_size=rec_id_size,
+                record_id=record_id,
+                cg_record_sizes=cg_record_sizes,
+            )
             if not raw_data or record_size <= 0:
                 return np.array([], dtype=np.float64)
             values = extract_signal(raw_data, record_size, ch_spec)
@@ -550,21 +572,35 @@ class MDF4Reader:
         opening the file again.
         """
         from .udf_helpers import (
-            read_raw_data, extract_signal, extract_timestamps,
+            read_raw_data, extract_signal, extract_timestamps, prepare_cg_records,
         )
 
         def _do_read(fh: BinaryIO) -> Tuple[np.ndarray, np.ndarray]:
             data_block_addr = signal_info["data_block_addr"]
             record_size = signal_info["record_size"]
+            rec_id_size = signal_info.get("rec_id_size", 0)
+            record_id = signal_info.get("record_id", 0)
+            cg_record_sizes = signal_info.get("cg_record_sizes")
 
             # Read the raw data block once (shared between master and signal)
             raw_data = read_raw_data(fh, data_block_addr, record_size, sample_count)
+            raw_data, index_offset = prepare_cg_records(
+                raw_data,
+                record_size=record_size,
+                rec_id_size=rec_id_size,
+                record_id=record_id,
+                cg_record_sizes=cg_record_sizes,
+            )
 
             actual_samples = len(raw_data) // record_size if record_size else 0
             if master_info:
-                timestamps = extract_timestamps(raw_data, record_size, master_info)
+                timestamps = extract_timestamps(
+                    raw_data, record_size, master_info, index_offset=index_offset,
+                )
             else:
-                timestamps = np.arange(actual_samples, dtype=np.float64)
+                timestamps = np.arange(
+                    index_offset, index_offset + actual_samples, dtype=np.float64,
+                )
 
             values = extract_signal(raw_data, record_size, signal_info)
             if values is None:
@@ -606,12 +642,15 @@ class MDF4Reader:
             "master_channels": master_channels,
             "signal_channels": signal_channels,
             "channel_id_map": channel_id_map,
+            "unsorted_dg_ctx": dict(self._unsorted_dg_ctx),
         }
 
     @staticmethod
-    def channel_to_dict(ch: "ChannelInfo") -> dict:
+    def channel_to_dict(ch: "ChannelInfo", unsorted_dg_ctx: Optional[dict] = None) -> dict:
         """Convert a ChannelInfo to a serializable dict suitable for bin packing."""
-        return {
+        from .mdf_decode import unsorted_fields_from_ctx
+
+        d = {
             "group_idx": ch.group_idx,
             "channel_idx": ch.channel_idx,
             "sample_count": ch.sample_count,
@@ -630,12 +669,17 @@ class MDF4Reader:
             "data_bytes": ch.data_bytes,
             "cc_type": ch.cc_type,
             "cc_params": list(ch.cc_params) if ch.cc_params else [],
+            "dg_block_addr": ch.dg_block_addr,
         }
+        d.update(unsorted_fields_from_ctx(ch.dg_block_addr, ch.record_id, unsorted_dg_ctx or {}))
+        return d
 
     @staticmethod
-    def master_to_dict(ch: "ChannelInfo") -> dict:
+    def master_to_dict(ch: "ChannelInfo", unsorted_dg_ctx: Optional[dict] = None) -> dict:
         """Convert a master ChannelInfo to a serializable dict for timestamp extraction."""
-        return {
+        from .mdf_decode import unsorted_fields_from_ctx
+
+        d = {
             "byte_offset": ch.byte_offset,
             "bit_offset": ch.bit_offset,
             "bit_count": ch.bit_count,
@@ -644,3 +688,5 @@ class MDF4Reader:
             "cc_type": ch.cc_type,
             "cc_params": list(ch.cc_params) if ch.cc_params else [],
         }
+        d.update(unsorted_fields_from_ctx(ch.dg_block_addr, ch.record_id, unsorted_dg_ctx or {}))
+        return d

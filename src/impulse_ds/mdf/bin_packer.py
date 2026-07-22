@@ -10,6 +10,9 @@ planner, and `plan_master_partitions` plans the per-group master time base.
 
 from typing import Dict, List
 
+from .mdf4_reader import MDF4Reader
+
+
 def plan_partitions(
     file_path: str,
     master_channels: dict,
@@ -22,6 +25,7 @@ def plan_partitions(
     run_length_encoding: bool = False,
     max_groups_per_partition: int = 64,
     time_offset: float = 0.0,
+    unsorted_dg_ctx: dict = None,
 ) -> List[dict]:
     """
     Plan Spark partitions for one MDF file, decoupling parallelism from channel
@@ -63,36 +67,23 @@ def plan_partitions(
     signal_channels: [ChannelInfo], channel_id_map: {(group_idx, channel_idx): id}).
     """
     target_rows = max(1, int(target_partition_mb * 1024 * 1024 / 16))
+    ctx = unsorted_dg_ctx or {}
 
     groups: Dict[int, list] = {}
     for ch in signal_channels:
-        groups.setdefault(ch.data_block_addr, []).append(ch)
+        groups.setdefault(ch.group_idx, []).append(ch)
 
     def _master_info(group_idx):
         m = master_channels.get(group_idx)
         if not m:
             return None
-        return {
-            "byte_offset": m.byte_offset, "bit_offset": m.bit_offset,
-            "bit_count": m.bit_count, "data_type": m.data_type,
-            "channel_type": m.channel_type, "cc_type": m.cc_type,
-            "cc_params": list(m.cc_params) if m.cc_params else [],
-        }
+        return MDF4Reader.master_to_dict(m, ctx)
 
     def _ch_dict(ch):
-        return {
-            "channel_id": channel_id_map.get((ch.group_idx, ch.channel_idx), -1),
-            "group_idx": ch.group_idx, "channel_idx": ch.channel_idx,
-            "sample_count": ch.sample_count, "data_type": ch.data_type,
-            "bit_offset": ch.bit_offset, "byte_offset": ch.byte_offset,
-            "bit_count": ch.bit_count, "channel_type": ch.channel_type,
-            "data_block_addr": ch.data_block_addr, "record_size": ch.record_size,
-            "master_info": _master_info(ch.group_idx), "cn_flags": ch.cn_flags,
-            "invalidation_bit_pos": ch.invalidation_bit_pos,
-            "invalidation_bytes": ch.invalidation_bytes, "data_bytes": ch.data_bytes,
-            "cc_type": ch.cc_type,
-            "cc_params": list(ch.cc_params) if ch.cc_params else [],
-        }
+        d = MDF4Reader.channel_to_dict(ch, ctx)
+        d["channel_id"] = channel_id_map.get((ch.group_idx, ch.channel_idx), -1)
+        d["master_info"] = _master_info(ch.group_idx)
+        return d
 
     def _spec(ch_dicts, r0=None, r1=None):
         s = {"file_path": file_path, "channels": ch_dicts,
@@ -124,7 +115,7 @@ def plan_partitions(
             pending_rows = 0
             pending_groups = 0
 
-    for chans in groups.values():
+    for chans in sorted(groups.values(), key=lambda cs: cs[0].data_block_addr):
         c = len(chans)
         group_records = chans[0].sample_count
         if c == 0 or group_records == 0:
@@ -167,6 +158,7 @@ def plan_master_partitions(
     time_dtype: str = "float64",
     max_groups_per_partition: int = 64,
     time_offset: float = 0.0,
+    unsorted_dg_ctx: dict = None,
 ) -> List[dict]:
     """
     Plan Spark partitions for the MASTER channels of one MDF file — the time
@@ -186,20 +178,20 @@ def plan_master_partitions(
     row_start/row_end). Groups without a master are simply absent from the input.
     """
     target_rows = max(1, int(target_partition_mb * 1024 * 1024 / 16))
+    ctx = unsorted_dg_ctx or {}
 
     def _master_entry(group_idx, m):
-        return {
+        from .mdf_decode import unsorted_fields_from_ctx
+
+        entry = {
             "group_idx": group_idx,
             "data_block_addr": m.data_block_addr,
             "record_size": m.record_size,
             "sample_count": m.sample_count,
-            "master_info": {
-                "byte_offset": m.byte_offset, "bit_offset": m.bit_offset,
-                "bit_count": m.bit_count, "data_type": m.data_type,
-                "channel_type": m.channel_type, "cc_type": m.cc_type,
-                "cc_params": list(m.cc_params) if m.cc_params else [],
-            },
+            "master_info": MDF4Reader.master_to_dict(m, ctx),
         }
+        entry.update(unsorted_fields_from_ctx(m.dg_block_addr, m.record_id, ctx))
+        return entry
 
     def _spec(masters, r0=None, r1=None):
         s = {"file_path": file_path,
@@ -278,10 +270,12 @@ def plan_stripes_for_file(
     if file_bytes is None:
         with open(file_path, "rb") as fh:
             file_bytes = fh.read()
-    organized = MDF4Reader(file_bytes=file_bytes).scan_channels_organized()
+    reader = MDF4Reader(file_bytes=file_bytes)
+    organized = reader.scan_channels_organized()
     master_channels = organized["master_channels"]
     signal_channels = organized["signal_channels"]
     channel_id_map = organized["channel_id_map"]
+    unsorted_dg_ctx = organized.get("unsorted_dg_ctx") or {}
 
     target_rows = max(1, int(target_partition_mb * 1024 * 1024 / 16))
     stripe_bytes_cap = int(stripe_target_mb * 1024 * 1024)
@@ -291,49 +285,50 @@ def plan_stripes_for_file(
         m = master_channels.get(group_idx)
         if not m:
             return None
-        return {
-            "byte_offset": m.byte_offset, "bit_offset": m.bit_offset,
-            "bit_count": m.bit_count, "data_type": m.data_type,
-            "channel_type": m.channel_type, "cc_type": m.cc_type,
-            "cc_params": list(m.cc_params) if m.cc_params else [],
-        }
+        return MDF4Reader.master_to_dict(m, unsorted_dg_ctx)
 
     def _chd(ch):
-        return {
-            "channel_id": channel_id_map.get((ch.group_idx, ch.channel_idx), -1),
-            "group_idx": ch.group_idx, "channel_idx": ch.channel_idx,
-            "sample_count": ch.sample_count, "data_type": ch.data_type,
-            "bit_offset": ch.bit_offset, "byte_offset": ch.byte_offset,
-            "bit_count": ch.bit_count, "channel_type": ch.channel_type,
-            "data_block_addr": ch.data_block_addr, "record_size": ch.record_size,
-            "cn_flags": ch.cn_flags, "invalidation_bit_pos": ch.invalidation_bit_pos,
-            "invalidation_bytes": ch.invalidation_bytes, "data_bytes": ch.data_bytes,
-            "cc_type": ch.cc_type,
-            "cc_params": list(ch.cc_params) if ch.cc_params else [],
-        }
+        d = MDF4Reader.channel_to_dict(ch, unsorted_dg_ctx)
+        d["channel_id"] = channel_id_map.get((ch.group_idx, ch.channel_idx), -1)
+        return d
 
     bio = io.BytesIO(file_bytes)
-    by_block = {}
+    by_group: Dict[int, list] = {}
     for ch in signal_channels:
-        by_block.setdefault(ch.data_block_addr, []).append(ch)
+        by_group.setdefault(ch.group_idx, []).append(ch)
 
     groups_meta = {}
     subblocks = []
-    for addr, chans in by_block.items():
-        rs = chans[0].record_size
-        sc = chans[0].sample_count
-        gi = chans[0].group_idx
+    for group_idx, chans in by_group.items():
+        ch0 = chans[0]
+        rs = ch0.record_size
+        sc = ch0.sample_count
         if rs == 0 or sc == 0:
             continue
-        groups_meta[addr] = {
-            "record_size": rs, "master_info": _minfo(gi),
-            "channels": [_chd(c) for c in chans], "n_channels": len(chans),
+        from .mdf_decode import unsorted_fields_from_ctx
+
+        meta = {
+            "group_idx": group_idx,
+            "data_block_addr": ch0.data_block_addr,
+            "record_size": rs,
+            "master_info": _minfo(group_idx),
+            "channels": [_chd(c) for c in chans],
+            "n_channels": len(chans),
+            "sample_count": sc,
         }
-        for (soff, slen, rstart, rcount) in parse_subblocks(bio, addr, rs, sc):
-            if rcount <= 0:
+        meta.update(unsorted_fields_from_ctx(ch0.dg_block_addr, ch0.record_id, unsorted_dg_ctx))
+        groups_meta[group_idx] = meta
+        for (soff, slen, rstart, rcount) in parse_subblocks(bio, ch0.data_block_addr, rs, sc):
+            if rcount <= 0 and slen <= 0:
                 continue
-            subblocks.append({"grp": addr, "abs_off": soff, "on_disk_len": slen,
-                              "rec_start": rstart, "rec_count": rcount})
+            subblocks.append({
+                "group_idx": group_idx,
+                "grp": ch0.data_block_addr,
+                "abs_off": soff,
+                "on_disk_len": slen,
+                "rec_start": rstart,
+                "rec_count": rcount,
+            })
 
     subblocks.sort(key=lambda s: s["abs_off"])
 
@@ -357,7 +352,8 @@ def plan_stripes_for_file(
             cur = []; cur_rows = cur_bytes = 0; cur_lo = cur_hi = None; cur_grps = set()
 
     for sb in subblocks:
-        rows = sb["rec_count"] * groups_meta[sb["grp"]]["n_channels"]
+        gidx = sb["group_idx"]
+        rows = sb["rec_count"] * groups_meta[gidx]["n_channels"]
         gap = (sb["abs_off"] - cur_hi) if cur_hi is not None else 0
         if cur and (cur_rows + rows > target_rows
                     or cur_bytes + sb["on_disk_len"] > stripe_bytes_cap
@@ -367,7 +363,7 @@ def plan_stripes_for_file(
         cur.append(sb)
         cur_rows += rows
         cur_bytes += sb["on_disk_len"]
-        cur_grps.add(sb["grp"])
+        cur_grps.add(gidx)
         end = sb["abs_off"] + sb["on_disk_len"]
         cur_lo = sb["abs_off"] if cur_lo is None else min(cur_lo, sb["abs_off"])
         cur_hi = end if cur_hi is None else max(cur_hi, end)

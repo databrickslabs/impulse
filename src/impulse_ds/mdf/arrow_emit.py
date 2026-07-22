@@ -15,7 +15,7 @@ from .mdf_blocks import (
     dt_data_extent, resolve_dl_addr, read_data_list_range, read_raw_data,
     _decompress_subblock_blob, _read_block_chunks,
 )
-from .mdf_decode import extract_signal, extract_timestamps
+from .mdf_decode import extract_signal, extract_timestamps, prepare_cg_records
 
 
 def _pa_float(dtype):
@@ -25,6 +25,56 @@ def _pa_float(dtype):
 
 def _np_float(dtype):
     return np.float32 if str(dtype) == "float32" else np.float64
+
+
+def _unsorted_kwargs(ch_spec):
+    return {
+        "rec_id_size": ch_spec.get("rec_id_size", 0),
+        "record_id": ch_spec.get("record_id", 0),
+        "cg_record_sizes": ch_spec.get("cg_record_sizes"),
+    }
+
+
+def _emit_prepared_signal_group(
+    raw_data,
+    group_channels,
+    record_size,
+    master_info,
+    time_offset,
+    emit_fn,
+    prof,
+    log,
+    data_block_addr,
+    _now,
+    index_offset=0,
+):
+    """Decode one prepared (filtered/sliced) raw block for all channels in a CG."""
+    actual = len(raw_data) // record_size if record_size else 0
+    if actual == 0:
+        return
+    t0 = _now()
+    if master_info is not None:
+        timestamps = extract_timestamps(
+            raw_data, record_size, master_info, index_offset=index_offset,
+        )
+    else:
+        timestamps = np.arange(index_offset, index_offset + actual, dtype=np.float64)
+    if time_offset:
+        timestamps = timestamps + time_offset
+    prof["decode"] += _now() - t0
+    for ch_spec in group_channels:
+        try:
+            t0 = _now()
+            values = extract_signal(raw_data, record_size, ch_spec)
+            prof["decode"] += _now() - t0
+            if values is None:
+                continue
+            yield from emit_fn(timestamps, values, ch_spec["channel_id"])
+        except Exception as e:
+            log.warning(
+                "extract failed ch=%s block=%d: %s",
+                ch_spec.get("channel_id"), data_block_addr, e,
+            )
 
 
 def _eq_nan(a, b):
@@ -329,13 +379,40 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
     for ch_spec in channels_spec:
         if ch_spec["sample_count"] == 0:
             continue
-        block_groups.setdefault(ch_spec["data_block_addr"], []).append(ch_spec)
+        block_groups.setdefault(ch_spec["group_idx"], []).append(ch_spec)
 
     with open(file_path, "rb") as f:
-        for data_block_addr, group_channels in block_groups.items():
-            record_size = group_channels[0]["record_size"]
-            sample_count = group_channels[0]["sample_count"]
-            master_info = group_channels[0].get("master_info")
+        for _group_idx, group_channels in block_groups.items():
+            ch0 = group_channels[0]
+            data_block_addr = ch0["data_block_addr"]
+            record_size = ch0["record_size"]
+            sample_count = ch0["sample_count"]
+            master_info = ch0.get("master_info")
+            rec_id_size = ch0.get("rec_id_size", 0)
+            us = _unsorted_kwargs(ch0)
+
+            if rec_id_size > 0:
+                try:
+                    t0 = _now()
+                    raw_data = read_raw_data(f, data_block_addr, record_size, sample_count)
+                    prof["read"] += _now() - t0
+                except Exception as e:
+                    log.warning("read_raw_data failed at %d in %s: %s",
+                                data_block_addr, file_path, e)
+                    continue
+                raw_data, index_offset = prepare_cg_records(
+                    raw_data,
+                    record_size=record_size,
+                    row_start=spec_row_start,
+                    row_end=spec_row_end,
+                    **us,
+                )
+                yield from _emit_prepared_signal_group(
+                    raw_data, group_channels, record_size, master_info,
+                    time_offset, emit_fn, prof, log, data_block_addr, _now,
+                    index_offset=index_offset,
+                )
+                continue
 
             try:
                 extent = dt_data_extent(f, data_block_addr)
@@ -451,36 +528,21 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
             if spec_row_start is not None:
                 lo = max(0, min(spec_row_start, total))
                 hi = total if spec_row_end is None else max(lo, min(spec_row_end, total))
-                raw_data = raw_data[lo * record_size:hi * record_size]
-                start_rec = lo
+                raw_data, start_rec = prepare_cg_records(
+                    raw_data,
+                    record_size=record_size,
+                    row_start=lo,
+                    row_end=hi,
+                )
             else:
-                start_rec = 0
-            actual = len(raw_data) // record_size
-            if actual == 0:
-                continue
-            t0 = _now()
-            if master_info is not None:
-                timestamps = extract_timestamps(
-                    raw_data, record_size, master_info, index_offset=start_rec)
-            else:
-                timestamps = np.arange(start_rec, start_rec + actual, dtype=np.float64)
-            if time_offset:
-                timestamps = timestamps + time_offset
-            prof["decode"] += _now() - t0
-            for ch_spec in group_channels:
-                try:
-                    t0 = _now()
-                    values = extract_signal(raw_data, record_size, ch_spec)
-                    prof["decode"] += _now() - t0
-                    if values is None:
-                        continue
-                    yield from emit_fn(
-                        timestamps, values, ch_spec["channel_id"],
-                    )
-                except Exception as e:
-                    log.warning("extract failed ch=%s block=%d: %s",
-                                ch_spec.get("channel_id"), data_block_addr, e)
-                    continue
+                raw_data, start_rec = prepare_cg_records(
+                    raw_data, record_size=record_size,
+                )
+            yield from _emit_prepared_signal_group(
+                raw_data, group_channels, record_size, master_info,
+                time_offset, emit_fn, prof, log, data_block_addr, _now,
+                index_offset=start_rec,
+            )
 
         # Drain state held across read chunks (RLE keeps one open trailing run
         # per channel; the per-sample path holds nothing, so this is a no-op).
@@ -575,7 +637,11 @@ def convert_master_spec_to_arrow_batches(spec, prof=None, time_dtype="float64"):
                 continue
 
             for raw, start in _read_block_chunks(
-                f, mspec["data_block_addr"], rs, sc, r0, r1, prof, log):
+                f, mspec["data_block_addr"], rs, sc, r0, r1, prof, log,
+                rec_id_size=mspec.get("rec_id_size", 0),
+                record_id=mspec.get("record_id", 0),
+                cg_record_sizes=mspec.get("cg_record_sizes"),
+            ):
                 t0 = _now()
                 ts = extract_timestamps(raw, rs, minfo, index_offset=start)
                 if time_offset:
@@ -630,15 +696,44 @@ def convert_stripe_spec_to_arrow_batches(spec, prof=None, time_dtype="float64",
         blob = f.read(byte_end - byte_start)
     prof["read"] += _now() - t0
 
-    by_grp = {}
+    by_gidx = {}
     for sb in subblocks:
-        by_grp.setdefault(sb["grp"], []).append(sb)
+        by_gidx.setdefault(sb["group_idx"], []).append(sb)
 
-    for grp, subs in by_grp.items():
-        meta = groups[str(grp)]
+    for gidx, subs in by_gidx.items():
+        meta = groups[str(gidx)]
         record_size = meta["record_size"]
         master_info = meta["master_info"]
         channels = meta["channels"]
+        rec_id_size = meta.get("rec_id_size", 0)
+        us = {
+            "rec_id_size": rec_id_size,
+            "record_id": meta.get("record_id", 0),
+            "cg_record_sizes": meta.get("cg_record_sizes"),
+        }
+
+        if rec_id_size > 0:
+            parts = []
+            for sb in sorted(subs, key=lambda x: x["abs_off"]):
+                rel = sb["abs_off"] - byte_start
+                try:
+                    t0 = _now()
+                    parts.append(_decompress_subblock_blob(blob, rel))
+                    prof["decode"] += _now() - t0
+                except Exception as e:
+                    log.warning("stripe decompress failed gidx=%s off=%d: %s",
+                                gidx, sb["abs_off"], e)
+            if not parts:
+                continue
+            raw = b"".join(parts)
+            raw, index_offset = prepare_cg_records(raw, record_size=record_size, **us)
+            yield from _emit_prepared_signal_group(
+                raw, channels, record_size, master_info, time_offset,
+                emit_fn, prof, log, meta.get("data_block_addr", 0), _now,
+                index_offset=index_offset,
+            )
+            continue
+
         for sb in sorted(subs, key=lambda x: x["rec_start"]):
             rel = sb["abs_off"] - byte_start
             try:
@@ -646,7 +741,7 @@ def convert_stripe_spec_to_arrow_batches(spec, prof=None, time_dtype="float64",
                 raw = _decompress_subblock_blob(blob, rel)
                 prof["decode"] += _now() - t0
             except Exception as e:
-                log.warning("stripe decompress failed grp=%s off=%d: %s", grp, sb["abs_off"], e)
+                log.warning("stripe decompress failed gidx=%s off=%d: %s", gidx, sb["abs_off"], e)
                 continue
             actual = len(raw) // record_size if record_size else 0
             if actual == 0:

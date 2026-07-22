@@ -6,6 +6,7 @@ the fly with asammdf (_mdf_samples.py) — no pre-built fixtures required.
 This also cross-validates our reader against asammdf's own output.
 """
 
+import io
 import os
 import pytest
 import numpy as np
@@ -13,7 +14,7 @@ import numpy as np
 from impulse_ds.mdf.mdf4_reader import (
     MDF4Reader, CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER
 )
-from ._mdf_samples import sample_mdf_dir
+from ._mdf_samples import sample_mdf_dir, START_TIME
 
 
 _DIR, _FILES = sample_mdf_dir()
@@ -392,3 +393,95 @@ class TestPlanPartitionsCoalescing:
                 assert a[1] == b[0]                        # contiguous, no gaps/overlap
         all_keys = whole_seen | set(ranges)
         assert len(all_keys) == len(signal)
+
+
+class TestMDF4ReaderExtended:
+    def test_file_bytes_matches_path(self, mdf_file):
+        with open(mdf_file, "rb") as fh:
+            data = fh.read()
+        by_path = MDF4Reader(mdf_file).scan_metadata()
+        by_bytes = MDF4Reader(file_bytes=data).scan_metadata()
+        assert len(by_path) == len(by_bytes)
+        assert [c.channel_name for c in by_path] == [c.channel_name for c in by_bytes]
+
+    def test_invalid_signature_raises(self):
+        with pytest.raises(ValueError, match="Not a valid MDF"):
+            MDF4Reader(file_bytes=b"NOTMDF!!" + b"\x00" * 56).scan_metadata()
+
+    def test_header_datetime_from_samples(self):
+        d, files = sample_mdf_dir()
+        if not files:
+            pytest.skip("no samples")
+        path = f"{d}/{files[0]}"
+        reader = MDF4Reader(path)
+        dt = reader.read_header_datetime()
+        assert dt is not None
+        assert dt.year == START_TIME.year
+        epoch = reader.read_header_start_epoch_seconds()
+        assert epoch is not None
+
+    def test_linear_cc_on_sample_c(self):
+        d, files = sample_mdf_dir()
+        if "sample_c.mf4" not in files:
+            pytest.skip("no cc sample")
+        path = f"{d}/sample_c.mf4"
+        reader = MDF4Reader(path)
+        channels = reader.scan_metadata()
+        scaled = [c for c in channels if c.channel_name == "Scaled"][0]
+        assert scaled.cc_type == 1
+        values = MDF4Reader.read_channel_data(
+            path, scaled.data_block_addr, scaled.record_size,
+            scaled.byte_offset, scaled.bit_offset, scaled.bit_count,
+            scaled.data_type, scaled.channel_type, scaled.sample_count,
+            cc_type=scaled.cc_type, cc_params=scaled.cc_params,
+        )
+        np.testing.assert_allclose(values, np.arange(10) * 2.0 + 10.0)
+
+    def test_channel_to_dict_unsorted_fields(self):
+        from impulse_ds.mdf.mdf4_reader import ChannelInfo
+        ch = ChannelInfo(
+            group_idx=0, channel_idx=0, channel_name="x", unit="",
+            sample_count=1, data_type=4, bit_offset=0, byte_offset=4,
+            bit_count=64, channel_type=0, cn_block_addr=0, cg_block_addr=0,
+            dg_block_addr=100, data_block_addr=1000, record_size=20,
+            rec_id_size=4, record_id=1,
+        )
+        ctx = {100: {"rec_id_size": 4, "cg_sizes": {1: 20}}}
+        d = MDF4Reader.channel_to_dict(ch, ctx)
+        assert d["rec_id_size"] == 4
+        assert d["cg_record_sizes"] == {1: 20}
+
+
+class TestParseCcBlock:
+    @staticmethod
+    def _cc_at_offset(blob: bytes, offset: int = 8):
+        return b"\x00" * offset + blob
+
+    def test_zero_addr_returns_identity(self):
+        with io.BytesIO(b"") as f:
+            assert MDF4Reader._parse_cc_block(f, 0) == (-1, ())
+
+    def test_wrong_block_id(self):
+        blob = self._cc_at_offset(b"##DT" + b"\x00" * 20)
+        with io.BytesIO(blob) as f:
+            assert MDF4Reader._parse_cc_block(f, 8) == (-1, ())
+
+    def test_empty_params_and_unsupported_type(self):
+        from ._block_fixtures import make_cc_block
+
+        no_params = self._cc_at_offset(make_cc_block(cc_type=0, cc_val_count=0, params=()))
+        with io.BytesIO(no_params) as f:
+            assert MDF4Reader._parse_cc_block(f, 8) == (0, ())
+
+        unsupported = self._cc_at_offset(make_cc_block(cc_type=9, cc_val_count=0, params=()))
+        with io.BytesIO(unsupported) as f:
+            assert MDF4Reader._parse_cc_block(f, 8) == (-1, ())
+
+    def test_linear_params(self):
+        from ._block_fixtures import make_cc_block
+
+        blob = self._cc_at_offset(make_cc_block(cc_type=1, cc_val_count=2, params=(10.0, 2.0)))
+        with io.BytesIO(blob) as f:
+            cc_type, params = MDF4Reader._parse_cc_block(f, 8)
+        assert cc_type == 1
+        assert params == (10.0, 2.0)

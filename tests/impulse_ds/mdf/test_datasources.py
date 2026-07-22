@@ -441,3 +441,109 @@ class TestSchemaMatchesEmittedTypes:
                 assert emitted == declared, (
                     f"schema/emit mismatch abs={abst} val={vdt} time={tdt} "
                     f"rle={rle} part={part}: {declared} vs {emitted}")
+
+
+class TestDatasourcesEdgeCases:
+    def test_metadata_read_empty_file_path(self):
+        from impulse_ds.mdf.datasources import MdfMetadataReader
+        from pyspark.sql.datasource import InputPartition
+
+        reader = MdfMetadataReader({"path": "/unused"})
+        rows = list(reader.read(InputPartition({"file_path": ""})))
+        assert rows == []
+
+    def test_masters_schema_float32(self):
+        if not EXAMPLE_FILES:
+            pytest.skip("No example files")
+        from impulse_ds.mdf.datasources import MdfMastersDataSource, MdfMastersReader
+
+        opts = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "time_dtype": "float32"}
+        sch = MdfMastersDataSource(dict(opts)).schema()
+        assert sch["timestamp"].dataType.simpleString() == "float"
+        reader = MdfMastersReader(opts)
+        for p in reader.partitions():
+            for b in reader.read(p):
+                assert str(b.schema.field("timestamp").type) == "float"
+                return
+
+    def test_absolute_time_raises_without_hd_start(self, tmp_path, monkeypatch):
+        from asammdf import MDF, Signal
+        import numpy as np
+
+        path = tmp_path / "no_start.mf4"
+        mdf = MDF(version="4.10")
+        t = np.arange(5, dtype=np.float64) * 0.1
+        mdf.append([Signal(samples=t, timestamps=t, name="x")])
+        mdf.save(str(path), overwrite=True)
+        mdf.close()
+
+        monkeypatch.setattr(
+            "impulse_ds.mdf.mdf4_reader.MDF4Reader.read_header_start_epoch_seconds",
+            lambda self: None,
+        )
+        reader = MdfSignalsReader({"path": str(tmp_path), "files": "no_start.mf4",
+                                     "absolute_time": "true"})
+        with pytest.raises(ValueError, match="no measurement start time"):
+            reader.partitions()
+
+    def test_masters_absolute_time_raises_without_hd_start(self, tmp_path, monkeypatch):
+        from asammdf import MDF, Signal
+        import numpy as np
+        from impulse_ds.mdf.datasources import MdfMastersReader
+
+        path = tmp_path / "no_start.mf4"
+        mdf = MDF(version="4.10")
+        t = np.arange(5, dtype=np.float64) * 0.1
+        mdf.append([Signal(samples=t, timestamps=t, name="x")])
+        mdf.save(str(path), overwrite=True)
+        mdf.close()
+
+        monkeypatch.setattr(
+            "impulse_ds.mdf.mdf4_reader.MDF4Reader.read_header_start_epoch_seconds",
+            lambda self: None,
+        )
+        reader = MdfMastersReader({
+            "path": str(tmp_path), "files": "no_start.mf4", "absolute_time": "true",
+        })
+        with pytest.raises(ValueError, match="no measurement start time"):
+            reader.partitions()
+
+    def test_signals_empty_partitions_when_no_signals(self, monkeypatch):
+        from impulse_ds.mdf.datasources import MdfSignalsReader
+
+        def _empty_scan(self):
+            return {"master_channels": {}, "signal_channels": [], "channel_id_map": {},
+                    "unsorted_dg_ctx": {}}
+
+        monkeypatch.setattr(
+            "impulse_ds.mdf.datasources._resolve_file_list",
+            lambda opts: ["/fake/a.mf4"],
+        )
+        monkeypatch.setattr(
+            "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
+            _empty_scan,
+        )
+        reader = MdfSignalsReader({"path": "/x", "files": "a.mf4"})
+        parts = reader.partitions()
+        assert len(parts) == 1
+        assert parts[0].value == "[]"
+        assert list(reader.read(parts[0])) == []
+
+    def test_masters_empty_when_no_masters(self, monkeypatch):
+        from impulse_ds.mdf.datasources import MdfMastersReader
+
+        def _no_masters(self):
+            return {"master_channels": {}, "signal_channels": [], "channel_id_map": {},
+                    "unsorted_dg_ctx": {}}
+
+        monkeypatch.setattr(
+            "impulse_ds.mdf.datasources._resolve_file_list",
+            lambda opts: ["/fake/a.mf4"],
+        )
+        monkeypatch.setattr(
+            "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
+            _no_masters,
+        )
+        reader = MdfMastersReader({"path": "/x", "files": "a.mf4"})
+        parts = reader.partitions()
+        assert parts[0].value == "[]"

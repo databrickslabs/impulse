@@ -257,6 +257,7 @@ class MdfSignalsReader(DataSourceReader):
                 run_length_encoding=run_length_encoding,
                 max_groups_per_partition=max_groups_per_partition,
                 time_offset=time_offset,
+                unsorted_dg_ctx=organized.get("unsorted_dg_ctx"),
             )
             all_partition_specs.extend(json.dumps(s) for s in specs)
 
@@ -458,6 +459,7 @@ class MdfMastersReader(DataSourceReader):
                 time_dtype=time_dtype,
                 max_groups_per_partition=max_groups_per_partition,
                 time_offset=time_offset,
+                unsorted_dg_ctx=organized.get("unsorted_dg_ctx"),
             )
             all_specs.extend(json.dumps(s) for s in specs)
 

@@ -161,7 +161,9 @@ class MDFToDeltaConverter:
 
         # Step 4: Plan record-range / channel-subset partitions
         partition_specs = self._plan(
-            file_path, master_channels, signal_channels, channel_id_map)
+            file_path, master_channels, signal_channels, channel_id_map,
+            unsorted_dg_ctx=reader._unsorted_dg_ctx,
+        )
 
         # Step 5: Run distributed conversion
         total_samples = sum(ch.sample_count for ch in signal_channels)
@@ -223,7 +225,14 @@ class MDFToDeltaConverter:
             for ch in signal_channels
         ]
 
-    def _plan(self, file_path, master_channels, signal_channels, channel_id_map):
+    def _plan(
+        self,
+        file_path,
+        master_channels,
+        signal_channels,
+        channel_id_map,
+        unsorted_dg_ctx=None,
+    ):
         """Plan partition specs for one file using this converter's settings.
         Shared by convert() and convert_batch_parallel()."""
         return plan_partitions(
@@ -232,6 +241,7 @@ class MDFToDeltaConverter:
             time_dtype=self.time_dtype, value_dtype=self.value_dtype,
             run_length_encoding=self.run_length_encoding,
             max_groups_per_partition=self.max_groups_per_partition,
+            unsorted_dg_ctx=unsorted_dg_ctx,
         )
 
     def _write_metadata(
@@ -340,7 +350,11 @@ class MDFToDeltaConverter:
         def _scan(idx_path):
             idx, fp = idx_path
             reader = MDF4Reader(fp)
-            return idx, fp, reader.scan_metadata(), reader.read_header_datetime()
+            channels = reader.scan_metadata()
+            return (
+                idx, fp, channels, reader.read_header_datetime(),
+                reader._unsorted_dg_ctx,
+            )
 
         max_workers = min(16, max(1, len(file_paths)))
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -349,7 +363,7 @@ class MDFToDeltaConverter:
                 key=lambda r: r[0],
             )
 
-        for i, file_path, all_channels_in_file, header_datetime in scanned:
+        for i, file_path, all_channels_in_file, header_datetime, unsorted_ctx in scanned:
             if not all_channels_in_file:
                 continue
 
@@ -360,7 +374,9 @@ class MDFToDeltaConverter:
             all_metadata_rows.extend(self._metadata_rows(
                 signal_channels, channel_id_map, file_path, header_datetime))
             all_partition_specs.extend(self._plan(
-                file_path, master_channels, signal_channels, channel_id_map))
+                file_path, master_channels, signal_channels, channel_id_map,
+                unsorted_dg_ctx=unsorted_ctx,
+            ))
 
             total_channels += len(signal_channels)
             total_samples += sum(ch.sample_count for ch in signal_channels)
