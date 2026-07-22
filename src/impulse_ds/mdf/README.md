@@ -1,5 +1,8 @@
 # impulse_ds.mdf
 
+> ⚠️ **Experimental** — see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for spec
+> coverage gaps and backlog items.
+
 Convert ASAM **MDF4** measurement files to **Delta Lake** tables with PySpark /
 Databricks. The reader parses MDF4 binary blocks directly (no `asammdf` at
 runtime), so conversion parallelises across Spark workers, each reading only the
@@ -8,11 +11,21 @@ bytes for its partition.
 Every output row is identified by `file_uri` — the source file path.
 
 **New to the data sources?** See [QUICKSTART.md](QUICKSTART.md) for minimal
-examples of `mdf_signals`, `mdf_metadata`, and `mdf_masters`.
+examples of `mdf_signals`, `mdf_metadata`, and `mdf_masters`. For experimental
+status and known gaps, see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## Solution Accelerator
 
 An end-to-end solution accelerator to convert mf4 files into the impulse schema will be available soon.
+
+
+## Acknowledgments
+
+The MDF data sources and low-level reader were implemented with reference to
+[asammdf](https://github.com/danielhrisca/asammdf) by [Daniel Hrisca](https://github.com/danielhrisca).
+`asammdf` is not a runtime dependency of this package; it is listed under test
+dependencies only (see below) for synthesising small MDF4 fixtures.
+
 
 ## Two ways to use it
 
@@ -198,33 +211,6 @@ Package path: `src/impulse_ds/mdf/`
 | `datasources.py` | the three Spark data sources                                                              |
 | `schemas.py`     | shared Spark schemas (`SIGNALS_SCHEMA`, `METADATA_SCHEMA`)                                |
 
-
-
-
-## Limitations (backlog)
-
-Known gaps in the numeric-first reader/converter. **Sorted** data groups (`rec_id_size = 0`)
-and CC types 0–2, 4–6 work as expected. **Unsorted** data groups (`rec_id_size > 0`)
-with interleaved channel groups are supported via per-CG record filtering on read.
-
-
-| area                                                                                                                                                                                             | severity   | status                      |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | --------------------------- |
-| **VLSD channels** — variable-length signals store an offset in the fixed record; payload in SDBLOCK is not followed. Channels currently emit NaN. String/byte output would need schema changes.  | MEDIUM     | not implemented             |
-| **CC type 3 (algebraic / formula)** — formula text in `cc_ref[0]` (TXBLOCK) is not read or evaluated; `apply_cc_conversion` has no handler for type 3.                                           | LOW–MEDIUM | not implemented             |
-| **CC types 7–10 (text conversions)** — require TXBLOCK / `cc_ref` resolution. Unsupported by design for the numeric-only `value` column; `_parse_cc_block` returns `(-1, ())` for `cc_type > 6`. | LOW        | not implemented (by design) |
-
-
-**CC types 7–10:** types 7, 8, 10 produce text (need a string extraction path / separate table); type 9 (text→value) could stay numeric but needs reference-text matching.
-
-**Unsorted DGs:** reads filter interleaved records by `record_id` before decode (`filter_unsorted_records` in `mdf_decode.py`). Stripe mode concatenates sub-blocks, then filters once per channel group.
-
-## Acknowledgments
-
-The MDF data sources and low-level reader were implemented with reference to
-[asammdf](https://github.com/danielhrisca/asammdf) by [Daniel Hrisca](https://github.com/danielhrisca).
-`asammdf` is not a runtime dependency of this package; it is listed under test
-dependencies only (see below) for synthesising small MDF4 fixtures.
 
 ## Dependencies
 
