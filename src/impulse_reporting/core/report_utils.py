@@ -452,11 +452,10 @@ def cleanup_temp_tables(spark: SparkSession, catalog: str, schema: str) -> None:
 # ---------------------------------------------------------------------------
 # Entity orchestration + persistence helpers
 #
-# Generic over the entity type-enum (e.g. ``ChannelType``).  Currently used only
-# by calculated channels; written to be reusable so aggregations can adopt them
-# next (``merge_keys`` accepts a per-type callable for that reason).  Event
-# *incremental facts* group-by-table + union before ``replace_by_ids`` and so do
-# not fit ``persist_facts_incremental`` — migrating them needs a separate helper.
+# Generic over the entity type-enum (``EventType`` / ``AggregationType`` /
+# ``ChannelType``); shared by events, aggregations, and calculated channels.
+# ``persist_facts_incremental`` groups by output table and unions shared-table
+# types before ``replace_by_ids``; ``merge_keys`` accepts a per-type callable.
 # ---------------------------------------------------------------------------
 
 
