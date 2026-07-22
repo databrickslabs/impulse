@@ -3,6 +3,7 @@
 from enum import Enum
 from unittest.mock import MagicMock, create_autospec, patch
 
+import pytest
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame
 
@@ -349,6 +350,18 @@ class TestSplitByHashChange:
         assert call_count[0] == 2
         assert "BASIC_EVENT" in changed
         assert "SEQUENCE_OF_EVENTS" in changed
+
+    def test_unknown_kind_raises(self):
+        """An unsupported `kind` is rejected before any comparison runs."""
+        with pytest.raises(ValueError, match="Unsupported kind 'bogus'"):
+            split_by_hash_change(
+                items_by_type={"BASIC_EVENT": [MagicMock()]},
+                type_enum=MagicMock(),
+                sink=MagicMock(),
+                spark=MagicMock(),
+                hash_comparator=MagicMock(),
+                kind="bogus",
+            )
 
 
 # ============================================================================

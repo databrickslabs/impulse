@@ -22,6 +22,20 @@ class TestConstruction:
         ch = _channel()
         assert ch.identity == _IDENTITY
 
+    def test_attributes_normalized_to_str(self):
+        # attributes are optional; when given they are coerced to a str->str dict.
+        ch = CalculatedChannel(
+            name="speed_kmh",
+            expr=TimeSeriesSelector(None) * 3.6,
+            identity=dict(_IDENTITY),
+            attributes={"unit": "kmh", "scale": 3.6},
+        )
+        assert ch.attributes == {"unit": "kmh", "scale": "3.6"}
+
+    def test_attributes_default_empty(self):
+        # No attributes → empty dict, not None.
+        assert _channel().attributes == {}
+
     def test_get_id_deterministic_and_identity_derived(self):
         # Same identity → same id regardless of name; different identity → different id.
         a = _channel(name="a")
