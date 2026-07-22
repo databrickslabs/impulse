@@ -33,6 +33,14 @@ expression is evaluated per measurement container and exploded into narrow rows 
 `channels` shape. The identity itself is stored once on the channel dimension (as a `map`), not repeated
 on every fact row.
 
+:::note When to use a calculated channel
+Reach for a calculated channel **only when the derived time series itself is the deliverable** — you want
+it materialized to a queryable gold table, or returned as narrow silver-shaped rows via
+`solve_calculated_channels`. To *compute over* a derived signal, you don't need one: aggregations and
+events accept any TSAL expression directly (e.g. `StatsAggregator(input_expressions=[rpm * torque], ...)`,
+`BasicEvent(expr=speed > 100)`) and derive it on the fly at solve time.
+:::
+
 ```python
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
 

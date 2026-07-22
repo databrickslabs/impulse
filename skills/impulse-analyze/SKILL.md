@@ -143,7 +143,9 @@ cc = CalculatedChannel(
     {"channel_name": "speed_kmh", "data_key": "CALC"},
 )
 df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-# df: [container_id, channel_id, tstart, tend, value, channel_name, data_key]
+# df: [container_id, channel_id, tstart, tend, value, identity]
+#     identity is a map<string,string> holding the channel's identity dict
 ```
 
-All selections must be `CalculatedChannel`s sharing one identity key set.
+All selections must be `CalculatedChannel`s; identity keys are arbitrary and need not match across
+selections (each row carries its own identity map).

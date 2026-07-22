@@ -16,6 +16,13 @@ persisted at the same per-sample grain as the silver `channels` table — unlike
 `impulse-aggregations`), which summarizes a signal into bins or statistics. It is the *persisted, labeled*
 form of a virtual signal.
 
+**When to use — only when you want to persist or directly work with the derived time series itself.**
+Aggregations and events accept any derived TSAL expression *directly* (e.g.
+`StatsAggregator(input_expressions=[rpm * torque], ...)`, `BasicEvent(expr=speed > 100)`) and derive it
+**on the fly** at solve time — they do **not** need a calculated channel to compute over a derived signal.
+Reach for a `CalculatedChannel` when the derived signal is itself the deliverable: you want it materialized
+to a queryable gold table, or returned as narrow silver-shaped rows via `solve_calculated_channels`.
+
 **Every calculated channel must be registered with the report before computing:**
 
 ```python
@@ -27,8 +34,9 @@ at construction (raises `ValueError`).
 
 ## CalculatedChannel
 
-Couples a TSAL expression with an `identity` — the identifier columns emitted on every output row. The
-expression is evaluated per container and exploded into narrow rows (one per sample interval).
+Couples a TSAL expression with an `identity` — an arbitrary key-value dict identifying the channel (stored
+on the dimension, seeds `channel_id`). The expression is evaluated per container and exploded into narrow
+rows (one per sample interval).
 
 ```python
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
@@ -48,7 +56,7 @@ report.add_calculated_channel(speed_kmh)
 |--------------|------------------------|----------|---------------------------------------------------------------------------------------------------|
 | `name`       | `str`                  | Yes      | Human-readable channel name; stored in `calculated_channel_dimension`.                            |
 | `expr`       | `TimeSeriesExpression` | Yes      | Derived signal. **Must evaluate to `SampleSeries`.**                                              |
-| `identity`   | `dict[str, str]`       | Yes      | Output identifier columns. **Must contain exactly `{"channel_name", "data_key"}`.** Seeds `channel_id`. |
+| `identity`   | `dict[str, str]`       | Yes      | Channel identity — any **non-empty** dict (arbitrary keys). Seeds `channel_id`; stored as a `map` on `calculated_channel_dimension`, not on fact rows. |
 | `desc`       | `str`                  | No       | Description stored in `calculated_channel_dimension`.                                             |
 | `attributes` | `Mapping[str, str]`    | No       | Free-form metadata; values coerced to strings.                                                    |
 
@@ -69,24 +77,26 @@ from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSol
 cc = CalculatedChannel(
     db.query.channel(channel_name="Vehicle Speed Sensor") * 3.6,
     {"channel_name": "speed_kmh", "data_key": "CALC"},
-    # channel_id defaults to a deterministic hash; pass an int to override, or None to emit null.
+    # channel_id is a deterministic hash of the sorted identity.
 )
 df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-df.show()  # [container_id, channel_id, tstart, tend, value, channel_name, data_key]
+df.show()  # [container_id, channel_id, tstart, tend, value, identity]
+#          identity is a map<string,string> holding the channel's identity dict
 ```
 
-All selections in one call must share the same identity key set (validated up front).
+All selections in one call must be `CalculatedChannel`s; identity keys are arbitrary and need not match
+across selections.
 
 ## Output schema
 
 **calculated_channel_dimension** (one row per channel per report) — key columns: `channel_id`,
-`report_id`, `channel_type` (`"CALCULATED_CHANNEL"`), `channel_name`, `channel_description`,
-`channel_expression` (TSAL string), `identity` (map), `definition_hash`, `attributes` (map).
+`report_id`, `channel_type` (`"CALCULATED_CHANNEL"`), `channel_description`, `channel_expression`
+(TSAL string), `identity` (map), `definition_hash`, `attributes` (map).
 
 **calculated_channel_fact** (one row per sample interval per container) — `container_id`, `channel_id`,
-`tstart`, `tend`, `value`, `channel_name`, `data_key`. Same narrow, run-length-encoded shape as the silver
-`channels` table. Join to the dimension on `channel_id`, and to `measurement_dimension` on `container_id`
-(see `impulse-data-model`).
+`tstart`, `tend`, `value`. Same narrow, run-length-encoded shape as the silver `channels` table. The
+identity is **not** on the fact — it lives on the dimension; join on `channel_id` (and to
+`measurement_dimension` on `container_id`; see `impulse-data-model`).
 
 ## Incremental
 
