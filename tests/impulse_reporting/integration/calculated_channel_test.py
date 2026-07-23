@@ -69,6 +69,9 @@ def test_persist_calculated_channel_full(spark):
         config=dict(_config(is_enabled=False)),
     )
     ch = _add_channel(report, factor=3.6)
+    # A *1.0 passthrough channel materializes the physical signal unchanged, so its
+    # gold fact rows must be identical to the silver channel rows (see below).
+    ch_pass = _add_channel(report, factor=1.0, name="speed_raw")
 
     report.determine_report()
     report.persist_results()
@@ -78,14 +81,14 @@ def test_persist_calculated_channel_full(spark):
 
     fact = spark.read.table(_FACT)
     assert fact.count() > 0
-    # channel_id in the fact matches the reporting entity id.
+    # Both channels' ids appear in the fact and match their reporting entity ids.
     ids = {r["channel_id"] for r in fact.select("channel_id").distinct().collect()}
-    assert ids == {ch.get_id()}
+    assert ids == {ch.get_id(), ch_pass.get_id()}
     # Identity is NOT on the fact — it lives on the dimension, joined via channel_id.
     assert "identity" not in fact.columns
     assert fact.columns == ["container_id", "channel_id", "tstart", "tend", "value", "_created_at"]
 
-    # Values are the derived signal: compare against the raw source scaled by 3.6.
+    # The silver source rows for the physical channel this derived signal is built from.
     raw = (
         report.get_db()
         .channels(spark)
@@ -98,8 +101,25 @@ def test_persist_calculated_channel_full(spark):
         )
     )
     raw_sum = raw.select(F.sum("value")).first()[0]
-    calc_sum = fact.select(F.sum("value")).first()[0]
+    calc_sum = fact.filter(F.col("channel_id") == ch.get_id()).select(F.sum("value")).first()[0]
     assert calc_sum == pytest.approx(raw_sum * 3.6)
+
+    # End-to-end passthrough invariant: a *1.0 calculated channel reproduces the
+    # silver signal exactly. Compare the gold fact rows to the silver channel rows
+    # on (container_id, tstart, tend, value). channel_id is intentionally excluded
+    # (the derived channel has its own identity-derived id); value is compared
+    # numerically since silver stores int and the derived signal is float64.
+    gold_pass = {
+        (r["container_id"], r["tstart"], r["tend"], float(r["value"]))
+        for r in fact.filter(F.col("channel_id") == ch_pass.get_id())
+        .select("container_id", "tstart", "tend", "value")
+        .collect()
+    }
+    silver_rows = {
+        (r["container_id"], r["tstart"], r["tend"], float(r["value"]))
+        for r in raw.select("container_id", "tstart", "tend", "value").collect()
+    }
+    assert gold_pass == silver_rows
 
     # The dimension carries the identity (a map), keyed by channel_id — the join
     # target for the fact. Confirm the fact's channel_id resolves to the identity.
