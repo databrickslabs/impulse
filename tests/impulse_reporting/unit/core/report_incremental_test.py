@@ -8,6 +8,7 @@ Spark processing (event/aggregation determination, persistence).
 
 from unittest.mock import MagicMock, create_autospec, patch
 
+import pyspark.sql.functions as F
 import pytest
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame
@@ -593,9 +594,11 @@ class TestPersistResultsProcessingMode:
 class TestPersistIncrementalDelegation:
     """Tests for _persist_incremental handling of dict vs DataFrame formats."""
 
-    def test_persist_incremental_dict_format_changed_calls_replace(self, spark):
-        """Dict format with changed df + changed IDs calls replace_by_ids."""
+    def test_persist_incremental_dict_format_calls_merge(self, spark):
+        """Dict format (changed + unchanged) is written with a single merge_incremental."""
         report = _build_report(spark)
+        report._processed_container_ids = [7]
+        report._updated_container_ids = [7]
         mock_changed_df = MagicMock(spec=DataFrame)
         mock_unchanged_df = MagicMock(spec=DataFrame)
 
@@ -631,18 +634,25 @@ class TestPersistIncrementalDelegation:
                 changed_event_ids={},
             )
 
-            # Should call replace_by_ids for changed
-            report.sink.replace_by_ids.assert_called_once()
-            replace_call = report.sink.replace_by_ids.call_args
-            assert replace_call.kwargs["id_column"] == "visual_id"
-            assert replace_call.kwargs["ids_to_replace"] == [42]
+            # One unified MERGE, no legacy replace_by_ids path.
+            report.sink.replace_by_ids.assert_not_called()
+            report.sink.merge_incremental.assert_called_once()
+            call = report.sink.merge_incremental.call_args
+            assert call.args[2] == ["container_id", "visual_id", "bin_ID"]
+            # Delete scope covers updated containers and the changed visual_id.
+            cond_strs = sorted(str(c) for c in call.kwargs["delete_conditions"])
+            assert cond_strs == sorted(
+                [
+                    str(F.col("target.container_id").isin([7])),
+                    str(F.col("target.visual_id").isin([42])),
+                ]
+            )
 
-            # Should call upsert for unchanged
-            report.sink.upsert.assert_called_once()
-
-    def test_persist_incremental_single_df_calls_upsert(self, spark):
-        """Single DataFrame (backward compat) in incremental mode uses MERGE."""
+    def test_persist_incremental_single_df_calls_merge(self, spark):
+        """Single DataFrame (backward compat) in incremental mode uses merge_incremental."""
         report = _build_report(spark)
+        report._processed_container_ids = [3]
+        report._updated_container_ids = [3]
         mock_agg_df = MagicMock(spec=DataFrame)
 
         report.aggregation_dfs = {"HISTOGRAM": mock_agg_df}
@@ -669,9 +679,11 @@ class TestPersistIncrementalDelegation:
                 changed_event_ids={},
             )
 
-            # Single DataFrame -> upsert only, no replace
-            report.sink.upsert.assert_called_once()
-            report.sink.replace_by_ids.assert_not_called()
+            # Single DataFrame (unchanged) over reprocessed containers -> one MERGE.
+            report.sink.merge_incremental.assert_called_once()
+            call = report.sink.merge_incremental.call_args
+            cond_strs = [str(c) for c in call.kwargs["delete_conditions"]]
+            assert cond_strs == [str(F.col("target.container_id").isin([3]))]
 
     def test_persist_incremental_measurement_dimension_upserts(self, spark):
         """Measurement dimension uses upsert by container_id."""
@@ -746,9 +758,11 @@ class TestPersistIncrementalDelegation:
 
     def test_persist_incremental_cross_type_changed_events_combined(self, spark):
         """When multiple event types share a fact table and both have changed
-        definitions, their DataFrames are combined into a single replace_by_ids
-        call so that earlier types' data is not overwritten by later ones."""
+        definitions, their DataFrames are unioned into a single merge_incremental
+        so that earlier types' data is not overwritten by later ones."""
         report = _build_report(spark)
+        report._processed_container_ids = []
+        report._updated_container_ids = []
 
         mock_basic_changed_df = MagicMock(spec=DataFrame)
         mock_seq_changed_df = MagicMock(spec=DataFrame)
@@ -789,11 +803,14 @@ class TestPersistIncrementalDelegation:
                 },
             )
 
-            report.sink.replace_by_ids.assert_called_once()
-            replace_call = report.sink.replace_by_ids.call_args
-            assert replace_call.kwargs["df"] is mock_combined_df
-            assert replace_call.kwargs["id_column"] == "event_id"
-            assert set(replace_call.kwargs["ids_to_replace"]) == {10, 20}
+            report.sink.merge_incremental.assert_called_once()
+            call = report.sink.merge_incremental.call_args
+            assert call.args[0] is mock_combined_df
+            assert call.args[2] == ["container_id", "event_id", "event_instance_id"]
+            # No reprocessed containers → delete scope is the combined changed event ids.
+            cond_strs = [str(c) for c in call.kwargs["delete_conditions"]]
+            assert len(cond_strs) == 1
+            assert cond_strs[0] == str(F.col("target.event_id").isin([10, 20]))
 
             mock_transformed_basic.unionByName.assert_called_once_with(mock_transformed_seq)
 

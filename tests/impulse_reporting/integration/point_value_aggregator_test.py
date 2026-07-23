@@ -234,8 +234,8 @@ def test_incremental_stats_and_point_value_shared_fact_changed_defs(spark):
 
     Exercises the aggregation branch of ``persist_facts_incremental`` where the
     changed DataFrames of *different* types on one fact table are ``unionByName``
-    -combined into a single ``replace_by_ids(id_column="visual_id")`` — the
-    cross-type union must not clobber either type's rows.
+    -combined into a single ``merge_incremental`` (delete scope on ``visual_id``)
+    — the cross-type union must not clobber either type's rows.
     """
     # --- Run 1: seed both aggregators into the shared fact table ---
     report_1 = Report(
@@ -272,7 +272,7 @@ def test_incremental_stats_and_point_value_shared_fact_changed_defs(spark):
     stats_rows = fact_run2.where(F.col("visual_id") == stats_2.get_id())
     pva_rows = fact_run2.where(F.col("visual_id") == pva_2.get_id())
 
-    # Both types survive the cross-type union + single replace_by_ids (no clobber).
+    # Both types survive the cross-type union + single merge_incremental (no clobber).
     assert stats_rows.count() > 0
     assert pva_rows.count() > 0
     # The changed stats definition took effect: the expanded statistics are present.
