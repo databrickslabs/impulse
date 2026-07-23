@@ -1,11 +1,13 @@
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
 from databricks.sdk import WorkspaceClient
 
 from impulse_reporting.aggregations.histogram import (
     HistogramDuration,
 )
+from impulse_reporting.aggregations.point_value_aggregator import PointValueAggregator
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.config.config_parser import (
     IncrementalConfig,
@@ -17,6 +19,7 @@ from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
 from impulse_reporting.events.container_event import ContainerEvent
+from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from tests.conftest import spark
 
 
@@ -668,3 +671,101 @@ def test_incremental_cross_type_event_definition_change(spark):
     assert (
         seq_count_run2 > 0
     ), "SequenceOfEvents fact data must survive after cross-type incremental persistence"
+
+
+def test_incremental_long_seeded_event_fact_accepts_double_event(spark):
+    """A mixture of event types (PointsInTimeEvent, ContainerEvent, BasicEvent) added across
+    incremental runs must keep a consistent event_instance_fact output structure.
+
+    Run 1 seeds the shared table with PointsInTimeEvent + ContainerEvent; run 2 adds a new
+    BasicEvent incrementally. All event types must agree on the ``start_ts``/``end_ts`` type
+    (double) so the run-2 write fits the seeded table.
+    """
+    # --- Run 1 (seed): only long-emitting event types (PointsInTimeEvent + ContainerEvent) ---
+    report_1 = Report(
+        name="long_seeded_event_fact_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(set_config("container_metrics_inc_1_2", False)),
+    )
+    eng_rpm = report_1.get_db().query.channel(channel_name="Engine RPM")
+    pit_event = PointsInTimeEvent(name="rpm_rising", expr=eng_rpm.rising_edges())
+    container_event = ContainerEvent(name="full_measurement")
+    report_1.add_event(pit_event)
+    report_1.add_event(container_event)
+    page = Page(page_number=1)
+    report_1.add_page(page)
+    page.add_aggregation(
+        PointValueAggregator(
+            name="rpm_at_edges",
+            input_expressions=[eng_rpm],
+            channel_names=["Engine RPM"],
+            event=pit_event,
+        )
+    )
+    report_1.determine_report()
+    report_1.persist_results()
+
+    event_fact_run1 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
+    pit_event_id = pit_event.get_id()
+    container_event_id = container_event.get_id()
+    assert (
+        event_fact_run1.where(F.col("event_id") == pit_event_id).count() > 0
+    ), "PointsInTimeEvent should have fact rows after run 1"
+    assert (
+        event_fact_run1.where(F.col("event_id") == container_event_id).count() > 0
+    ), "ContainerEvent should have fact rows after run 1"
+
+    # --- Run 2 (incremental): keep the long events, add a NEW (double-emitting) BasicEvent ---
+    report_2 = Report(
+        name="long_seeded_event_fact_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(set_config("container_metrics_inc_1_2", True)),
+    )
+    eng_rpm_2 = report_2.get_db().query.channel(channel_name="Engine RPM")
+    pit_event_2 = PointsInTimeEvent(name="rpm_rising", expr=eng_rpm_2.rising_edges())
+    container_event_2 = ContainerEvent(name="full_measurement")
+    basic_event = BasicEvent(name="rpm_gt_0", expr=eng_rpm_2 > 0)
+    report_2.add_event(pit_event_2)
+    report_2.add_event(container_event_2)
+    report_2.add_event(basic_event)
+    page_2 = Page(page_number=1)
+    report_2.add_page(page_2)
+    page_2.add_aggregation(
+        PointValueAggregator(
+            name="rpm_at_edges",
+            input_expressions=[eng_rpm_2],
+            channel_names=["Engine RPM"],
+            event=pit_event_2,
+        )
+    )
+    page_2.add_aggregation(
+        StatsAggregator(
+            name="rpm_stats",
+            input_expressions=[eng_rpm_2],
+            channel_names=["Engine RPM"],
+            statistics=["min", "max"],
+            event=basic_event,
+        )
+    )
+    report_2.determine_report()
+    report_2.persist_results()
+
+    event_fact_run2 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
+    basic_event_id = basic_event.get_id()
+
+    # The long-seeded event types AND the newly-added double BasicEvent all survive together.
+    assert (
+        event_fact_run2.where(F.col("event_id") == pit_event_id).count() > 0
+    ), "PointsInTimeEvent fact data must survive incremental persistence"
+    assert (
+        event_fact_run2.where(F.col("event_id") == container_event_id).count() > 0
+    ), "ContainerEvent fact data must survive incremental persistence"
+    assert (
+        event_fact_run2.where(F.col("event_id") == basic_event_id).count() > 0
+    ), "newly-added BasicEvent must be persisted into the shared event_instance_fact"
+
+    # The shared timestamp columns are double across every event type (not long-seeded).
+    assert event_fact_run2.schema["start_ts"].dataType == T.DoubleType()
+    assert event_fact_run2.schema["end_ts"].dataType == T.DoubleType()
