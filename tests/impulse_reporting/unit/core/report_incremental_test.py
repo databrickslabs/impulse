@@ -597,7 +597,7 @@ class TestPersistIncrementalDelegation:
     def test_persist_incremental_dict_format_calls_merge(self, spark):
         """Dict format (changed + unchanged) is written with a single merge_incremental."""
         report = _build_report(spark)
-        report._processed_container_ids = [7]
+        report._has_processed_containers = True
         report._updated_container_ids = [7]
         mock_changed_df = MagicMock(spec=DataFrame)
         mock_unchanged_df = MagicMock(spec=DataFrame)
@@ -651,7 +651,7 @@ class TestPersistIncrementalDelegation:
     def test_persist_incremental_single_df_calls_merge(self, spark):
         """Single DataFrame (backward compat) in incremental mode uses merge_incremental."""
         report = _build_report(spark)
-        report._processed_container_ids = [3]
+        report._has_processed_containers = True
         report._updated_container_ids = [3]
         mock_agg_df = MagicMock(spec=DataFrame)
 
@@ -761,7 +761,7 @@ class TestPersistIncrementalDelegation:
         definitions, their DataFrames are unioned into a single merge_incremental
         so that earlier types' data is not overwritten by later ones."""
         report = _build_report(spark)
-        report._processed_container_ids = []
+        report._has_processed_containers = False
         report._updated_container_ids = []
 
         mock_basic_changed_df = MagicMock(spec=DataFrame)

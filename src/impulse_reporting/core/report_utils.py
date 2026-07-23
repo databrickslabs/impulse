@@ -633,7 +633,7 @@ def persist_facts_incremental(
     id_column: str,
     merge_keys: list[str] | Callable[[object], list[str]],
     changed_ids: dict[str, list[int]],
-    processed_container_ids: list | None = None,
+    has_processed_containers: bool = False,
     updated_container_ids: list | None = None,
     container_id_col: str = "container_id",
 ) -> None:
@@ -668,10 +668,10 @@ def persist_facts_incremental(
     changed_ids : dict[str, list[int]]
         ``{type_name: [ids]}`` with changed definitions recomputed over all
         containers.
-    processed_container_ids : list, optional
-        Ids of containers recomputed this run (new + updated). Gates whether a
-        table is written — new containers carry no delete scope but must still be
-        inserted. Empty/None + no changed ids → nothing to do.
+    has_processed_containers : bool, optional
+        Whether any container was recomputed this run (new or updated). Gates
+        whether a table is written — new containers carry no delete scope but must
+        still be inserted. ``False`` + no changed ids → nothing to do.
     updated_container_ids : list, optional
         Ids of UPDATED containers only (present in gold, refreshed in silver).
         Scopes the delete-by-source; new containers are excluded because they have
@@ -681,7 +681,6 @@ def persist_facts_incremental(
     """
     from impulse_reporting.persist.report_storage import WriterFactory
 
-    processed_container_ids = processed_container_ids or []
     updated_container_ids = updated_container_ids or []
 
     # Group per-type facts by output table so shared-table types persist together.
@@ -712,7 +711,7 @@ def persist_facts_incremental(
         # updated) and no changed definitions. Keeps idempotent runs byte-identical
         # (no no-op MERGE commit).
         table_changed_ids = changed_ids_by_table.get(table_name, [])
-        if not processed_container_ids and not table_changed_ids:
+        if not has_processed_containers and not table_changed_ids:
             continue
 
         # Scope the delete-by-source: updated containers (only they can hold stale

@@ -912,7 +912,7 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["container_id", "channel_id", "tstart"],
                 changed_ids={"FOO": [1, 2]},
-                processed_container_ids=[10, 20],
+                has_processed_containers=True,
                 updated_container_ids=[10, 20],
             )
 
@@ -946,7 +946,7 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
-                processed_container_ids=[10],
+                has_processed_containers=True,
                 updated_container_ids=[],
             )
 
@@ -973,7 +973,7 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={"FOO": [7]},
-                processed_container_ids=[],
+                has_processed_containers=False,
                 updated_container_ids=[],
             )
 
@@ -999,7 +999,7 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
-                processed_container_ids=[],
+                has_processed_containers=False,
                 updated_container_ids=[],
             )
 
@@ -1020,7 +1020,7 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
-                processed_container_ids=[10],
+                has_processed_containers=True,
                 updated_container_ids=[10],
             )
 
@@ -1043,7 +1043,7 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
-                processed_container_ids=[],
+                has_processed_containers=False,
                 updated_container_ids=[],
             )
 
@@ -1064,7 +1064,7 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
-                processed_container_ids=[10],
+                has_processed_containers=True,
                 updated_container_ids=[10],
             )
 
@@ -1091,7 +1091,7 @@ class TestPersistFactsIncremental:
                 id_column="id",
                 merge_keys=keys_for,
                 changed_ids={},
-                processed_container_ids=[10],
+                has_processed_containers=True,
                 updated_container_ids=[10],
             )
 
@@ -1117,7 +1117,7 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
-                processed_container_ids=[10],
+                has_processed_containers=True,
                 updated_container_ids=[10],
                 container_id_col="cont_id",
             )
@@ -1146,7 +1146,7 @@ class TestPersistFactsIncremental:
                 id_column="visual_id",
                 merge_keys=["visual_id"],
                 changed_ids={"FOO": [1], "BAR": [2]},
-                processed_container_ids=[],
+                has_processed_containers=False,
                 updated_container_ids=[],
             )
 
@@ -1178,7 +1178,7 @@ class TestPersistFactsIncremental:
                 id_column="visual_id",
                 merge_keys=["visual_id"],
                 changed_ids={},
-                processed_container_ids=[10],
+                has_processed_containers=True,
                 updated_container_ids=[10],
             )
 

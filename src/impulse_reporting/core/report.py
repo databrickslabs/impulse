@@ -636,7 +636,7 @@ class Report:
         None
         """
         changed_channel_ids = changed_channel_ids or {}
-        processed_container_ids = getattr(self, "_processed_container_ids", [])
+        has_processed_containers = getattr(self, "_has_processed_containers", False)
         updated_container_ids = getattr(self, "_updated_container_ids", [])
         storage_factory = WriterFactory(self.sink)
         transformer = ReportEntityTransformer()
@@ -655,7 +655,7 @@ class Report:
             id_column="visual_id",
             merge_keys=self._get_aggregation_merge_keys,
             changed_ids=changed_aggregation_ids,
-            processed_container_ids=processed_container_ids,
+            has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
         )
         persist_dimensions_incremental(
@@ -677,7 +677,7 @@ class Report:
             id_column="event_id",
             merge_keys=["container_id", "event_id", "event_instance_id"],
             changed_ids=changed_event_ids,
-            processed_container_ids=processed_container_ids,
+            has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
         )
         persist_dimensions_incremental(
@@ -697,7 +697,7 @@ class Report:
             id_column="channel_id",
             merge_keys=["container_id", "channel_id", "tstart"],
             changed_ids=changed_channel_ids,
-            processed_container_ids=processed_container_ids,
+            has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
         )
         persist_dimensions_incremental(
@@ -885,12 +885,15 @@ class Report:
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
 
-        # Two distinct container id sets for persistence:
-        # - processed (new + updated): what was recomputed this run → gates whether
-        #   a fact table is written (new containers must be inserted);
-        # - updated only: scopes the delete-by-source, since only containers that
-        #   already have gold rows can have stale rows to prune.
-        self._processed_container_ids = self._collect_container_ids(pre_filtered_containers_df)
+        # Two signals for persistence:
+        # - has_processed_containers (new + updated): gates whether a fact table is
+        #   written (new containers must be inserted). Only a bool is needed, so
+        #   probe emptiness with isEmpty() rather than collecting the whole id list.
+        # - updated container ids: scopes the delete-by-source, since only
+        #   containers that already have gold rows can have stale rows to prune.
+        self._has_processed_containers = (
+            pre_filtered_containers_df is not None and not pre_filtered_containers_df.isEmpty()
+        )
         self._updated_container_ids = self._collect_container_ids(
             self._detect_updated_containers() if self._is_incremental else None
         )
