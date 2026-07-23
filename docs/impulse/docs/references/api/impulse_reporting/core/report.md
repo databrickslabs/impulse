@@ -268,6 +268,34 @@ Get a dictionary of events part of the report keyed by event name.
 
 `dict`: Dictionary mapping event names to Event objects.
 
+#### add\_calculated\_channel
+
+```python
+def add_calculated_channel(channel)
+```
+
+Add a calculated channel to the report.
+
+**Arguments**:
+
+- `channel` (`CalculatedChannel`): The calculated channel to add.
+
+**Returns**:
+
+`None`: 
+
+#### get\_calculated\_channels
+
+```python
+def get_calculated_channels() -> list
+```
+
+Get the list of calculated channels associated with the report.
+
+**Returns**:
+
+`list of CalculatedChannel`: List of calculated channels.
+
 #### persist\_results
 
 ```python

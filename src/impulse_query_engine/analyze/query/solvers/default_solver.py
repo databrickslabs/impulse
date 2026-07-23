@@ -960,6 +960,39 @@ class DefaultSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
+        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
+
+        schema = self._build_solve_output_schema(q, selections, dtypes)
+        solve_udf = F.pandas_udf(
+            partial(DefaultSolver._solve_udf, selections=selections, col_map=col_map),
+            schema,
+            F.PandasUDFType.GROUPED_MAP,
+        )
+        return self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
+
+    def _prepare_channels_join(self, query, channels_df) -> tuple[DataFrame, DataFrame, int]:
+        """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
+
+        Applies optional per-channel unit conversion, reads and column-maps the
+        channel-data table (raw-encoding it when in raw mode), broadcast-joins it
+        to the channel-match frame on ``[container_id, channel_id]``, and counts
+        the distinct containers.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object containing database and filter information.
+        channels_df : pyspark.sql.DataFrame
+            Channel-match DataFrame from the filter pipeline.
+
+        Returns
+        -------
+        tuple[DataFrame, DataFrame, int]
+            ``(channels_q, joined_df, container_count)`` — the column-mapped
+            channel-data DataFrame (authoritative for output ``container_id`` /
+            ``channel_id`` types), the join fed to the grouped-map UDF, and the
+            number of distinct containers.
+        """
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
 
@@ -993,17 +1026,15 @@ class DefaultSolver(QuerySolver):
             self.config.value_col,
         )
 
-        schema = self._build_solve_output_schema(q, selections, dtypes)
-        solve_udf = F.pandas_udf(
-            partial(DefaultSolver._solve_udf, selections=selections, col_map=col_map),
-            schema,
-            F.PandasUDFType.GROUPED_MAP,
+        joined_df = q.join(
+            F.broadcast(channels_df),
+            on=[self.config.container_id_col, self.config.channel_id_col],
         )
-        df = q.join(
-            F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
-        )
-
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
+        return q, joined_df, container_count
+
+    def _apply_grouped_map(self, joined_df, container_count, schema, solve_udf) -> DataFrame:
+        """Run *solve_udf* per container, or return an empty frame when none match."""
         if container_count == 0:
             return self.spark.createDataFrame([], schema=schema)
 
@@ -1014,7 +1045,7 @@ class DefaultSolver(QuerySolver):
         # by position), so the order is arbitrary — order by a constant to
         # avoid an unnecessary per-channel sort (row_number just requires
         # *some* ordering).
-        df = df.repartition(container_count, self.config.container_id_col)
+        df = joined_df.repartition(container_count, self.config.container_id_col)
         w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
             F.lit(1)
         )
@@ -1024,3 +1055,117 @@ class DefaultSolver(QuerySolver):
             .drop("_rn")
         )
         return df.groupBy(self.config.container_id_col).apply(solve_udf)
+
+    # ------------------------------------------------------------------
+    # Calculated channels (narrow output)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _solve_calculated_channels_udf(
+        pdf, selections: Iterable, col_map: dict[str, str]
+    ) -> pd.DataFrame:
+        """
+        UDF to solve calculated channels for a single container.
+
+        Unlike :meth:`_solve_udf` (one wide row per container), this emits many
+        narrow rows: each ``CalculatedChannel`` builds to its raw
+        ``(tstarts, tends, values)`` arrays that are exploded into
+        ``(container_id, channel_id, tstart, tend, value)`` rows.  Each channel
+        supplies its own deterministic ``channel_id``
+        (:attr:`CalculatedChannel.channel_id`); the identity map is *not* emitted
+        here — it is constant per ``channel_id`` and attached afterward by
+        :meth:`solve_calculated_channels` to keep the UDF's Arrow payload small.
+
+        Parameters
+        ----------
+        pdf : pd.DataFrame
+            Rows for a single container (all input channels joined in).
+        selections : Iterable
+            The ``CalculatedChannel`` selections to evaluate.
+        col_map : dict[str, str]
+            Column-name mapping for the cache (cid/ch/ts/te/val/conv).
+
+        Returns
+        -------
+        pd.DataFrame
+            Narrow rows for this container; empty (but full-width) when no
+            calculated channel produced any samples.
+        """
+        cache = TimeSeriesCache(pdf, col_map=col_map)
+        cid_col = col_map["cid"]
+        ch_col = col_map["ch"]
+        container_id = pdf[cid_col].iloc[0]
+
+        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": []}
+
+        for cc in selections:
+            tstarts, tends, values = cc.build(cache)
+            for tstart, tend, value in zip(tstarts, tends, values, strict=False):
+                cols[cid_col].append(container_id)
+                cols[ch_col].append(cc.channel_id)
+                cols["tstart"].append(tstart)
+                cols["tend"].append(tend)
+                cols["value"].append(value)
+
+        return pd.DataFrame(cols)
+
+    @staticmethod
+    def _identity_map_expr(identity: dict[str, str]) -> "F.Column":
+        """Build a ``map<string,string>`` literal column from an identity dict."""
+        kv_literals = [F.lit(str(x)) for k, v in identity.items() for x in (k, v)]
+        return F.create_map(*kv_literals)
+
+    def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
+        """
+        Solve calculated channels by grouping channels and exploding each result.
+
+        Structurally parallels :meth:`solve` — sharing the
+        :meth:`_prepare_channels_join` prelude and :meth:`_apply_grouped_map`
+        tail — but the grouped-map UDF emits narrow silver-shaped rows (many per
+        container) instead of one wide row.  Output columns are
+        ``[container_id, channel_id, tstart, tend, value, identity]`` where
+        ``identity`` is a ``MapType(string, string)`` holding the channel's
+        identity dict.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object containing database and filter information.
+        channels_df : pyspark.sql.DataFrame
+            Channel-match DataFrame from the filter pipeline.
+        selections : list
+            List of ``CalculatedChannel`` selections to evaluate.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            Narrow DataFrame of calculated-channel samples.
+        """
+        col_map = self.config.col_map
+        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
+
+        schema = self._build_calculated_channels_udf_schema(q)
+        solve_udf = F.pandas_udf(
+            partial(
+                DefaultSolver._solve_calculated_channels_udf,
+                selections=selections,
+                col_map=col_map,
+            ),
+            schema,
+            F.PandasUDFType.GROUPED_MAP,
+        )
+        res = self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
+
+        # Identity is constant per channel_id, so attach it here via a
+        # channel_id-keyed CASE instead of the UDF shipping a copy per row.
+        channel_id_col = self.config.channel_id_col
+        identity_expr = None
+        for cc in selections:
+            branch = F.col(channel_id_col) == F.lit(cc.channel_id)
+            id_map = self._identity_map_expr(cc.identity)
+            identity_expr = (
+                F.when(branch, id_map)
+                if identity_expr is None
+                else identity_expr.when(branch, id_map)
+            )
+        return res.withColumn("identity", identity_expr)

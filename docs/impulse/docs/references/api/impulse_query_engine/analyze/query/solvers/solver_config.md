@@ -37,7 +37,8 @@ RLE
     ``value`` within a container/channel into a single interval (see
     :class:`~impulse_query_engine.analyze.query.solvers.utils.rle_encoder.RleEncoder`).
 INTERVAL
-    Derive ``tend`` from the following sample's timestamp, *without* merging equal-valued runs (see
+    Derive ``tend`` from the following sample's timestamp and drop exact
+    duplicate points, *without* merging equal-valued runs (see
     :class:`~impulse_query_engine.analyze.query.solvers.utils.interval_encoder.IntervalEncoder`).
 
 
@@ -383,6 +384,24 @@ def group_id_col() -> str
 ```
 
 Internal column name for the unit group id on the unit_conversion table.
+
+
+#### timestamp\_col
+
+```python
+def timestamp_col() -> str
+```
+
+Internal column name for the timestamp on the channels table for raw encoded channel data.
+
+
+#### is\_plausible\_col
+
+```python
+def is_plausible_col() -> str
+```
+
+Internal column name for the plausibility flag on the channels table for raw encoded channel data.
 
 
 #### effective\_alias\_join\_keys

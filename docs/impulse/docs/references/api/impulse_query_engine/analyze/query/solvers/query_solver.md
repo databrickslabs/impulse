@@ -202,3 +202,27 @@ Stage 6: Solve query.
 
 `pyspark.sql.DataFrame`: DataFrame containing results for each container.
 
+#### solve\_calculated\_channels
+
+```python
+def solve_calculated_channels(query, channels_df, selections) -> DataFrame
+```
+
+Solve calculated channels into a narrow, silver-shaped DataFrame.
+
+Optional stage, parallel to :meth:`solve` but emitting many rows per
+container (the exploded ``SampleSeries`` of each ``CalculatedChannel``)
+instead of one wide row.  Solvers that support calculated channels
+(e.g. ``DefaultSolver``) override this; the base implementation raises.
+
+**Arguments**:
+
+- `query` (`QueryBuilder`): Query object containing database and filter information.
+- `channels_df` (`pyspark.sql.DataFrame`): Channel-match DataFrame from the filter pipeline.
+- `selections` (`list`): List of ``CalculatedChannel`` selections to evaluate.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: Narrow ``[container_id, channel_id, tstart, tend, value,
+identity]`` DataFrame (``identity`` is a ``MapType(string, string)``).
+

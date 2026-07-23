@@ -80,3 +80,20 @@ STATS_AGGREGATOR_DIMENSION_SCHEMA = StructType(
         StructField("definition_hash", LongType(), True),
     ]
 )
+
+# Metadata for calculated channels. ``channel_id`` is the deterministic entity id
+# (identical to the fact's channel_id), ``definition_hash`` drives incremental
+# reprocessing, and ``identity`` is a ``MapType(string, string)`` holding the full
+# identity dict — self-describing, with no fixed per-key columns.
+CALCULATED_CHANNEL_DIMENSION_SCHEMA = StructType(
+    [
+        StructField("channel_id", LongType(), False),
+        StructField("report_id", IntegerType(), False),
+        StructField("channel_type", StringType(), True),
+        StructField("channel_description", StringType(), True),
+        StructField("channel_expression", StringType(), True),
+        StructField("identity", MapType(StringType(), StringType()), True),
+        StructField("definition_hash", LongType(), True),
+        StructField("attributes", MapType(StringType(), StringType()), True),
+    ]
+)

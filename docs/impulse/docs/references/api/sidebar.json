@@ -24,6 +24,13 @@
                 },
                 {
                   "items": [
+                    "references/api/impulse_query_engine/analyze/query/channels/calculated_channel"
+                  ],
+                  "label": "impulse_query_engine.analyze.query.channels",
+                  "type": "category"
+                },
+                {
+                  "items": [
                     "references/api/impulse_query_engine/analyze/query/solvers/default_solver",
                     "references/api/impulse_query_engine/analyze/query/solvers/query_solver",
                     "references/api/impulse_query_engine/analyze/query/solvers/solver_config"
@@ -69,6 +76,14 @@
             "references/api/impulse_reporting/aggregations/stats_aggregator"
           ],
           "label": "impulse_reporting.aggregations",
+          "type": "category"
+        },
+        {
+          "items": [
+            "references/api/impulse_reporting/channels/calculated_channel",
+            "references/api/impulse_reporting/channels/channel_types"
+          ],
+          "label": "impulse_reporting.channels",
           "type": "category"
         },
         {

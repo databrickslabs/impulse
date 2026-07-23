@@ -95,6 +95,7 @@ A star schema. Every table is prefixed with your configured `table_prefix` (e.g.
 | `histogram_fact`        | One row per bin per container            |
 | `histogram2d_fact`      | One row per (x, y) bin per container     |
 | `stats_aggregator_fact` | One row per signal per event instance    |
+| `calculated_channel_fact` | One row per sample interval per container (a derived signal, silver `channels` shape) |
 
 **Dimension tables**
 
@@ -105,12 +106,14 @@ A star schema. Every table is prefixed with your configured `table_prefix` (e.g.
 | `histogram_dimension`        | Histogram metadata (bins, signal info, units).              |
 | `histogram2d_dimension`      | 2D histogram metadata.                                      |
 | `stats_aggregator_dimension` | Statistics metadata (channel names, labels).                |
+| `calculated_channel_dimension` | Calculated-channel definitions (name, expression, identity). See `impulse-channels`. |
 
-**Join pattern** — three key columns connect facts to dimensions:
+**Join pattern** — key columns connect facts to dimensions:
 
 - `container_id` → links every fact to `measurement_dimension`.
 - `event_id` → links `event_instance_fact`, `histogram_fact`, `histogram2d_fact` to `event_dimension`.
 - `visual_id` → links each aggregation fact to its own dimension table.
+- `channel_id` → links `calculated_channel_fact` to `calculated_channel_dimension`.
 
 `stats_aggregator_fact` additionally joins to `event_instance_fact` via `event_instance_id` for
 per-interval breakdowns.

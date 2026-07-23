@@ -108,6 +108,34 @@ Solver tuning lives under the `query_engine` section of your report config:
 If `query_engine` is omitted from your config entirely, the engine runs
 with `DefaultSolver` and `data_type = "RLE"`.
 
+## Calculated channels
+
+The standard `solve()` produces a **wide** result — one row per container, one column per selection.
+`DefaultSolver.solve_calculated_channels` is a parallel entry point that produces a **narrow**,
+silver-shaped result instead: it explodes each selection's `SampleSeries` into one row per sample
+interval, emitting `container_id, channel_id, tstart, tend, value` plus a single self-describing
+`identity` `map` column.
+
+Every selection must be a [`CalculatedChannel`](../report/channel.md) (identity keys are arbitrary and
+need not match across selections), and each wrapped expression must evaluate to a `SampleSeries`. The stage reuses the same
+metadata filter pipeline as `solve()` to resolve the input channels, then runs a grouped-map UDF per
+container. Only `DefaultSolver` implements it — the base `QuerySolver` raises `NotImplementedError`.
+
+```python
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+
+cc = CalculatedChannel(
+    db.query.channel(channel_name="Vehicle Speed Sensor") * 3.6,
+    {"channel_name": "speed_kmh", "data_key": "CALC"},
+)
+df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+# df: [container_id, channel_id, tstart, tend, value, channel_name, data_key]
+```
+
+The reporting layer builds on this stage to persist derived channels to the gold layer — see
+[Channels](../report/channel.md).
+
 ## API reference
 
 Auto-generated symbol-level docs:
