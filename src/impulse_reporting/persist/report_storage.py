@@ -304,6 +304,15 @@ class UnityCatalogSink(Sink):
         (removing the surplus a shrunk container leaves behind). Rows outside the
         scope are untouched.
 
+        The MERGE runs with ``withSchemaEvolution()`` so a fact-schema change
+        between releases doesn't break an incremental run: a column added to the
+        source is added to the gold table (existing rows get NULL). A column
+        dropped from the source is *retained* in gold (new rows get NULL for it) —
+        Delta does not drop columns via MERGE evolution, so a true column removal
+        still needs a full overwrite. Incompatible type changes still error rather
+        than silently coerce. When source and gold schemas match (the normal case)
+        this is a no-op.
+
         Parameters
         ----------
         df : DataFrame
@@ -334,6 +343,7 @@ class UnityCatalogSink(Sink):
         builder = (
             target.alias("target")
             .merge(df.alias("source"), merge_condition)
+            .withSchemaEvolution()
             .whenMatchedUpdateAll()
             .whenNotMatchedInsertAll()
         )

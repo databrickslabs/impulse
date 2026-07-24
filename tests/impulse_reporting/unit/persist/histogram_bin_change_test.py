@@ -6,7 +6,8 @@ Exercises the single-MERGE incremental persist against real Delta tables:
 - unchanged definitions upsert reprocessed containers;
 - stale rows left by a shrunk container are deleted-by-source in the same
   transaction (the regression that motivated the unified MERGE);
-- rows outside the delete scope are never touched.
+- rows outside the delete scope are never touched;
+- a fact-schema change (added column) evolves the gold table instead of failing.
 """
 
 import pyspark.sql.functions as F
@@ -389,3 +390,72 @@ def test_merge_incremental_combined_changed_and_unchanged(spark):
         assert len(container_2_67890) == 2
     finally:
         spark.sql(f"DROP TABLE IF EXISTS {fact_table}")
+
+
+def test_merge_incremental_evolves_added_column_while_shrinking(spark):
+    """A fact-schema change (new column) doesn't break an incremental MERGE.
+
+    ``merge_incremental`` runs with ``withSchemaEvolution()``, so a source that
+    carries a column the gold table lacks evolves the table instead of failing —
+    while still upserting, and still pruning stale rows in the reprocessed scope
+    in the same transaction. This is the code-version-boundary case that a plain
+    MERGE (no evolution) would reject with DELTA_MERGE_UNRESOLVED_EXPRESSION.
+    """
+    table_name = "spark_catalog.gold.test_histogram_fact_schema_evo"
+    evolved_schema = StructType(
+        HISTOGRAM_FACT_SCHEMA.fields + [StructField("source_flag", StringType(), True)]
+    )
+    try:
+        # Seed gold with the OLD schema (no source_flag): container 1 has 3 bins,
+        # container 2 has 1 bin.
+        initial = [
+            Row(container_id=1, visual_id=100, bin_ID=0, bin_name="b0", hist_value=10.0),
+            Row(container_id=1, visual_id=100, bin_ID=1, bin_name="b1", hist_value=11.0),
+            Row(container_id=1, visual_id=100, bin_ID=2, bin_name="b2", hist_value=12.0),
+            Row(container_id=2, visual_id=100, bin_ID=0, bin_name="b0", hist_value=20.0),
+        ]
+        spark.createDataFrame(initial, schema=HISTOGRAM_FACT_SCHEMA).write.format("delta").mode(
+            "overwrite"
+        ).saveAsTable(table_name)
+
+        sink = _sink()
+
+        # Reprocess container 1 only: it now emits a single bin AND the source
+        # carries a NEW column (source_flag) absent from the seeded gold schema.
+        evolved_src = spark.createDataFrame(
+            [
+                Row(
+                    container_id=1,
+                    visual_id=100,
+                    bin_ID=0,
+                    bin_name="b0",
+                    hist_value=99.0,
+                    source_flag="v2",
+                )
+            ],
+            schema=evolved_schema,
+        )
+        sink.merge_incremental(
+            evolved_src,
+            table_name,
+            MERGE_KEYS,
+            delete_conditions=[F.col("target.container_id").isin([1])],
+        )
+
+        result = spark.read.table(table_name)
+        # Schema evolved: the new column is now part of the gold table.
+        assert "source_flag" in result.columns
+
+        # Container 1 shrank 3 → 1 (delete-by-source fired) and carries the new value.
+        c1 = result.filter("container_id = 1").collect()
+        assert len(c1) == 1
+        assert c1[0].hist_value == 99.0
+        assert c1[0].source_flag == "v2"
+
+        # Container 2 was not reprocessed → preserved, with NULL for the new column.
+        c2 = result.filter("container_id = 2").collect()
+        assert len(c2) == 1
+        assert c2[0].hist_value == 20.0
+        assert c2[0].source_flag is None
+    finally:
+        spark.sql(f"DROP TABLE IF EXISTS {table_name}")
