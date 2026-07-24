@@ -10,6 +10,7 @@ import uuid
 from functools import reduce
 from typing import TYPE_CHECKING
 
+import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, SparkSession
 
 if TYPE_CHECKING:
@@ -455,7 +456,8 @@ def cleanup_temp_tables(spark: SparkSession, catalog: str, schema: str) -> None:
 # Generic over the entity type-enum (``EventType`` / ``AggregationType`` /
 # ``ChannelType``); shared by events, aggregations, and calculated channels.
 # ``persist_facts_incremental`` groups by output table and unions shared-table
-# types before ``replace_by_ids``; ``merge_keys`` accepts a per-type callable.
+# types into a single ``merge_incremental``; ``merge_keys`` accepts a per-type
+# callable.
 # ---------------------------------------------------------------------------
 
 
@@ -631,19 +633,19 @@ def persist_facts_incremental(
     id_column: str,
     merge_keys: list[str] | Callable[[object], list[str]],
     changed_ids: dict[str, list[int]],
+    has_processed_containers: bool = False,
+    updated_container_ids: list | None = None,
+    container_id_col: str = "container_id",
 ) -> None:
-    """Incremental persist of fact DataFrames, grouped by output table.
+    """Incremental persist of fact DataFrames in a single MERGE per output table.
 
-    Per-type facts are grouped by their fact-table name, so entity types that
-    share a table (e.g. ``StatsAggregator`` + ``PointValueAggregator`` →
-    ``stats_aggregator_fact``, or mixed event types → ``event_instance_fact``)
-    are persisted together with no clobber.  For each table:
-
-    - **Changed** definitions (only types listed in *changed_ids*) are
-      ``unionByName``-combined and rewritten atomically in a single
-      ``replace_by_ids`` over all containers.
-    - **Unchanged** definitions are ``upsert``-ed (MERGE) over the incremental
-      container subset.
+    Per-type facts are grouped by fact-table name, so types sharing a table
+    (e.g. ``StatsAggregator`` + ``PointValueAggregator``, or mixed event types)
+    persist together with no clobber. Per table, changed rows (all containers)
+    and unchanged rows (reprocessed containers) are ``unionByName``-combined into
+    one ``sink.merge_incremental`` source; the delete scope prunes stale rows a
+    shrunk container leaves behind. The union is collision-free because an entity
+    is in exactly one bucket and ``merge_keys`` always includes its id.
 
     Parameters
     ----------
@@ -654,19 +656,32 @@ def persist_facts_incremental(
     type_enum : Enum
         The entity type-enum (resolves fact schema/uri + writer).
     sink : Sink
-        Target sink exposing ``replace_by_ids`` / ``upsert``.
+        Target sink exposing ``merge_incremental``.
     transform_fn : Callable[[DataFrame, StructType], DataFrame]
         Prepares a DataFrame for persistence (column projection + metadata).
     id_column : str
-        Column ``replace_by_ids`` targets for changed definitions (e.g.
+        Entity id column scoping changed-definition deletes (e.g.
         ``"channel_id"``, ``"visual_id"``, ``"event_id"``).
     merge_keys : list[str] or Callable
-        MERGE keys for unchanged upserts; a callable is resolved per entity type
-        (mirrors ``Report._get_aggregation_merge_keys``).
+        MERGE keys; a callable is resolved per entity type (mirrors
+        ``Report._get_aggregation_merge_keys``).
     changed_ids : dict[str, list[int]]
-        ``{type_name: [ids]}`` with changed definitions to replace.
+        ``{type_name: [ids]}`` with changed definitions recomputed over all
+        containers.
+    has_processed_containers : bool, optional
+        Whether any container was recomputed this run (new or updated). Gates
+        whether a table is written — new containers carry no delete scope but must
+        still be inserted. ``False`` + no changed ids → nothing to do.
+    updated_container_ids : list, optional
+        Ids of UPDATED containers only (present in gold, refreshed in silver).
+        Scopes the delete-by-source; new containers are excluded because they have
+        no gold rows to prune. Empty/None → no container-scoped delete.
+    container_id_col : str, optional
+        Gold fact-table container column, by default ``"container_id"``.
     """
     from impulse_reporting.persist.report_storage import WriterFactory
+
+    updated_container_ids = updated_container_ids or []
 
     # Group per-type facts by output table so shared-table types persist together.
     changed_by_table: dict[str, list[DataFrame]] = {}
@@ -692,24 +707,31 @@ def persist_facts_incremental(
         schema, uri = writer.extract_fact_schema_and_output_uri(entity_type)
         keys = _resolve_merge_keys(merge_keys, entity_type)
 
-        # Changed definitions: union then a single atomic replaceWhere.
-        changed_dfs = changed_by_table.get(table_name, [])
+        # Skip when there is nothing to write: no containers processed (new or
+        # updated) and no changed definitions. Keeps idempotent runs byte-identical
+        # (no no-op MERGE commit).
         table_changed_ids = changed_ids_by_table.get(table_name, [])
-        if changed_dfs and table_changed_ids:
-            combined = reduce(
-                lambda a, b: a.unionByName(b),
-                (transform_fn(cdf, schema) for cdf in changed_dfs),
-            )
-            sink.replace_by_ids(
-                df=combined,
-                uri=uri,
-                id_column=id_column,
-                ids_to_replace=table_changed_ids,
-            )
+        if not has_processed_containers and not table_changed_ids:
+            continue
 
-        # Unchanged definitions: MERGE over the incremental subset.
-        for udf in unchanged_by_table.get(table_name, []):
-            sink.upsert(transform_fn(udf, schema), uri, keys)
+        # Scope the delete-by-source: updated containers (only they can hold stale
+        # rows — new ones have none) and changed-definition entities.
+        delete_conditions = []
+        if updated_container_ids:
+            delete_conditions.append(
+                F.col(f"target.{container_id_col}").isin(updated_container_ids)
+            )
+        if table_changed_ids:
+            delete_conditions.append(F.col(f"target.{id_column}").isin(table_changed_ids))
+
+        # Single source: changed rows (all containers) + unchanged rows (processed
+        # containers), unioned by name into one MERGE.
+        source_dfs = [
+            transform_fn(df, schema)
+            for df in changed_by_table.get(table_name, []) + unchanged_by_table.get(table_name, [])
+        ]
+        source = reduce(lambda a, b: a.unionByName(b), source_dfs)
+        sink.merge_incremental(source, uri, keys, delete_conditions=delete_conditions)
 
 
 def persist_dimensions_incremental(

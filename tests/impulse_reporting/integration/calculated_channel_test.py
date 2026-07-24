@@ -25,6 +25,9 @@ from impulse_reporting.config.config_parser import (
 )
 from impulse_reporting.core.report import Report
 from tests.conftest import setup_raw_channels_db, spark  # noqa: F401  (pytest fixtures)
+from tests.impulse_reporting.integration.test_helpers import (
+    clone_silver_with_shrunk_container,
+)
 
 _FACT = "spark_catalog.gold.evaluation_calculated_channel_fact"
 _DIM = "spark_catalog.gold.evaluation_calculated_channel_dimension"
@@ -167,6 +170,95 @@ def test_incremental_unchanged_is_idempotent(spark):
     assert spark.read.table(_FACT).count() == count_before
 
 
+def test_incremental_modified_container_fewer_rows_deletes_stale(spark):
+    """Regression: a modified container producing FEWER rows under an UNCHANGED
+    definition must not leave stale gold fact rows behind.
+
+    Calculated-channel facts are 1:1 with the silver signal intervals, so cutting
+    container 1's source rows deterministically shrinks its gold facts. Container 1
+    is flagged updated (newer silver ``timestamp``); containers 2 & 3 keep an old
+    timestamp so they are not reprocessed and must stay byte-identical.
+    """
+    # Run 1 (full): seed gold from the base silver tables (container 1 has 50
+    # source intervals for the Vehicle Speed Sensor → 50 calc-channel fact rows).
+    r1 = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config(is_enabled=False)),
+    )
+    ch = _add_channel(r1, factor=3.6)
+    r1.determine_report()
+    r1.persist_results()
+
+    fact_pre = spark.read.table(_FACT).filter(F.col("channel_id") == ch.get_id())
+    c1_before = fact_pre.filter(F.col("container_id") == 1).count()
+    others_before = {
+        (r["container_id"], r["tstart"], r["value"])
+        for r in fact_pre.filter(F.col("container_id") != 1)
+        .select("container_id", "tstart", "value")
+        .collect()
+    }
+    assert c1_before > 5  # there is real shrink headroom
+
+    shrink_cm = "spark_catalog.silver.container_metrics_shrink"
+    shrink_channels = "spark_catalog.silver.channels_shrink"
+    try:
+        # Modified silver: bump container 1's timestamp (→ detected as updated),
+        # keep 2 & 3 old (→ skipped). Vehicle Speed Sensor is channel_id 7; keep
+        # only the first 5 of container 1's intervals for it, everything else intact.
+        clone_silver_with_shrunk_container(
+            spark,
+            updated_container_id=1,
+            shrink_channel_ids=[7],
+            keep_n=5,
+            cm_table=shrink_cm,
+            channels_table=shrink_channels,
+        )
+
+        # Run 2 (incremental): unchanged definition, container 1 now yields 5 rows.
+        cfg = ImpulseConfig(
+            source=Source(
+                container_metrics_table=shrink_cm,
+                channel_metrics_table="spark_catalog.silver.channel_metrics",
+                channels_uri=shrink_channels,
+            ),
+            unity_sink=UnitySink(
+                catalog="spark_catalog", schema="gold", table_prefix="evaluation"
+            ),
+            incremental=IncrementalConfig(
+                enabled=True,
+                silver_last_modified_column="timestamp",
+                gold_last_modified_column="_created_at",
+            ),
+        )
+        r2 = Report(
+            name="calc_channel_report",
+            spark=spark,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=dict(cfg),
+        )
+        ch2 = _add_channel(r2, factor=3.6)
+        assert ch2.get_id() == ch.get_id()  # unchanged definition
+        r2.determine_report()
+        r2.persist_results()
+
+        fact_post = spark.read.table(_FACT).filter(F.col("channel_id") == ch.get_id())
+        # Container 1 shrank to exactly 5 rows — no stale orphans survive.
+        assert fact_post.filter(F.col("container_id") == 1).count() == 5
+        # Containers 2 & 3 were not reprocessed → untouched.
+        others_after = {
+            (r["container_id"], r["tstart"], r["value"])
+            for r in fact_post.filter(F.col("container_id") != 1)
+            .select("container_id", "tstart", "value")
+            .collect()
+        }
+        assert others_after == others_before
+    finally:
+        spark.sql(f"DROP TABLE IF EXISTS {shrink_cm}")
+        spark.sql(f"DROP TABLE IF EXISTS {shrink_channels}")
+
+
 def test_incremental_changed_definition_replaces(spark):
     # Seed gold with factor 3.6.
     r1 = Report(
@@ -185,7 +277,8 @@ def test_incremental_changed_definition_replaces(spark):
         .first()[0]
     )
 
-    # Re-run incrementally with a changed factor → replace_by_ids rewrites the rows.
+    # Re-run incrementally with a changed factor → the changed-definition path
+    # rewrites the rows in the unified MERGE (scoped by channel_id).
     r2 = Report(
         name="calc_channel_report",
         spark=spark,

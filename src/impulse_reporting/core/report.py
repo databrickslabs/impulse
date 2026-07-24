@@ -636,6 +636,8 @@ class Report:
         None
         """
         changed_channel_ids = changed_channel_ids or {}
+        has_processed_containers = getattr(self, "_has_processed_containers", False)
+        updated_container_ids = getattr(self, "_updated_container_ids", [])
         storage_factory = WriterFactory(self.sink)
         transformer = ReportEntityTransformer()
 
@@ -653,6 +655,8 @@ class Report:
             id_column="visual_id",
             merge_keys=self._get_aggregation_merge_keys,
             changed_ids=changed_aggregation_ids,
+            has_processed_containers=has_processed_containers,
+            updated_container_ids=updated_container_ids,
         )
         persist_dimensions_incremental(
             self.aggregation_metadata_dfs,
@@ -673,6 +677,8 @@ class Report:
             id_column="event_id",
             merge_keys=["container_id", "event_id", "event_instance_id"],
             changed_ids=changed_event_ids,
+            has_processed_containers=has_processed_containers,
+            updated_container_ids=updated_container_ids,
         )
         persist_dimensions_incremental(
             self.event_metadata_dfs,
@@ -682,7 +688,31 @@ class Report:
             merge_keys=["event_id"],
         )
 
-        # Persist measurement dimension (upsert by container_id)
+        # Persist calculated channel facts + dimensions
+        persist_facts_incremental(
+            self.calculated_channel_dfs,
+            ChannelType,
+            self.sink,
+            _transform,
+            id_column="channel_id",
+            merge_keys=["container_id", "channel_id", "tstart"],
+            changed_ids=changed_channel_ids,
+            has_processed_containers=has_processed_containers,
+            updated_container_ids=updated_container_ids,
+        )
+        persist_dimensions_incremental(
+            self.calculated_channel_metadata_dfs,
+            ChannelType,
+            self.sink,
+            _transform,
+            merge_keys=["channel_id"],
+        )
+
+        # Persist the measurement dimension LAST (as ``_persist_full`` does). It
+        # holds the gold timestamp that container-update detection compares
+        # against; the fact solves above are lazy, so writing it earlier would
+        # bump that timestamp before they materialize and drop the containers
+        # being reprocessed.
         if self.container_dimension_df:
             writer = storage_factory.create_container_dimension_writer()
             uri = writer.get_output_uri()
@@ -708,24 +738,6 @@ class Report:
                     solver_cfg.channel_alias_col,
                 ],
             )
-
-        # Persist calculated channel facts + dimensions
-        persist_facts_incremental(
-            self.calculated_channel_dfs,
-            ChannelType,
-            self.sink,
-            _transform,
-            id_column="channel_id",
-            merge_keys=["container_id", "channel_id", "tstart"],
-            changed_ids=changed_channel_ids,
-        )
-        persist_dimensions_incremental(
-            self.calculated_channel_metadata_dfs,
-            ChannelType,
-            self.sink,
-            _transform,
-            merge_keys=["channel_id"],
-        )
 
     def _transform_for_persistence(
         self,
@@ -868,10 +880,23 @@ class Report:
         # Determine processing mode: config overrides signature, gold must exist
         self._is_incremental = self._resolve_is_incremental(is_incremental)
 
-        # Detect containers to process (incremental mode only)
+        # Detect containers to process (incremental mode only): new + updated.
         pre_filtered_containers_df = None
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
+
+        # Two signals for persistence:
+        # - has_processed_containers (new + updated): gates whether a fact table is
+        #   written (new containers must be inserted). Only a bool is needed, so
+        #   probe emptiness with isEmpty() rather than collecting the whole id list.
+        # - updated container ids: scopes the delete-by-source, since only
+        #   containers that already have gold rows can have stale rows to prune.
+        self._has_processed_containers = (
+            pre_filtered_containers_df is not None and not pre_filtered_containers_df.isEmpty()
+        )
+        self._updated_container_ids = self._collect_container_ids(
+            self._detect_updated_containers() if self._is_incremental else None
+        )
 
         hash_comparator = DefinitionHashComparator(self.spark)
 
@@ -1110,22 +1135,80 @@ class Report:
             DataFrame containing containers to process, or None if gold table
             doesn't exist (indicating full processing is needed).
         """
-        if not self._has_sink:
+        args = self._container_detection_args()
+        if args is None:
             return None
-        detector = ContainerUpsertDetector(self.spark)
-        silver_containers = self.db.container_metrics(self.spark)
-        measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
-
-        # Retrieve configurable column names (default: "last_modified")
-        silver_col = "last_modified"
-        gold_col = "last_modified"
-        if hasattr(self.config, "incremental") and self.config.incremental is not None:
-            silver_col = self.config.incremental.silver_last_modified_column
-            gold_col = self.config.incremental.gold_last_modified_column
-
+        detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
         return detector.detect_upserted_containers(
             silver_containers,
             measurement_dim_table,
             silver_last_modified_col=silver_col,
             gold_last_modified_col=gold_col,
         )
+
+    def _detect_updated_containers(self) -> DataFrame | None:
+        """Detect only UPDATED containers (present in gold, newer silver timestamp).
+
+        Excludes new containers — see
+        ``ContainerUpsertDetector.detect_updated_containers``. Used to scope the
+        incremental delete-by-source. Returns None in sinkless mode or when the
+        gold table doesn't exist.
+
+        Returns
+        -------
+        DataFrame | None
+            Updated containers, or None.
+        """
+        args = self._container_detection_args()
+        if args is None:
+            return None
+        detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
+        return detector.detect_updated_containers(
+            silver_containers,
+            measurement_dim_table,
+            silver_last_modified_col=silver_col,
+            gold_last_modified_col=gold_col,
+        )
+
+    def _container_detection_args(self):
+        """Shared inputs for container detection, or None in sinkless mode.
+
+        Returns
+        -------
+        tuple | None
+            ``(detector, silver_containers_df, measurement_dim_table, silver_col,
+            gold_col)`` — the freshness column names come from the incremental
+            config (default ``"last_modified"``). None when no sink is configured.
+        """
+        if not self._has_sink:
+            return None
+        detector = ContainerUpsertDetector(self.spark)
+        silver_containers = self.db.container_metrics(self.spark)
+        measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
+
+        silver_col = "last_modified"
+        gold_col = "last_modified"
+        if hasattr(self.config, "incremental") and self.config.incremental is not None:
+            silver_col = self.config.incremental.silver_last_modified_column
+            gold_col = self.config.incremental.gold_last_modified_column
+
+        return detector, silver_containers, measurement_dim_table, silver_col, gold_col
+
+    @staticmethod
+    def _collect_container_ids(containers_df: DataFrame | None) -> list:
+        """Collect ``container_id`` values from a detected-containers DataFrame.
+
+        Parameters
+        ----------
+        containers_df : DataFrame | None
+            A detected-containers DataFrame (silver schema, includes
+            ``container_id``), or None.
+
+        Returns
+        -------
+        list
+            Container id values (empty when None).
+        """
+        if containers_df is None:
+            return []
+        return [row["container_id"] for row in containers_df.select("container_id").collect()]

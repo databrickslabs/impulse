@@ -3,6 +3,7 @@
 from enum import Enum
 from unittest.mock import MagicMock, create_autospec, patch
 
+import pyspark.sql.functions as F
 import pytest
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame
@@ -888,8 +889,16 @@ class TestPersistFactsIncremental:
             "impulse_reporting.persist.report_storage.WriterFactory", return_value=factory
         )
 
-    def test_changed_replaced_and_unchanged_upserted(self):
-        changed, unchanged = MagicMock(), MagicMock()
+    @staticmethod
+    def _delete_condition_strs(call):
+        """Stringify the delete_conditions Columns of a merge_incremental call."""
+        return sorted(str(c) for c in call.kwargs["delete_conditions"])
+
+    def test_changed_and_unchanged_merged_in_one_call(self):
+        # Changed (all containers) + unchanged (processed) union into a single
+        # MERGE; delete scope covers both updated containers and changed ids.
+        changed, unchanged, unioned = MagicMock(), MagicMock(), MagicMock()
+        changed.unionByName.return_value = unioned
         writer = MagicMock()
         writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
         sink = MagicMock()
@@ -903,16 +912,79 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["container_id", "channel_id", "tstart"],
                 changed_ids={"FOO": [1, 2]},
+                has_processed_containers=True,
+                updated_container_ids=[10, 20],
             )
 
-        sink.replace_by_ids.assert_called_once_with(
-            df=changed, uri="uri", id_column="channel_id", ids_to_replace=[1, 2]
-        )
-        sink.upsert.assert_called_once_with(
-            unchanged, "uri", ["container_id", "channel_id", "tstart"]
+        sink.replace_by_ids.assert_not_called()  # method no longer exists on the sink
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        # Source is the changed ∪ unchanged union; keys forwarded.
+        changed.unionByName.assert_called_once_with(unchanged)
+        assert call.args == (unioned, "uri", ["container_id", "channel_id", "tstart"])
+        assert self._delete_condition_strs(call) == sorted(
+            [
+                str(F.col("target.container_id").isin([10, 20])),
+                str(F.col("target.channel_id").isin([1, 2])),
+            ]
         )
 
+    def test_new_only_container_merges_without_container_delete(self):
+        # A brand-new container (processed but not updated) must still be inserted,
+        # but carries NO container-scoped delete (it has no gold rows to prune).
+        unchanged = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": None, "unchanged": unchanged}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[],
+            )
+
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (unchanged, "uri", ["channel_id"])
+        # Nothing to delete: new container, no changed ids.
+        assert self._delete_condition_strs(call) == []
+
+    def test_changed_only_scopes_delete_by_changed_ids(self):
+        # No processed containers, but a changed definition → still merges,
+        # deleting stale rows only for the changed entity ids.
+        changed = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": changed, "unchanged": None}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={"FOO": [7]},
+                has_processed_containers=False,
+                updated_container_ids=[],
+            )
+
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (changed, "uri", ["channel_id"])
+        assert self._delete_condition_strs(call) == [str(F.col("target.channel_id").isin([7]))]
+
     def test_changed_skipped_when_type_not_in_changed_ids(self):
+        # Changed df present but not listed in changed_ids and nothing processed
+        # → no work → skipped entirely.
         changed = MagicMock()
         writer = MagicMock()
         writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
@@ -927,13 +999,14 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
+                has_processed_containers=False,
+                updated_container_ids=[],
             )
 
-        sink.replace_by_ids.assert_not_called()
-        sink.upsert.assert_not_called()
+        sink.merge_incremental.assert_not_called()
 
     def test_none_value_is_a_noop(self):
-        # A type whose fact value is None triggers neither replace nor upsert.
+        # A type whose fact value is None triggers no merge.
         writer = MagicMock()
         writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
         sink = MagicMock()
@@ -947,12 +1020,36 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
             )
 
-        sink.replace_by_ids.assert_not_called()
-        sink.upsert.assert_not_called()
+        sink.merge_incremental.assert_not_called()
 
-    def test_bare_df_is_upserted(self):
+    def test_no_processed_and_no_changed_is_skipped(self):
+        # Unchanged df but nothing processed and nothing changed → skipped,
+        # keeping gold byte-identical.
+        unchanged = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": None, "unchanged": unchanged}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=False,
+                updated_container_ids=[],
+            )
+
+        sink.merge_incremental.assert_not_called()
+
+    def test_bare_df_is_merged(self):
         bare = MagicMock()
         writer = MagicMock()
         writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
@@ -967,9 +1064,14 @@ class TestPersistFactsIncremental:
                 id_column="channel_id",
                 merge_keys=["channel_id"],
                 changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
             )
 
-        sink.upsert.assert_called_once_with(bare, "uri", ["channel_id"])
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (bare, "uri", ["channel_id"])
+        assert self._delete_condition_strs(call) == [str(F.col("target.container_id").isin([10]))]
 
     def test_callable_merge_keys_resolved_per_type(self):
         unchanged = MagicMock()
@@ -989,13 +1091,43 @@ class TestPersistFactsIncremental:
                 id_column="id",
                 merge_keys=keys_for,
                 changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
             )
 
-        sink.upsert.assert_called_once_with(unchanged, "uri", ["container_id", "foo"])
+        sink.merge_incremental.assert_called_once()
+        assert sink.merge_incremental.call_args.args == (
+            unchanged,
+            "uri",
+            ["container_id", "foo"],
+        )
 
-    def test_shared_table_changed_types_union_into_one_replace(self):
-        # FOO and BAR share `shared_fact`: their changed DFs are unioned and
-        # rewritten in a single replace_by_ids with the combined ids.
+    def test_custom_container_id_col_used_in_delete_scope(self):
+        bare = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": bare},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
+                container_id_col="cont_id",
+            )
+
+        call = sink.merge_incremental.call_args
+        assert self._delete_condition_strs(call) == [str(F.col("target.cont_id").isin([10]))]
+
+    def test_shared_table_changed_types_union_into_one_merge(self):
+        # FOO and BAR share `shared_fact`: their changed DFs union into a single
+        # MERGE with the combined changed-id delete scope.
         foo_changed, bar_changed, unioned = MagicMock(), MagicMock(), MagicMock()
         foo_changed.unionByName.return_value = unioned
         writer = MagicMock()
@@ -1014,17 +1146,22 @@ class TestPersistFactsIncremental:
                 id_column="visual_id",
                 merge_keys=["visual_id"],
                 changed_ids={"FOO": [1], "BAR": [2]},
+                has_processed_containers=False,
+                updated_container_ids=[],
             )
 
-        # Single replace over the shared table with unioned DF + combined ids.
+        # Single MERGE over the shared table with the unioned DF + combined ids.
         foo_changed.unionByName.assert_called_once_with(bar_changed)
-        sink.replace_by_ids.assert_called_once_with(
-            df=unioned, uri="uri", id_column="visual_id", ids_to_replace=[1, 2]
-        )
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (unioned, "uri", ["visual_id"])
+        assert self._delete_condition_strs(call) == [str(F.col("target.visual_id").isin([1, 2]))]
 
-    def test_shared_table_unchanged_types_each_upserted(self):
-        # FOO and BAR unchanged dfs both target `shared_fact` → one upsert each.
-        foo_unchanged, bar_unchanged = MagicMock(), MagicMock()
+    def test_shared_table_unchanged_types_union_into_one_merge(self):
+        # FOO and BAR unchanged dfs both target `shared_fact` → unioned into a
+        # single MERGE (no per-type clobber), scoped to updated containers.
+        foo_unchanged, bar_unchanged, unioned = MagicMock(), MagicMock(), MagicMock()
+        foo_unchanged.unionByName.return_value = unioned
         writer = MagicMock()
         writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
         sink = MagicMock()
@@ -1041,12 +1178,15 @@ class TestPersistFactsIncremental:
                 id_column="visual_id",
                 merge_keys=["visual_id"],
                 changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
             )
 
-        sink.replace_by_ids.assert_not_called()
-        assert sink.upsert.call_count == 2
-        upserted = {call.args[0] for call in sink.upsert.call_args_list}
-        assert upserted == {foo_unchanged, bar_unchanged}
+        foo_unchanged.unionByName.assert_called_once_with(bar_unchanged)
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (unioned, "uri", ["visual_id"])
+        assert self._delete_condition_strs(call) == [str(F.col("target.container_id").isin([10]))]
 
 
 class TestPersistDimensionsIncremental:

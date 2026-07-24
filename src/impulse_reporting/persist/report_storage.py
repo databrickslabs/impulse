@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from functools import reduce
 
 import pyspark.sql.functions as F
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql.types import StructType
 
 from impulse_reporting.aggregations.aggregation_types import AggregationType
@@ -288,32 +288,46 @@ class UnityCatalogSink(Sink):
             .execute()
         )
 
-    def replace_by_ids(
+    def merge_incremental(
         self,
         df: DataFrame,
         uri: str,
-        id_column: str,
-        ids_to_replace: list[int],
+        merge_keys: list[str],
+        *,
+        delete_conditions: list[Column] | None = None,
         overwrite_schema: bool = True,
     ):
-        """
-        Atomically replace all records for specified IDs using Delta Lake's replaceWhere.
+        """Upsert ``df`` and prune stale rows in one Delta MERGE.
 
-        This is a single atomic transaction - no intermediate inconsistent state.
-        Use for CHANGED definitions where old data structure is incompatible with new.
+        Matched rows update, source-only rows insert, and target rows within the
+        ``delete_conditions`` scope that are absent from the source are deleted
+        (removing the surplus a shrunk container leaves behind). Rows outside the
+        scope are untouched.
+
+        The MERGE runs with ``withSchemaEvolution()`` so a fact-schema change
+        between releases doesn't break an incremental run: a column added to the
+        source is added to the gold table (existing rows get NULL). A column
+        dropped from the source is *retained* in gold (new rows get NULL for it) —
+        Delta does not drop columns via MERGE evolution, so a true column removal
+        still needs a full overwrite. Incompatible type changes still error rather
+        than silently coerce. When source and gold schemas match (the normal case)
+        this is a no-op.
 
         Parameters
         ----------
         df : DataFrame
-            Source DataFrame with new records to insert.
+            Source rows to upsert. May be empty (stale rows are still deleted).
         uri : str
             Target Unity Catalog table URI.
-        id_column : str
-            Column containing the entity ID (e.g., "visual_id" for aggregations, "event_id" for events).
-        ids_to_replace : list[int]
-            List of IDs whose records should be completely replaced.
+        merge_keys : list[str]
+            Columns matched between source and target.
+        delete_conditions : list[Column], optional
+            Target-scoped predicates OR-ed together to bound
+            ``whenNotMatchedBySourceDelete``. Must reference the ``target`` alias
+            (a bare column is ambiguous with the merge keys). None/empty → pure
+            upsert; ``.isin([])`` is always false, so it can never mass-delete.
         overwrite_schema : bool, optional
-            Whether to overwrite the schema of the target table, by default True.
+            Only consumed on first write (table creation), by default True.
 
         Returns
         -------
@@ -323,21 +337,22 @@ class UnityCatalogSink(Sink):
             df.write.format("delta").option("overwriteSchema", overwrite_schema).saveAsTable(uri)
             return
 
-        if not ids_to_replace:
-            # No IDs to replace, nothing to do
-            return
+        merge_condition = " AND ".join([f"target.{k} = source.{k}" for k in merge_keys])
 
-        # Build replaceWhere condition
-        replace_condition = f"{id_column} IN ({','.join(map(str, ids_to_replace))})"
-
-        # Atomic operation: deletes all matching rows and inserts new data in single transaction
-        (
-            df.write.format("delta")
-            .mode("overwrite")
-            .option("replaceWhere", replace_condition)
-            .option("overwriteSchema", overwrite_schema)
-            .saveAsTable(uri)
+        target = self._resolve_delta_table(df.sparkSession, uri)
+        builder = (
+            target.alias("target")
+            .merge(df.alias("source"), merge_condition)
+            .withSchemaEvolution()
+            .whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
         )
+
+        if delete_conditions:
+            combined = reduce(lambda a, b: a | b, delete_conditions)
+            builder = builder.whenNotMatchedBySourceDelete(condition=combined)
+
+        builder.execute()
 
     def _table_exists(self, spark: SparkSession, uri: str) -> bool:
         """

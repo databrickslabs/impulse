@@ -171,6 +171,50 @@ def test_detects_both_new_and_updated_containers(spark, cleanup_test_tables):
     assert sorted(result_ids) == [1, 3]
 
 
+def test_detect_updated_containers_excludes_new(spark, cleanup_test_tables):
+    """detect_updated_containers returns updated containers but NOT new ones."""
+    detector = ContainerUpsertDetector(spark)
+    newer_timestamp = BASE_TIMESTAMP + timedelta(hours=1)
+
+    # Container 1: updated (newer); 2: unchanged; 3: new (absent from gold).
+    silver_data = [
+        Row(container_id=1, file_name="file1.dat", last_modified=newer_timestamp),
+        Row(container_id=2, file_name="file2.dat", last_modified=BASE_TIMESTAMP),
+        Row(container_id=3, file_name="file3.dat", last_modified=newer_timestamp),
+    ]
+    silver_df = spark.createDataFrame(silver_data, schema=SILVER_CONTAINER_SCHEMA)
+
+    gold_data = [
+        Row(container_id=1, last_modified=BASE_TIMESTAMP, _created_at=BASE_TIMESTAMP),
+        Row(container_id=2, last_modified=BASE_TIMESTAMP, _created_at=BASE_TIMESTAMP),
+    ]
+    gold_df = spark.createDataFrame(gold_data, schema=GOLD_MEASUREMENT_DIM_SCHEMA)
+    gold_df.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.gold.test_measurement_dimension"
+    )
+
+    result = detector.detect_updated_containers(
+        silver_df, "spark_catalog.gold.test_measurement_dimension"
+    )
+
+    assert result is not None
+    # Only the updated container (1); the new one (3) is excluded.
+    assert [row.container_id for row in result.collect()] == [1]
+
+
+def test_detect_updated_containers_returns_none_when_gold_missing(spark):
+    """detect_updated_containers returns None when the gold table doesn't exist."""
+    detector = ContainerUpsertDetector(spark)
+    silver_df = spark.createDataFrame(
+        [Row(container_id=1, file_name="test.dat", last_modified=datetime.now())],
+        schema=SILVER_CONTAINER_SCHEMA,
+    )
+
+    result = detector.detect_updated_containers(silver_df, "spark_catalog.gold.nonexistent_table")
+
+    assert result is None
+
+
 def test_returns_empty_dataframe_when_no_changes(spark, cleanup_test_tables):
     """Test that empty DataFrame is returned when no containers need processing."""
     detector = ContainerUpsertDetector(spark)
