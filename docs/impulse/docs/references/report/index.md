@@ -91,7 +91,7 @@ or pass `is_incremental=True` at call time.
 1. Compare every event and aggregation against its stored `definition_hash` in the gold dimension table. Classify each as **changed** (hash differs, or it's brand new) or **unchanged** (hash matches).
 2. For unchanged definitions, process only the containers that are new or have newer silver data than gold. Skip the rest.
 3. For changed definitions, reprocess all containers that match the report's filters.
-4. Persist via Delta `MERGE` on natural keys for unchanged definitions; replace atomically via `replaceWhere` on `visual_id`, `event_id`, or `channel_id` for changed ones.
+4. Persist each fact table with a single Delta `MERGE` on its natural keys. The changed rows (all containers) and unchanged rows (reprocessed containers) are written together, and stale rows within the reprocessed scope are deleted in the same transaction (see [Operational notes](#operational-notes)).
 
 #### Mode resolution
 
@@ -128,6 +128,6 @@ Renaming an aggregation, tweaking the description, or swapping `channel_name` or
 
 #### Operational notes
 
-- A single run can be partly incremental: one event is changed (full reprocess), another is unchanged (upserted containers only), a newly added aggregation is brand new (also full reprocess). Each entity walks its own path.
-- `replaceWhere` is atomic per fact table. When a definition changes, all rows for that `visual_id`, `event_id`, or `channel_id` get deleted and rewritten in one transaction. No intermediate inconsistent state, but there is a brief rewrite window.
-- `MERGE` keeps existing rows that don't conflict, so unchanged definitions accumulate rows for new containers without rewriting the old ones.
+- A single run can be partly incremental: one event is changed (full reprocess), another is unchanged (upserted containers only), a newly added aggregation is brand new (also full reprocess). Each entity walks its own path, but all of an entity's rows land in **one** `MERGE` per fact table (entity types that share a fact table are combined), so there is no intermediate inconsistent state.
+- The `MERGE` updates matched rows and inserts new ones, and also **deletes stale rows** (`whenNotMatchedBySourceDelete`) — but only within a bounded scope: the updated containers and the changed-definition entity ids. A modified container that now produces *fewer* rows (e.g. an event that fires fewer times, or an event-scoped statistic with fewer instances) has its surplus rows removed rather than left behind as orphans.
+- Rows outside that scope are never touched: containers that weren't reprocessed, and entities whose definition didn't change, keep their existing gold rows untouched. New containers carry no delete scope (they have no prior gold rows) — their rows are simply inserted.

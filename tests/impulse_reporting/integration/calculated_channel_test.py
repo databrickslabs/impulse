@@ -25,6 +25,9 @@ from impulse_reporting.config.config_parser import (
 )
 from impulse_reporting.core.report import Report
 from tests.conftest import setup_raw_channels_db, spark  # noqa: F401  (pytest fixtures)
+from tests.impulse_reporting.integration.test_helpers import (
+    clone_silver_with_shrunk_container,
+)
 
 _FACT = "spark_catalog.gold.evaluation_calculated_channel_fact"
 _DIM = "spark_catalog.gold.evaluation_calculated_channel_dimension"
@@ -176,8 +179,6 @@ def test_incremental_modified_container_fewer_rows_deletes_stale(spark):
     is flagged updated (newer silver ``timestamp``); containers 2 & 3 keep an old
     timestamp so they are not reprocessed and must stay byte-identical.
     """
-    from pyspark.sql import Window
-
     # Run 1 (full): seed gold from the base silver tables (container 1 has 50
     # source intervals for the Vehicle Speed Sensor → 50 calc-channel fact rows).
     r1 = Report(
@@ -206,21 +207,14 @@ def test_incremental_modified_container_fewer_rows_deletes_stale(spark):
         # Modified silver: bump container 1's timestamp (→ detected as updated),
         # keep 2 & 3 old (→ skipped). Vehicle Speed Sensor is channel_id 7; keep
         # only the first 5 of container 1's intervals for it, everything else intact.
-        container_metrics = spark.read.table("spark_catalog.silver.container_metrics")
-        container_metrics.withColumn(
-            "timestamp",
-            F.when(F.col("container_id") == 1, F.current_timestamp()).otherwise(
-                F.lit("2020-01-01 00:00:00").cast("timestamp")
-            ),
-        ).write.format("delta").mode("overwrite").saveAsTable(shrink_cm)
-
-        channels = spark.read.table("spark_catalog.silver.channels")
-        rn = F.row_number().over(
-            Window.partitionBy("container_id", "channel_id").orderBy("tstart")
+        clone_silver_with_shrunk_container(
+            spark,
+            updated_container_id=1,
+            shrink_channel_ids=[7],
+            keep_n=5,
+            cm_table=shrink_cm,
+            channels_table=shrink_channels,
         )
-        channels.withColumn("_rn", rn).filter(
-            ~((F.col("container_id") == 1) & (F.col("channel_id") == 7)) | (F.col("_rn") <= 5)
-        ).drop("_rn").write.format("delta").mode("overwrite").saveAsTable(shrink_channels)
 
         # Run 2 (incremental): unchanged definition, container 1 now yields 5 rows.
         cfg = ImpulseConfig(
