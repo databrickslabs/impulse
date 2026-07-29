@@ -114,7 +114,7 @@ Only the hashed attributes matter. Anything else is cosmetic and won't trigger r
 | `ContainerEvent`    | `name`                                                      |
 | `Histogram`         | `base_expr`, `bins`, `event`                                |
 | `Histogram2D`       | `x_expr`, `y_expr`, `x_bins`, `y_bins`, `event`             |
-| `StatsAggregator`   | `input_expressions`, `statistics`, `event`                  |
+| `StatsAggregator`   | `input_expressions`, `statistics`, `event`, custom statistics (labels, functions, inputs, params) |
 | `CalculatedChannel` | `expr` string + `identity`                                  |
 
 Renaming an aggregation, tweaking the description, or swapping `channel_name` or units keeps the hash stable. No reprocessing.

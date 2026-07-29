@@ -129,7 +129,7 @@ are cosmetic and do not trigger reprocessing:
 | `ContainerEvent`    | `name`                                             |
 | `Histogram`         | `base_expr`, `bins`, `event`                       |
 | `Histogram2D`       | `x_expr`, `y_expr`, `x_bins`, `y_bins`, `event`    |
-| `StatsAggregator`   | `input_expressions`, `statistics`, `event`         |
+| `StatsAggregator`   | `input_expressions`, `statistics`, `event`, custom stats |
 | `CalculatedChannel` | `expr` string + `identity`                         |
 
 **Container-update detection** unions two sets: new containers (silver rows absent from gold) and
