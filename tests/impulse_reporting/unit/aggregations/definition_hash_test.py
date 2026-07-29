@@ -311,6 +311,18 @@ def _thresholded_count(series, t_start, t_end, threshold=0.0):
     return [float(sum((s.values > threshold).sum() for s in series))]
 
 
+def _scaled_default_2(series, t_start, t_end, scale=2.0):
+    """Statistic whose behavior lives in a default argument (scale=2.0)."""
+    values = [v for s in series for v in s.values]
+    return [float(scale * sum(values))]
+
+
+def _scaled_default_3(series, t_start, t_end, scale=3.0):
+    """Identical body to _scaled_default_2 but a different default (scale=3.0)."""
+    values = [v for s in series for v in s.values]
+    return [float(scale * sum(values))]
+
+
 class TestStatsAggregatorDefinitionHash:
     """Test suite for StatsAggregator.determine_definition_hash() with custom statistics."""
 
@@ -532,3 +544,60 @@ class TestStatsAggregatorDefinitionHash:
 
         assert labels_ab.determine_definition_hash() == labels_ab_same.determine_definition_hash()
         assert labels_ab.determine_definition_hash() != labels_cd.determine_definition_hash()
+
+    def test_default_argument_change_alters_hash(self):
+        """A behavior change carried only by a default argument must change the hash."""
+        agg_default_2 = self._make(
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_scaled_default_2, aggregation_labels=["scaled"])
+            ]
+        )
+        agg_default_3 = self._make(
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_scaled_default_3, aggregation_labels=["scaled"])
+            ]
+        )
+
+        assert (
+            agg_default_2.determine_definition_hash() != agg_default_3.determine_definition_hash()
+        )
+
+    def test_same_default_argument_is_stable(self):
+        agg1 = self._make(
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_scaled_default_2, aggregation_labels=["scaled"])
+            ]
+        )
+        agg2 = self._make(
+            name="other",
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_scaled_default_2, aggregation_labels=["scaled"])
+            ],
+        )
+
+        assert agg1.determine_definition_hash() == agg2.determine_definition_hash()
+
+    def test_positional_only_partial_does_not_crash(self):
+        """A partial with only positional bound args must hash without raising."""
+        # partial bound positionally (no keywords) -> func.keywords is {} on cpython,
+        # but the fingerprint must tolerate it regardless.
+        agg_pos_1 = self._make(
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(
+                    func=functools.partial(_thresholded_count, 0.0),
+                    aggregation_labels=["count"],
+                )
+            ]
+        )
+        agg_pos_2 = self._make(
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(
+                    func=functools.partial(_thresholded_count, 5.0),
+                    aggregation_labels=["count"],
+                )
+            ]
+        )
+
+        assert isinstance(agg_pos_1.determine_definition_hash(), int)
+        # different positional bound value -> different fingerprint
+        assert agg_pos_1.determine_definition_hash() != agg_pos_2.determine_definition_hash()

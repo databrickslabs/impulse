@@ -842,12 +842,14 @@ class StatsAggregator(Aggregation):
         Build a stable fingerprint for a custom statistic.
 
         The fingerprint covers the statistic's kind, output labels, declared input
-        indices, provisioned params, and the function's bytecode and constants.
+        indices, provisioned params, and the function's bytecode, constants, and
+        default argument values (``__defaults__`` / ``__kwdefaults__``).
         ``functools.partial`` wrappers are unwrapped with their bound arguments
         included, so changed parameters change the fingerprint. Note that bytecode
         hashing does not detect changes inside helper functions called by the
-        statistic, and is sensitive to the Python version. Callables without
-        ``__code__`` fall back to a labels-only fingerprint.
+        statistic or in captured closure variables, and is sensitive to the Python
+        version. Callables without ``__code__`` fall back to a labels-only
+        fingerprint.
 
         Parameters
         ----------
@@ -870,13 +872,19 @@ class StatsAggregator(Aggregation):
         params_repr = repr(sorted((params or {}).items()))
         partial_reprs = []
         while isinstance(func, functools.partial):
-            partial_reprs.append(f"{func.args!r}:{sorted(func.keywords.items())!r}")
+            partial_reprs.append(f"{func.args!r}:{sorted((func.keywords or {}).items())!r}")
             func = func.func
         code = getattr(func, "__code__", None)
         if code is None:
             digest = "no-code"
         else:
+            defaults_repr = repr(func.__defaults__)
+            kwdefaults_repr = repr(sorted((func.__kwdefaults__ or {}).items()))
             digest = hashlib.sha256(
-                code.co_code + repr(code.co_consts).encode() + "|".join(partial_reprs).encode()
+                code.co_code
+                + repr(code.co_consts).encode()
+                + defaults_repr.encode()
+                + kwdefaults_repr.encode()
+                + "|".join(partial_reprs).encode()
             ).hexdigest()
         return f"{kind}:{aggregation_labels!r}:{inputs_repr}:{params_repr}:{digest}"
