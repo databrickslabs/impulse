@@ -216,8 +216,8 @@ class PointsInTimeEvent(Event):
                 "event_name",
                 f.explode(f.col("value")).alias("ts"),
             )
-            .withColumn("start_ts", f.col("ts").cast("long"))
-            .withColumn("end_ts", f.col("ts").cast("long"))
+            .withColumn("start_ts", f.col("ts"))
+            .withColumn("end_ts", f.col("ts"))
             .withColumn(
                 "event_instance_id",
                 generate_event_instance_id_column(event_type=PointsInTimeEvent),

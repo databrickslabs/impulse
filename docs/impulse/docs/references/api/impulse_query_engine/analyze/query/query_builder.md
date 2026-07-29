@@ -157,6 +157,44 @@ When None, all containers matching query filters are processed (full mode).
 
 `pyspark.sql.DataFrame`: DataFrame containing query results.
 
+#### solve\_calculated\_channels
+
+```python
+def solve_calculated_channels(
+        spark,
+        solver: QuerySolver = BlobSolver(),
+        pre_filtered_containers_df: DataFrame = None) -> DataFrame
+```
+
+Compute calculated channels and return a narrow silver-shaped DataFrame.
+
+Every selection must be a :class:`CalculatedChannel`.  This runs the same
+metadata filter pipeline as :meth:`solve` (resolving the input channels
+each calculated channel depends on), then evaluates each calculated
+channel per container and emits rows in the silver ``channel_data`` shape
+— ``container_id, channel_id, tstart, tend, value`` — plus a single
+``identity`` ``MapType(string, string)`` column holding each channel's
+identity dict.
+
+**Arguments**:
+
+- `spark` (`SparkSession`): Spark session used for query execution.
+- `solver` (`QuerySolver`): Query solver to use.  Must implement ``solve_calculated_channels``
+(``DefaultSolver`` does); the default ``BlobSolver`` does not.
+- `pre_filtered_containers_df` (`DataFrame`): Pre-filtered container metrics for incremental processing.  When
+provided, only these containers are processed; when None, all
+containers matching the query filters are processed.
+
+**Raises**:
+
+- `ValueError`: If any selection is not a ``CalculatedChannel``, or if a wrapped
+expression does not evaluate to a ``SampleSeries``.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: Narrow DataFrame ``[container_id, channel_id, tstart, tend, value,
+identity]``.
+
 #### toPandas
 
 ```python

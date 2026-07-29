@@ -14,6 +14,7 @@ Each skill is a folder with a `SKILL.md` file that documents usage patterns. Sta
 | [`impulse-config`](./impulse-config/SKILL.md)            | The `ImpulseConfig` schema — source tables, sink, container filters, solver options, incremental processing, and sinkless mode. |
 | [`impulse-events`](./impulse-events/SKILL.md)            | Defining event windows: `BasicEvent`, `ContainerEvent`, `SequenceOfEvents`, `PointsInTimeEvent`.                   |
 | [`impulse-aggregations`](./impulse-aggregations/SKILL.md)| Computing results over channels: 1D/2D histograms (duration/distance/custom-weight), `StatsAggregator`, `PointValueAggregator`, and pages. |
+| [`impulse-channels`](./impulse-channels/SKILL.md)        | Calculated (derived) channels — materializing a new signal from existing channels via `CalculatedChannel` and `solve_calculated_channels`. |
 | [`impulse-reporting`](./impulse-reporting/SKILL.md)      | The batch pipeline that persists events and aggregations to the gold-layer star schema with `Report` / `Page`, plus incremental runs. |
 | [`impulse-analyze`](./impulse-analyze/SKILL.md)          | Ad-hoc analysis — evaluating TSAL directly through the query engine and returning Spark or pandas DataFrames, no gold-layer write. |
 | [`impulse-ml`](./impulse-ml/SKILL.md)                    | Extracting event-scoped statistics as a flat feature matrix for MLflow / AutoML.                                  |

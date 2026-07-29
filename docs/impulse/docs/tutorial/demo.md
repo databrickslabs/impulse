@@ -258,6 +258,32 @@ distance bins.
 
 ---
 
+## Step 4b: Materialize calculated channels
+
+Aggregations *summarize* signals. A [calculated channel](../references/report/channel.md) instead
+*materializes a derived signal* — persisting one of the Step 2 virtual channels as a first-class, queryable
+channel at the same per-sample grain as the silver `channels` table.
+
+```python
+from impulse_reporting.channels.calculated_channel import CalculatedChannel
+
+avg_temp_channel = CalculatedChannel(
+    name="avg_temp",
+    expr=avg_temp,  # the virtual signal defined in Step 2
+    identity={"channel_name": "avg_temp", "data_key": "CALC"},
+    desc="Average of ambient and intake air temperature",
+)
+my_report.add_calculated_channel(avg_temp_channel)
+```
+
+- The wrapped expression must evaluate to a `SampleSeries` (a signal), not `Intervals`.
+- `identity` is any non-empty dict (keys are arbitrary, e.g. `channel_name` / `data_key`); it seeds the
+  deterministic `channel_id` and is stored on `calculated_channel_dimension` (as a `map`, joined to the
+  fact via `channel_id`) — not repeated on every fact row.
+- Registration mirrors events: `add_calculated_channel()` before `determine_report()`.
+
+---
+
 ## Step 5: Compute and persist
 
 Two calls execute the full pipeline:
@@ -267,8 +293,8 @@ my_report.determine_report()
 my_report.persist_results()
 ```
 
-- `determine_report()` resolves all TSAL expressions, computes event instances, and runs all aggregations across all
-  containers matched by the configuration.
+- `determine_report()` resolves all TSAL expressions, computes event instances, runs all aggregations, and solves
+  calculated channels across all containers matched by the configuration.
 - `persist_results()` writes fact and dimension tables to the Gold layer in Unity Catalog.
 
 ---
@@ -365,5 +391,7 @@ After running the notebook, the following tables are created in Unity Catalog un
 | `t_histogram2d_fact`      | 2D histogram bin values per container.                       |
 | `t_stats_aggregator_dimension` | Statistics metadata (3 stats aggregations).                  |
 | `t_stats_aggregator_fact`      | Statistics values per signal, event instance, and container. |
+| `t_calculated_channel_dimension` | Calculated-channel definitions (1 channel: `avg_temp`).    |
+| `t_calculated_channel_fact`      | Materialized derived signal, one row per sample interval.  |
 
 See the [Data Model](../data_model) for complete schema details.

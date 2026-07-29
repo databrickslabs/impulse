@@ -222,6 +222,12 @@ squared_rpm = custom_transform(eng_rpm)
 Virtual signals are TSAL expressions that derive new channels from physical ones. They are not stored in the Silver
 layer but computed on-the-fly by the solver.
 
+:::note Persisting a virtual signal
+A virtual signal is ephemeral — it exists only for the query that defines it. To *materialize* a derived
+signal into a queryable gold table (with incremental updates), wrap the same expression in a
+[`CalculatedChannel`](../../report/channel.md) and register it on a report.
+:::
+
 ### Derived signals
 
 Combine physical channels with arithmetic:

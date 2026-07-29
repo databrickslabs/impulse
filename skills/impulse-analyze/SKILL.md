@@ -92,12 +92,16 @@ pdf = db.query.select(eng_rpm.mean().alias("rpm_mean")).toPandas(spark, solver=D
 `DefaultSolver(spark)` reads your silver layer. Constructor:
 
 ```python
-DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False)
+DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False, raw_encoder=RawEncoder.RLE)
 ```
 
 - `is_raw_data=True` when `channels` stores raw `(timestamp, value)` samples (default `False` expects
   RLE `[tstart, tend)` intervals). This is the ad-hoc equivalent of `query_engine.data_type` in a report
   config.
+- `raw_encoder` (`RawEncoder.RLE` default, or `RawEncoder.INTERVAL`) chooses how raw points become
+  intervals — RLE collapses equal-valued runs, INTERVAL keeps every sample. Only used when
+  `is_raw_data=True`; the ad-hoc equivalent of `query_engine.raw_encoder`. Import from
+  `impulse_query_engine.analyze.query.solvers.solver_config`.
 - `drop_implausible_data=True` drops rows where `is_plausible = false` (requires `is_raw_data=True`).
 - `config` takes a `SolverConfig` for column-name remapping / project scoping — the same object
   described under `solver_config` in `impulse-config`.
@@ -124,3 +128,24 @@ Each selected expression is typed by what it evaluates to (see `impulse-tsal` fo
 For scalar-per-container summaries (means, maxima, counts), `select()` the reducer expressions as
 above. When you want the results persisted as a star schema instead of returned inline, use
 `impulse-reporting`.
+
+## Solving calculated channels
+
+`solve()` returns one **wide** row per container. To get a **narrow**, silver-shaped result instead —
+one row per sample interval — use `solve_calculated_channels()` with `CalculatedChannel` selections (see
+`impulse-channels`). It requires a `DefaultSolver` (the default `BlobSolver` raises).
+
+```python
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+
+cc = CalculatedChannel(
+    db.query.channel(channel_name="Vehicle Speed Sensor") * 3.6,
+    {"channel_name": "speed_kmh", "data_key": "CALC"},
+)
+df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+# df: [container_id, channel_id, tstart, tend, value, identity]
+#     identity is a map<string,string> holding the channel's identity dict
+```
+
+All selections must be `CalculatedChannel`s; identity keys are arbitrary and need not match across
+selections (each row carries its own identity map).

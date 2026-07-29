@@ -331,8 +331,8 @@ class PointValueAggregator(Aggregation):
             "event_name",
             "event_id",
             "signal_index",
-            f.col("point_zip.point_timestamps").cast("long").alias("start_ts"),
-            f.col("point_zip.point_timestamps").cast("long").alias("end_ts"),
+            f.col("point_zip.point_timestamps").alias("start_ts"),
+            f.col("point_zip.point_timestamps").alias("end_ts"),
             f.lit("value").alias("aggregation_label"),
             f.col("point_zip.values").alias("statistic_value"),
         )

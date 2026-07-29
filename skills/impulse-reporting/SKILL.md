@@ -46,7 +46,8 @@ Exactly one of `config` / `config_path` must be provided.
 
 Useful methods: `get_db()` → the `MeasurementDB` for signal selection; `get_solver()` → the configured
 solver; `get_sink_config()` → the resolved sink; `add_event(event)`; `add_page(page)`;
-`determine_report(is_incremental=None)`; `persist_results()`.
+`add_calculated_channel(channel)` (see `impulse-channels`); `determine_report(is_incremental=None)`;
+`persist_results()`.
 
 ## The lifecycle
 
@@ -73,10 +74,17 @@ page.add_aggregation(HistogramDuration(
     channel_name="Engine RPM", bins_unit="rpm", values_unit="s",
 ))
 
-# 4. Compute everything (in parallel across containers)
+# 4. (optional) Materialize derived channels (impulse-channels)
+from impulse_reporting.channels.calculated_channel import CalculatedChannel
+report.add_calculated_channel(CalculatedChannel(
+    name="speed_kmh", expr=veh_spd * 3.6,
+    identity={"channel_name": "speed_kmh", "data_key": "CALC"},
+))
+
+# 5. Compute everything (in parallel across containers)
 report.determine_report()
 
-# 5. Write the gold star schema
+# 6. Write the gold star schema
 report.persist_results()
 ```
 
@@ -110,18 +118,19 @@ in silver. Turn it on via `incremental.enabled` in config (see `impulse-config`)
 **On each run:** each event/aggregation is compared against its stored `definition_hash`. Unchanged
 definitions reprocess only new/updated containers (persisted via Delta `MERGE` on natural keys);
 changed or brand-new definitions reprocess all matching containers (replaced atomically via
-`replaceWhere` on `visual_id`/`event_id`). A single run can mix both per entity.
+`replaceWhere` on `visual_id`/`event_id`/`channel_id`). A single run can mix both per entity.
 
 **What counts as a definition change** — only the hashed attributes; renames, descriptions, and units
 are cosmetic and do not trigger reprocessing:
 
-| Type              | Hashed                                             |
-|-------------------|----------------------------------------------------|
-| `BasicEvent`      | `expr` string                                      |
-| `ContainerEvent`  | `name`                                             |
-| `Histogram`       | `base_expr`, `bins`, `event`                       |
-| `Histogram2D`     | `x_expr`, `y_expr`, `x_bins`, `y_bins`, `event`    |
-| `StatsAggregator` | `input_expressions`, `statistics`, `event`         |
+| Type                | Hashed                                             |
+|---------------------|----------------------------------------------------|
+| `BasicEvent`        | `expr` string                                      |
+| `ContainerEvent`    | `name`                                             |
+| `Histogram`         | `base_expr`, `bins`, `event`                       |
+| `Histogram2D`       | `x_expr`, `y_expr`, `x_bins`, `y_bins`, `event`    |
+| `StatsAggregator`   | `input_expressions`, `statistics`, `event`         |
+| `CalculatedChannel` | `expr` string + `identity`                         |
 
 **Container-update detection** unions two sets: new containers (silver rows absent from gold) and
 updated containers (silver `silver_last_modified_column` newer than the gold `gold_last_modified_column`).

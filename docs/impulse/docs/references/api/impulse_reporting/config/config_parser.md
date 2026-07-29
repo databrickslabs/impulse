@@ -180,6 +180,12 @@ Configuration for the query engine solver.
 **Arguments**:
 
 - `solver` (`Solvers, default=Solvers.DEFAULT_SOLVER`): The solver type to use for query execution.
+- `raw_encoder` (`RawEncoder, optional, default=None`): Encoder used to convert RAW point data into intervals.  ``RLE``
+collapses consecutive equal-valued samples into runs; ``INTERVAL``
+only derives ``tend`` and drops exact duplicates.  Only takes effect
+when ``data_type=RAW``; ignored for RLE input.  When omitted and
+``data_type=RAW``, it is resolved to ``RLE`` at validation time;
+for RLE input the field stays ``None`` and is never consulted.
 - `solver_config` (`SolverConfig`): Per-table column name mappings and filter configuration for
 the solver.  Use this when your silver-layer tables use
 non-default column names or when you need project/toolbox
@@ -204,10 +210,17 @@ def validate_drop_implausible_data_requires_raw()
 
 `drop_implausible_data=True` currently only takes effect with RAW data.
 
-The filter is applied inside the RAW -> RLE conversion path in
-``IntervalEncoder.prepare_channels_df``. RLE input short-circuits that
-path and the flag is silently ignored, so we reject the combination at
-config validation time.
+The filter is applied inside the RAW -> interval conversion path by the
+selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).
+
+
+#### default\_raw\_encoder\_for\_raw\_data
+
+```python
+def default_raw_encoder_for_raw_data()
+```
+
+When ``data_type=RAW`` and ``raw_encoder`` is unset, default to RLE.
 
 
 ## IncrementalConfig

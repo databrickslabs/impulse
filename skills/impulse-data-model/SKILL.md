@@ -44,6 +44,8 @@ in `source` (see `impulse-config`).
     processing time. Set `query_engine.data_type` to `"RAW"` or `"RLE"` to match (see `impulse-config`).
   - An optional boolean `is_plausible` column lets the solver drop implausible samples when
     `drop_implausible_data=True` (requires RAW).
+  - Extra columns on `channels` are ignored — the engine projects down to the columns above before
+    solving, so it is safe to keep additional bookkeeping columns on the table.
 - **Tag tables are strict EAV.** `query.channel(channel_name="Engine RPM")` looks up
   `channel_tags.value` where `key = 'channel_name'`. Without `channel_tags`, channel selectors match
   columns on `channel_metrics` instead.
@@ -93,6 +95,7 @@ A star schema. Every table is prefixed with your configured `table_prefix` (e.g.
 | `histogram_fact`        | One row per bin per container            |
 | `histogram2d_fact`      | One row per (x, y) bin per container     |
 | `stats_aggregator_fact` | One row per signal per event instance    |
+| `calculated_channel_fact` | One row per sample interval per container (a derived signal, silver `channels` shape) |
 
 **Dimension tables**
 
@@ -103,12 +106,14 @@ A star schema. Every table is prefixed with your configured `table_prefix` (e.g.
 | `histogram_dimension`        | Histogram metadata (bins, signal info, units).              |
 | `histogram2d_dimension`      | 2D histogram metadata.                                      |
 | `stats_aggregator_dimension` | Statistics metadata (channel names, labels).                |
+| `calculated_channel_dimension` | Calculated-channel definitions (name, expression, identity). See `impulse-channels`. |
 
-**Join pattern** — three key columns connect facts to dimensions:
+**Join pattern** — key columns connect facts to dimensions:
 
 - `container_id` → links every fact to `measurement_dimension`.
 - `event_id` → links `event_instance_fact`, `histogram_fact`, `histogram2d_fact` to `event_dimension`.
 - `visual_id` → links each aggregation fact to its own dimension table.
+- `channel_id` → links `calculated_channel_fact` to `calculated_channel_dimension`.
 
 `stats_aggregator_fact` additionally joins to `event_instance_fact` via `event_instance_id` for
 per-interval breakdowns.
@@ -141,6 +146,9 @@ the table is read; everything downstream uses the internal names. Set it under
     }
 }
 ```
+
+In RAW mode the `channels` internal names are `timestamp` and (optionally) `is_plausible` — remap
+them the same way (e.g. `{"ts_raw": "timestamp"}`).
 
 The underlying tables must still follow the silver-layer relationships (EAV tag tables,
 per-`(container_id, channel_id)` channel rows). The full `SolverConfig` schema — per-table `filters`,

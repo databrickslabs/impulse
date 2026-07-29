@@ -7,11 +7,17 @@ and reduce its size.
 from __future__ import annotations
 
 import uuid
+from functools import reduce
 from typing import TYPE_CHECKING
 
+import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, SparkSession
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pyspark.sql.types import StructType
+
     from impulse_query_engine.analyze.metadata.time_series_expression import (
         TimeSeriesExpression,
     )
@@ -20,7 +26,7 @@ if TYPE_CHECKING:
     from impulse_reporting.incremental.definition_hash_comparator import (
         DefinitionHashComparator,
     )
-    from impulse_reporting.persist.report_storage import Sink
+    from impulse_reporting.persist.report_storage import Sink, WriterFactory
 
 
 def build_batches(
@@ -111,7 +117,7 @@ def split_by_hash_change(
     sink: Sink | None,
     spark: SparkSession,
     hash_comparator: DefinitionHashComparator,
-    is_event: bool = True,
+    kind: str = "event",
 ) -> tuple[dict[str, list], dict[str, list], dict[str, list[int]]]:
     """Split items into changed/unchanged using definition-hash comparison.
 
@@ -120,21 +126,31 @@ def split_by_hash_change(
     items_by_type : dict[str, list]
         ``{type_name: [items]}`` as returned by ``_group_*_by_type()``.
     type_enum : type
-        ``EventType`` or ``AggregationType`` enum class.
+        ``EventType``, ``AggregationType``, or ``ChannelType`` enum class.
     sink : Sink | None
         Report sink (``None`` in sinkless mode).
     spark : SparkSession
         Active Spark session.
     hash_comparator : DefinitionHashComparator
         Comparator instance.
-    is_event : bool
-        ``True`` for events, ``False`` for aggregations.
+    kind : str
+        One of ``"event"``, ``"aggregation"``, or ``"channel"`` — selects which
+        comparator method to use.
 
     Returns
     -------
     tuple[dict, dict, dict]
         ``(changed_by_type, unchanged_by_type, changed_ids)``
     """
+    comparators = {
+        "event": hash_comparator.group_events_by_hash_change,
+        "aggregation": hash_comparator.group_aggregations_by_hash_change,
+        "channel": hash_comparator.group_calculated_channels_by_hash_change,
+    }
+    if kind not in comparators:
+        raise ValueError(f"Unsupported kind '{kind}'; expected one of {sorted(comparators)}.")
+    compare = comparators[kind]
+
     changed_by_type: dict[str, list] = {}
     unchanged_by_type: dict[str, list] = {}
     changed_ids: dict[str, list[int]] = {}
@@ -150,13 +166,7 @@ def split_by_hash_change(
             continue
 
         dim_table = sink.config.get_output_uri_dimension_table(type_enum[type_name])
-
-        if is_event:
-            changed, unchanged = hash_comparator.group_events_by_hash_change(items, dim_table)
-        else:
-            changed, unchanged = hash_comparator.group_aggregations_by_hash_change(
-                items, dim_table
-            )
+        changed, unchanged = compare(items, dim_table)
 
         if changed:
             changed_by_type[type_name] = changed
@@ -294,6 +304,52 @@ def dispatch_aggregations(
     return aggregation_dfs
 
 
+def dispatch_calculated_channels(
+    spark: SparkSession,
+    channels_by_type: dict[str, list],
+    type_enum,
+    query: QueryBuilder,
+    solver: QuerySolver,
+    pre_filtered_containers_df: DataFrame | None,
+) -> dict:
+    """Dispatch ``determine_calculated_channels`` calls per type.
+
+    Unlike events/aggregations, calculated channels never ride the wide
+    ``solved_df`` — each type drives its own narrow solve via
+    ``query.solve_calculated_channels`` (the ``ContainerEvent`` pattern), so this
+    always passes ``spark``/``query``/``solver``/``pre_filtered_containers_df``.
+
+    Parameters
+    ----------
+    spark : SparkSession
+    channels_by_type : dict[str, list]
+    type_enum : ChannelType enum
+    query : QueryBuilder
+    solver : QuerySolver
+    pre_filtered_containers_df : DataFrame | None
+
+    Returns
+    -------
+    dict
+        ``channel_dfs``
+    """
+    channel_dfs: dict = {}
+
+    for type_name, channels in channels_by_type.items():
+        if not channels:
+            continue
+        cls = type_enum[type_name].value
+        channel_dfs[type_name] = cls.determine_calculated_channels(
+            spark,
+            channels,
+            query=query,
+            solver=solver,
+            pre_filtered_containers_df=pre_filtered_containers_df,
+        )
+
+    return channel_dfs
+
+
 def solve_expressions_batched(
     spark: SparkSession,
     expressions: list[TimeSeriesExpression],
@@ -392,3 +448,320 @@ def cleanup_temp_tables(spark: SparkSession, catalog: str, schema: str) -> None:
     for row in tables.collect():
         table_name = row["tableName"]
         spark.sql(f"DROP TABLE IF EXISTS `{catalog}`.`{schema}`.`{table_name}`")
+
+
+# ---------------------------------------------------------------------------
+# Entity orchestration + persistence helpers
+#
+# Generic over the entity type-enum (``EventType`` / ``AggregationType`` /
+# ``ChannelType``); shared by events, aggregations, and calculated channels.
+# ``persist_facts_incremental`` groups by output table and unions shared-table
+# types into a single ``merge_incremental``; ``merge_keys`` accepts a per-type
+# callable.
+# ---------------------------------------------------------------------------
+
+
+def group_selectables_by_type(items: list, type_enum) -> dict[str, list]:
+    """Bucket *items* into ``{type_enum member name: [items]}`` by ``isinstance``.
+
+    Each item is assigned to the first type whose ``.value`` class it is an
+    instance of.  Every enum member gets a (possibly empty) bucket.
+
+    Parameters
+    ----------
+    items : list
+        Entities to group (e.g. a report's calculated channels).
+    type_enum : Enum
+        The entity type-enum (e.g. ``ChannelType``); each member's ``.value`` is
+        the entity class.
+
+    Returns
+    -------
+    dict[str, list]
+        ``{type_name: [items]}``.
+    """
+    by_type: dict[str, list] = {member.name: [] for member in type_enum}
+    for item in items:
+        for type_name in by_type:
+            if isinstance(item, type_enum[type_name].value):
+                by_type[type_name].append(item)
+                break
+    return by_type
+
+
+def merge_changed_unchanged(
+    changed_by_type: dict[str, DataFrame | None],
+    unchanged_by_type: dict[str, DataFrame | None],
+) -> dict[str, dict[str, DataFrame | None]]:
+    """Combine changed/unchanged dispatch results into per-type structured dicts.
+
+    Parameters
+    ----------
+    changed_by_type : dict[str, DataFrame | None]
+        Solved facts for changed definitions, keyed by type name.
+    unchanged_by_type : dict[str, DataFrame | None]
+        Solved facts for unchanged definitions, keyed by type name.
+
+    Returns
+    -------
+    dict[str, dict[str, DataFrame | None]]
+        ``{type_name: {"changed": df, "unchanged": df}}`` for every type present
+        in either input.
+    """
+    result: dict[str, dict[str, DataFrame | None]] = {}
+    for type_name in set(changed_by_type) | set(unchanged_by_type):
+        result[type_name] = {
+            "changed": changed_by_type.get(type_name),
+            "unchanged": unchanged_by_type.get(type_name),
+        }
+    return result
+
+
+def build_metadata_dfs(
+    items_by_type: dict[str, list],
+    type_enum,
+    spark: SparkSession,
+) -> dict[str, DataFrame]:
+    """Build the dimension (metadata) DataFrame for each non-empty type.
+
+    Parameters
+    ----------
+    items_by_type : dict[str, list]
+        ``{type_name: [items]}`` as returned by :func:`group_selectables_by_type`.
+    type_enum : Enum
+        The entity type-enum; ``type_enum[name].value`` is the entity class whose
+        ``determine_metadata_df(spark, items)`` classmethod builds the dimension.
+    spark : SparkSession
+        Active Spark session.
+
+    Returns
+    -------
+    dict[str, DataFrame]
+        ``{type_name: metadata_df}`` for each type with at least one item.
+    """
+    metadata_dfs: dict[str, DataFrame] = {}
+    for type_name, items in items_by_type.items():
+        if not items:
+            continue
+        cls = type_enum[type_name].value
+        metadata_dfs[type_name] = cls.determine_metadata_df(spark, items)
+    return metadata_dfs
+
+
+def _fact_dfs_for_table(dfs) -> list[DataFrame]:
+    """Flatten a per-type fact value into a list of DataFrames to write.
+
+    Accepts the structured ``{"changed": df, "unchanged": df}`` dict (either may
+    be ``None``) or a bare DataFrame; ``None`` values are dropped.
+    """
+    if isinstance(dfs, dict):
+        return [dfs[key] for key in ("changed", "unchanged") if dfs.get(key) is not None]
+    return [dfs] if dfs is not None else []
+
+
+def persist_facts_full(dfs_by_type: dict, type_enum, writer_factory: WriterFactory) -> None:
+    """Full-overwrite persist of fact DataFrames, grouped by output table.
+
+    Groups per-type facts by their fact-table name (so types sharing a table are
+    written together), then writes each table via the entity writer.
+
+    Parameters
+    ----------
+    dfs_by_type : dict
+        ``{type_name: value}`` where value is a structured
+        ``{"changed", "unchanged"}`` dict or a bare DataFrame.
+    type_enum : Enum
+        The entity type-enum (resolves fact-table names + writer).
+    writer_factory : WriterFactory
+        Factory producing the entity writer.
+    """
+    dfs_by_table: dict[str, list[DataFrame]] = {}
+    for type_name, dfs in dfs_by_type.items():
+        table_name = type_enum[type_name].get_fact_table_name()
+        dfs_by_table.setdefault(table_name, []).extend(_fact_dfs_for_table(dfs))
+
+    for table_name, dfs_list in dfs_by_table.items():
+        if not dfs_list:
+            continue
+        entity_type = type_enum.get_any_for_fact_table(table_name)
+        writer = writer_factory.create_writer(entity_type)
+        schema, uri = writer.extract_fact_schema_and_output_uri(entity_type)
+        writer.write(dfs_list, schema=schema, uri=uri)
+
+
+def persist_dimensions_full(
+    metadata_dfs_by_type: dict[str, DataFrame],
+    type_enum,
+    writer_factory: WriterFactory,
+) -> None:
+    """Full-overwrite persist of dimension DataFrames, grouped by output table.
+
+    Parameters
+    ----------
+    metadata_dfs_by_type : dict[str, DataFrame]
+        ``{type_name: metadata_df}``.
+    type_enum : Enum
+        The entity type-enum (resolves dimension-table names + writer).
+    writer_factory : WriterFactory
+        Factory producing the entity writer.
+    """
+    dfs_by_table: dict[str, list[DataFrame]] = {}
+    for type_name, metadata_df in metadata_dfs_by_type.items():
+        table_name = type_enum[type_name].get_dimension_table_name()
+        dfs_by_table.setdefault(table_name, []).append(metadata_df)
+
+    for table_name, dfs_list in dfs_by_table.items():
+        if not dfs_list:
+            continue
+        entity_type = type_enum.get_any_for_dimension_table(table_name)
+        writer = writer_factory.create_writer(entity_type)
+        schema, uri = writer.extract_metadata_schema_and_output_uri(entity_type)
+        writer.write(dfs_list, schema=schema, uri=uri)
+
+
+def _resolve_merge_keys(merge_keys, entity_type) -> list[str]:
+    """Return merge keys, resolving a per-type callable if one was supplied."""
+    return merge_keys(entity_type) if callable(merge_keys) else merge_keys
+
+
+def persist_facts_incremental(
+    dfs_by_type: dict,
+    type_enum,
+    sink: Sink,
+    transform_fn: Callable[[DataFrame, StructType], DataFrame],
+    *,
+    id_column: str,
+    merge_keys: list[str] | Callable[[object], list[str]],
+    changed_ids: dict[str, list[int]],
+    has_processed_containers: bool = False,
+    updated_container_ids: list | None = None,
+    container_id_col: str = "container_id",
+) -> None:
+    """Incremental persist of fact DataFrames in a single MERGE per output table.
+
+    Per-type facts are grouped by fact-table name, so types sharing a table
+    (e.g. ``StatsAggregator`` + ``PointValueAggregator``, or mixed event types)
+    persist together with no clobber. Per table, changed rows (all containers)
+    and unchanged rows (reprocessed containers) are ``unionByName``-combined into
+    one ``sink.merge_incremental`` source; the delete scope prunes stale rows a
+    shrunk container leaves behind. The union is collision-free because an entity
+    is in exactly one bucket and ``merge_keys`` always includes its id.
+
+    Parameters
+    ----------
+    dfs_by_type : dict
+        ``{type_name: value}`` where value is a structured
+        ``{"changed", "unchanged"}`` dict or a bare DataFrame (treated as
+        unchanged).
+    type_enum : Enum
+        The entity type-enum (resolves fact schema/uri + writer).
+    sink : Sink
+        Target sink exposing ``merge_incremental``.
+    transform_fn : Callable[[DataFrame, StructType], DataFrame]
+        Prepares a DataFrame for persistence (column projection + metadata).
+    id_column : str
+        Entity id column scoping changed-definition deletes (e.g.
+        ``"channel_id"``, ``"visual_id"``, ``"event_id"``).
+    merge_keys : list[str] or Callable
+        MERGE keys; a callable is resolved per entity type (mirrors
+        ``Report._get_aggregation_merge_keys``).
+    changed_ids : dict[str, list[int]]
+        ``{type_name: [ids]}`` with changed definitions recomputed over all
+        containers.
+    has_processed_containers : bool, optional
+        Whether any container was recomputed this run (new or updated). Gates
+        whether a table is written — new containers carry no delete scope but must
+        still be inserted. ``False`` + no changed ids → nothing to do.
+    updated_container_ids : list, optional
+        Ids of UPDATED containers only (present in gold, refreshed in silver).
+        Scopes the delete-by-source; new containers are excluded because they have
+        no gold rows to prune. Empty/None → no container-scoped delete.
+    container_id_col : str, optional
+        Gold fact-table container column, by default ``"container_id"``.
+    """
+    from impulse_reporting.persist.report_storage import WriterFactory
+
+    updated_container_ids = updated_container_ids or []
+
+    # Group per-type facts by output table so shared-table types persist together.
+    changed_by_table: dict[str, list[DataFrame]] = {}
+    unchanged_by_table: dict[str, list[DataFrame]] = {}
+    changed_ids_by_table: dict[str, list[int]] = {}
+    for type_name, data in dfs_by_type.items():
+        table_name = type_enum[type_name].get_fact_table_name()
+        if isinstance(data, dict):
+            changed_df = data.get("changed")
+            unchanged_df = data.get("unchanged")
+            if changed_df is not None and type_name in changed_ids:
+                changed_by_table.setdefault(table_name, []).append(changed_df)
+                changed_ids_by_table.setdefault(table_name, []).extend(changed_ids[type_name])
+            if unchanged_df is not None:
+                unchanged_by_table.setdefault(table_name, []).append(unchanged_df)
+        elif data is not None:
+            unchanged_by_table.setdefault(table_name, []).append(data)
+
+    factory = WriterFactory(sink)
+    for table_name in set(changed_by_table) | set(unchanged_by_table):
+        entity_type = type_enum.get_any_for_fact_table(table_name)
+        writer = factory.create_writer(entity_type)
+        schema, uri = writer.extract_fact_schema_and_output_uri(entity_type)
+        keys = _resolve_merge_keys(merge_keys, entity_type)
+
+        # Skip when there is nothing to write: no containers processed (new or
+        # updated) and no changed definitions. Keeps idempotent runs byte-identical
+        # (no no-op MERGE commit).
+        table_changed_ids = changed_ids_by_table.get(table_name, [])
+        if not has_processed_containers and not table_changed_ids:
+            continue
+
+        # Scope the delete-by-source: updated containers (only they can hold stale
+        # rows — new ones have none) and changed-definition entities.
+        delete_conditions = []
+        if updated_container_ids:
+            delete_conditions.append(
+                F.col(f"target.{container_id_col}").isin(updated_container_ids)
+            )
+        if table_changed_ids:
+            delete_conditions.append(F.col(f"target.{id_column}").isin(table_changed_ids))
+
+        # Single source: changed rows (all containers) + unchanged rows (processed
+        # containers), unioned by name into one MERGE.
+        source_dfs = [
+            transform_fn(df, schema)
+            for df in changed_by_table.get(table_name, []) + unchanged_by_table.get(table_name, [])
+        ]
+        source = reduce(lambda a, b: a.unionByName(b), source_dfs)
+        sink.merge_incremental(source, uri, keys, delete_conditions=delete_conditions)
+
+
+def persist_dimensions_incremental(
+    metadata_dfs_by_type: dict[str, DataFrame],
+    type_enum,
+    sink: Sink,
+    transform_fn: Callable[[DataFrame, StructType], DataFrame],
+    *,
+    merge_keys: list[str],
+) -> None:
+    """Incremental persist of dimension DataFrames (always ``upsert``), per type.
+
+    Parameters
+    ----------
+    metadata_dfs_by_type : dict[str, DataFrame]
+        ``{type_name: metadata_df}``.
+    type_enum : Enum
+        The entity type-enum (resolves dimension schema/uri + writer).
+    sink : Sink
+        Target sink exposing ``upsert``.
+    transform_fn : Callable[[DataFrame, StructType], DataFrame]
+        Prepares a DataFrame for persistence (column projection + metadata).
+    merge_keys : list[str]
+        MERGE keys for the dimension upsert (e.g. ``["channel_id"]``).
+    """
+    from impulse_reporting.persist.report_storage import WriterFactory
+
+    factory = WriterFactory(sink)
+    for type_name, metadata_df in metadata_dfs_by_type.items():
+        entity_type = type_enum[type_name]
+        writer = factory.create_writer(entity_type)
+        schema, uri = writer.extract_metadata_schema_and_output_uri(entity_type)
+        sink.upsert(transform_fn(metadata_df, schema), uri, merge_keys)
