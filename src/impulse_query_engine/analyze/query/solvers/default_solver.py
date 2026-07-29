@@ -14,6 +14,7 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
+from .registry import register_solver
 from .series_cache import SeriesCache
 from .solver_config import RawEncoder, SolverConfig
 from .utils.interval_encoder import IntervalEncoder
@@ -21,6 +22,8 @@ from .utils.rle_encoder import RleEncoder
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
+
+    from .solver_context import SolverBuildContext
 
 
 class TimeSeriesCache(SeriesCache):
@@ -134,6 +137,7 @@ class TimeSeriesCache(SeriesCache):
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
 
+@register_solver("DefaultSolver", aliases=("DeltaSolver", "KeyValueStoreSolver"))
 class DefaultSolver(QuerySolver):
     """
     The default query-engine solver.  Adapts to the shape of the silver layer.
@@ -196,6 +200,21 @@ class DefaultSolver(QuerySolver):
         self.drop_implausible_data: bool = drop_implausible_data
         self.raw_encoder: RawEncoder = raw_encoder
         self.channel_encoder: RleEncoder | IntervalEncoder = self._build_channel_encoder()
+
+    @classmethod
+    def from_config(cls, ctx: "SolverBuildContext") -> "DefaultSolver":
+        """Build a :class:`DefaultSolver` from a :class:`SolverBuildContext`.
+
+        Overrides the base hook to wire the SparkSession and the raw-data flags
+        that this solver requires beyond ``solver_config``.
+        """
+        return cls(
+            ctx.spark,
+            config=ctx.solver_config,
+            is_raw_data=ctx.is_raw_data,
+            drop_implausible_data=ctx.drop_implausible_data,
+            raw_encoder=ctx.raw_encoder,
+        )
 
     def _build_channel_encoder(self) -> RleEncoder | IntervalEncoder:
         """Construct the raw -> interval encoder selected by ``raw_encoder``.
@@ -261,7 +280,7 @@ class DefaultSolver(QuerySolver):
                 required_elements.extend(filt.required_tags())
         required_elements = set(required_elements)
 
-        tags = query.db.container_tags(self.spark)
+        tags = self.load_container_tags(query.db, self.spark)
         tags = self._apply_column_mapping(tags, self.config.container_tags.column_name_mapping)
 
         if self.config.project_id is not None:
@@ -329,7 +348,7 @@ class DefaultSolver(QuerySolver):
         if pre_filtered_containers_df is not None:
             metrics = pre_filtered_containers_df
         else:
-            metrics = query.db.container_metrics(self.spark)
+            metrics = self.load_container_metrics(query.db, self.spark)
 
         metrics = self._apply_column_mapping(
             metrics, self.config.container_metrics.column_name_mapping
@@ -403,7 +422,7 @@ class DefaultSolver(QuerySolver):
         for selector in selectors:
             required_tags.update(selector.required_tags())
 
-        tbl = db.channel_tags(spark)
+        tbl = self.load_channel_tags(db, spark)
         tbl = self._apply_column_mapping(tbl, self.config.channel_tags.column_name_mapping)
         expr = self._build_expr(selectors)
 
@@ -456,7 +475,7 @@ class DefaultSolver(QuerySolver):
         if len(selectors) == 0:
             return self._empty_channel_match_df(spark, db)
 
-        channel_metrics_df = db.channel_metrics(spark)
+        channel_metrics_df = self.load_channel_metrics(db, spark)
         channel_metrics_df = self._apply_column_mapping(
             channel_metrics_df, self.config.channel_metrics.column_name_mapping
         )
@@ -537,7 +556,7 @@ class DefaultSolver(QuerySolver):
         if len(selectors) == 0:
             return self._empty_channel_match_df(spark, db)
 
-        channel_mapping = db.channel_mapping(spark)
+        channel_mapping = self.load_channel_mapping(db, spark)
         channel_mapping = self._apply_column_mapping(
             channel_mapping, self.config.channel_mapping.column_name_mapping
         )
@@ -552,7 +571,7 @@ class DefaultSolver(QuerySolver):
 
         resolved_mapping = channel_mapping.where(self._build_expr(selectors))
 
-        channel_metrics = db.channel_metrics(spark)
+        channel_metrics = self.load_channel_metrics(db, spark)
         channel_metrics = self._apply_column_mapping(
             channel_metrics, self.config.channel_metrics.column_name_mapping
         )
@@ -850,7 +869,7 @@ class DefaultSolver(QuerySolver):
             :meth:`_validate_unit_conversion_table` for the underlying
             check.
         """
-        uc_table = query.db.unit_conversion(spark)
+        uc_table = self.load_unit_conversion(query.db, spark)
         uc_table = self._apply_column_mapping(
             uc_table, self.config.unit_conversion.column_name_mapping
         )
@@ -1008,7 +1027,7 @@ class DefaultSolver(QuerySolver):
             if col_name in channels_df.columns:
                 channels_df = channels_df.drop(col_name)
 
-        q = query.db.channels(self.spark)
+        q = self.load_channels(query.db, self.spark)
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
 
         if self.is_raw_data:

@@ -12,6 +12,8 @@ from pyspark.sql.column import Column
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
 
+    from .solver_context import SolverBuildContext
+
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
@@ -34,6 +36,57 @@ class QuerySolver(ABC):
 
     def __init__(self, config: SolverConfig = None):
         self.config = config or SolverConfig()
+
+    @classmethod
+    def from_config(cls, ctx: "SolverBuildContext") -> "QuerySolver":
+        """Build a solver from a :class:`SolverBuildContext`.
+
+        This is the uniform instantiation hook used by the report factory so
+        that solvers with different constructor signatures can all be built the
+        same way.  The base implementation passes only ``solver_config`` (the
+        common case for a :class:`QuerySolver` subclass); solvers that need more
+        construction inputs — such as :class:`DefaultSolver`, which needs the
+        SparkSession and the raw-data flags — override this classmethod.
+
+        Parameters
+        ----------
+        ctx : SolverBuildContext
+            The construction inputs resolved from the report configuration.
+
+        Returns
+        -------
+        QuerySolver
+            A ready-to-use solver instance.
+        """
+        return cls(config=ctx.solver_config)
+
+    def load_container_tags(self, db: "MeasurementDB", spark) -> DataFrame:
+        """Read the raw ``container_tags`` (narrow/EAV) table."""
+        return db.container_tags(spark)
+
+    def load_container_metrics(self, db: "MeasurementDB", spark) -> DataFrame:
+        """Read the raw ``container_metrics`` table."""
+        return db.container_metrics(spark)
+
+    def load_channel_tags(self, db: "MeasurementDB", spark) -> DataFrame:
+        """Read the raw ``channel_tags`` (narrow/EAV) table."""
+        return db.channel_tags(spark)
+
+    def load_channel_metrics(self, db: "MeasurementDB", spark) -> DataFrame:
+        """Read the raw ``channel_metrics`` table."""
+        return db.channel_metrics(spark)
+
+    def load_channel_mapping(self, db: "MeasurementDB", spark) -> DataFrame:
+        """Read the raw ``channel_mapping`` (alias) table."""
+        return db.channel_mapping(spark)
+
+    def load_unit_conversion(self, db: "MeasurementDB", spark) -> DataFrame:
+        """Read the raw ``unit_conversion`` table."""
+        return db.unit_conversion(spark)
+
+    def load_channels(self, db: "MeasurementDB", spark) -> DataFrame:
+        """Read the raw ``channels`` (time-series data) table."""
+        return db.channels(spark)
 
     @staticmethod
     def _apply_column_mapping(df: DataFrame, mapping: dict[str, str]) -> DataFrame:
@@ -155,7 +208,7 @@ class QuerySolver(ABC):
         schemas stay compatible regardless of the physical id types.
         """
         ref = self._apply_column_mapping(
-            db.channel_metrics(spark), self.config.channel_metrics.column_name_mapping
+            self.load_channel_metrics(db, spark), self.config.channel_metrics.column_name_mapping
         )
         return spark.createDataFrame(
             [],

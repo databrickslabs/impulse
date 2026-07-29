@@ -9,14 +9,14 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
-from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.analyze.query.solvers.registry import resolve_registration
+from impulse_query_engine.analyze.query.solvers.solver_context import SolverBuildContext
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.channels.channel_types import ChannelType
 from impulse_reporting.config.config_parser import (
     ImpulseConfig,
-    Solvers,
     DataType,
 )
 from impulse_reporting.core.page import Page
@@ -127,7 +127,7 @@ class Report:
         )
 
         self.solver = Report.create_solver(self.spark, self.config)
-        log_telemetry(self.ws, "solver", self.config.query_engine.solver.name)
+        log_telemetry(self.ws, "solver", self.config.query_engine.solver)
         log_telemetry(self.ws, "data_type", self.config.query_engine.data_type.value)
 
     @property
@@ -321,27 +321,25 @@ class Report:
 
         Raises
         ------
-        ValueError
-            If the solver type is unknown.
+        KeyError
+            If ``query_engine.solver`` names a solver that is not registered.
+            The message lists the registered names; import the package that
+            registers the solver before building the report.
         """
-        # DELTA_SOLVER and KEY_VALUE_STORE_SOLVER are deprecated aliases retained
-        # for backward compatibility with existing report configs; all three
-        # resolve to the unified DefaultSolver.
-        match config.query_engine.solver:
-            case Solvers.DEFAULT_SOLVER | Solvers.DELTA_SOLVER | Solvers.KEY_VALUE_STORE_SOLVER:
-                return DefaultSolver(
-                    spark,
-                    config=config.query_engine.solver_config,
-                    is_raw_data=config.query_engine.data_type is DataType.RAW,
-                    drop_implausible_data=config.query_engine.drop_implausible_data,
-                    raw_encoder=config.query_engine.raw_encoder,
-                )
-            case _:
-                raise ValueError(
-                    f"Unknown query engine solver: {config.query_engine.solver}. "
-                    f"Supported: {Solvers.DEFAULT_SOLVER} (DELTA_SOLVER and "
-                    f"KEY_VALUE_STORE_SOLVER are deprecated aliases)."
-                )
+        # The solver name is resolved through the solver registry: the built-in
+        # DefaultSolver self-registers under "DefaultSolver" (plus the deprecated
+        # "DeltaSolver"/"KeyValueStoreSolver" aliases), and customer solvers
+        # register themselves when their package is imported.  ``from_config``
+        # builds the resolved class uniformly regardless of its constructor.
+        qe = config.query_engine
+        ctx = SolverBuildContext(
+            spark=spark,
+            solver_config=qe.solver_config,
+            is_raw_data=qe.data_type is DataType.RAW,
+            drop_implausible_data=qe.drop_implausible_data,
+            raw_encoder=qe.raw_encoder,
+        )
+        return resolve_registration(qe.solver).solver_cls.from_config(ctx)
 
     def get_sink_config(self) -> SinkConfig:
         """
@@ -1206,7 +1204,11 @@ class Report:
         if not self._has_sink:
             return None
         detector = ContainerUpsertDetector(self.spark)
-        silver_containers = self.db.container_metrics(self.spark)
+        # Route through the solver's container-metrics seam (not db.container_metrics
+        # directly) so a custom solver that combines/reshapes container sources feeds
+        # the same container set into incremental change detection. The default
+        # implementation reads the single configured table, preserving prior behavior.
+        silver_containers = self.solver.load_container_metrics(self.db, self.spark)
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
 
         silver_col = "last_modified"
