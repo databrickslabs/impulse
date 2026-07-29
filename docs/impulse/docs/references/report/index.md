@@ -114,10 +114,10 @@ Only the hashed attributes matter. Anything else is cosmetic and won't trigger r
 | `ContainerEvent`    | `name`                                                      |
 | `Histogram`         | `base_expr`, `bins`, `event`                                |
 | `Histogram2D`       | `x_expr`, `y_expr`, `x_bins`, `y_bins`, `event`             |
-| `StatsAggregator`   | `input_expressions`, `statistics`, `event`, custom statistics (labels, functions, inputs, params) |
+| `StatsAggregator`   | `input_expressions`, `statistics`, `event`, `channel_names`, custom statistics (labels, functions, inputs, params, cross-channel `channel_name`) |
 | `CalculatedChannel` | `expr` string + `identity`                                  |
 
-Renaming an aggregation, tweaking the description, or swapping `channel_name` or units keeps the hash stable. No reprocessing.
+Renaming an aggregation, tweaking the description, or changing units keeps the hash stable. No reprocessing. `channel_names` (and a cross-channel statistic's `channel_name`) **do** affect the hash for `StatsAggregator` / `PointValueAggregator`, because they are the fact table's `channel_name` merge key — renaming forces a recompute so old-name rows are pruned rather than left stale.
 
 #### Container-update detection
 

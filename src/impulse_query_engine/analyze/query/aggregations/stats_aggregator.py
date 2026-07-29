@@ -290,15 +290,14 @@ class StatsAggregator(Aggregation):
         -------
         tuple
             A 4-tuple containing:
-            - event_timestamps: List of [start, end] pairs for each event interval,
-              repeated once per input expression (series-major order)
-            - numeric_values: List of lists of dicts with numeric statistics per
-              input expression and interval
+            - event_timestamps: List of [start, end] pairs, one per non-degenerate
+              event interval (canonical interval order)
+            - numeric_values: List (per input expression) of lists of dicts with
+              numeric statistics, each inner list aligned with ``event_timestamps``
             - string_values: List of lists of dicts with string statistics per
               input expression and interval (if any)
             - cross_channel_values: One dict of cross-channel statistics per
-              non-degenerate event interval, aligned with the interval order of
-              ``numeric_values`` (not with the repeated ``event_timestamps``);
+              non-degenerate event interval, aligned with ``event_timestamps``;
               empty when no cross-channel statistics are configured
         """
         # Step 1: Evaluate input expressions to get SampleSeries instances
@@ -329,38 +328,31 @@ class StatsAggregator(Aggregation):
             intervals = self.event_expression.build(cache)
             sample_series_filtered = [s.where(intervals) for s in sample_series_list]
 
-        event_timestamps = []
+        # Canonical list of non-degenerate intervals, in order. event_timestamps,
+        # each numeric_values[signal], and cross_channel_values are all aligned to it.
+        non_degenerate = [
+            (interval[0], interval[1])
+            for interval in intervals.get_data()
+            if interval[1] != interval[0]
+        ]
+        event_timestamps = [[t_start, t_end] for t_start, t_end in non_degenerate]
+
         numeric_values = []
         string_values = []
-
         for series in sample_series_filtered:
-            numeric_values_in_series = []
-            for interval in intervals.get_data():
-                t_start = interval[0]
-                t_end = interval[1]
-
-                if t_end == t_start:
-                    continue
-                event_timestamps.append([t_start, t_end])
-                numeric_values_in_series.append(
+            numeric_values.append(
+                [
                     self._calculate_aggregations(series, t_start, t_end)
-                )
-
-            numeric_values.append(numeric_values_in_series)
+                    for t_start, t_end in non_degenerate
+                ]
+            )
 
         cross_channel_values = []
         if self.cross_channel_custom_statistics:
-            for interval in intervals.get_data():
-                t_start = interval[0]
-                t_end = interval[1]
-
-                if t_end == t_start:
-                    continue
-                cross_channel_values.append(
-                    self._calculate_cross_channel_statistics(
-                        sample_series_filtered, t_start, t_end
-                    )
-                )
+            cross_channel_values = [
+                self._calculate_cross_channel_statistics(sample_series_filtered, t_start, t_end)
+                for t_start, t_end in non_degenerate
+            ]
 
         return (event_timestamps, numeric_values, string_values, cross_channel_values)
 

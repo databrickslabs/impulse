@@ -338,19 +338,47 @@ class TestStatsAggregatorDefinitionHash:
             **kwargs,
         )
 
-    def test_hash_without_custom_stats_matches_legacy_formula(self):
-        """Aggregators without custom statistics keep their pre-existing hash."""
+    def test_hash_without_custom_stats_matches_formula(self):
+        """Aggregators without custom statistics hash input exprs, stats, event, channel_names."""
         stats_agg = self._make()
 
         event_expr_str = str(stats_agg.event.get_expression())
         input_expr_strs = ",".join(str(expr) for expr in stats_agg.input_expressions)
         stats_strs = ",".join(stats_agg.statistics)
-        hash_input = "::".join([input_expr_strs, stats_strs, event_expr_str])
+        hash_input = "::".join(
+            [input_expr_strs, stats_strs, event_expr_str, repr(stats_agg.channel_names)]
+        )
         expected = int.from_bytes(
             hashlib.sha256(hash_input.encode()).digest()[:8], byteorder="big", signed=True
         )
 
         assert stats_agg.determine_definition_hash() == expected
+
+    def test_renaming_channel_names_changes_hash(self):
+        """channel_names is the fact-table merge key, so a rename must force recompute."""
+        agg1 = self._make(channel_names=["ch_a", "ch_b"])
+        agg2 = self._make(channel_names=["ch_a", "ch_renamed"])
+
+        assert agg1.determine_definition_hash() != agg2.determine_definition_hash()
+
+    def test_cross_channel_channel_name_changes_hash(self):
+        """A cross-channel descriptor's channel_name (a fact merge key) affects the hash."""
+        agg1 = self._make(
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(
+                    func=_spread, aggregation_labels=["spread"], channel_name="combined"
+                )
+            ]
+        )
+        agg2 = self._make(
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(
+                    func=_spread, aggregation_labels=["spread"], channel_name="other_name"
+                )
+            ]
+        )
+
+        assert agg1.determine_definition_hash() != agg2.determine_definition_hash()
 
     def test_adding_custom_stat_changes_hash(self):
         plain = self._make()
@@ -451,24 +479,6 @@ class TestStatsAggregatorDefinitionHash:
 
         assert agg_cross.determine_definition_hash() != agg_per_channel.determine_definition_hash()
 
-    def test_channel_name_is_excluded_from_hash(self):
-        agg1 = self._make(
-            cross_channel_custom_statistics=[
-                CrossChannelStatistic(
-                    func=_spread, aggregation_labels=["spread"], channel_name="combined"
-                )
-            ]
-        )
-        agg2 = self._make(
-            cross_channel_custom_statistics=[
-                CrossChannelStatistic(
-                    func=_spread, aggregation_labels=["spread"], channel_name="other_name"
-                )
-            ]
-        )
-
-        assert agg1.determine_definition_hash() == agg2.determine_definition_hash()
-
     def test_params_change_hash(self):
         agg1 = self._make(
             cross_channel_custom_statistics=[
@@ -501,18 +511,12 @@ class TestStatsAggregatorDefinitionHash:
         assert agg1.determine_definition_hash() == agg1_same.determine_definition_hash()
         assert agg1.determine_definition_hash() != agg2.determine_definition_hash()
 
-    def test_inputs_hash_uses_indices_not_names(self):
-        """Consistent channel renames keep the hash; rewiring inputs changes it."""
+    def test_rewiring_cross_channel_inputs_changes_hash(self):
+        """Pointing a cross-channel statistic at a different input channel changes the hash."""
         agg1 = self._make(
             channel_names=["ch_a", "ch_b"],
             cross_channel_custom_statistics=[
                 CrossChannelStatistic(func=_spread, aggregation_labels=["spread"], inputs=["ch_b"])
-            ],
-        )
-        renamed = self._make(
-            channel_names=["ch_x", "ch_y"],
-            cross_channel_custom_statistics=[
-                CrossChannelStatistic(func=_spread, aggregation_labels=["spread"], inputs=["ch_y"])
             ],
         )
         rewired = self._make(
@@ -522,8 +526,25 @@ class TestStatsAggregatorDefinitionHash:
             ],
         )
 
-        assert agg1.determine_definition_hash() == renamed.determine_definition_hash()
         assert agg1.determine_definition_hash() != rewired.determine_definition_hash()
+
+    def test_cross_channel_inputs_fingerprint_uses_indices(self):
+        """The inputs portion of the fingerprint is index-based, not name-based."""
+        # Same declared-input index (1) under different channel names -> identical
+        # inputs_repr in the fingerprint, isolating the index-based behavior from the
+        # channel_names component of the full hash.
+        fp_b = StatsAggregator._fingerprint_custom_statistic(
+            "cross_channel", ["spread"], _spread, inputs_repr=repr([1])
+        )
+        fp_y = StatsAggregator._fingerprint_custom_statistic(
+            "cross_channel", ["spread"], _spread, inputs_repr=repr([1])
+        )
+        fp_other = StatsAggregator._fingerprint_custom_statistic(
+            "cross_channel", ["spread"], _spread, inputs_repr=repr([0])
+        )
+
+        assert fp_b == fp_y
+        assert fp_b != fp_other
 
     def test_aggregation_labels_change_hash(self):
         labels_ab = self._make(

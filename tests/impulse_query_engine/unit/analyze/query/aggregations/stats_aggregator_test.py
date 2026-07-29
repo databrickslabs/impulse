@@ -515,9 +515,9 @@ def test_build_with_none_event_expression_uses_synced_series_bounds():
         cache=None
     )
 
-    # event_timestamps is appended inside the per-expression loop in build(),
-    # so for N=2 expressions with one synthetic event each the list has 2 entries.
-    assert event_timestamps == [[0.0, 5.0], [0.0, 5.0]]
+    # event_timestamps is canonical (one entry per non-degenerate interval), so the
+    # single synthetic interval spanning both series yields exactly one entry.
+    assert event_timestamps == [[0.0, 5.0]]
     assert len(numeric_values) == 2
     assert len(numeric_values[0]) == 1
     assert len(numeric_values[1]) == 1

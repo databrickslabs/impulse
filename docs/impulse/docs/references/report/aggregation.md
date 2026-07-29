@@ -334,8 +334,10 @@ Notes:
   built-in label.
 - `func` is cloudpickled to Spark executors: use a module-level importable function and never capture
   Spark objects.
-- A statistic's `func`, labels, resolved inputs, and `params` are part of the definition hash, so changing
-  any of them triggers reprocessing.
+- A statistic's `func`, labels, resolved inputs, `params`, and (for cross-channel) `channel_name` are part
+  of the definition hash, so changing any of them triggers reprocessing. `channel_name` is included because
+  it is the fact table's merge key — a rename must recompute so old-name rows are pruned rather than left
+  stale in incremental mode.
 
 ### Output schema
 

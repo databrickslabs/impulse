@@ -490,9 +490,9 @@ class StatsAggregator(Aggregation):
             ),
         )
 
-        # Step 2: Explode by interval - zip event_timestamps with signal_stats_per_interval
-        # event_timestamps: [[start, end], [start, end], ...]
-        # signal_stats_per_interval: [{stats}, {stats}, ...]
+        # Step 2: Explode by interval - zip event_timestamps with signal_stats_per_interval.
+        # Both are aligned per interval (event_timestamps is canonical, one entry per
+        # interval), so the zip lines up 1:1.
         df_with_interval = df_with_signal.select(
             "container_id",
             "stats_name",
@@ -533,12 +533,10 @@ class StatsAggregator(Aggregation):
         """
         Explode the cross-channel statistics values into one row per interval and statistic.
 
-        ``event_timestamps`` is repeated once per input expression (series-major
-        order) by the query engine, so its first ``size(cross_channel_values)``
-        entries are exactly the event intervals in order; they are sliced and
-        zipped with the per-interval statistics maps. Aggregations without
-        cross-channel statistics have an empty ``cross_channel_values`` array and
-        contribute no rows.
+        ``event_timestamps`` is canonical (one entry per non-degenerate interval),
+        aligned with ``cross_channel_values``, so the two zip 1:1. Aggregations
+        without cross-channel statistics have an empty ``cross_channel_values``
+        array and contribute no rows.
 
         Parameters
         ----------
@@ -551,20 +549,13 @@ class StatsAggregator(Aggregation):
             DataFrame with one row per cross-channel statistic and interval,
             matching the column layout of ``_explode_stats_values``.
         """
-        df_sliced = df.withColumn(
-            "cross_channel_event_timestamps",
-            f.slice(f.col("event_timestamps"), 1, f.size(f.col("cross_channel_values"))),
-        )
-
-        df_with_interval = df_sliced.select(
+        df_with_interval = df.select(
             "container_id",
             "stats_name",
             "event_id",
             "event_name",
             f.posexplode(
-                f.arrays_zip(
-                    f.col("cross_channel_event_timestamps"), f.col("cross_channel_values")
-                )
+                f.arrays_zip(f.col("event_timestamps"), f.col("cross_channel_values"))
             ).alias("interval_index", "zipped"),
         )
 
@@ -574,8 +565,8 @@ class StatsAggregator(Aggregation):
             "event_id",
             "event_name",
             f.lit(-1).alias("signal_index"),
-            f.col("zipped.cross_channel_event_timestamps").getItem(0).alias("start_ts"),
-            f.col("zipped.cross_channel_event_timestamps").getItem(1).alias("end_ts"),
+            f.col("zipped.event_timestamps").getItem(0).alias("start_ts"),
+            f.col("zipped.event_timestamps").getItem(1).alias("end_ts"),
             f.col("zipped.cross_channel_values").alias("statistics"),
         )
 
@@ -762,14 +753,16 @@ class StatsAggregator(Aggregation):
         - input_expressions
         - statistics to be calculated
         - event expression if there is any
-        - custom statistics (name, kind, declared input indices, and function
-          bytecode, so implementation or input-wiring changes invalidate cached
-          results; only appended when custom statistics are configured so
-          aggregators without them keep their previous hash)
+        - channel_names, and each cross-channel descriptor's channel_name. These
+          are the fact table's ``channel_name`` merge key, so a rename must force
+          a recompute (a changed definition recomputes and prunes all containers);
+          otherwise, in incremental mode, already-processed containers would keep
+          rows under the old name.
+        - custom statistics (labels, kind, declared input indices, params, and
+          function bytecode, so implementation or input-wiring changes invalidate
+          cached results; only appended when custom statistics are configured)
 
-        Excludes: name, desc, signal_name, units, page_number, report_id, and the
-        cross-channel descriptors' channel_name (presentation metadata, like
-        channel_names).
+        Excludes: name, desc, units, page_number, report_id.
 
         Returns
         -------
@@ -790,6 +783,7 @@ class StatsAggregator(Aggregation):
             input_expr_strs,  # Input expressions
             stats_strs,  # statistics aggregation types
             event_expr_str,  # Event expression
+            repr(self.channel_names),  # fact-table channel_name merge key
         ]
 
         custom_fingerprints = [
@@ -819,6 +813,7 @@ class StatsAggregator(Aggregation):
                     statistic.func,
                     inputs_repr=inputs_repr,
                     params=statistic.params,
+                    channel_name=statistic.channel_name,
                 )
             )
         if custom_fingerprints:
@@ -837,19 +832,20 @@ class StatsAggregator(Aggregation):
         func: Callable,
         inputs_repr: str,
         params: dict | None = None,
+        channel_name: str | None = None,
     ) -> str:
         """
         Build a stable fingerprint for a custom statistic.
 
         The fingerprint covers the statistic's kind, output labels, declared input
-        indices, provisioned params, and the function's bytecode, constants, and
-        default argument values (``__defaults__`` / ``__kwdefaults__``).
-        ``functools.partial`` wrappers are unwrapped with their bound arguments
-        included, so changed parameters change the fingerprint. Note that bytecode
-        hashing does not detect changes inside helper functions called by the
-        statistic or in captured closure variables, and is sensitive to the Python
-        version. Callables without ``__code__`` fall back to a labels-only
-        fingerprint.
+        indices, provisioned params, the fact-table ``channel_name`` (cross-channel
+        only), and the function's bytecode, constants, and default argument values
+        (``__defaults__`` / ``__kwdefaults__``). ``functools.partial`` wrappers are
+        unwrapped with their bound arguments included, so changed parameters change
+        the fingerprint. Note that bytecode hashing does not detect changes inside
+        helper functions called by the statistic or in captured closure variables,
+        and is sensitive to the Python version. Callables without ``__code__`` fall
+        back to a labels-only fingerprint.
 
         Parameters
         ----------
@@ -863,6 +859,10 @@ class StatsAggregator(Aggregation):
             Representation of the declared input indices.
         params : dict, optional
             The statistic's provisioned params.
+        channel_name : str, optional
+            The cross-channel descriptor's ``channel_name`` (the fact-table merge
+            key); ``None`` for per-channel statistics and cross-channel statistics
+            that default to their label.
 
         Returns
         -------
@@ -887,4 +887,6 @@ class StatsAggregator(Aggregation):
                 + kwdefaults_repr.encode()
                 + "|".join(partial_reprs).encode()
             ).hexdigest()
-        return f"{kind}:{aggregation_labels!r}:{inputs_repr}:{params_repr}:{digest}"
+        return (
+            f"{kind}:{aggregation_labels!r}:{inputs_repr}:{params_repr}:{channel_name!r}:{digest}"
+        )

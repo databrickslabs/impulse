@@ -83,9 +83,9 @@ class TestStatisticsAggregatorIntegration:
             stats_data = row["multi_channel_stats"]
             event_timestamps, numeric_values, string_values, cross_channel_values = stats_data
 
-            # event_timestamps is appended inside the per-expression loop,
-            # so N=2 expressions with one synthetic event each give 2 entries.
-            assert len(event_timestamps) == 2
+            # event_timestamps is canonical (one entry per interval), so the single
+            # synthetic interval spanning both channels gives 1 entry.
+            assert len(event_timestamps) == 1
 
             # Should have two expressions (eng_rpm and veh_speed)
             assert len(numeric_values) == 2

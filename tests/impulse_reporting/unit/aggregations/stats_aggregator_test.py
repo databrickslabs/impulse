@@ -791,8 +791,8 @@ def _build_solved_df(spark, stats_name):
             T.StructField(stats_name, value_type),
         ]
     )
-    # 2 signals x 2 intervals; event_timestamps repeated per signal (series-major)
-    event_timestamps = [[0.0, 10.0], [10.0, 20.0], [0.0, 10.0], [10.0, 20.0]]
+    # 2 signals x 2 intervals; event_timestamps canonical (one entry per interval)
+    event_timestamps = [[0.0, 10.0], [10.0, 20.0]]
     numeric_values = [
         [{"min": 1.0, "rms": 1.5}, {"min": 2.0, "rms": 2.5}],
         [{"min": 3.0, "rms": 3.5}, {"min": 4.0, "rms": 4.5}],
@@ -854,7 +854,7 @@ def test_determine_aggregations_without_custom_statistics_has_no_extra_rows(spar
             T.StructField("plain_stats", value_type),
         ]
     )
-    event_timestamps = [[0.0, 10.0], [0.0, 10.0]]
+    event_timestamps = [[0.0, 10.0]]
     numeric_values = [[{"min": 1.0}], [{"min": 3.0}]]
     solved_df = spark.createDataFrame([(1, (event_timestamps, numeric_values, [], []))], schema)
 
@@ -915,8 +915,8 @@ def test_determine_aggregations_with_multi_output_statistics(spark):
             T.StructField(stats_agg.get_name(), value_type),
         ]
     )
-    # 2 signals x 2 intervals; event_timestamps repeated per signal (series-major)
-    event_timestamps = [[0.0, 10.0], [10.0, 20.0], [0.0, 10.0], [10.0, 20.0]]
+    # 2 signals x 2 intervals; event_timestamps canonical (one entry per interval)
+    event_timestamps = [[0.0, 10.0], [10.0, 20.0]]
     numeric_values = [
         [{"min": 1.0, "p50": 1.5, "p90": 1.9}, {"min": 2.0, "p50": 2.5, "p90": 2.9}],
         [{"min": 3.0, "p50": 3.5, "p90": 3.9}, {"min": 4.0, "p50": 4.5, "p90": 4.9}],
