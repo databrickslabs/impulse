@@ -7,6 +7,7 @@ import pytest
 
 from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     CrossChannelStatistic,
+    PerChannelStatistic,
 )
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
@@ -16,15 +17,15 @@ def _value_spread(series, t_start, t_end):
     """Cross-channel statistic: max - min over the values of all series."""
     values = [v for s in series for v in s.values if not np.isnan(v)]
     if not values:
-        return float("nan")
-    return float(max(values) - min(values))
+        return [float("nan")]
+    return [float(max(values) - min(values))]
 
 
 def _rms(series, t_start, t_end):
     """Per-channel statistic: root mean square of the series values."""
     if len(series) == 0:
-        return float("nan")
-    return float(np.sqrt(np.nanmean(series.values**2)))
+        return [float("nan")]
+    return [float(np.sqrt(np.nanmean(series.values**2)))]
 
 
 def test_stats_case_check_numeric_values(spark, basic_narrow_db):
@@ -248,12 +249,14 @@ def test_stats_aggregator_with_custom_statistics(spark, basic_narrow_db):
         input_expressions=[eng_rpm, veh_spd],
         statistics=["min", "max"],
         event_expression=air_temp_event,
-        cross_channel_custom_statistics={
-            "spread": CrossChannelStatistic(
-                func=_value_spread, inputs=["engine_rpm", "vehicle_speed"]
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(
+                func=_value_spread,
+                aggregation_labels=["spread"],
+                inputs=["engine_rpm", "vehicle_speed"],
             ),
-        },
-        per_channel_custom_statistics={"rms": _rms},
+        ],
+        per_channel_custom_statistics=[PerChannelStatistic(func=_rms, aggregation_labels=["rms"])],
         input_names=["engine_rpm", "vehicle_speed"],
     )
 

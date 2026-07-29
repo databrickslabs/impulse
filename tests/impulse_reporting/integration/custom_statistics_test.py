@@ -10,6 +10,7 @@ from databricks.sdk import WorkspaceClient
 
 from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     CrossChannelStatistic,
+    PerChannelStatistic,
 )
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.core.page import Page
@@ -21,20 +22,38 @@ def _value_spread(series, t_start, t_end):
     """Cross-channel: max - min over the values of all series."""
     values = [v for s in series for v in s.values if not np.isnan(v)]
     if not values:
-        return float("nan")
-    return float(max(values) - min(values))
+        return [float("nan")]
+    return [float(max(values) - min(values))]
 
 
 def _count_above(series, t_start, t_end, threshold=0.0):
     """Cross-channel: number of samples above a configurable threshold."""
-    return float(sum((s.values > threshold).sum() for s in series))
+    return [float(sum((s.values > threshold).sum() for s in series))]
 
 
 def _rms(series, t_start, t_end):
     """Per-channel: root mean square of the series values."""
     if len(series) == 0:
-        return float("nan")
-    return float(np.sqrt(np.nanmean(series.values**2)))
+        return [float("nan")]
+    return [float(np.sqrt(np.nanmean(series.values**2)))]
+
+
+def _percentiles(series, t_start, t_end):
+    """Per-channel multi-output: returns (p50, p90) of the series values."""
+    if len(series) == 0:
+        return (float("nan"), float("nan"))
+    return (
+        float(np.nanpercentile(series.values, 50)),
+        float(np.nanpercentile(series.values, 90)),
+    )
+
+
+def _min_max(series, t_start, t_end):
+    """Cross-channel multi-output: returns [min, max] over all series values."""
+    values = [v for s in series for v in s.values if not np.isnan(v)]
+    if not values:
+        return [float("nan"), float("nan")]
+    return [float(min(values)), float(max(values))]
 
 
 def test_custom_statistics_report(spark):
@@ -66,15 +85,18 @@ def test_custom_statistics_report(spark):
         channel_names=["Engine RPM", "Vehicle Speed"],
         statistics=["min", "max"],
         event=rpm_event,
-        cross_channel_custom_statistics={
-            "spread": CrossChannelStatistic(
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(
                 func=_value_spread,
+                aggregation_labels=["spread"],
                 inputs=["Engine RPM", "Vehicle Speed"],
                 channel_name="rpm_speed_spread",
             ),
-            "count": CrossChannelStatistic(func=_count_above, params={"threshold": 0.0}),
-        },
-        per_channel_custom_statistics={"rms": _rms},
+            CrossChannelStatistic(
+                func=_count_above, aggregation_labels=["count"], params={"threshold": 0.0}
+            ),
+        ],
+        per_channel_custom_statistics=[PerChannelStatistic(func=_rms, aggregation_labels=["rms"])],
     )
     page.add_aggregation(stats)
 
@@ -134,3 +156,75 @@ def test_custom_statistics_report(spark):
     metadata_df = my_report.aggregation_metadata_dfs["STATS_AGGREGATOR"]
     metadata = metadata_df.collect()[0]
     assert metadata["statistics"] == ["min", "max", "rms", "spread", "count"]
+
+
+def test_multi_output_custom_statistics_report(spark):
+    """Multi-output custom statistics fan out to several fact rows end-to-end."""
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    base_path = base_path[: base_path.find("tests")]
+    config_path = os.path.join(base_path, "tests", "data", "config", "config.json")
+
+    my_report: Report = Report(
+        name="multi_output_stats_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config_path=config_path,
+    )
+
+    query = my_report.get_db().query
+    c1 = query.channel(channel_name="Engine RPM")
+    c2 = query.channel(channel_name="Vehicle Speed Sensor")
+
+    rpm_event = BasicEvent(name="rpm_event", expr=c1 > 0, desc="Engine RPM > 0")
+    my_report.add_event(rpm_event)
+
+    page = Page(page_number=1)
+    my_report.add_page(page)
+
+    stats = StatsAggregator(
+        name="multi_output_stats",
+        input_expressions=[c1, c2],
+        channel_names=["Engine RPM", "Vehicle Speed"],
+        statistics=["min", "max"],
+        event=rpm_event,
+        per_channel_custom_statistics=[
+            PerChannelStatistic(func=_percentiles, aggregation_labels=["p50", "p90"]),
+        ],
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(
+                func=_min_max, aggregation_labels=["lo", "hi"], channel_name="rpm_speed_bounds"
+            ),
+        ],
+    )
+    page.add_aggregation(stats)
+
+    my_report.determine_report()
+
+    stats_df = my_report.aggregation_dfs["STATS_AGGREGATOR"]["changed"]
+    rows = stats_df.collect()
+    by_label = {}
+    for row in rows:
+        by_label.setdefault(row["aggregation_label"], []).append(row)
+
+    # per-channel multi-output labels land under the real channel names
+    assert {row["channel_name"] for row in by_label["p50"]} == {"Engine RPM", "Vehicle Speed"}
+    assert {row["channel_name"] for row in by_label["p90"]} == {"Engine RPM", "Vehicle Speed"}
+
+    # cross-channel multi-output labels share the descriptor's channel_name
+    assert {row["channel_name"] for row in by_label["lo"]} == {"rpm_speed_bounds"}
+    assert {row["channel_name"] for row in by_label["hi"]} == {"rpm_speed_bounds"}
+
+    # values are finite and hi >= lo for each interval
+    for label in ("p50", "p90", "lo", "hi"):
+        for row in by_label[label]:
+            assert not math.isnan(row["statistic_value"])
+
+    # per interval instance, hi >= lo
+    lo_by_instance = {row["event_instance_id"]: row["statistic_value"] for row in by_label["lo"]}
+    hi_by_instance = {row["event_instance_id"]: row["statistic_value"] for row in by_label["hi"]}
+    for instance_id, lo in lo_by_instance.items():
+        assert hi_by_instance[instance_id] >= lo - 1e-9
+
+    # the label set is documented in the dimension row
+    metadata = my_report.aggregation_metadata_dfs["STATS_AGGREGATOR"].collect()[0]
+    assert metadata["statistics"] == ["min", "max", "p50", "p90", "lo", "hi"]

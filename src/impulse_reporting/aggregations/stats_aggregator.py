@@ -54,8 +54,8 @@ class StatsAggregator(Aggregation):
         desc: str = None,
         agg_type: str = "stats_aggregator",
         values_unit: str = None,
-        cross_channel_custom_statistics: dict[str, Callable | CrossChannelStatistic] | None = None,
-        per_channel_custom_statistics: dict[str, Callable | PerChannelStatistic] | None = None,
+        cross_channel_custom_statistics: list[CrossChannelStatistic] | None = None,
+        per_channel_custom_statistics: list[PerChannelStatistic] | None = None,
     ):
         """
         Initialize a StatsAggregator object.
@@ -79,16 +79,15 @@ class StatsAggregator(Aggregation):
             Type of aggregation, defaults to "stats_aggregator".
         values_unit : str, optional
             Unit of the statistic values.
-        cross_channel_custom_statistics : dict, optional
-            Mapping of statistic name to a callable or ``CrossChannelStatistic``
-            descriptor, computed once per event interval across the descriptor's
-            declared input channels (referencing ``channel_names``; all channels
-            when none are declared). Fact rows carry the descriptor's
-            ``channel_name``, defaulting to the statistic's name. See
+        cross_channel_custom_statistics : list of CrossChannelStatistic, optional
+            Custom statistics computed once per event interval across each
+            descriptor's declared input channels (referencing ``channel_names``;
+            all channels when none are declared). Fact rows carry the
+            descriptor's ``channel_name`` (applied to all its output labels),
+            defaulting to each output's ``aggregation_label``. See
             ``impulse_query_engine`` ``StatsAggregator`` for the callable contract.
-        per_channel_custom_statistics : dict, optional
-            Mapping of statistic name to a callable or ``PerChannelStatistic``
-            descriptor, computed once per input channel and event interval,
+        per_channel_custom_statistics : list of PerChannelStatistic, optional
+            Custom statistics computed once per input channel and event interval,
             exactly like a built-in statistic. Fact rows carry the real channel
             names. Descriptor ``params`` are passed to the callable as keyword
             arguments.
@@ -127,13 +126,14 @@ class StatsAggregator(Aggregation):
         ValueError
             If a descriptor's ``channel_name`` is set but not a non-empty string.
         """
-        for name, statistic in self.cross_channel_custom_statistics.items():
+        for statistic in self.cross_channel_custom_statistics:
             if statistic.channel_name is None:
                 continue
             if not isinstance(statistic.channel_name, str) or not statistic.channel_name:
                 raise ValueError(
-                    f"channel_name of cross-channel statistic '{name}' must be a "
-                    f"non-empty string, got {statistic.channel_name!r}"
+                    f"channel_name of cross-channel statistic "
+                    f"{statistic.aggregation_labels!r} must be a non-empty string, "
+                    f"got {statistic.channel_name!r}"
                 )
 
     def _validate_channel_names(self) -> None:
@@ -226,6 +226,20 @@ class StatsAggregator(Aggregation):
 
         return query_eng_stats_agg
 
+    @staticmethod
+    def _custom_statistic_labels(
+        statistics: list[PerChannelStatistic | CrossChannelStatistic],
+    ) -> list[str]:
+        """
+        Flatten custom statistics to the output labels they produce.
+
+        These are the values that appear as ``aggregation_label`` in the fact rows.
+        """
+        labels: list[str] = []
+        for statistic in statistics:
+            labels.extend(statistic.aggregation_labels)
+        return labels
+
     def as_dict(self) -> dict:
         """
         Get a dictionary representation of the statistics aggregation.
@@ -244,8 +258,8 @@ class StatsAggregator(Aggregation):
             "agg_type": self.agg_type if self.agg_type else "stats_aggregator",
             "statistics": (
                 list(self.statistics)
-                + list(self.per_channel_custom_statistics)
-                + list(self.cross_channel_custom_statistics)
+                + self._custom_statistic_labels(self.per_channel_custom_statistics)
+                + self._custom_statistic_labels(self.cross_channel_custom_statistics)
             ),
             "channel_names": self.channel_names,
             "signal_expressions": [expr.__str__() for expr in self.input_expressions],
@@ -583,12 +597,12 @@ class StatsAggregator(Aggregation):
         """
         Add a channel_name column for cross-channel statistic rows.
 
-        Descriptors with an explicit ``channel_name`` are mapped per
-        (aggregation, statistic); all other rows default to their
-        ``aggregation_label`` (the statistic's name), which is non-null and
-        stable as required by the fact table's merge keys. A ``channel_name``
-        equal to a real input channel name is allowed and pivots the statistic
-        into that channel's rows.
+        Descriptors with an explicit ``channel_name`` apply it to all of their
+        output rows (matched on the descriptor's effective labels — its
+        ``aggregation_labels``); all other rows default to their
+        ``aggregation_label``, which is non-null and stable as required by the
+        fact table's merge keys. A ``channel_name`` equal to a real input channel
+        name is allowed and pivots the statistic into that channel's rows.
 
         Parameters
         ----------
@@ -607,11 +621,12 @@ class StatsAggregator(Aggregation):
                 if agg is None:
                     continue
                 agg_name = agg.get_name()
-                for stat_name, statistic in agg.cross_channel_custom_statistics.items():
+                for statistic in agg.cross_channel_custom_statistics:
                     if statistic.channel_name is None:
                         continue
+                    labels = statistic.aggregation_labels
                     condition = (f.col("stats_name") == f.lit(agg_name)) & (
-                        f.col("aggregation_label") == f.lit(stat_name)
+                        f.col("aggregation_label").isin(labels)
                     )
                     if col_expr is None:
                         col_expr = f.when(condition, f.lit(statistic.channel_name))
@@ -779,11 +794,19 @@ class StatsAggregator(Aggregation):
 
         custom_fingerprints = [
             self._fingerprint_custom_statistic(
-                "per_channel", name, statistic.func, inputs_repr="", params=statistic.params
+                "per_channel",
+                statistic.aggregation_labels,
+                statistic.func,
+                inputs_repr="",
+                params=statistic.params,
             )
-            for name, statistic in sorted(self.per_channel_custom_statistics.items())
+            for statistic in sorted(
+                self.per_channel_custom_statistics, key=lambda s: tuple(s.aggregation_labels)
+            )
         ]
-        for name, statistic in sorted(self.cross_channel_custom_statistics.items()):
+        for statistic in sorted(
+            self.cross_channel_custom_statistics, key=lambda s: tuple(s.aggregation_labels)
+        ):
             if statistic.inputs is None:
                 inputs_repr = "all"
             else:
@@ -792,7 +815,7 @@ class StatsAggregator(Aggregation):
             custom_fingerprints.append(
                 self._fingerprint_custom_statistic(
                     "cross_channel",
-                    name,
+                    statistic.aggregation_labels,
                     statistic.func,
                     inputs_repr=inputs_repr,
                     params=statistic.params,
@@ -809,25 +832,29 @@ class StatsAggregator(Aggregation):
 
     @staticmethod
     def _fingerprint_custom_statistic(
-        kind: str, name: str, func: Callable, inputs_repr: str, params: dict | None = None
+        kind: str,
+        aggregation_labels: list[str],
+        func: Callable,
+        inputs_repr: str,
+        params: dict | None = None,
     ) -> str:
         """
         Build a stable fingerprint for a custom statistic.
 
-        The fingerprint covers the statistic's kind, name, declared input indices,
-        provisioned params, and the function's bytecode and constants.
+        The fingerprint covers the statistic's kind, output labels, declared input
+        indices, provisioned params, and the function's bytecode and constants.
         ``functools.partial`` wrappers are unwrapped with their bound arguments
         included, so changed parameters change the fingerprint. Note that bytecode
         hashing does not detect changes inside helper functions called by the
         statistic, and is sensitive to the Python version. Callables without
-        ``__code__`` fall back to a name-only fingerprint.
+        ``__code__`` fall back to a labels-only fingerprint.
 
         Parameters
         ----------
         kind : str
             Either ``per_channel`` or ``cross_channel``.
-        name : str
-            The statistic's name.
+        aggregation_labels : list of str
+            The statistic's output labels (its identity).
         func : Callable
             The statistic's callable.
         inputs_repr : str
@@ -852,4 +879,4 @@ class StatsAggregator(Aggregation):
             digest = hashlib.sha256(
                 code.co_code + repr(code.co_consts).encode() + "|".join(partial_reprs).encode()
             ).hexdigest()
-        return f"{kind}:{name}:{inputs_repr}:{params_repr}:{digest}"
+        return f"{kind}:{aggregation_labels!r}:{inputs_repr}:{params_repr}:{digest}"

@@ -10,6 +10,7 @@ import pytest
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     CrossChannelStatistic,
+    PerChannelStatistic,
 )
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
@@ -688,19 +689,19 @@ def test_init_rejects_points_in_time_event():
 def _spread(series, t_start, t_end):
     """Cross-channel test statistic."""
     values = [v for s in series for v in s.values]
-    return float(max(values) - min(values)) if values else float("nan")
+    return [float(max(values) - min(values)) if values else float("nan")]
 
 
 def _ratio(series, t_start, t_end):
     """Cross-channel test statistic."""
-    return 0.5
+    return [0.5]
 
 
 def _rms(series, t_start, t_end):
     """Per-channel test statistic."""
     import numpy as np
 
-    return float(np.sqrt(np.nanmean(series.values**2))) if len(series) else float("nan")
+    return [float(np.sqrt(np.nanmean(series.values**2))) if len(series) else float("nan")]
 
 
 def _make_custom_stats_aggregator(name="my_stats"):
@@ -710,23 +711,25 @@ def _make_custom_stats_aggregator(name="my_stats"):
         channel_names=["ch_a", "ch_b"],
         statistics=["min"],
         event=BasicEvent(name="test_event", expr=TimeSeriesSelector(None) > 0),
-        cross_channel_custom_statistics={
-            "spread": CrossChannelStatistic(
-                func=_spread, inputs=["ch_a", "ch_b"], channel_name="combined"
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(
+                func=_spread,
+                aggregation_labels=["spread"],
+                inputs=["ch_a", "ch_b"],
+                channel_name="combined",
             ),
-            "ratio": _ratio,
-        },
-        per_channel_custom_statistics={"rms": _rms},
+            CrossChannelStatistic(func=_ratio, aggregation_labels=["ratio"]),
+        ],
+        per_channel_custom_statistics=[PerChannelStatistic(func=_rms, aggregation_labels=["rms"])],
     )
 
 
 def test_custom_statistics_normalization_and_as_dict():
     stats_agg = _make_custom_stats_aggregator()
 
-    # plain callables are normalized to CrossChannelStatistic descriptors
-    assert isinstance(stats_agg.cross_channel_custom_statistics["ratio"], CrossChannelStatistic)
-    assert stats_agg.cross_channel_custom_statistics["ratio"].channel_name is None
-    assert stats_agg.cross_channel_custom_statistics["spread"].channel_name == "combined"
+    # descriptors are stored as validated lists
+    assert stats_agg.cross_channel_custom_statistics[0].channel_name == "combined"
+    assert stats_agg.cross_channel_custom_statistics[1].channel_name is None
 
     stats_dict = stats_agg.as_dict()
     assert stats_dict["statistics"] == ["min", "rms", "spread", "ratio"]
@@ -743,9 +746,9 @@ def test_cross_channel_empty_channel_name_rejected():
             input_expressions=[TimeSeriesSelector(None)],
             channel_names=["ch_a"],
             statistics=["min"],
-            cross_channel_custom_statistics={
-                "spread": CrossChannelStatistic(func=_spread, channel_name="")
-            },
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_spread, aggregation_labels=["spread"], channel_name="")
+            ],
         )
 
 
@@ -756,9 +759,11 @@ def test_cross_channel_unknown_input_rejected():
             input_expressions=[TimeSeriesSelector(None)],
             channel_names=["ch_a"],
             statistics=["min"],
-            cross_channel_custom_statistics={
-                "spread": CrossChannelStatistic(func=_spread, inputs=["missing"])
-            },
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(
+                    func=_spread, aggregation_labels=["spread"], inputs=["missing"]
+                )
+            ],
         )
 
 
@@ -859,3 +864,95 @@ def test_determine_aggregations_without_custom_statistics_has_no_extra_rows(spar
     assert len(rows) == 2
     assert {row["channel_name"] for row in rows} == {"ch_a", "ch_b"}
     assert {row["aggregation_label"] for row in rows} == {"min"}
+
+
+def _bounds(series, t_start, t_end):
+    """Cross-channel multi-output test statistic."""
+    values = [v for s in series for v in s.values]
+    return [float(min(values)), float(max(values))] if values else [float("nan"), float("nan")]
+
+
+def _quantiles(series, t_start, t_end):
+    """Per-channel multi-output test statistic."""
+    import numpy as np
+
+    if len(series) == 0:
+        return (float("nan"), float("nan"))
+    return (float(np.nanpercentile(series.values, 50)), float(np.nanpercentile(series.values, 90)))
+
+
+def _make_multi_output_stats_aggregator(name="multi_stats"):
+    return StatsAggregator(
+        name=name,
+        input_expressions=[TimeSeriesSelector(None), TimeSeriesSelector(None)],
+        channel_names=["ch_a", "ch_b"],
+        statistics=["min"],
+        event=BasicEvent(name="test_event", expr=TimeSeriesSelector(None) > 0),
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(
+                func=_bounds, aggregation_labels=["lo", "hi"], channel_name="combined"
+            ),
+        ],
+        per_channel_custom_statistics=[
+            PerChannelStatistic(func=_quantiles, aggregation_labels=["p50", "p90"]),
+        ],
+    )
+
+
+def test_multi_output_as_dict_lists_effective_labels():
+    stats_agg = _make_multi_output_stats_aggregator()
+    # per-channel labels then cross-channel labels, after built-ins
+    assert stats_agg.as_dict()["statistics"] == ["min", "p50", "p90", "lo", "hi"]
+
+
+def test_determine_aggregations_with_multi_output_statistics(spark):
+    stats_agg = _make_multi_output_stats_aggregator()
+
+    value_type = stats_agg.get_expression().dtype()
+    schema = T.StructType(
+        [
+            T.StructField("container_id", T.IntegerType()),
+            T.StructField(stats_agg.get_name(), value_type),
+        ]
+    )
+    # 2 signals x 2 intervals; event_timestamps repeated per signal (series-major)
+    event_timestamps = [[0.0, 10.0], [10.0, 20.0], [0.0, 10.0], [10.0, 20.0]]
+    numeric_values = [
+        [{"min": 1.0, "p50": 1.5, "p90": 1.9}, {"min": 2.0, "p50": 2.5, "p90": 2.9}],
+        [{"min": 3.0, "p50": 3.5, "p90": 3.9}, {"min": 4.0, "p50": 4.5, "p90": 4.9}],
+    ]
+    cross_channel_values = [{"lo": 1.0, "hi": 4.0}, {"lo": 2.0, "hi": 5.0}]
+    solved_df = spark.createDataFrame(
+        [(1, (event_timestamps, numeric_values, [], cross_channel_values))], schema
+    )
+
+    df = StatsAggregator.determine_aggregations(spark, [stats_agg], solved_df=solved_df)
+    rows = df.collect()
+
+    by_label = {}
+    for row in rows:
+        by_label.setdefault(row["aggregation_label"], []).append(row)
+
+    # per-channel multi-output labels land under real channel names
+    assert {row["channel_name"] for row in by_label["p50"]} == {"ch_a", "ch_b"}
+    assert {row["channel_name"] for row in by_label["p90"]} == {"ch_a", "ch_b"}
+    assert sorted(row["statistic_value"] for row in by_label["p50"]) == [1.5, 2.5, 3.5, 4.5]
+
+    # cross-channel multi-output labels share the descriptor's channel_name
+    assert {row["channel_name"] for row in by_label["lo"]} == {"combined"}
+    assert {row["channel_name"] for row in by_label["hi"]} == {"combined"}
+    assert sorted(row["statistic_value"] for row in by_label["lo"]) == [1.0, 2.0]
+    assert sorted(row["statistic_value"] for row in by_label["hi"]) == [4.0, 5.0]
+
+    # both cross-channel outputs of interval 0 join the interval's per-channel rows
+    instance_interval_0 = {
+        row["event_instance_id"] for row in by_label["min"] if row["statistic_value"] in (1.0, 3.0)
+    }
+    lo_hi_instance_0 = {
+        row["event_instance_id"]
+        for label in ("lo", "hi")
+        for row in by_label[label]
+        if row["statistic_value"] in (1.0, 4.0)
+    }
+    assert lo_hi_instance_0 == instance_interval_0
+    assert len(instance_interval_0) == 1

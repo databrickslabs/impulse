@@ -1,6 +1,6 @@
 """StatsAggregator class for computing statistics within event intervals."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import pyspark.sql.types as T
@@ -51,8 +51,8 @@ class StatsAggregator(Aggregation):
         input_expressions: list[TimeSeriesExpression],
         statistics: list[str] | None = None,
         event_expression: TimeSeriesExpression = None,
-        cross_channel_custom_statistics: dict[str, Callable | CrossChannelStatistic] | None = None,
-        per_channel_custom_statistics: dict[str, Callable | PerChannelStatistic] | None = None,
+        cross_channel_custom_statistics: list[CrossChannelStatistic] | None = None,
+        per_channel_custom_statistics: list[PerChannelStatistic] | None = None,
         input_names: list[str] | None = None,
     ):
         """
@@ -71,26 +71,24 @@ class StatsAggregator(Aggregation):
         event_expression : TimeSeriesExpression
             TimeSeriesExpression defining event intervals for statistics computation.
             When evaluated, it yields an instance of Intervals.
-        cross_channel_custom_statistics : dict, optional
-            Mapping of statistic name to a callable or ``CrossChannelStatistic``
-            descriptor. Each statistic is computed once per event interval:
+        cross_channel_custom_statistics : list of CrossChannelStatistic, optional
+            Custom statistics computed once per event interval:
             ``func(series: list[SampleSeries], t_start: float, t_end: float,
-            **params) -> float``, where ``params`` is the descriptor's params
-            mapping (empty for plain callables). The series are clipped to the
+            **params) -> Sequence[float]``. The series are clipped to the
             interval and ordered like the descriptor's ``inputs`` declaration
             (all input expressions in input order when no inputs are declared).
-            Series may be empty; return ``float("nan")`` for an undefined result.
-            Exceptions propagate and fail the query. Callables are cloudpickled
-            to Spark executors — use module-level importable functions and never
-            capture Spark objects.
-        per_channel_custom_statistics : dict, optional
-            Mapping of statistic name to a callable or ``PerChannelStatistic``
-            descriptor, computed once per input channel and event interval,
+            ``func`` returns a sequence mapped positionally to the descriptor's
+            ``aggregation_labels``. Series may be empty; return ``float("nan")``
+            entries for undefined results. Exceptions propagate and fail the
+            query. Callables are cloudpickled to Spark executors — use
+            module-level importable functions and never capture Spark objects.
+        per_channel_custom_statistics : list of PerChannelStatistic, optional
+            Custom statistics computed once per input channel and event interval,
             exactly like a built-in statistic: ``func(series: SampleSeries,
-            t_start: float, t_end: float, **params) -> float``.
-            The series is clipped to the interval and may be empty (unlike
-            built-ins, the callable is invoked even for empty/all-NaN intervals).
-            The same pickling guidance as for cross-channel statistics applies.
+            t_start: float, t_end: float, **params) -> Sequence[float]``. The
+            series is clipped to the interval and may be empty (unlike built-ins,
+            the callable is invoked even for empty/all-NaN intervals). The same
+            return and pickling guidance as for cross-channel statistics applies.
         input_names : list of str, optional
             Names of the input expressions, parallel to ``input_expressions``.
             Required when any cross-channel statistic declares ``inputs``.
@@ -105,7 +103,7 @@ class StatsAggregator(Aggregation):
         self.per_channel_custom_statistics = normalize_per_channel_statistics(
             per_channel_custom_statistics
         )
-        self._validate_custom_statistic_names()
+        self._validate_custom_statistic_labels()
         self._validate_input_names()
         self._cross_channel_input_indices = self._resolve_cross_channel_inputs()
 
@@ -115,32 +113,37 @@ class StatsAggregator(Aggregation):
         ]
         self._string_stats = [s for s in self.statistics if s in STRING_STATISTICS]
 
-    def _validate_custom_statistic_names(self) -> None:
+    def _validate_custom_statistic_labels(self) -> None:
         """
-        Ensure custom statistic names collide neither with built-ins nor each other.
+        Ensure custom statistic output labels collide neither with built-ins nor
+        each other.
+
+        Collisions are rejected because two outputs sharing an
+        ``aggregation_label`` would produce ambiguous, colliding result-map keys.
 
         Raises
         ------
         ValueError
-            If a custom statistic name shadows a built-in statistic or is present
-            in both custom-statistics mappings.
+            If a custom output label shadows a built-in statistic or is produced
+            by more than one custom statistic.
         """
-        custom_names = set(self.cross_channel_custom_statistics) | set(
-            self.per_channel_custom_statistics
-        )
-        builtin_collisions = custom_names & BUILTIN_STATISTIC_NAMES
+        all_labels: list[str] = []
+        for statistic in self.per_channel_custom_statistics:
+            all_labels.extend(statistic.aggregation_labels)
+        for statistic in self.cross_channel_custom_statistics:
+            all_labels.extend(statistic.aggregation_labels)
+
+        builtin_collisions = set(all_labels) & BUILTIN_STATISTIC_NAMES
         if builtin_collisions:
             raise ValueError(
-                "Custom statistic names collide with built-in statistics: "
+                "Custom statistic output labels collide with built-in statistics: "
                 f"{sorted(builtin_collisions)}"
             )
-        kind_collisions = set(self.cross_channel_custom_statistics) & set(
-            self.per_channel_custom_statistics
-        )
-        if kind_collisions:
+        duplicates = sorted({label for label in all_labels if all_labels.count(label) > 1})
+        if duplicates:
             raise ValueError(
-                "Statistic names used in both cross_channel_custom_statistics and "
-                f"per_channel_custom_statistics: {sorted(kind_collisions)}"
+                "Custom statistic output labels must be unique across all custom "
+                f"statistics; duplicated: {duplicates}"
             )
 
     def _validate_input_names(self) -> None:
@@ -163,15 +166,16 @@ class StatsAggregator(Aggregation):
         if len(set(self.input_names)) != len(self.input_names):
             raise ValueError(f"input_names must be unique, got {self.input_names}")
 
-    def _resolve_cross_channel_inputs(self) -> dict[str, list[int] | None]:
+    def _resolve_cross_channel_inputs(self) -> list[list[int] | None]:
         """
         Resolve each cross-channel statistic's declared inputs to expression indices.
 
         Returns
         -------
-        dict of str to (list of int or None)
-            Per statistic, the indices into ``input_expressions`` in declared
-            order, or ``None`` when the statistic consumes all inputs.
+        list of (list of int or None)
+            Parallel to ``cross_channel_custom_statistics``: per statistic, the
+            indices into ``input_expressions`` in declared order, or ``None``
+            when the statistic consumes all inputs.
 
         Raises
         ------
@@ -179,23 +183,24 @@ class StatsAggregator(Aggregation):
             If inputs are declared without ``input_names`` or reference a name
             that is not in ``input_names``.
         """
-        indices: dict[str, list[int] | None] = {}
-        for name, statistic in self.cross_channel_custom_statistics.items():
+        indices: list[list[int] | None] = []
+        for statistic in self.cross_channel_custom_statistics:
             if statistic.inputs is None:
-                indices[name] = None
+                indices.append(None)
                 continue
             if self.input_names is None:
                 raise ValueError(
-                    f"Cross-channel statistic '{name}' declares inputs "
-                    f"{statistic.inputs}, but no input_names were provided."
+                    f"Cross-channel statistic {statistic.aggregation_labels!r} declares "
+                    f"inputs {statistic.inputs}, but no input_names were provided."
                 )
             unknown = [ch for ch in statistic.inputs if ch not in self.input_names]
             if unknown:
                 raise ValueError(
-                    f"Cross-channel statistic '{name}' references unknown input "
-                    f"channels {unknown}; available input_names: {self.input_names}"
+                    f"Cross-channel statistic {statistic.aggregation_labels!r} references "
+                    f"unknown input channels {unknown}; available input_names: "
+                    f"{self.input_names}"
                 )
-            indices[name] = [self.input_names.index(ch) for ch in statistic.inputs]
+            indices.append([self.input_names.index(ch) for ch in statistic.inputs])
         return indices
 
     def __str__(self) -> str:
@@ -207,15 +212,18 @@ class StatsAggregator(Aggregation):
         str
             String representation of the StatsAggregator object.
         """
-        cross_channel = {
-            name: statistic.inputs
-            for name, statistic in self.cross_channel_custom_statistics.items()
-        }
+        cross_channel = [
+            {"labels": statistic.aggregation_labels, "inputs": statistic.inputs}
+            for statistic in self.cross_channel_custom_statistics
+        ]
+        per_channel = [
+            statistic.aggregation_labels for statistic in self.per_channel_custom_statistics
+        ]
         return (
             f"<StatsAggregator input_expressions={self.input_expressions}, "
             f"event_expression={self.event_expression}, statistics={self.statistics}, "
             f"cross_channel_custom_statistics={cross_channel}, "
-            f"per_channel_custom_statistics={list(self.per_channel_custom_statistics)}>"
+            f"per_channel_custom_statistics={per_channel}>"
         )
 
     def dtype(self) -> T.StructType:
@@ -406,10 +414,12 @@ class StatsAggregator(Aggregation):
 
         if self.per_channel_custom_statistics:
             channel_series = SampleSeries(tstarts=t_starts, tends=t_ends, values=values)
-            for name, statistic in self.per_channel_custom_statistics.items():
-                results[name] = self._coerce_stat_result(
-                    name,
-                    statistic.func(channel_series, t_start, t_end, **(statistic.params or {})),
+            for statistic in self.per_channel_custom_statistics:
+                results.update(
+                    self._map_labeled_result(
+                        statistic,
+                        statistic.func(channel_series, t_start, t_end, **(statistic.params or {})),
+                    )
                 )
 
         return results
@@ -448,16 +458,57 @@ class StatsAggregator(Aggregation):
             return clipped[index]
 
         results = {}
-        for name, statistic in self.cross_channel_custom_statistics.items():
-            indices = self._cross_channel_input_indices[name]
+        for statistic, indices in zip(
+            self.cross_channel_custom_statistics,
+            self._cross_channel_input_indices,
+            strict=True,
+        ):
             if indices is None:
                 indices = range(len(series_list))
             statistic_series = [clip(i) for i in indices]
-            results[name] = self._coerce_stat_result(
-                name,
-                statistic.func(statistic_series, t_start, t_end, **(statistic.params or {})),
+            results.update(
+                self._map_labeled_result(
+                    statistic,
+                    statistic.func(statistic_series, t_start, t_end, **(statistic.params or {})),
+                )
             )
         return results
+
+    def _map_labeled_result(
+        self,
+        statistic: PerChannelStatistic | CrossChannelStatistic,
+        value,
+    ) -> dict[str, float]:
+        """
+        Map a custom statistic's returned sequence to its output labels.
+
+        The statistic must return a sequence of scalars whose length equals its
+        ``aggregation_labels``; the values are mapped positionally.
+
+        Raises
+        ------
+        TypeError
+            If the statistic returns a non-sequence (or a string).
+        ValueError
+            If the returned sequence length does not match the declared labels.
+        """
+        labels = statistic.aggregation_labels
+        # Accept any sized, ordered container (list, tuple, numpy array, ...) but
+        # not scalars, strings, or bytes.
+        if isinstance(value, (str, bytes)) or not isinstance(value, (Sequence, np.ndarray)):
+            raise TypeError(
+                f"Custom statistic {labels!r} must return a sequence of "
+                f"{len(labels)} scalars, got {type(value).__name__}"
+            )
+        if len(value) != len(labels):
+            raise ValueError(
+                f"Custom statistic {labels!r} returned {len(value)} values but declares "
+                f"{len(labels)} aggregation_labels"
+            )
+        return {
+            label: self._coerce_stat_result(label, v)
+            for label, v in zip(labels, value, strict=True)
+        }
 
     @staticmethod
     def _coerce_stat_result(name: str, value) -> float:

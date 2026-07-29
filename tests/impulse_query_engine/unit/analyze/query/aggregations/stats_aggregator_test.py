@@ -622,25 +622,25 @@ def _spread(series, t_start, t_end):
     values = np.concatenate([s.values for s in series]) if series else np.array([])
     valid = values[~np.isnan(values)]
     if valid.size == 0:
-        return float("nan")
-    return float(np.max(valid) - np.min(valid))
+        return [float("nan")]
+    return [float(np.max(valid) - np.min(valid))]
 
 
 def _total_sample_count(series, t_start, t_end):
     """Cross-channel: total number of samples across all series."""
-    return float(sum(len(s) for s in series))
+    return [float(sum(len(s) for s in series))]
 
 
 def _rms(series, t_start, t_end):
     """Per-channel: root mean square of the series values."""
     if len(series) == 0:
-        return float("nan")
-    return float(np.sqrt(np.nanmean(series.values**2)))
+        return [float("nan")]
+    return [float(np.sqrt(np.nanmean(series.values**2)))]
 
 
 def _sample_count(series, t_start, t_end):
     """Per-channel: number of samples in the series."""
-    return float(len(series))
+    return [float(len(series))]
 
 
 def test_build_cross_channel_stat_two_channels_two_intervals():
@@ -652,7 +652,9 @@ def test_build_cross_channel_stat_two_channels_two_intervals():
         input_expressions=[expr1, expr2],
         event_expression=event,
         statistics=["min"],
-        cross_channel_custom_statistics={"spread": _spread},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_spread, aggregation_labels=["spread"])
+        ],
     )
 
     _, numeric_values, _, cross_channel_values = stats_agg.build(cache=None)
@@ -673,7 +675,10 @@ def test_build_multiple_cross_channel_stats():
     stats_agg = StatsAggregator(
         input_expressions=[expr],
         event_expression=event,
-        cross_channel_custom_statistics={"spread": _spread, "count": _total_sample_count},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_spread, aggregation_labels=["spread"]),
+            CrossChannelStatistic(func=_total_sample_count, aggregation_labels=["count"]),
+        ],
     )
 
     _, _, _, cross_channel_values = stats_agg.build(cache=None)
@@ -691,7 +696,9 @@ def test_build_cross_channel_stat_without_event_expression():
     stats_agg = StatsAggregator(
         input_expressions=[expr1, expr2],
         event_expression=None,
-        cross_channel_custom_statistics={"spread": _spread},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_spread, aggregation_labels=["spread"])
+        ],
     )
 
     _, _, _, cross_channel_values = stats_agg.build(cache=None)
@@ -711,14 +718,14 @@ def test_cross_channel_inputs_subset_order_and_clipping():
 
     def capture(series, t_start, t_end):
         received.append((series, t_start, t_end))
-        return 0.0
+        return [0.0]
 
     stats_agg = StatsAggregator(
         input_expressions=[expr_a, expr_b, expr_c],
         event_expression=event,
-        cross_channel_custom_statistics={
-            "captured": CrossChannelStatistic(func=capture, inputs=["c", "a"])
-        },
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=capture, aggregation_labels=["captured"], inputs=["c", "a"])
+        ],
         input_names=["a", "b", "c"],
     )
 
@@ -744,7 +751,10 @@ def test_cross_channel_stat_called_with_empty_series():
     stats_agg = StatsAggregator(
         input_expressions=[expr],
         event_expression=event,
-        cross_channel_custom_statistics={"spread": _spread, "count": _total_sample_count},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_spread, aggregation_labels=["spread"]),
+            CrossChannelStatistic(func=_total_sample_count, aggregation_labels=["count"]),
+        ],
     )
 
     _, _, _, cross_channel_values = stats_agg.build(cache=None)
@@ -765,7 +775,9 @@ def test_build_degenerate_interval_skipped_for_cross_channel():
         input_expressions=[expr],
         event_expression=event,
         statistics=["min"],
-        cross_channel_custom_statistics={"count": _total_sample_count},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_total_sample_count, aggregation_labels=["count"])
+        ],
     )
 
     _, numeric_values, _, cross_channel_values = stats_agg.build(cache=None)
@@ -782,14 +794,16 @@ def test_cross_channel_error_propagates_from_build():
 
     stats_agg = StatsAggregator(
         input_expressions=[expr],
-        cross_channel_custom_statistics={"broken": broken},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=broken, aggregation_labels=["broken"])
+        ],
     )
 
     with pytest.raises(RuntimeError, match="boom"):
         stats_agg.build(cache=None)
 
 
-def test_cross_channel_non_scalar_return_raises_type_error():
+def test_cross_channel_non_sequence_return_raises_type_error():
     expr = _mock_expr([0.0], [1.0], [10.0])
 
     def returns_none(series, t_start, t_end):
@@ -797,7 +811,9 @@ def test_cross_channel_non_scalar_return_raises_type_error():
 
     stats_agg = StatsAggregator(
         input_expressions=[expr],
-        cross_channel_custom_statistics={"bad_stat": returns_none},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=returns_none, aggregation_labels=["bad_stat"])
+        ],
     )
 
     with pytest.raises(TypeError, match="bad_stat"):
@@ -811,7 +827,9 @@ def test_build_custom_only_without_builtin_statistics():
     stats_agg = StatsAggregator(
         input_expressions=[expr],
         event_expression=event,
-        cross_channel_custom_statistics={"count": _total_sample_count},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_total_sample_count, aggregation_labels=["count"])
+        ],
     )
 
     _, numeric_values, _, cross_channel_values = stats_agg.build(cache=None)
@@ -829,7 +847,7 @@ def test_per_channel_custom_stat_alongside_builtins():
         input_expressions=[expr1, expr2],
         event_expression=event,
         statistics=["min", "max"],
-        per_channel_custom_statistics={"rms": _rms},
+        per_channel_custom_statistics=[PerChannelStatistic(func=_rms, aggregation_labels=["rms"])],
     )
 
     _, numeric_values, _, _ = stats_agg.build(cache=None)
@@ -855,7 +873,9 @@ def test_per_channel_custom_stat_called_for_empty_interval():
         input_expressions=[expr],
         event_expression=event,
         statistics=["min"],
-        per_channel_custom_statistics={"count": _sample_count},
+        per_channel_custom_statistics=[
+            PerChannelStatistic(func=_sample_count, aggregation_labels=["count"])
+        ],
     )
 
     _, numeric_values, _, _ = stats_agg.build(cache=None)
@@ -873,12 +893,14 @@ def test_per_channel_custom_stat_receives_clipped_series():
 
     def capture(series, t_start, t_end):
         received.append((series, t_start, t_end))
-        return 0.0
+        return [0.0]
 
     stats_agg = StatsAggregator(
         input_expressions=[expr],
         event_expression=event,
-        per_channel_custom_statistics={"captured": capture},
+        per_channel_custom_statistics=[
+            PerChannelStatistic(func=capture, aggregation_labels=["captured"])
+        ],
     )
 
     stats_agg.build(cache=None)
@@ -890,47 +912,69 @@ def test_per_channel_custom_stat_receives_clipped_series():
     assert np.all(series.tends <= t_end)
 
 
-def test_per_channel_non_scalar_return_raises_type_error():
-    expr = _mock_expr([0.0], [1.0], [10.0])
-
-    def returns_list(series, t_start, t_end):
-        return [1.0, 2.0]
-
-    stats_agg = StatsAggregator(
-        input_expressions=[expr],
-        per_channel_custom_statistics={"bad_stat": returns_list},
-    )
-
-    with pytest.raises(TypeError, match="bad_stat"):
-        stats_agg.build(cache=None)
-
-
 def test_custom_statistics_validation_errors():
     expr = _mock_expr([0.0], [1.0], [10.0])
 
+    # not a list
     with pytest.raises(TypeError, match="cross_channel_custom_statistics"):
-        StatsAggregator([expr], cross_channel_custom_statistics=[_spread])
-
-    with pytest.raises(TypeError, match="per_channel_custom_statistics"):
-        StatsAggregator([expr], per_channel_custom_statistics={"rms": "not callable"})
-
-    with pytest.raises(TypeError, match="callable"):
-        StatsAggregator([expr], cross_channel_custom_statistics={"x": 42})
-
-    with pytest.raises(ValueError, match="non-empty"):
-        StatsAggregator([expr], cross_channel_custom_statistics={"": _spread})
-
-    with pytest.raises(ValueError, match="built-in"):
-        StatsAggregator([expr], cross_channel_custom_statistics={"mean": _spread})
-
-    with pytest.raises(ValueError, match="built-in"):
-        StatsAggregator([expr], per_channel_custom_statistics={"max": _rms})
-
-    with pytest.raises(ValueError, match="both"):
         StatsAggregator(
             [expr],
-            cross_channel_custom_statistics={"x": _spread},
-            per_channel_custom_statistics={"x": _rms},
+            cross_channel_custom_statistics=CrossChannelStatistic(
+                func=_spread, aggregation_labels=["spread"]
+            ),
+        )
+
+    # bare callable rejected (must be a descriptor)
+    with pytest.raises(TypeError, match="descriptors"):
+        StatsAggregator([expr], cross_channel_custom_statistics=[_spread])
+
+    with pytest.raises(TypeError, match="descriptors"):
+        StatsAggregator([expr], per_channel_custom_statistics=[_rms])
+
+    # built-in label collisions
+    with pytest.raises(ValueError, match="built-in"):
+        StatsAggregator(
+            [expr],
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_spread, aggregation_labels=["mean"])
+            ],
+        )
+
+    with pytest.raises(ValueError, match="built-in"):
+        StatsAggregator(
+            [expr],
+            per_channel_custom_statistics=[
+                PerChannelStatistic(func=_rms, aggregation_labels=["max"])
+            ],
+        )
+
+    # duplicate label across statistics
+    with pytest.raises(ValueError, match="unique"):
+        StatsAggregator(
+            [expr],
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_spread, aggregation_labels=["dup"])
+            ],
+            per_channel_custom_statistics=[
+                PerChannelStatistic(func=_rms, aggregation_labels=["dup"])
+            ],
+        )
+
+
+def test_missing_aggregation_labels_rejected():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    # descriptor built without labels fails at construction (required field)
+    with pytest.raises(TypeError):
+        PerChannelStatistic(func=_rms)
+
+    # explicit None is rejected by the normalizer
+    with pytest.raises(TypeError, match="aggregation_labels is required"):
+        StatsAggregator(
+            [expr],
+            per_channel_custom_statistics=[
+                PerChannelStatistic(func=_rms, aggregation_labels=None)
+            ],
         )
 
 
@@ -940,17 +984,17 @@ def test_cross_channel_inputs_validation_errors():
     with pytest.raises(ValueError, match="no input_names"):
         StatsAggregator(
             [expr],
-            cross_channel_custom_statistics={
-                "x": CrossChannelStatistic(func=_spread, inputs=["a"])
-            },
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_spread, aggregation_labels=["x"], inputs=["a"])
+            ],
         )
 
     with pytest.raises(ValueError, match="unknown input"):
         StatsAggregator(
             [expr],
-            cross_channel_custom_statistics={
-                "x": CrossChannelStatistic(func=_spread, inputs=["missing"])
-            },
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_spread, aggregation_labels=["x"], inputs=["missing"])
+            ],
             input_names=["a"],
         )
 
@@ -963,14 +1007,14 @@ def test_cross_channel_inputs_validation_errors():
 
 def _count_above(series, t_start, t_end, threshold=0.0):
     """Cross-channel: number of samples above a configurable threshold."""
-    return float(sum((s.values > threshold).sum() for s in series))
+    return [float(sum((s.values > threshold).sum() for s in series))]
 
 
 def _scaled_rms(series, t_start, t_end, scale=1.0):
     """Per-channel: scaled root mean square."""
     if len(series) == 0:
-        return float("nan")
-    return float(scale * np.sqrt(np.nanmean(series.values**2)))
+        return [float("nan")]
+    return [float(scale * np.sqrt(np.nanmean(series.values**2)))]
 
 
 def test_cross_channel_stat_with_params():
@@ -981,10 +1025,12 @@ def test_cross_channel_stat_with_params():
     stats_agg = StatsAggregator(
         input_expressions=[expr1, expr2],
         event_expression=event,
-        cross_channel_custom_statistics={
-            "count_default": _count_above,
-            "count_hi": CrossChannelStatistic(func=_count_above, params={"threshold": 25.0}),
-        },
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_count_above, aggregation_labels=["count_default"]),
+            CrossChannelStatistic(
+                func=_count_above, aggregation_labels=["count_hi"], params={"threshold": 25.0}
+            ),
+        ],
     )
 
     _, _, _, cross_channel_values = stats_agg.build(cache=None)
@@ -1003,10 +1049,12 @@ def test_per_channel_stat_with_params():
     stats_agg = StatsAggregator(
         input_expressions=[expr],
         event_expression=event,
-        per_channel_custom_statistics={
-            "rms": _scaled_rms,
-            "rms_x10": PerChannelStatistic(func=_scaled_rms, params={"scale": 10.0}),
-        },
+        per_channel_custom_statistics=[
+            PerChannelStatistic(func=_scaled_rms, aggregation_labels=["rms"]),
+            PerChannelStatistic(
+                func=_scaled_rms, aggregation_labels=["rms_x10"], params={"scale": 10.0}
+            ),
+        ],
     )
 
     _, numeric_values, _, _ = stats_agg.build(cache=None)
@@ -1021,17 +1069,19 @@ def test_custom_statistic_params_validation_errors():
     with pytest.raises(TypeError, match="params must be a dict"):
         StatsAggregator(
             [expr],
-            cross_channel_custom_statistics={
-                "x": CrossChannelStatistic(func=_count_above, params=[1, 2])
-            },
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_count_above, aggregation_labels=["x"], params=[1, 2])
+            ],
         )
 
     with pytest.raises(TypeError, match="identifiers"):
         StatsAggregator(
             [expr],
-            per_channel_custom_statistics={
-                "x": PerChannelStatistic(func=_scaled_rms, params={"not a name": 1.0})
-            },
+            per_channel_custom_statistics=[
+                PerChannelStatistic(
+                    func=_scaled_rms, aggregation_labels=["x"], params={"not a name": 1.0}
+                )
+            ],
         )
 
 
@@ -1041,13 +1091,171 @@ def test_str_contains_custom_statistics():
     stats_agg = StatsAggregator(
         input_expressions=[expr],
         statistics=["min"],
-        cross_channel_custom_statistics={
-            "spread": CrossChannelStatistic(func=_spread, inputs=["a"])
-        },
-        per_channel_custom_statistics={"rms": _rms},
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_spread, aggregation_labels=["spread"], inputs=["a"])
+        ],
+        per_channel_custom_statistics=[PerChannelStatistic(func=_rms, aggregation_labels=["rms"])],
         input_names=["a"],
     )
 
     str_repr = str(stats_agg)
-    assert "cross_channel_custom_statistics={'spread': ['a']}" in str_repr
-    assert "per_channel_custom_statistics=['rms']" in str_repr
+    assert "'labels': ['spread']" in str_repr
+    assert "'inputs': ['a']" in str_repr
+    assert "per_channel_custom_statistics=[['rms']]" in str_repr
+
+
+def _min_max_pair(series, t_start, t_end):
+    """Per-channel multi-output: returns (min, max) as a tuple."""
+    if len(series) == 0:
+        return (float("nan"), float("nan"))
+    return (float(np.nanmin(series.values)), float(np.nanmax(series.values)))
+
+
+def _spread_and_count(series, t_start, t_end):
+    """Cross-channel multi-output: returns [spread, total_sample_count]."""
+    values = np.concatenate([s.values for s in series]) if series else np.array([])
+    valid = values[~np.isnan(values)]
+    spread = float(np.max(valid) - np.min(valid)) if valid.size else float("nan")
+    return [spread, float(sum(len(s) for s in series))]
+
+
+def test_per_channel_multi_output_maps_labels_positionally():
+    expr = _mock_expr([0.0, 2.0], [1.0, 3.0], [10.0, 30.0])
+    event = _mock_event([0.0, 2.0], [1.0, 3.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        statistics=["mean"],
+        per_channel_custom_statistics=[
+            PerChannelStatistic(func=_min_max_pair, aggregation_labels=["lo", "hi"])
+        ],
+    )
+
+    _, numeric_values, _, _ = stats_agg.build(cache=None)
+
+    for interval_map in numeric_values[0]:
+        assert set(interval_map.keys()) == {"mean", "lo", "hi"}
+    nptest.assert_almost_equal(numeric_values[0][0]["lo"], 10.0)
+    nptest.assert_almost_equal(numeric_values[0][0]["hi"], 10.0)
+    nptest.assert_almost_equal(numeric_values[0][1]["lo"], 30.0)
+    nptest.assert_almost_equal(numeric_values[0][1]["hi"], 30.0)
+
+
+def test_cross_channel_multi_output_maps_labels_positionally():
+    expr1 = _mock_expr([0.0, 2.0], [1.0, 3.0], [10.0, 30.0])
+    expr2 = _mock_expr([0.0, 2.0], [1.0, 3.0], [20.0, 50.0])
+    event = _mock_event([0.0, 2.0], [1.0, 3.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr1, expr2],
+        event_expression=event,
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(func=_spread_and_count, aggregation_labels=["spread", "n"])
+        ],
+    )
+
+    _, _, _, cross_channel_values = stats_agg.build(cache=None)
+
+    assert len(cross_channel_values) == 2
+    for interval_map in cross_channel_values:
+        assert set(interval_map.keys()) == {"spread", "n"}
+    nptest.assert_almost_equal(cross_channel_values[0]["spread"], 10.0)
+    assert cross_channel_values[0]["n"] == 2.0
+
+
+def test_single_label_requires_sequence_return():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+    event = _mock_event([0.0], [1.0])
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        event_expression=event,
+        per_channel_custom_statistics=[PerChannelStatistic(func=_rms, aggregation_labels=["rms"])],
+    )
+
+    _, numeric_values, _, _ = stats_agg.build(cache=None)
+
+    nptest.assert_almost_equal(numeric_values[0][0]["rms"], 10.0)
+
+
+def test_multi_output_length_mismatch_raises():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    def one_value(series, t_start, t_end):
+        return (1.0,)
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        per_channel_custom_statistics=[
+            PerChannelStatistic(func=one_value, aggregation_labels=["lo", "hi"])
+        ],
+    )
+
+    with pytest.raises(ValueError, match="lo.*hi|hi.*lo"):
+        stats_agg.build(cache=None)
+
+
+def test_multi_output_non_sequence_return_raises():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    def scalar_only(series, t_start, t_end):
+        return 1.0
+
+    stats_agg = StatsAggregator(
+        input_expressions=[expr],
+        per_channel_custom_statistics=[
+            PerChannelStatistic(func=scalar_only, aggregation_labels=["lo", "hi"])
+        ],
+    )
+
+    with pytest.raises(TypeError, match="sequence"):
+        stats_agg.build(cache=None)
+
+
+def test_multi_output_label_collision_with_builtin_raises():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    with pytest.raises(ValueError, match="built-in"):
+        StatsAggregator(
+            input_expressions=[expr],
+            statistics=["min"],
+            per_channel_custom_statistics=[
+                PerChannelStatistic(func=_min_max_pair, aggregation_labels=["min", "hi"])
+            ],
+        )
+
+
+def test_multi_output_label_collision_across_statistics_raises():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    with pytest.raises(ValueError, match="unique"):
+        StatsAggregator(
+            input_expressions=[expr],
+            per_channel_custom_statistics=[
+                PerChannelStatistic(func=_min_max_pair, aggregation_labels=["lo", "hi"])
+            ],
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(func=_spread_and_count, aggregation_labels=["hi", "n"])
+            ],
+        )
+
+
+def test_multi_output_label_validation_errors():
+    expr = _mock_expr([0.0], [1.0], [10.0])
+
+    with pytest.raises(TypeError, match="non-empty"):
+        StatsAggregator(
+            input_expressions=[expr],
+            per_channel_custom_statistics=[
+                PerChannelStatistic(func=_min_max_pair, aggregation_labels=[])
+            ],
+        )
+
+    with pytest.raises(ValueError, match="unique"):
+        StatsAggregator(
+            input_expressions=[expr],
+            per_channel_custom_statistics=[
+                PerChannelStatistic(func=_min_max_pair, aggregation_labels=["dup", "dup"])
+            ],
+        )
