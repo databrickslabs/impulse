@@ -56,7 +56,7 @@ jobs:
         run: make lint
 
   test:
-    name: Testing
+    name: Testing (${{ matrix.component }})
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -64,8 +64,13 @@ jobs:
     permissions:
       id-token: write
     strategy:
+      fail-fast: false
       matrix:
-        python-version: [ '3.12' ]
+        include:
+          - component: query_engine
+            path: tests/impulse_query_engine
+          - component: reporting
+            path: tests/impulse_reporting
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -90,10 +95,10 @@ jobs:
         run: make dev
 
       - name: Run unit tests with coverage
-        run: make test
+        run: make test TEST_PATH=${{ matrix.path }}
 
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           use_oidc: true
+          flags: ${{ matrix.component }}
