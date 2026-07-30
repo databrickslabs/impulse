@@ -120,7 +120,8 @@ class TestMdfDecodeCoverage:
         raw16 = struct.pack(">2H", 100, 200)
         col16 = np.frombuffer(raw16, dtype=np.uint8).reshape(2, 2)
         np.testing.assert_allclose(
-            convert_values(col16, UINT_BE, 16, 0, 2), [100.0, 200.0],
+            convert_values(col16, UINT_BE, 16, 0, 2),
+            [100.0, 200.0],
         )
         # 24-bit little-endian in 3-byte columns
         col24 = np.array([[0x12, 0x34, 0x56], [0x78, 0x9A, 0xBC]], dtype=np.uint8)
@@ -132,7 +133,8 @@ class TestMdfDecodeCoverage:
         raw = struct.pack(">2h", -3, 7)
         col = np.frombuffer(raw, dtype=np.uint8).reshape(2, 2)
         np.testing.assert_allclose(
-            convert_values(col, SINT_BE, 16, 0, 2), [-3.0, 7.0],
+            convert_values(col, SINT_BE, 16, 0, 2),
+            [-3.0, 7.0],
         )
         raw32 = struct.pack("<i", -42)
         col32 = np.frombuffer(raw32, dtype=np.uint8).reshape(1, 4)
@@ -149,11 +151,15 @@ class TestMdfDecodeCoverage:
     def test_cc_rational_and_tab_interp(self):
         raw = np.array([1.0, 2.0])
         rat = apply_cc_conversion(
-            raw.copy(), CC_RATIONAL, (0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            raw.copy(),
+            CC_RATIONAL,
+            (0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
         )
         np.testing.assert_allclose(rat, [1.0, 2.0])
         tab = apply_cc_conversion(
-            np.array([0.0, 50.0, 100.0]), CC_TAB_INTERP, (0.0, 0.0, 100.0, 10.0),
+            np.array([0.0, 50.0, 100.0]),
+            CC_TAB_INTERP,
+            (0.0, 0.0, 100.0, 10.0),
         )
         np.testing.assert_allclose(tab, [0.0, 5.0, 10.0])
 
@@ -178,20 +184,30 @@ class TestMdfDecodeCoverage:
     def test_prepare_cg_empty_and_empty_slice(self):
         raw, rec_id_size, cg_sizes, record_size = _interleaved_raw()
         empty, off = prepare_cg_records(
-            raw, record_size=record_size, rec_id_size=rec_id_size,
-            record_id=1, cg_record_sizes=None,
+            raw,
+            record_size=record_size,
+            rec_id_size=rec_id_size,
+            record_id=1,
+            cg_record_sizes=None,
         )
         assert empty == b""
         sliced, off2 = prepare_cg_records(
-            raw, record_size=record_size, rec_id_size=rec_id_size,
-            record_id=1, cg_record_sizes=cg_sizes, row_start=2, row_end=2,
+            raw,
+            record_size=record_size,
+            rec_id_size=rec_id_size,
+            record_id=1,
+            cg_record_sizes=cg_sizes,
+            row_start=2,
+            row_end=2,
         )
         assert sliced == b""
         assert off2 == 2
 
     def test_unsorted_fields_from_ctx(self):
         assert unsorted_fields_from_ctx(1, 2, None) == {
-            "rec_id_size": 0, "record_id": 0, "cg_record_sizes": None,
+            "rec_id_size": 0,
+            "record_id": 0,
+            "cg_record_sizes": None,
         }
         ctx = {5: {"rec_id_size": 4, "cg_sizes": {1: 20}}}
         out = unsorted_fields_from_ctx(5, 1, ctx)
@@ -208,9 +224,14 @@ class TestMdfDecodeCoverage:
             for i in range(n)
         )
         base = {
-            "channel_type": 0, "bit_offset": 0, "record_size": rs,
-            "cn_flags": 0, "invalidation_bytes": 0, "data_bytes": 8,
-            "cc_type": -1, "cc_params": [],
+            "channel_type": 0,
+            "bit_offset": 0,
+            "record_size": rs,
+            "cn_flags": 0,
+            "invalidation_bytes": 0,
+            "data_bytes": 8,
+            "cc_type": -1,
+            "cc_params": [],
         }
         ch_f64 = {**base, "data_type": FLOAT_LE, "bit_count": 64, "byte_offset": 0}
         ch_f32 = {**base, "data_type": FLOAT_LE, "bit_count": 32, "byte_offset": 8}
@@ -247,12 +268,24 @@ class TestMdfBlocksCoverage:
         raw, rec_id_size, cg_sizes, record_size = _interleaved_raw()
         blob = make_dt_block(raw)
         import logging
+
         prof = {"read": 0}
         with io.BytesIO(blob) as f:
-            chunks = list(_read_block_chunks(
-                f, 0, record_size, 3, None, None, prof, logging.getLogger("t"),
-                rec_id_size=rec_id_size, record_id=1, cg_record_sizes=cg_sizes,
-            ))
+            chunks = list(
+                _read_block_chunks(
+                    f,
+                    0,
+                    record_size,
+                    3,
+                    None,
+                    None,
+                    prof,
+                    logging.getLogger("t"),
+                    rec_id_size=rec_id_size,
+                    record_id=1,
+                    cg_record_sizes=cg_sizes,
+                )
+            )
         assert len(chunks) == 1
         data, start = chunks[0]
         assert start == 0
@@ -303,8 +336,13 @@ class TestArrowEmitCoverage:
             ch["sample_count"] = 4
             ch["byte_offset"] = 0
             ch["master_info"] = {
-                "byte_offset": 0, "bit_offset": 0, "bit_count": 64,
-                "data_type": FLOAT_LE, "channel_type": 3, "cc_type": -1, "cc_params": [],
+                "byte_offset": 0,
+                "bit_offset": 0,
+                "bit_count": 64,
+                "data_type": FLOAT_LE,
+                "channel_type": 3,
+                "cc_type": -1,
+                "cc_params": [],
             }
             ch["rec_id_size"] = 0
             ch.pop("cg_record_sizes", None)
@@ -322,10 +360,9 @@ class TestArrowEmitCoverage:
         with open(path, "rb") as fh:
             fb = fh.read()
         from impulse_ds.mdf.bin_packer import plan_stripes_for_file
+
         specs = plan_stripes_for_file(path, file_bytes=fb, stripe_target_mb=0.001)
-        total = sum(
-            b.num_rows for s in specs for b in convert_stripe_spec_to_arrow_batches(s)
-        )
+        total = sum(b.num_rows for s in specs for b in convert_stripe_spec_to_arrow_batches(s))
         assert total > 0
 
     def test_rle_helpers_edge_cases(self):
@@ -344,10 +381,14 @@ class TestArrowEmitCoverage:
         d, files = sample_mdf_dir()
         if not files:
             pytest.skip("no samples")
-        reader = MdfSignalsReader({
-            "path": d, "files": files[0], "target_partition_mb": "0.0001",
-            "run_length_encoding": "true",
-        })
+        reader = MdfSignalsReader(
+            {
+                "path": d,
+                "files": files[0],
+                "target_partition_mb": "0.0001",
+                "run_length_encoding": "true",
+            }
+        )
         rows = sum(b.num_rows for p in reader.partitions() for b in reader.read(p))
         assert rows > 0
 
@@ -356,6 +397,7 @@ class TestArrowEmitCoverage:
         if not files:
             pytest.skip("no samples")
         from impulse_ds.mdf.datasources import MdfMastersDataSource, MdfSignalsDataSource
+
         opts = {"path": d, "files": files[0], "time_dtype": "float32", "value_dtype": "float32"}
         assert MdfSignalsDataSource(opts).schema()["value"].dataType.simpleString() == "float"
         assert MdfMastersDataSource(opts).schema()["timestamp"].dataType.simpleString() == "float"
@@ -377,8 +419,11 @@ class TestMdf4ReaderCoverage:
         link_count = 0
         length = 24 + len(body)
         return (
-            BLOCK_ID_CC + b"\x00" * 4 + struct.pack("<Q", length)
-            + struct.pack("<Q", link_count) + body
+            BLOCK_ID_CC
+            + b"\x00" * 4
+            + struct.pack("<Q", length)
+            + struct.pack("<Q", link_count)
+            + body
         )
 
     def test_parse_cc_block_variants(self):
@@ -415,9 +460,16 @@ class TestMdf4ReaderCoverage:
         ch = [c for c in reader.scan_metadata() if c.channel_type == 0][0]
         with open(path, "rb") as fh:
             vals = MDF4Reader.read_channel_data(
-                path, ch.data_block_addr, ch.record_size,
-                ch.byte_offset, ch.bit_offset, ch.bit_count,
-                ch.data_type, ch.channel_type, ch.sample_count, f=fh,
+                path,
+                ch.data_block_addr,
+                ch.record_size,
+                ch.byte_offset,
+                ch.bit_offset,
+                ch.bit_count,
+                ch.data_type,
+                ch.channel_type,
+                ch.sample_count,
+                f=fh,
             )
         assert len(vals) == ch.sample_count
 
@@ -431,18 +483,34 @@ class TestMdf4ReaderCoverage:
         sig_d = MDF4Reader.channel_to_dict(sig)
         with open(path, "rb") as fh:
             ts, vals = MDF4Reader.read_channel_pair(
-                path, None, sig_d, sig.sample_count, f=fh,
+                path,
+                None,
+                sig_d,
+                sig.sample_count,
+                f=fh,
             )
         assert len(ts) == sig.sample_count
         assert len(vals) == sig.sample_count
 
     def test_master_to_dict(self):
         ch = ChannelInfo(
-            group_idx=0, channel_idx=0, channel_name="t", unit="s",
-            sample_count=1, data_type=4, bit_offset=0, byte_offset=0,
-            bit_count=64, channel_type=CN_TYPE_VIRTUAL_MASTER,
-            cn_block_addr=0, cg_block_addr=0, dg_block_addr=50,
-            data_block_addr=100, record_size=8, rec_id_size=4, record_id=2,
+            group_idx=0,
+            channel_idx=0,
+            channel_name="t",
+            unit="s",
+            sample_count=1,
+            data_type=4,
+            bit_offset=0,
+            byte_offset=0,
+            bit_count=64,
+            channel_type=CN_TYPE_VIRTUAL_MASTER,
+            cn_block_addr=0,
+            cg_block_addr=0,
+            dg_block_addr=50,
+            data_block_addr=100,
+            record_size=8,
+            rec_id_size=4,
+            record_id=2,
         )
         ctx = {50: {"rec_id_size": 4, "cg_sizes": {2: 8}}}
         d = MDF4Reader.master_to_dict(ch, ctx)
@@ -453,9 +521,9 @@ class TestMdf4ReaderCoverage:
         blob = bytearray(128)
         blob[0:8] = b"MDF     "
         blob[64:68] = BLOCK_ID_HD
-        struct.pack_into("<Q", blob, 72, 104)   # hd block length
-        struct.pack_into("<Q", blob, 80, 0)      # link_count
-        struct.pack_into("<Q", blob, 88, 0)     # start_time_ns = unset
+        struct.pack_into("<Q", blob, 72, 104)  # hd block length
+        struct.pack_into("<Q", blob, 80, 0)  # link_count
+        struct.pack_into("<Q", blob, 88, 0)  # start_time_ns = unset
         reader = MDF4Reader(file_bytes=bytes(blob))
         assert reader.read_header_start_epoch_seconds() is None
         assert reader.read_header_datetime() is None
@@ -473,18 +541,26 @@ class TestMdf4ReaderCoverage:
     def test_metadata_reader_empty_path(self):
         from pyspark.sql.datasource import InputPartition
         from impulse_ds.mdf.datasources import MdfMetadataReader
+
         reader = MdfMetadataReader({"path": "/tmp", "files": "x.mf4"})
         assert list(reader.read(InputPartition({"file_path": ""}))) == []
 
     def test_masters_partitions_no_masters(self, monkeypatch):
         def _no_masters(self):
-            return {"master_channels": {}, "signal_channels": [], "channel_id_map": {},
-                    "unsorted_dg_ctx": {}}
+            return {
+                "master_channels": {},
+                "signal_channels": [],
+                "channel_id_map": {},
+                "unsorted_dg_ctx": {},
+            }
+
         monkeypatch.setattr(
-            "impulse_ds.mdf.datasources._resolve_file_list", lambda o: ["/x.mf4"],
+            "impulse_ds.mdf.datasources._resolve_file_list",
+            lambda _o: ["/x.mf4"],
         )
         monkeypatch.setattr(
-            "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized", _no_masters,
+            "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
+            _no_masters,
         )
         reader = MdfMastersReader({"path": "/x", "files": "a.mf4"})
         parts = reader.partitions()
@@ -510,21 +586,75 @@ class TestMdfDecodeMoreCoverage:
 
     def test_extract_signal_all_fast_paths(self):
         base = {
-            "channel_type": 0, "bit_offset": 0,
-            "cn_flags": 0, "invalidation_bytes": 0, "data_bytes": 8,
-            "cc_type": -1, "cc_params": [],
+            "channel_type": 0,
+            "bit_offset": 0,
+            "cn_flags": 0,
+            "invalidation_bytes": 0,
+            "data_bytes": 8,
+            "cc_type": -1,
+            "cc_params": [],
         }
         cases = [
-            (8, struct.pack("<d", 1.0), {**base, "data_type": FLOAT_LE, "bit_count": 64, "byte_offset": 0}, 1.0),
-            (8, struct.pack("<f", 2.0), {**base, "data_type": FLOAT_LE, "bit_count": 32, "byte_offset": 0}, 2.0),
-            (4, struct.pack("<H", 3), {**base, "data_type": UINT_LE, "bit_count": 16, "byte_offset": 0}, 3.0),
-            (4, struct.pack("<I", 4), {**base, "data_type": UINT_LE, "bit_count": 32, "byte_offset": 0}, 4.0),
-            (2, struct.pack("<B", 5), {**base, "data_type": UINT_LE, "bit_count": 8, "byte_offset": 0}, 5.0),
-            (2, struct.pack("<b", -1), {**base, "data_type": SINT_LE, "bit_count": 8, "byte_offset": 0}, -1.0),
-            (4, struct.pack("<h", -2), {**base, "data_type": SINT_LE, "bit_count": 16, "byte_offset": 0}, -2.0),
-            (8, struct.pack("<i", -3), {**base, "data_type": SINT_LE, "bit_count": 32, "byte_offset": 0}, -3.0),
-            (8, struct.pack("<Q", 5), {**base, "data_type": UINT_LE, "bit_count": 64, "byte_offset": 0}, 5.0),
-            (8, struct.pack("<q", -4), {**base, "data_type": SINT_LE, "bit_count": 64, "byte_offset": 0}, -4.0),
+            (
+                8,
+                struct.pack("<d", 1.0),
+                {**base, "data_type": FLOAT_LE, "bit_count": 64, "byte_offset": 0},
+                1.0,
+            ),
+            (
+                8,
+                struct.pack("<f", 2.0),
+                {**base, "data_type": FLOAT_LE, "bit_count": 32, "byte_offset": 0},
+                2.0,
+            ),
+            (
+                4,
+                struct.pack("<H", 3),
+                {**base, "data_type": UINT_LE, "bit_count": 16, "byte_offset": 0},
+                3.0,
+            ),
+            (
+                4,
+                struct.pack("<I", 4),
+                {**base, "data_type": UINT_LE, "bit_count": 32, "byte_offset": 0},
+                4.0,
+            ),
+            (
+                2,
+                struct.pack("<B", 5),
+                {**base, "data_type": UINT_LE, "bit_count": 8, "byte_offset": 0},
+                5.0,
+            ),
+            (
+                2,
+                struct.pack("<b", -1),
+                {**base, "data_type": SINT_LE, "bit_count": 8, "byte_offset": 0},
+                -1.0,
+            ),
+            (
+                4,
+                struct.pack("<h", -2),
+                {**base, "data_type": SINT_LE, "bit_count": 16, "byte_offset": 0},
+                -2.0,
+            ),
+            (
+                8,
+                struct.pack("<i", -3),
+                {**base, "data_type": SINT_LE, "bit_count": 32, "byte_offset": 0},
+                -3.0,
+            ),
+            (
+                8,
+                struct.pack("<Q", 5),
+                {**base, "data_type": UINT_LE, "bit_count": 64, "byte_offset": 0},
+                5.0,
+            ),
+            (
+                8,
+                struct.pack("<q", -4),
+                {**base, "data_type": SINT_LE, "bit_count": 64, "byte_offset": 0},
+                -4.0,
+            ),
         ]
         for rs, raw, ch, expected in cases:
             ch = {**ch, "record_size": rs}
@@ -536,10 +666,17 @@ class TestMdfDecodeMoreCoverage:
         rs = 4
         raw = struct.pack("<H", 0x1234) + b"\x00\x00"
         ch = {
-            "channel_type": 0, "data_type": UINT_LE, "bit_count": 12,
-            "byte_offset": 0, "bit_offset": 4, "record_size": rs,
-            "cn_flags": 0, "invalidation_bytes": 0, "data_bytes": 2,
-            "cc_type": CC_LINEAR, "cc_params": [1.0, 2.0],
+            "channel_type": 0,
+            "data_type": UINT_LE,
+            "bit_count": 12,
+            "byte_offset": 0,
+            "bit_offset": 4,
+            "record_size": rs,
+            "cn_flags": 0,
+            "invalidation_bytes": 0,
+            "data_bytes": 2,
+            "cc_type": CC_LINEAR,
+            "cc_params": [1.0, 2.0],
         }
         raw_val = 0x1234 >> 4
         vals = extract_signal(raw, rs, ch)
@@ -548,19 +685,43 @@ class TestMdfDecodeMoreCoverage:
     def test_extract_timestamps_with_cc(self):
         raw = struct.pack("<d", 2.0)
         master = {
-            "channel_type": 2, "byte_offset": 0, "bit_offset": 0,
-            "bit_count": 64, "data_type": FLOAT_LE,
-            "cc_type": CC_LINEAR, "cc_params": [1.0, 10.0],
+            "channel_type": 2,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "bit_count": 64,
+            "data_type": FLOAT_LE,
+            "cc_type": CC_LINEAR,
+            "cc_params": [1.0, 10.0],
         }
         ts = extract_timestamps(raw, 8, master)
         assert ts[0] == pytest.approx(21.0)
 
     def test_extract_timestamps_fast_paths_and_empty(self):
-        assert len(extract_timestamps(b"", 8, {"channel_type": 2, "data_type": FLOAT_LE, "bit_count": 64, "byte_offset": 0, "bit_offset": 0})) == 0
+        assert (
+            len(
+                extract_timestamps(
+                    b"",
+                    8,
+                    {
+                        "channel_type": 2,
+                        "data_type": FLOAT_LE,
+                        "bit_count": 64,
+                        "byte_offset": 0,
+                        "bit_offset": 0,
+                    },
+                )
+            )
+            == 0
+        )
         raw = struct.pack("<f", 1.5) + b"\x00" * 4
         master = {
-            "channel_type": 2, "byte_offset": 0, "bit_offset": 0,
-            "bit_count": 32, "data_type": FLOAT_LE, "cc_type": -1, "cc_params": [],
+            "channel_type": 2,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "bit_count": 32,
+            "data_type": FLOAT_LE,
+            "cc_type": -1,
+            "cc_params": [],
         }
         np.testing.assert_allclose(extract_timestamps(raw, 8, master), [1.5])
         raw2 = struct.pack("<Q", 42)
@@ -592,12 +753,25 @@ class TestMdfDecodeMoreCoverage:
         assert len(filter_unsorted_records(bad, rec_id_size, 1, cg_sizes)) == 2 * record_size
 
     def test_prepare_cg_empty_after_filter(self):
-        assert prepare_cg_records(b"\x00\x00", record_size=8, rec_id_size=4,
-                                  record_id=99, cg_record_sizes={1: 8}) == (b"", 0)
+        assert prepare_cg_records(
+            b"\x00\x00", record_size=8, rec_id_size=4, record_id=99, cg_record_sizes={1: 8}
+        ) == (b"", 0)
 
     def test_extract_signal_returns_none_when_empty(self):
-        assert extract_signal(b"", 8, {"channel_type": 0, "data_type": FLOAT_LE,
-                                        "bit_count": 64, "byte_offset": 0, "bit_offset": 0}) is None
+        assert (
+            extract_signal(
+                b"",
+                8,
+                {
+                    "channel_type": 0,
+                    "data_type": FLOAT_LE,
+                    "bit_count": 64,
+                    "byte_offset": 0,
+                    "bit_offset": 0,
+                },
+            )
+            is None
+        )
 
     def test_storage_record_id_zero_size(self):
         assert storage_record_id(99, 0) == 0
@@ -636,7 +810,13 @@ class TestMdfBlocksMoreCoverage:
         assert raw == payload
 
     def test_hl_zero_link_returns_empty(self):
-        hl = b"##HL" + b"\x00" * 4 + struct.pack("<Q", 32) + struct.pack("<Q", 1) + struct.pack("<Q", 0)
+        hl = (
+            b"##HL"
+            + b"\x00" * 4
+            + struct.pack("<Q", 32)
+            + struct.pack("<Q", 1)
+            + struct.pack("<Q", 0)
+        )
         with io.BytesIO(hl) as f:
             assert read_raw_data(f, 0, 8, 1) == b""
 
@@ -651,11 +831,21 @@ class TestMdfBlocksMoreCoverage:
         payload = b"".join(struct.pack("<d", float(i)) for i in range(5))
         blob = make_dz_block(payload)
         import logging
+
         prof = {"read": 0}
         with io.BytesIO(blob) as f:
-            chunks = list(_read_block_chunks(
-                f, 0, 8, 5, 1, 4, prof, logging.getLogger("t"),
-            ))
+            chunks = list(
+                _read_block_chunks(
+                    f,
+                    0,
+                    8,
+                    5,
+                    1,
+                    4,
+                    prof,
+                    logging.getLogger("t"),
+                )
+            )
         assert len(chunks) == 1
         assert len(chunks[0][0]) == 3 * 8
 
@@ -668,6 +858,7 @@ class TestMdfBlocksMoreCoverage:
     def test_collect_dl_stops_on_non_dl_block(self):
         from impulse_ds.mdf.mdf_blocks import _collect_dl_block_addrs
         from ._block_fixtures import make_dl_block
+
         bad = b"##XX" + b"\x00" * 20
         dt = make_dt_block(b"\x01\x02\x03\x04" + b"\x00" * 4)
         blob = bad + dt
@@ -679,6 +870,7 @@ class TestMdfBlocksMoreCoverage:
 
     def test_read_dl_blob_short_header(self):
         from impulse_ds.mdf.mdf_blocks import _read_dl_blob
+
         blob, dl_addr = build_dl_file([struct.pack("<d", 1.0)])
         with io.BytesIO(blob[:20]) as f:
             b, lo, addrs = _read_dl_blob(f, dl_addr)
@@ -686,6 +878,7 @@ class TestMdfBlocksMoreCoverage:
 
     def test_read_data_list_raw_empty_meta(self):
         from impulse_ds.mdf.mdf_blocks import read_data_list_raw
+
         empty_dl = b"##DL" + b"\x00" * 4 + struct.pack("<Q", 32) + struct.pack("<Q", 1)
         empty_dl += struct.pack("<Q", 0) + b"\x00" * 4 + struct.pack("<I", 0)
         with io.BytesIO(empty_dl) as f:
@@ -695,11 +888,21 @@ class TestMdfBlocksMoreCoverage:
         records = [struct.pack("<d", float(i)) for i in range(4)]
         blob, dl_addr = build_dl_file(records)
         import logging
+
         prof = {"read": 0}
         with io.BytesIO(blob) as f:
-            chunks = list(_read_block_chunks(
-                f, dl_addr, 8, 4, 1, 3, prof, logging.getLogger("t"),
-            ))
+            chunks = list(
+                _read_block_chunks(
+                    f,
+                    dl_addr,
+                    8,
+                    4,
+                    1,
+                    3,
+                    prof,
+                    logging.getLogger("t"),
+                )
+            )
         assert len(chunks) == 1
         assert len(chunks[0][0]) == 2 * 8
 
@@ -708,7 +911,13 @@ class TestMdfBlocksMoreCoverage:
         with io.BytesIO(dz) as f:
             subs = parse_subblocks(f, 0, 8, 1)
         assert subs[0][3] == 1
-        hl = b"##HL" + b"\x00" * 4 + struct.pack("<Q", 32) + struct.pack("<Q", 1) + struct.pack("<Q", 0)
+        hl = (
+            b"##HL"
+            + b"\x00" * 4
+            + struct.pack("<Q", 32)
+            + struct.pack("<Q", 1)
+            + struct.pack("<Q", 0)
+        )
         with io.BytesIO(hl) as f:
             assert parse_subblocks(f, 0, 8, 1) == []
 
@@ -731,9 +940,18 @@ class TestMdfBlocksMoreCoverage:
         payload = make_dt_block(b"\x00" * 8)
         prof = {"read": 0}
         with io.BytesIO(payload) as f:
-            chunks = list(_read_block_chunks(
-                f, 0, 8, 1, None, None, prof, logging.getLogger("t"),
-            ))
+            chunks = list(
+                _read_block_chunks(
+                    f,
+                    0,
+                    8,
+                    1,
+                    None,
+                    None,
+                    prof,
+                    logging.getLogger("t"),
+                )
+            )
         assert len(chunks) == 1
 
     def test_parse_subblocks_on_dz_block(self):
@@ -751,10 +969,14 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[1]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=0.00001,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=0.00001,
         )
         batches = list(convert_spec_to_arrow_batches(specs[0]))
         assert batches
@@ -767,13 +989,15 @@ class TestArrowEmitMoreCoverage:
             "time_offset": 1.5,
             "row_start": 2,
             "row_end": 5,
-            "masters": [{
-                "group_idx": 0,
-                "record_size": 8,
-                "sample_count": 10,
-                "data_block_addr": 0,
-                "master_info": {"channel_type": 3, "cc_type": -1, "cc_params": []},
-            }],
+            "masters": [
+                {
+                    "group_idx": 0,
+                    "record_size": 8,
+                    "sample_count": 10,
+                    "data_block_addr": 0,
+                    "master_info": {"channel_type": 3, "cc_type": -1, "cc_params": []},
+                }
+            ],
         }
         batches = list(convert_master_spec_to_arrow_batches(spec))
         assert len(batches) == 1
@@ -788,9 +1012,12 @@ class TestArrowEmitMoreCoverage:
         from impulse_ds.mdf.bin_packer import plan_master_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
         from impulse_ds.mdf.udf_helpers import convert_master_spec_to_arrow_batches
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_master_partitions(
-            path, org["master_channels"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            target_partition_mb=16,
             unsorted_dg_ctx=org["unsorted_dg_ctx"],
         )
         batches = list(convert_master_spec_to_arrow_batches(specs[0]))
@@ -819,13 +1046,15 @@ class TestArrowEmitMoreCoverage:
                         "cg_record_sizes": cg_sizes,
                     },
                 },
-                "subblocks": [{
-                    "group_idx": 0,
-                    "abs_off": 0,
-                    "on_disk_len": len(blob),
-                    "rec_start": 0,
-                    "rec_count": 3,
-                }],
+                "subblocks": [
+                    {
+                        "group_idx": 0,
+                        "abs_off": 0,
+                        "on_disk_len": len(blob),
+                        "rec_start": 0,
+                        "rec_count": 3,
+                    }
+                ],
             }
             batches = list(convert_stripe_spec_to_arrow_batches(spec))
             assert batches[0].num_rows == 2
@@ -854,13 +1083,15 @@ class TestArrowEmitMoreCoverage:
                         "channels": [ch],
                     },
                 },
-                "subblocks": [{
-                    "group_idx": 0,
-                    "abs_off": 0,
-                    "on_disk_len": len(blob),
-                    "rec_start": 0,
-                    "rec_count": 3,
-                }],
+                "subblocks": [
+                    {
+                        "group_idx": 0,
+                        "abs_off": 0,
+                        "on_disk_len": len(blob),
+                        "rec_start": 0,
+                        "rec_count": 3,
+                    }
+                ],
             }
             batches = list(convert_stripe_spec_to_arrow_batches(spec))
             assert batches[0].num_rows == 3
@@ -874,10 +1105,14 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )
         spec = dict(specs[0])
         spec["channels"] = [dict(spec["channels"][0])]
@@ -891,10 +1126,14 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )
         spec = dict(specs[0])
         spec["channels"] = [dict(spec["channels"][0])]
@@ -918,33 +1157,85 @@ class TestArrowEmitMoreCoverage:
     def test_emit_prepared_signal_group_paths(self):
         import logging
         import time
+
         prof = {"decode": 0}
         log = logging.getLogger("t")
         now = time.perf_counter_ns
         ch = {
-            "channel_id": 1, "channel_type": 0, "data_type": FLOAT_LE,
-            "bit_count": 64, "byte_offset": 0, "bit_offset": 0,
-            "cn_flags": 0, "invalidation_bytes": 0, "data_bytes": 8,
-            "cc_type": -1, "cc_params": [],
+            "channel_id": 1,
+            "channel_type": 0,
+            "data_type": FLOAT_LE,
+            "bit_count": 64,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "cn_flags": 0,
+            "invalidation_bytes": 0,
+            "data_bytes": 8,
+            "cc_type": -1,
+            "cc_params": [],
         }
         raw = struct.pack("<2d", 1.0, 2.0)
-        out = list(_emit_prepared_signal_group(
-            raw, [ch], 8, None, 1.0, lambda t, v, c: [(t, v, c)],
-            prof, log, 0, now,
-        ))
+        out = list(
+            _emit_prepared_signal_group(
+                raw,
+                [ch],
+                8,
+                None,
+                1.0,
+                lambda t, v, c: [(t, v, c)],
+                prof,
+                log,
+                0,
+                now,
+            )
+        )
         assert len(out) == 1
         assert len(out[0][0]) == 2
         assert out[0][0][0] == pytest.approx(1.0)  # time offset applied
-        assert list(_emit_prepared_signal_group(b"", [ch], 8, None, 0, lambda *_: [],
-                                                prof, log, 0, now)) == []
+        assert (
+            list(
+                _emit_prepared_signal_group(
+                    b"", [ch], 8, None, 0, lambda *_: [], prof, log, 0, now
+                )
+            )
+            == []
+        )
         bad_ch = {**ch, "bit_count": 999}
-        assert list(_emit_prepared_signal_group(
-            raw, [bad_ch], 8, None, 0, lambda *_: [], prof, log, 0, now,
-        )) == []
+        assert (
+            list(
+                _emit_prepared_signal_group(
+                    raw,
+                    [bad_ch],
+                    8,
+                    None,
+                    0,
+                    lambda *_: [],
+                    prof,
+                    log,
+                    0,
+                    now,
+                )
+            )
+            == []
+        )
         broken = {**ch, "byte_offset": 999}
-        assert list(_emit_prepared_signal_group(
-            raw, [broken], 8, None, 0, lambda *_: [], prof, log, 0, now,
-        )) == []
+        assert (
+            list(
+                _emit_prepared_signal_group(
+                    raw,
+                    [broken],
+                    8,
+                    None,
+                    0,
+                    lambda *_: [],
+                    prof,
+                    log,
+                    0,
+                    now,
+                )
+            )
+            == []
+        )
 
     def test_convert_spec_dt_streaming_on_sample(self):
         d, files = sample_mdf_dir()
@@ -953,13 +1244,18 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )
-        batches = list(convert_spec_to_arrow_batches(specs[0], time_dtype="float32",
-                                                    value_dtype="float32"))
+        batches = list(
+            convert_spec_to_arrow_batches(specs[0], time_dtype="float32", value_dtype="float32")
+        )
         assert batches[0].num_rows > 0
 
     def test_stripe_decompress_failure_skipped(self, monkeypatch):
@@ -968,6 +1264,7 @@ class TestArrowEmitMoreCoverage:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_stripes_for_file
+
         specs = plan_stripes_for_file(path, stripe_target_mb=0.001)
 
         def _bad_decompress(*a, **k):
@@ -983,10 +1280,14 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )
         spec = dict(specs[0])
         spec["row_start"] = 0
@@ -1001,11 +1302,15 @@ class TestArrowEmitMoreCoverage:
     def test_master_spec_zero_record_size(self):
         spec = {
             "file_path": "/dev/null",
-            "masters": [{
-                "group_idx": 0, "record_size": 0, "sample_count": 1,
-                "data_block_addr": 0,
-                "master_info": {"channel_type": 3, "cc_type": -1, "cc_params": []},
-            }],
+            "masters": [
+                {
+                    "group_idx": 0,
+                    "record_size": 0,
+                    "sample_count": 1,
+                    "data_block_addr": 0,
+                    "master_info": {"channel_type": 3, "cc_type": -1, "cc_params": []},
+                }
+            ],
         }
         assert list(convert_master_spec_to_arrow_batches(spec)) == []
 
@@ -1016,10 +1321,14 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )
         spec = dict(specs[0])
         ch = dict(spec["channels"][0])
@@ -1035,14 +1344,23 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )
-        batches = list(convert_spec_to_arrow_batches(
-            specs[0], run_length_encoding=True, time_dtype="float32", value_dtype="float32",
-        ))
+        batches = list(
+            convert_spec_to_arrow_batches(
+                specs[0],
+                run_length_encoding=True,
+                time_dtype="float32",
+                value_dtype="float32",
+            )
+        )
         assert batches
 
     def test_stripe_unsorted_decompress_failure(self, monkeypatch):
@@ -1067,10 +1385,15 @@ class TestArrowEmitMoreCoverage:
                         "cg_record_sizes": cg_sizes,
                     },
                 },
-                "subblocks": [{
-                    "group_idx": 0, "abs_off": 0, "on_disk_len": len(blob),
-                    "rec_start": 0, "rec_count": 3,
-                }],
+                "subblocks": [
+                    {
+                        "group_idx": 0,
+                        "abs_off": 0,
+                        "on_disk_len": len(blob),
+                        "rec_start": 0,
+                        "rec_count": 3,
+                    }
+                ],
             }
 
             def _bad(*a, **k):
@@ -1084,30 +1407,60 @@ class TestArrowEmitMoreCoverage:
     def test_emit_prepared_skips_vlsd_channel(self):
         import logging
         import time
+
         prof = {"decode": 0}
         log = logging.getLogger("t")
         now = time.perf_counter_ns
         vlsd = {
-            "channel_id": 2, "channel_type": 1, "data_type": FLOAT_LE,
-            "bit_count": 64, "byte_offset": 0, "bit_offset": 0,
-            "cn_flags": 0, "invalidation_bytes": 0, "data_bytes": 8,
-            "cc_type": -1, "cc_params": [],
+            "channel_id": 2,
+            "channel_type": 1,
+            "data_type": FLOAT_LE,
+            "bit_count": 64,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "cn_flags": 0,
+            "invalidation_bytes": 0,
+            "data_bytes": 8,
+            "cc_type": -1,
+            "cc_params": [],
         }
         good = {
-            "channel_id": 1, "channel_type": 0, "data_type": FLOAT_LE,
-            "bit_count": 64, "byte_offset": 0, "bit_offset": 0,
-            "cn_flags": 0, "invalidation_bytes": 0, "data_bytes": 8,
-            "cc_type": -1, "cc_params": [],
+            "channel_id": 1,
+            "channel_type": 0,
+            "data_type": FLOAT_LE,
+            "bit_count": 64,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "cn_flags": 0,
+            "invalidation_bytes": 0,
+            "data_bytes": 8,
+            "cc_type": -1,
+            "cc_params": [],
         }
         raw = struct.pack("<d", 3.0)
         master = {
-            "channel_type": 2, "byte_offset": 0, "bit_offset": 0,
-            "bit_count": 64, "data_type": FLOAT_LE, "cc_type": -1, "cc_params": [],
+            "channel_type": 2,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "bit_count": 64,
+            "data_type": FLOAT_LE,
+            "cc_type": -1,
+            "cc_params": [],
         }
-        out = list(_emit_prepared_signal_group(
-            raw, [vlsd, good], 8, master, 0, lambda t, v, c: [(c,)],
-            prof, log, 0, now,
-        ))
+        out = list(
+            _emit_prepared_signal_group(
+                raw,
+                [vlsd, good],
+                8,
+                master,
+                0,
+                lambda _t, _v, c: [(c,)],
+                prof,
+                log,
+                0,
+                now,
+            )
+        )
         assert (2,) in out and (1,) in out
 
     def test_convert_spec_dz_fallback_row_slice(self):
@@ -1117,10 +1470,14 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[1]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=0.00001,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=0.00001,
         )
         row_specs = [s for s in specs if "row_start" in s]
         assert row_specs
@@ -1138,8 +1495,13 @@ class TestArrowEmitMoreCoverage:
             ch["sample_count"] = 6
             ch["byte_offset"] = 0
             ch["master_info"] = {
-                "byte_offset": 0, "bit_offset": 0, "bit_count": 64,
-                "data_type": FLOAT_LE, "channel_type": 3, "cc_type": -1, "cc_params": [],
+                "byte_offset": 0,
+                "bit_offset": 0,
+                "bit_count": 64,
+                "data_type": FLOAT_LE,
+                "channel_type": 3,
+                "cc_type": -1,
+                "cc_params": [],
             }
             spec = {"file_path": path, "channels": [ch], "row_start": 1, "row_end": 4}
             batches = list(convert_spec_to_arrow_batches(spec))
@@ -1161,8 +1523,11 @@ class TestArrowEmitMoreCoverage:
         monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _boom)
         org = MDF4Reader(path).scan_channels_organized()
         spec = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )[0]
         assert list(convert_spec_to_arrow_batches(spec)) == []
         stripe = plan_stripes_for_file(path, stripe_target_mb=0.001)[0]
@@ -1174,11 +1539,15 @@ class TestArrowEmitMoreCoverage:
             "time_offset": 2.0,
             "row_start": 1,
             "row_end": 4,
-            "masters": [{
-                "group_idx": 0, "record_size": 8, "sample_count": 10,
-                "data_block_addr": 0,
-                "master_info": {"channel_type": 3, "cc_type": -1, "cc_params": []},
-            }],
+            "masters": [
+                {
+                    "group_idx": 0,
+                    "record_size": 8,
+                    "sample_count": 10,
+                    "data_block_addr": 0,
+                    "master_info": {"channel_type": 3, "cc_type": -1, "cc_params": []},
+                }
+            ],
         }
         batches = list(convert_master_spec_to_arrow_batches(spec))
         ts = batches[0].column("timestamp").to_pylist()
@@ -1191,10 +1560,14 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )
         empty_dt_spec = dict(specs[0])
         empty_dt_spec["channels"] = [dict(empty_dt_spec["channels"][0])]
@@ -1214,14 +1587,25 @@ class TestArrowEmitMoreCoverage:
         prof = {"arrow": 0, "rows": 0}
         schema = signals_arrow_schema()
         emit_fn, flush_fn = _make_signal_emitters(
-            "/f.mf4", schema, schema.field("time").type, schema.field("value").type,
-            np.float64, np.float64, False, prof,
+            "/f.mf4",
+            schema,
+            schema.field("time").type,
+            schema.field("value").type,
+            np.float64,
+            np.float64,
+            False,
+            prof,
         )
         assert list(emit_fn(np.array([]), np.array([]), 1)) == []
         emit_rle, flush_rle = _make_signal_emitters(
-            "/f.mf4", signals_arrow_schema(run_length_encoding=True),
-            schema.field("time").type, schema.field("value").type,
-            np.float64, np.float64, True, prof,
+            "/f.mf4",
+            signals_arrow_schema(run_length_encoding=True),
+            schema.field("time").type,
+            schema.field("value").type,
+            np.float64,
+            np.float64,
+            True,
+            prof,
         )
         empty_closed = (np.array([]), np.array([]), np.array([]))
 
@@ -1229,18 +1613,24 @@ class TestArrowEmitMoreCoverage:
             return empty_closed, None
 
         monkeypatch.setattr(
-            "impulse_ds.mdf.arrow_emit._rle_compress_chunk", _empty_closed,
+            "impulse_ds.mdf.arrow_emit._rle_compress_chunk",
+            _empty_closed,
         )
         assert list(emit_rle(np.array([0.0]), np.array([1.0]), 1)) == []
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit._rle_flush", lambda c: None)
+        monkeypatch.setattr("impulse_ds.mdf.arrow_emit._rle_flush", lambda _c: None)
         emit_rle2, flush_rle2 = _make_signal_emitters(
-            "/f.mf4", signals_arrow_schema(run_length_encoding=True),
-            schema.field("time").type, schema.field("value").type,
-            np.float64, np.float64, True, prof,
+            "/f.mf4",
+            signals_arrow_schema(run_length_encoding=True),
+            schema.field("time").type,
+            schema.field("value").type,
+            np.float64,
+            np.float64,
+            True,
+            prof,
         )
         monkeypatch.setattr(
             "impulse_ds.mdf.arrow_emit._rle_compress_chunk",
-            lambda ts, vs, carry: (None, [1.0, 0.0, 0.0]),
+            lambda _ts, _vs, _carry: (None, [1.0, 0.0, 0.0]),
         )
         assert list(emit_rle2(np.array([0.0]), np.array([1.0]), 1)) == []
         assert list(flush_rle2()) == []
@@ -1248,34 +1638,68 @@ class TestArrowEmitMoreCoverage:
     def test_emit_prepared_none_and_exception(self, monkeypatch):
         import logging
         import time
+
         prof = {"decode": 0}
         log = logging.getLogger("t")
         now = time.perf_counter_ns
         raw = struct.pack("<d", 1.0)
         ch = {
-            "channel_id": 1, "channel_type": 0, "data_type": FLOAT_LE,
-            "bit_count": 64, "byte_offset": 0, "bit_offset": 0,
-            "cn_flags": 0, "invalidation_bytes": 0, "data_bytes": 8,
-            "cc_type": -1, "cc_params": [],
+            "channel_id": 1,
+            "channel_type": 0,
+            "data_type": FLOAT_LE,
+            "bit_count": 64,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "cn_flags": 0,
+            "invalidation_bytes": 0,
+            "data_bytes": 8,
+            "cc_type": -1,
+            "cc_params": [],
         }
 
         def _none(*a, **k):
             return None
 
         monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _none)
-        assert list(_emit_prepared_signal_group(
-            raw, [ch], 8, None, 0, lambda t, v, c: [(c,)],
-            prof, log, 0, now,
-        )) == []
+        assert (
+            list(
+                _emit_prepared_signal_group(
+                    raw,
+                    [ch],
+                    8,
+                    None,
+                    0,
+                    lambda _t, _v, c: [(c,)],
+                    prof,
+                    log,
+                    0,
+                    now,
+                )
+            )
+            == []
+        )
 
         def _boom(*a, **k):
             raise RuntimeError("boom")
 
         monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _boom)
-        assert list(_emit_prepared_signal_group(
-            raw, [ch], 8, None, 0, lambda t, v, c: [(c,)],
-            prof, log, 0, now,
-        )) == []
+        assert (
+            list(
+                _emit_prepared_signal_group(
+                    raw,
+                    [ch],
+                    8,
+                    None,
+                    0,
+                    lambda _t, _v, c: [(c,)],
+                    prof,
+                    log,
+                    0,
+                    now,
+                )
+            )
+            == []
+        )
 
     def test_dl_row_range_remaining_branches(self, monkeypatch):
         records = [struct.pack("<d", float(i)) for i in range(4)]
@@ -1289,18 +1713,40 @@ class TestArrowEmitMoreCoverage:
             base["byte_offset"] = 0
             empty = dict(base)
             empty["master_info"] = {
-                "byte_offset": 0, "bit_offset": 0, "bit_count": 64,
-                "data_type": FLOAT_LE, "channel_type": 3, "cc_type": -1, "cc_params": [],
+                "byte_offset": 0,
+                "bit_offset": 0,
+                "bit_count": 64,
+                "data_type": FLOAT_LE,
+                "channel_type": 3,
+                "cc_type": -1,
+                "cc_params": [],
             }
-            assert list(convert_spec_to_arrow_batches({
-                "file_path": path, "channels": [empty], "row_start": 2, "row_end": 2,
-            })) == []
+            assert (
+                list(
+                    convert_spec_to_arrow_batches(
+                        {
+                            "file_path": path,
+                            "channels": [empty],
+                            "row_start": 2,
+                            "row_end": 2,
+                        }
+                    )
+                )
+                == []
+            )
             no_master = dict(base)
             no_master["master_info"] = None
-            batches = list(convert_spec_to_arrow_batches({
-                "file_path": path, "channels": [no_master],
-                "row_start": 1, "row_end": 3, "time_offset": 10.0,
-            }))
+            batches = list(
+                convert_spec_to_arrow_batches(
+                    {
+                        "file_path": path,
+                        "channels": [no_master],
+                        "row_start": 1,
+                        "row_end": 3,
+                        "time_offset": 10.0,
+                    }
+                )
+            )
             assert batches[0].num_rows == 2
             assert batches[0].column("time").to_pylist() == pytest.approx([11.0, 12.0])
 
@@ -1308,17 +1754,37 @@ class TestArrowEmitMoreCoverage:
                 return None
 
             monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _none_sig)
-            assert list(convert_spec_to_arrow_batches({
-                "file_path": path, "channels": [empty], "row_start": 0, "row_end": 2,
-            })) == []
+            assert (
+                list(
+                    convert_spec_to_arrow_batches(
+                        {
+                            "file_path": path,
+                            "channels": [empty],
+                            "row_start": 0,
+                            "row_end": 2,
+                        }
+                    )
+                )
+                == []
+            )
 
             def _boom_sig(raw_data, record_size, ch_spec):
                 raise ValueError("extract")
 
             monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _boom_sig)
-            assert list(convert_spec_to_arrow_batches({
-                "file_path": path, "channels": [empty], "row_start": 0, "row_end": 2,
-            })) == []
+            assert (
+                list(
+                    convert_spec_to_arrow_batches(
+                        {
+                            "file_path": path,
+                            "channels": [empty],
+                            "row_start": 0,
+                            "row_end": 2,
+                        }
+                    )
+                )
+                == []
+            )
         finally:
             Path(path).unlink(missing_ok=True)
 
@@ -1351,9 +1817,17 @@ class TestArrowEmitMoreCoverage:
             ch2["sample_count"] = 0
             ch2["byte_offset"] = 0
             ch2["master_info"] = None
-            assert list(convert_spec_to_arrow_batches({
-                "file_path": empty_path, "channels": [ch2],
-            })) == []
+            assert (
+                list(
+                    convert_spec_to_arrow_batches(
+                        {
+                            "file_path": empty_path,
+                            "channels": [ch2],
+                        }
+                    )
+                )
+                == []
+            )
         finally:
             Path(empty_path).unlink(missing_ok=True)
 
@@ -1364,10 +1838,14 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         spec = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )[0]
 
         real_open = open
@@ -1403,12 +1881,16 @@ class TestArrowEmitMoreCoverage:
         path = f"{d}/{files[0]}"
         from impulse_ds.mdf.bin_packer import plan_partitions
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
+
         org = MDF4Reader(path).scan_channels_organized()
         spec = plan_partitions(
-            path, org["master_channels"], org["signal_channels"],
-            org["channel_id_map"], target_partition_mb=16,
+            path,
+            org["master_channels"],
+            org["signal_channels"],
+            org["channel_id_map"],
+            target_partition_mb=16,
         )[0]
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", lambda *a, **k: None)
+        monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", lambda *_a, **_k: None)
         assert list(convert_spec_to_arrow_batches(spec)) == []
 
     def test_stripe_short_subblock_and_none_values(self, monkeypatch):
@@ -1431,14 +1913,20 @@ class TestArrowEmitMoreCoverage:
                         "rec_id_size": 0,
                     },
                 },
-                "subblocks": [{
-                    "group_idx": 0, "abs_off": 0, "on_disk_len": len(blob),
-                    "rec_start": 0, "rec_count": 1,
-                }],
+                "subblocks": [
+                    {
+                        "group_idx": 0,
+                        "abs_off": 0,
+                        "on_disk_len": len(blob),
+                        "rec_start": 0,
+                        "rec_count": 1,
+                    }
+                ],
             }
             assert list(convert_stripe_spec_to_arrow_batches(spec)) == []
             monkeypatch.setattr(
-                "impulse_ds.mdf.arrow_emit.extract_signal", lambda *a, **k: None,
+                "impulse_ds.mdf.arrow_emit.extract_signal",
+                lambda *_a, **_k: None,
             )
             assert list(convert_stripe_spec_to_arrow_batches(spec)) == []
         finally:
@@ -1449,11 +1937,15 @@ class TestArrowEmitMoreCoverage:
             "file_path": "/dev/null",
             "row_start": 5,
             "row_end": 5,
-            "masters": [{
-                "group_idx": 0, "record_size": 8, "sample_count": 10,
-                "data_block_addr": 0,
-                "master_info": {"channel_type": 3, "cc_type": -1, "cc_params": []},
-            }],
+            "masters": [
+                {
+                    "group_idx": 0,
+                    "record_size": 8,
+                    "sample_count": 10,
+                    "data_block_addr": 0,
+                    "master_info": {"channel_type": 3, "cc_type": -1, "cc_params": []},
+                }
+            ],
         }
         assert list(convert_master_spec_to_arrow_batches(spec)) == []
 
@@ -1494,8 +1986,18 @@ class TestMdf4ReaderMoreCoverage:
 
     def test_read_channel_data_empty_paths(self):
         empty = MDF4Reader.read_channel_data(
-            "/dev/null", 0, 0, 0, 0, 64, FLOAT_LE, 0, 0,
-            rec_id_size=4, record_id=1, cg_record_sizes={1: 8},
+            "/dev/null",
+            0,
+            0,
+            0,
+            0,
+            64,
+            FLOAT_LE,
+            0,
+            0,
+            rec_id_size=4,
+            record_id=1,
+            cg_record_sizes={1: 8},
         )
         assert len(empty) == 0
         blob = make_dt_block(struct.pack("<d", 1.0))
@@ -1504,9 +2006,16 @@ class TestMdf4ReaderMoreCoverage:
         __import__("os").close(fd)
         try:
             vlsd = MDF4Reader.read_channel_data(
-                path, 0, 8, 0, 0, 64, FLOAT_LE, 1, 1,
+                path,
+                0,
+                8,
+                0,
+                0,
+                64,
+                FLOAT_LE,
+                1,
+                1,
             )
             assert np.isnan(vlsd[0])
         finally:
             Path(path).unlink(missing_ok=True)
-

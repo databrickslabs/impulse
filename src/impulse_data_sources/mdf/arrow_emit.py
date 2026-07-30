@@ -9,17 +9,23 @@ Three entry points emit the public output schemas:
 
 plus run-length encoding (collapse constant runs into [tstart, tend) intervals).
 """
+
 import numpy as np
 
 from .mdf_blocks import (
-    dt_data_extent, resolve_dl_addr, read_data_list_range, read_raw_data,
-    _decompress_subblock_blob, _read_block_chunks,
+    dt_data_extent,
+    resolve_dl_addr,
+    read_data_list_range,
+    read_raw_data,
+    _decompress_subblock_blob,
+    _read_block_chunks,
 )
 from .mdf_decode import extract_signal, extract_timestamps, prepare_cg_records
 
 
 def _pa_float(dtype):
     import pyarrow as pa
+
     return pa.float32() if str(dtype) == "float32" else pa.float64()
 
 
@@ -55,7 +61,10 @@ def _emit_prepared_signal_group(
     t0 = _now()
     if master_info is not None:
         timestamps = extract_timestamps(
-            raw_data, record_size, master_info, index_offset=index_offset,
+            raw_data,
+            record_size,
+            master_info,
+            index_offset=index_offset,
         )
     else:
         timestamps = np.arange(index_offset, index_offset + actual, dtype=np.float64)
@@ -73,7 +82,9 @@ def _emit_prepared_signal_group(
         except Exception as e:
             log.warning(
                 "extract failed ch=%s block=%d: %s",
-                ch_spec.get("channel_id"), data_block_addr, e,
+                ch_spec.get("channel_id"),
+                data_block_addr,
+                e,
             )
 
 
@@ -129,23 +140,23 @@ def _rle_compress_chunk(ts, vs, carry):
         else:
             # Value changed at this chunk's first sample: close the carried run
             # there (zero-order hold to the change point).
-            seg_t0.append(np.array([c_t0])); seg_t1.append(np.array([ts[0]]))
+            seg_t0.append(np.array([c_t0]))
+            seg_t1.append(np.array([ts[0]]))
             seg_v.append(np.array([c_val]))
 
     if m >= 2:
-        t0 = run_t0[:m - 1].copy()
+        t0 = run_t0[: m - 1].copy()
         t0[0] = first_t0
         seg_t0.append(t0)
-        seg_t1.append(run_t0[1:m])      # tend = start of the next run
-        seg_v.append(run_vals[:m - 1])
+        seg_t1.append(run_t0[1:m])  # tend = start of the next run
+        seg_v.append(run_vals[: m - 1])
         new_carry = [run_vals[m - 1], run_t0[m - 1], last_ts]
     else:
         # Whole chunk is a single run; it remains open.
         new_carry = [run_vals[0], first_t0, last_ts]
 
     if seg_v:
-        return (np.concatenate(seg_t0), np.concatenate(seg_t1),
-                np.concatenate(seg_v)), new_carry
+        return (np.concatenate(seg_t0), np.concatenate(seg_t1), np.concatenate(seg_v)), new_carry
     return None, new_carry
 
 
@@ -165,13 +176,11 @@ def _rle_flush(carry):
         return None
     c_val, c_t0, c_last = carry
     if c_t0 < c_last:
-        return (np.array([c_t0, c_last]), np.array([c_last, c_last]),
-                np.array([c_val, c_val]))
+        return (np.array([c_t0, c_last]), np.array([c_last, c_last]), np.array([c_val, c_val]))
     return np.array([c_last]), np.array([c_last]), np.array([c_val])
 
 
-def signals_arrow_schema(time_dtype="float64", value_dtype="float64",
-                         run_length_encoding=False):
+def signals_arrow_schema(time_dtype="float64", value_dtype="float64", run_length_encoding=False):
     """Arrow schema for emitted signal batches. time/value default to float64 but
     can be float32 (halves their on-disk bytes) per the data-source options.
     value is nullable to accept NaN/None invalid samples.
@@ -182,36 +191,52 @@ def signals_arrow_schema(time_dtype="float64", value_dtype="float64",
     (tstart == tend == last timestamp) so the final sample is recoverable.
     """
     import pyarrow as pa
+
     if run_length_encoding:
-        return pa.schema([
+        return pa.schema(
+            [
+                pa.field("file_uri", pa.string(), nullable=False),
+                pa.field("channel_id", pa.int32(), nullable=False),
+                pa.field("tstart", _pa_float(time_dtype), nullable=False),
+                pa.field("tend", _pa_float(time_dtype), nullable=False),
+                pa.field("value", _pa_float(value_dtype), nullable=True),
+            ]
+        )
+    return pa.schema(
+        [
             pa.field("file_uri", pa.string(), nullable=False),
             pa.field("channel_id", pa.int32(), nullable=False),
-            pa.field("tstart", _pa_float(time_dtype), nullable=False),
-            pa.field("tend", _pa_float(time_dtype), nullable=False),
+            pa.field("time", _pa_float(time_dtype), nullable=False),
             pa.field("value", _pa_float(value_dtype), nullable=True),
-        ])
-    return pa.schema([
-        pa.field("file_uri", pa.string(), nullable=False),
-        pa.field("channel_id", pa.int32(), nullable=False),
-        pa.field("time", _pa_float(time_dtype), nullable=False),
-        pa.field("value", _pa_float(value_dtype), nullable=True),
-    ])
+        ]
+    )
 
 
 def master_arrow_schema(time_dtype="float64"):
     """Arrow schema for the master time-base output: one row per ORIGINAL sample
     of each group's master channel (file_uri, group_idx, timestamp)."""
     import pyarrow as pa
-    return pa.schema([
-        pa.field("file_uri", pa.string(), nullable=False),
-        pa.field("group_idx", pa.int32(), nullable=False),
-        pa.field("timestamp", _pa_float(time_dtype), nullable=False),
-    ])
+
+    return pa.schema(
+        [
+            pa.field("file_uri", pa.string(), nullable=False),
+            pa.field("group_idx", pa.int32(), nullable=False),
+            pa.field("timestamp", _pa_float(time_dtype), nullable=False),
+        ]
+    )
 
 
-def _make_signal_emitters(file_uri, output_schema, pa_time, pa_value,
-                          np_time, np_value, run_length_encoding, prof,
-                          max_batch_rows=2_000_000):
+def _make_signal_emitters(
+    file_uri,
+    output_schema,
+    pa_time,
+    pa_value,
+    np_time,
+    np_value,
+    run_length_encoding,
+    prof,
+    max_batch_rows=2_000_000,
+):
     """Build the ``(emit_fn, flush_fn)`` pair shared by the per-group and
     stripe signal converters, so both inherit identical batching/RLE behaviour.
 
@@ -231,6 +256,7 @@ def _make_signal_emitters(file_uri, output_schema, pa_time, pa_value,
     zero-width point row per channel)."""
     import time
     import pyarrow as pa
+
     _now = time.perf_counter_ns
 
     uri_cache = []
@@ -238,7 +264,8 @@ def _make_signal_emitters(file_uri, output_schema, pa_time, pa_value,
     def _uri_const():
         if not uri_cache:
             uri_cache.append(
-                pa.array(np.full(max_batch_rows, file_uri, dtype=object), type=pa.string()))
+                pa.array(np.full(max_batch_rows, file_uri, dtype=object), type=pa.string())
+            )
         return uri_cache[0]
 
     def _emit_points(timestamps, values, channel_id):
@@ -247,8 +274,9 @@ def _make_signal_emitters(file_uri, output_schema, pa_time, pa_value,
             return
         cont_full = _uri_const()
         t0 = _now()
-        chan_full = pa.array(np.full(min(n, max_batch_rows), channel_id, dtype=np.int32),
-                             type=pa.int32())
+        chan_full = pa.array(
+            np.full(min(n, max_batch_rows), channel_id, dtype=np.int32), type=pa.int32()
+        )
         prof["arrow"] += _now() - t0
         for offset in range(0, n, max_batch_rows):
             end = min(offset + max_batch_rows, n)
@@ -261,9 +289,14 @@ def _make_signal_emitters(file_uri, output_schema, pa_time, pa_value,
             if np_value is np.float32:
                 vs = vs.astype(np.float32)
             rb = pa.RecordBatch.from_arrays(
-                [cont_full.slice(0, clen), chan_full.slice(0, clen),
-                 pa.array(ts, type=pa_time), pa.array(vs, type=pa_value)],
-                schema=output_schema)
+                [
+                    cont_full.slice(0, clen),
+                    chan_full.slice(0, clen),
+                    pa.array(ts, type=pa_time),
+                    pa.array(vs, type=pa_value),
+                ],
+                schema=output_schema,
+            )
             prof["arrow"] += _now() - t1
             prof["rows"] += clen
             yield rb
@@ -282,17 +315,25 @@ def _make_signal_emitters(file_uri, output_schema, pa_time, pa_value,
             end = min(offset + max_batch_rows, n)
             clen = end - offset
             _ta = _now()
-            t0 = t0arr[offset:end]; te = t1arr[offset:end]; vv = varr[offset:end]
+            t0 = t0arr[offset:end]
+            te = t1arr[offset:end]
+            vv = varr[offset:end]
             if np_time is np.float32:
-                t0 = t0.astype(np.float32); te = te.astype(np.float32)
+                t0 = t0.astype(np.float32)
+                te = te.astype(np.float32)
             if np_value is np.float32:
                 vv = vv.astype(np.float32)
             chan_full = pa.array(np.full(clen, channel_id, dtype=np.int32), type=pa.int32())
             rb = pa.RecordBatch.from_arrays(
-                [cont_full.slice(0, clen), chan_full,
-                 pa.array(t0, type=pa_time), pa.array(te, type=pa_time),
-                 pa.array(vv, type=pa_value)],
-                schema=output_schema)
+                [
+                    cont_full.slice(0, clen),
+                    chan_full,
+                    pa.array(t0, type=pa_time),
+                    pa.array(te, type=pa_time),
+                    pa.array(vv, type=pa_value),
+                ],
+                schema=output_schema,
+            )
             prof["arrow"] += _now() - _ta
             prof["rows"] += clen
             yield rb
@@ -313,8 +354,9 @@ def _make_signal_emitters(file_uri, output_schema, pa_time, pa_value,
     return emit_fn, flush_fn
 
 
-def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_dtype="float64",
-                                  run_length_encoding=False):
+def convert_spec_to_arrow_batches(
+    spec, prof=None, time_dtype="float64", value_dtype="float64", run_length_encoding=False
+):
     """
     Convert ONE partition spec into an iterator of pyarrow.RecordBatch with the
     signals schema (file_uri, channel_id, time, value).
@@ -372,8 +414,8 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
     # or run-length-encoded interval rows. flush_fn() drains any state held back
     # between read chunks (only RLE carries a trailing open run).
     emit_fn, flush_fn = _make_signal_emitters(
-        file_uri, output_schema, pa_time, pa_value, np_time, np_value,
-        run_length_encoding, prof)
+        file_uri, output_schema, pa_time, pa_value, np_time, np_value, run_length_encoding, prof
+    )
 
     block_groups = {}
     for ch_spec in channels_spec:
@@ -397,8 +439,9 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                     raw_data = read_raw_data(f, data_block_addr, record_size, sample_count)
                     prof["read"] += _now() - t0
                 except Exception as e:
-                    log.warning("read_raw_data failed at %d in %s: %s",
-                                data_block_addr, file_path, e)
+                    log.warning(
+                        "read_raw_data failed at %d in %s: %s", data_block_addr, file_path, e
+                    )
                     continue
                 raw_data, index_offset = prepare_cg_records(
                     raw_data,
@@ -408,8 +451,16 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                     **us,
                 )
                 yield from _emit_prepared_signal_group(
-                    raw_data, group_channels, record_size, master_info,
-                    time_offset, emit_fn, prof, log, data_block_addr, _now,
+                    raw_data,
+                    group_channels,
+                    record_size,
+                    master_info,
+                    time_offset,
+                    emit_fn,
+                    prof,
+                    log,
+                    data_block_addr,
+                    _now,
                     index_offset=index_offset,
                 )
                 continue
@@ -417,8 +468,9 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
             try:
                 extent = dt_data_extent(f, data_block_addr)
             except Exception as e:
-                log.warning("DT extent probe failed at %d in %s: %s",
-                            data_block_addr, file_path, e)
+                log.warning(
+                    "DT extent probe failed at %d in %s: %s", data_block_addr, file_path, e
+                )
                 extent = None
 
             if extent is not None:
@@ -429,7 +481,11 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                     continue
                 # Honor the planner's record-range slice (defaults to whole block).
                 lo = 0 if spec_row_start is None else max(0, min(spec_row_start, total_records))
-                hi = total_records if spec_row_end is None else max(lo, min(spec_row_end, total_records))
+                hi = (
+                    total_records
+                    if spec_row_end is None
+                    else max(lo, min(spec_row_end, total_records))
+                )
                 if hi <= lo:
                     continue
                 chunk_records = max(1, _CHUNK_BYTES // record_size)
@@ -446,7 +502,10 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                     t0 = _now()
                     if master_info is not None:
                         timestamps = extract_timestamps(
-                            raw_chunk, record_size, master_info, index_offset=rec0,
+                            raw_chunk,
+                            record_size,
+                            master_info,
+                            index_offset=rec0,
                         )
                     else:
                         timestamps = np.arange(rec0, rec0 + actual, dtype=np.float64)
@@ -461,11 +520,17 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                             if values is None:
                                 continue
                             yield from emit_fn(
-                                timestamps, values, ch_spec["channel_id"],
+                                timestamps,
+                                values,
+                                ch_spec["channel_id"],
                             )
                         except Exception as e:
-                            log.warning("extract failed ch=%s block=%d: %s",
-                                        ch_spec.get("channel_id"), data_block_addr, e)
+                            log.warning(
+                                "extract failed ch=%s block=%d: %s",
+                                ch_spec.get("channel_id"),
+                                data_block_addr,
+                                e,
+                            )
                             continue
                 continue
 
@@ -478,7 +543,11 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                     re_hi = spec_row_end if spec_row_end is not None else (1 << 62)
                     t0 = _now()
                     raw_data, start_rec = read_data_list_range(
-                        f, dl_addr, record_size, spec_row_start, re_hi,
+                        f,
+                        dl_addr,
+                        record_size,
+                        spec_row_start,
+                        re_hi,
                     )
                     prof["read"] += _now() - t0
                     actual = len(raw_data) // record_size if record_size else 0
@@ -487,7 +556,10 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                     t0 = _now()
                     if master_info is not None:
                         timestamps = extract_timestamps(
-                            raw_data, record_size, master_info, index_offset=start_rec,
+                            raw_data,
+                            record_size,
+                            master_info,
+                            index_offset=start_rec,
                         )
                     else:
                         timestamps = np.arange(start_rec, start_rec + actual, dtype=np.float64)
@@ -502,11 +574,17 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                             if values is None:
                                 continue
                             yield from emit_fn(
-                                timestamps, values, ch_spec["channel_id"],
+                                timestamps,
+                                values,
+                                ch_spec["channel_id"],
                             )
                         except Exception as e:
-                            log.warning("extract failed ch=%s block=%d: %s",
-                                        ch_spec.get("channel_id"), data_block_addr, e)
+                            log.warning(
+                                "extract failed ch=%s block=%d: %s",
+                                ch_spec.get("channel_id"),
+                                data_block_addr,
+                                e,
+                            )
                             continue
                     continue
 
@@ -519,8 +597,7 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                 raw_data = read_raw_data(f, data_block_addr, record_size, sample_count)
                 prof["read"] += _now() - t0
             except Exception as e:
-                log.warning("read_raw_data failed at %d in %s: %s",
-                            data_block_addr, file_path, e)
+                log.warning("read_raw_data failed at %d in %s: %s", data_block_addr, file_path, e)
                 continue
             total = len(raw_data) // record_size if record_size else 0
             if total == 0:
@@ -536,11 +613,20 @@ def convert_spec_to_arrow_batches(spec, prof=None, time_dtype="float64", value_d
                 )
             else:
                 raw_data, start_rec = prepare_cg_records(
-                    raw_data, record_size=record_size,
+                    raw_data,
+                    record_size=record_size,
                 )
             yield from _emit_prepared_signal_group(
-                raw_data, group_channels, record_size, master_info,
-                time_offset, emit_fn, prof, log, data_block_addr, _now,
+                raw_data,
+                group_channels,
+                record_size,
+                master_info,
+                time_offset,
+                emit_fn,
+                prof,
+                log,
+                data_block_addr,
+                _now,
                 index_offset=start_rec,
             )
 
@@ -590,7 +676,8 @@ def convert_master_spec_to_arrow_batches(spec, prof=None, time_dtype="float64"):
     def _uri_const():
         if not _uri_full_cache:
             _uri_full_cache.append(
-                pa.array(np.full(_MAX_BATCH_ROWS, file_uri, dtype=object), type=pa.string()))
+                pa.array(np.full(_MAX_BATCH_ROWS, file_uri, dtype=object), type=pa.string())
+            )
         return _uri_full_cache[0]
 
     def _emit(ts, group_idx):
@@ -637,7 +724,14 @@ def convert_master_spec_to_arrow_batches(spec, prof=None, time_dtype="float64"):
                 continue
 
             for raw, start in _read_block_chunks(
-                f, mspec["data_block_addr"], rs, sc, r0, r1, prof, log,
+                f,
+                mspec["data_block_addr"],
+                rs,
+                sc,
+                r0,
+                r1,
+                prof,
+                log,
                 rec_id_size=mspec.get("rec_id_size", 0),
                 record_id=mspec.get("record_id", 0),
                 cg_record_sizes=mspec.get("cg_record_sizes"),
@@ -650,8 +744,9 @@ def convert_master_spec_to_arrow_batches(spec, prof=None, time_dtype="float64"):
                 yield from _emit(ts, gid)
 
 
-def convert_stripe_spec_to_arrow_batches(spec, prof=None, time_dtype="float64",
-                                         value_dtype="float64", run_length_encoding=False):
+def convert_stripe_spec_to_arrow_batches(
+    spec, prof=None, time_dtype="float64", value_dtype="float64", run_length_encoding=False
+):
     """Decode ONE byte-offset stripe (Design B): a contiguous file region holding
     a set of data sub-blocks from possibly several groups. The whole region is read
     in ONE sequential IO, then each sub-block is decompressed + extracted from RAM.
@@ -686,8 +781,8 @@ def convert_stripe_spec_to_arrow_batches(spec, prof=None, time_dtype="float64",
 
     # Same emission dispatch as convert_spec_to_arrow_batches (per-sample or RLE).
     emit_fn, flush_fn = _make_signal_emitters(
-        file_uri, output_schema, pa_time, pa_value, np_time, np_value,
-        run_length_encoding, prof)
+        file_uri, output_schema, pa_time, pa_value, np_time, np_value, run_length_encoding, prof
+    )
 
     # One sequential read of the whole stripe.
     t0 = _now()
@@ -721,15 +816,24 @@ def convert_stripe_spec_to_arrow_batches(spec, prof=None, time_dtype="float64",
                     parts.append(_decompress_subblock_blob(blob, rel))
                     prof["decode"] += _now() - t0
                 except Exception as e:
-                    log.warning("stripe decompress failed gidx=%s off=%d: %s",
-                                gidx, sb["abs_off"], e)
+                    log.warning(
+                        "stripe decompress failed gidx=%s off=%d: %s", gidx, sb["abs_off"], e
+                    )
             if not parts:
                 continue
             raw = b"".join(parts)
             raw, index_offset = prepare_cg_records(raw, record_size=record_size, **us)
             yield from _emit_prepared_signal_group(
-                raw, channels, record_size, master_info, time_offset,
-                emit_fn, prof, log, meta.get("data_block_addr", 0), _now,
+                raw,
+                channels,
+                record_size,
+                master_info,
+                time_offset,
+                emit_fn,
+                prof,
+                log,
+                meta.get("data_block_addr", 0),
+                _now,
                 index_offset=index_offset,
             )
             continue
@@ -748,7 +852,9 @@ def convert_stripe_spec_to_arrow_batches(spec, prof=None, time_dtype="float64",
                 continue
             t0 = _now()
             if master_info is not None:
-                ts = extract_timestamps(raw, record_size, master_info, index_offset=sb["rec_start"])
+                ts = extract_timestamps(
+                    raw, record_size, master_info, index_offset=sb["rec_start"]
+                )
             else:
                 ts = np.arange(sb["rec_start"], sb["rec_start"] + actual, dtype=np.float64)
             if time_offset:

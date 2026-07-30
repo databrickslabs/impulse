@@ -11,9 +11,8 @@ Key blocks: HD (Header), DG (Data Group), CG (Channel Group), CN (Channel),
 import struct
 from datetime import datetime, timezone
 import numpy as np
-from typing import BinaryIO, List, Tuple, Dict, Optional
+from typing import BinaryIO
 from dataclasses import dataclass
-
 
 # MDF4 block IDs
 BLOCK_ID_HD = b"##HD"
@@ -64,6 +63,7 @@ CN_FLAG_INVALIDATION_PRESENT = 1 << 1
 @dataclass
 class ChannelInfo:
     """Metadata for a single channel within an MDF4 file."""
+
     group_idx: int
     channel_idx: int
     channel_name: str
@@ -98,20 +98,22 @@ class ChannelInfo:
 @dataclass
 class DataGroupInfo:
     """Metadata for a data group."""
+
     address: int
     data_block_addr: int
-    channel_groups: List["ChannelGroupInfo"]
+    channel_groups: list["ChannelGroupInfo"]
 
 
 @dataclass
 class ChannelGroupInfo:
     """Metadata for a channel group."""
+
     address: int
     record_id: int
     cycle_count: int
     data_bytes: int
     invalidation_bytes: int
-    channels: List[ChannelInfo]
+    channels: list[ChannelInfo]
 
 
 class MDF4Reader:
@@ -126,23 +128,26 @@ class MDF4Reader:
         build the block map from RAM without re-reading the volume."""
         self.file_path = file_path
         self._file_bytes = file_bytes
-        self._data_groups: Optional[List[DataGroupInfo]] = None
-        self._unsorted_dg_ctx: Dict[int, dict] = {}
-        self._text_cache: Dict[int, str] = {}  # address -> TX/MD text (immutable per file)
+        self._data_groups: list[DataGroupInfo] | None = None
+        self._unsorted_dg_ctx: dict[int, dict] = {}
+        self._text_cache: dict[int, str] = {}  # address -> TX/MD text (immutable per file)
 
     def _open(self):
         """Context manager yielding a seekable binary source (in-RAM buffer if
         file_bytes was provided, else the file on disk)."""
         import contextlib
         import io
+
         if self._file_bytes is not None:
+
             @contextlib.contextmanager
             def _buf():
                 yield io.BytesIO(self._file_bytes)
+
             return _buf()
         return open(self.file_path, "rb")
 
-    def _read_hd_start_utc_ns(self) -> Optional[int]:
+    def _read_hd_start_utc_ns(self) -> int | None:
         """Read the measurement start time from the HD block as UTC nanoseconds
         since the Unix epoch (full precision), or None if not set.
 
@@ -182,7 +187,7 @@ class MDF4Reader:
                 utc_ns -= total_offset_min * 60 * 1_000_000_000
             return utc_ns
 
-    def read_header_datetime(self) -> Optional[datetime]:
+    def read_header_datetime(self) -> datetime | None:
         """
         Read measurement start datetime from the MDF4 HD block.
 
@@ -198,7 +203,7 @@ class MDF4Reader:
         )
         return dt.replace(tzinfo=None)
 
-    def read_header_start_epoch_seconds(self) -> Optional[float]:
+    def read_header_start_epoch_seconds(self) -> float | None:
         """Measurement start time as Unix epoch seconds (UTC), as a float with
         the HD block's sub-second precision (not rounded to whole seconds), or
         None if not set. Used to make signal timestamps absolute.
@@ -245,7 +250,7 @@ class MDF4Reader:
         return text
 
     @staticmethod
-    def _parse_cc_block(f: BinaryIO, cc_addr: int) -> Tuple[int, tuple]:
+    def _parse_cc_block(f: BinaryIO, cc_addr: int) -> tuple[int, tuple]:
         """
         Parse a CC (Channel Conversion) block and return (cc_type, cc_params).
 
@@ -269,9 +274,9 @@ class MDF4Reader:
         # (precision, flags, ref_count, phy_range_*) are kept as named reads to
         # document the block layout and keep the offsets self-evident.
         cc_type = struct.unpack("<B", f.read(1))[0]
-        cc_precision = struct.unpack("<B", f.read(1))[0]      # noqa: F841 (layout)
-        cc_flags = struct.unpack("<H", f.read(2))[0]          # noqa: F841 (layout)
-        cc_ref_count = struct.unpack("<H", f.read(2))[0]      # noqa: F841 (layout)
+        cc_precision = struct.unpack("<B", f.read(1))[0]  # noqa: F841 (layout)
+        cc_flags = struct.unpack("<H", f.read(2))[0]  # noqa: F841 (layout)
+        cc_ref_count = struct.unpack("<H", f.read(2))[0]  # noqa: F841 (layout)
         cc_val_count = struct.unpack("<H", f.read(2))[0]
         cc_phy_range_min = struct.unpack("<d", f.read(8))[0]  # noqa: F841 (layout)
         cc_phy_range_max = struct.unpack("<d", f.read(8))[0]  # noqa: F841 (layout)
@@ -288,7 +293,7 @@ class MDF4Reader:
 
         return cc_type, cc_params
 
-    def scan_metadata(self) -> List[ChannelInfo]:
+    def scan_metadata(self) -> list[ChannelInfo]:
         """
         Scan the MDF4 file to extract all channel metadata without
         reading actual signal data. Returns list of ChannelInfo objects.
@@ -341,7 +346,7 @@ class MDF4Reader:
                 dg_rec_id_size = struct.unpack("<B", f.read(1))[0]
                 # skip remaining 7 reserved bytes
                 f.read(7)
-                dg_cg_sizes: Dict[int, int] = {}
+                dg_cg_sizes: dict[int, int] = {}
 
                 # Traverse CG linked list
                 cg_addr = first_cg_addr
@@ -371,6 +376,7 @@ class MDF4Reader:
                     record_size = dg_rec_id_size + cg_data_bytes + cg_invalidation_bytes
                     if dg_rec_id_size > 0:
                         from .mdf_decode import storage_record_id
+
                         dg_cg_sizes[storage_record_id(cg_record_id, dg_rec_id_size)] = record_size
 
                     # Traverse CN linked list
@@ -412,20 +418,22 @@ class MDF4Reader:
                         # limit ranges) are read in spec order purely to advance the
                         # file position; they are named to document the block layout.
                         cn_type = struct.unpack("<B", f.read(1))[0]
-                        cn_sync_type = struct.unpack("<B", f.read(1))[0]      # noqa: F841 (layout)
+                        cn_sync_type = struct.unpack("<B", f.read(1))[0]  # noqa: F841 (layout)
                         cn_data_type = struct.unpack("<B", f.read(1))[0]
                         cn_bit_offset = struct.unpack("<B", f.read(1))[0]
                         cn_byte_offset = struct.unpack("<I", f.read(4))[0]
                         cn_bit_count = struct.unpack("<I", f.read(4))[0]
                         cn_flags = struct.unpack("<I", f.read(4))[0]
                         cn_invalid_bit_pos = struct.unpack("<I", f.read(4))[0]
-                        cn_precision = struct.unpack("<B", f.read(1))[0]     # noqa: F841 (layout)
+                        cn_precision = struct.unpack("<B", f.read(1))[0]  # noqa: F841 (layout)
                         f.read(1)  # reserved
-                        cn_attachment_count = struct.unpack("<H", f.read(2))[0]  # noqa: F841 (layout)
+                        cn_attachment_count = struct.unpack("<H", f.read(2))[
+                            0
+                        ]  # noqa: F841 (layout)
                         cn_val_range_min = struct.unpack("<d", f.read(8))[0]  # noqa: F841 (layout)
                         cn_val_range_max = struct.unpack("<d", f.read(8))[0]  # noqa: F841 (layout)
-                        cn_limit_min = struct.unpack("<d", f.read(8))[0]      # noqa: F841 (layout)
-                        cn_limit_max = struct.unpack("<d", f.read(8))[0]      # noqa: F841 (layout)
+                        cn_limit_min = struct.unpack("<d", f.read(8))[0]  # noqa: F841 (layout)
+                        cn_limit_max = struct.unpack("<d", f.read(8))[0]  # noqa: F841 (layout)
                         cn_limit_ext_min = struct.unpack("<d", f.read(8))[0]  # noqa: F841 (layout)
                         cn_limit_ext_max = struct.unpack("<d", f.read(8))[0]  # noqa: F841 (layout)
 
@@ -438,32 +446,34 @@ class MDF4Reader:
                         # Parse CC conversion block
                         cc_type, cc_params = self._parse_cc_block(f, cc_addr)
 
-                        channels.append(ChannelInfo(
-                            group_idx=group_idx,
-                            channel_idx=channel_idx,
-                            channel_name=channel_name,
-                            unit=unit,
-                            sample_count=cg_cycle_count,
-                            data_type=cn_data_type,
-                            bit_offset=cn_bit_offset,
-                            byte_offset=dg_rec_id_size + cn_byte_offset,
-                            bit_count=cn_bit_count,
-                            channel_type=cn_type,
-                            cn_block_addr=cn_addr,
-                            cg_block_addr=cg_addr,
-                            dg_block_addr=dg_addr,
-                            data_block_addr=data_block_addr,
-                            record_size=record_size,
-                            cn_flags=cn_flags,
-                            invalidation_bit_pos=cn_invalid_bit_pos,
-                            invalidation_bytes=cg_invalidation_bytes,
-                            data_bytes=dg_rec_id_size + cg_data_bytes,
-                            cc_type=cc_type,
-                            cc_params=cc_params,
-                            rec_id_size=dg_rec_id_size,
-                            record_id=cg_record_id,
-                            md_comment=md_comment,
-                        ))
+                        channels.append(
+                            ChannelInfo(
+                                group_idx=group_idx,
+                                channel_idx=channel_idx,
+                                channel_name=channel_name,
+                                unit=unit,
+                                sample_count=cg_cycle_count,
+                                data_type=cn_data_type,
+                                bit_offset=cn_bit_offset,
+                                byte_offset=dg_rec_id_size + cn_byte_offset,
+                                bit_count=cn_bit_count,
+                                channel_type=cn_type,
+                                cn_block_addr=cn_addr,
+                                cg_block_addr=cg_addr,
+                                dg_block_addr=dg_addr,
+                                data_block_addr=data_block_addr,
+                                record_size=record_size,
+                                cn_flags=cn_flags,
+                                invalidation_bit_pos=cn_invalid_bit_pos,
+                                invalidation_bytes=cg_invalidation_bytes,
+                                data_bytes=dg_rec_id_size + cg_data_bytes,
+                                cc_type=cc_type,
+                                cc_params=cc_params,
+                                rec_id_size=dg_rec_id_size,
+                                record_id=cg_record_id,
+                                md_comment=md_comment,
+                            )
+                        )
 
                         channel_idx += 1
                         cn_addr = next_cn_addr
@@ -500,8 +510,8 @@ class MDF4Reader:
         cc_params: tuple = (),
         rec_id_size: int = 0,
         record_id: int = 0,
-        cg_record_sizes: Optional[dict] = None,
-        f: Optional[BinaryIO] = None,
+        cg_record_sizes: dict | None = None,
+        f: BinaryIO | None = None,
     ) -> np.ndarray:
         """
         Read raw signal data for a single channel directly from the binary file.
@@ -561,8 +571,8 @@ class MDF4Reader:
         master_info: dict,
         signal_info: dict,
         sample_count: int,
-        f: Optional[BinaryIO] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        f: BinaryIO | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Read both master (time) and signal channel data for a channel group.
         Returns (timestamps, values) both as float64 arrays.
@@ -572,10 +582,13 @@ class MDF4Reader:
         opening the file again.
         """
         from .udf_helpers import (
-            read_raw_data, extract_signal, extract_timestamps, prepare_cg_records,
+            read_raw_data,
+            extract_signal,
+            extract_timestamps,
+            prepare_cg_records,
         )
 
-        def _do_read(fh: BinaryIO) -> Tuple[np.ndarray, np.ndarray]:
+        def _do_read(fh: BinaryIO) -> tuple[np.ndarray, np.ndarray]:
             data_block_addr = signal_info["data_block_addr"]
             record_size = signal_info["record_size"]
             rec_id_size = signal_info.get("rec_id_size", 0)
@@ -595,11 +608,16 @@ class MDF4Reader:
             actual_samples = len(raw_data) // record_size if record_size else 0
             if master_info:
                 timestamps = extract_timestamps(
-                    raw_data, record_size, master_info, index_offset=index_offset,
+                    raw_data,
+                    record_size,
+                    master_info,
+                    index_offset=index_offset,
                 )
             else:
                 timestamps = np.arange(
-                    index_offset, index_offset + actual_samples, dtype=np.float64,
+                    index_offset,
+                    index_offset + actual_samples,
+                    dtype=np.float64,
                 )
 
             values = extract_signal(raw_data, record_size, signal_info)
@@ -613,7 +631,6 @@ class MDF4Reader:
 
         with open(file_path, "rb") as fh:
             return _do_read(fh)
-
 
     def scan_channels_organized(self) -> dict:
         """
@@ -646,7 +663,7 @@ class MDF4Reader:
         }
 
     @staticmethod
-    def channel_to_dict(ch: "ChannelInfo", unsorted_dg_ctx: Optional[dict] = None) -> dict:
+    def channel_to_dict(ch: "ChannelInfo", unsorted_dg_ctx: dict | None = None) -> dict:
         """Convert a ChannelInfo to a serializable dict suitable for bin packing."""
         from .mdf_decode import unsorted_fields_from_ctx
 
@@ -675,7 +692,7 @@ class MDF4Reader:
         return d
 
     @staticmethod
-    def master_to_dict(ch: "ChannelInfo", unsorted_dg_ctx: Optional[dict] = None) -> dict:
+    def master_to_dict(ch: "ChannelInfo", unsorted_dg_ctx: dict | None = None) -> dict:
         """Convert a master ChannelInfo to a serializable dict for timestamp extraction."""
         from .mdf_decode import unsorted_fields_from_ctx
 

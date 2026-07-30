@@ -16,11 +16,11 @@ from impulse_ds.mdf.datasources import (
     MdfSignalsReader,
 )
 
-
 # Sample MDF files are generated on the fly with asammdf (see _mdf_samples.py)
 # so the tests don't depend on any pre-built fixtures. EXAMPLE_FILES is empty when
 # asammdf is unavailable, and the `if not EXAMPLE_FILES: skip` guards handle that.
 from ._mdf_samples import sample_mdf_dir
+
 EXAMPLE_DIR, EXAMPLE_FILES = sample_mdf_dir()
 
 
@@ -120,9 +120,18 @@ class TestMetadataReader:
         rows = list(reader.read(partitions[0]))
         assert len(rows) > 0
         from impulse_ds.mdf.schemas import METADATA_SCHEMA
+
         assert len(rows[0]) == len(METADATA_SCHEMA.fields)  # md_comment included
-        (file_uri, channel_id, group_idx, channel_idx, channel_name, unit,
-         header_datetime, md_comment) = rows[0]
+        (
+            file_uri,
+            channel_id,
+            group_idx,
+            channel_idx,
+            channel_name,
+            unit,
+            header_datetime,
+            md_comment,
+        ) = rows[0]
         assert isinstance(file_uri, str) and file_uri.endswith(".mf4")
         assert channel_id == 0
         assert isinstance(channel_name, str)
@@ -144,6 +153,7 @@ class TestSignalsReader:
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
         import pyarrow as pa
+
         reader = MdfSignalsReader({"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0]})
         partitions = reader.partitions()
         batches = []
@@ -173,6 +183,7 @@ class TestSignalsReader:
 class TestRunLengthEncoding:
     def _read(self, opts):
         from collections import defaultdict
+
         reader = MdfSignalsReader(opts)
         cols = defaultdict(list)
         names = None
@@ -187,10 +198,16 @@ class TestRunLengthEncoding:
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
         from impulse_ds.mdf.datasources import MdfSignalsDataSource
+
         opts = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "run_length_encoding": "true"}
         sch = MdfSignalsDataSource(dict(opts)).schema()
         assert [f.name for f in sch.fields] == [
-            "file_uri", "channel_id", "tstart", "tend", "value"]
+            "file_uri",
+            "channel_id",
+            "tstart",
+            "tend",
+            "value",
+        ]
         names, _ = self._read(opts)
         assert names == ["file_uri", "channel_id", "tstart", "tend", "value"]
 
@@ -200,6 +217,7 @@ class TestRunLengthEncoding:
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
         from collections import defaultdict
+
         base = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "target_partition_mb": "16"}
         _, plain = self._read(base)
         _, rle = self._read({**base, "run_length_encoding": "true"})
@@ -244,15 +262,21 @@ class TestRunLengthEncoding:
         rch = per_channel(rle, ["tstart", "tend", "value"])
 
         def whole_rle(t, v):
-            o = np.argsort(t, kind="stable"); t, v = t[o], v[o]
-            s = _rle_run_starts(v); m = len(s)
+            o = np.argsort(t, kind="stable")
+            t, v = t[o], v[o]
+            s = _rle_run_starts(v)
+            m = len(s)
             return [(t[s[k]], t[s[k + 1]] if k < m - 1 else t[-1], v[s[k]]) for k in range(m)]
 
         def merge_adjacent(rows):
-            rows = sorted(rows, key=lambda r: r[0]); out = []
+            rows = sorted(rows, key=lambda r: r[0])
+            out = []
             for t0, t1, val in rows:
-                same = out and out[-1][1] == t0 and (
-                    out[-1][2] == val or (out[-1][2] != out[-1][2] and val != val))
+                same = (
+                    out
+                    and out[-1][1] == t0
+                    and (out[-1][2] == val or (out[-1][2] != out[-1][2] and val != val))
+                )
                 if same:
                     out[-1] = (out[-1][0], t1, out[-1][2])
                 else:
@@ -262,10 +286,13 @@ class TestRunLengthEncoding:
         total_plain = total_runs = 0
         for k, p in pch.items():
             ref = whole_rle(p["time"], p["value"])
-            got = merge_adjacent(list(zip(rch[k]["tstart"], rch[k]["tend"], rch[k]["value"])))
-            total_plain += len(p["time"]); total_runs += len(got)
+            got = merge_adjacent(
+                list(zip(rch[k]["tstart"], rch[k]["tend"], rch[k]["value"], strict=False))
+            )
+            total_plain += len(p["time"])
+            total_runs += len(got)
             assert len(ref) == len(got), f"channel {k}: {len(ref)} runs vs {len(got)}"
-            for (a0, a1, av), (b0, b1, bv) in zip(ref, got):
+            for (a0, a1, av), (b0, b1, bv) in zip(ref, got, strict=False):
                 assert abs(a0 - b0) < 1e-6 and abs(a1 - b1) < 1e-6
                 assert av == bv or (av != av and bv != bv)  # NaN == NaN
         # This example compresses substantially; guard against a no-op RLE.
@@ -275,6 +302,7 @@ class TestRunLengthEncoding:
 class TestMastersDataSource:
     def _read(self, reader, cols):
         from collections import defaultdict
+
         out = defaultdict(lambda: defaultdict(list))
         names = None
         for p in reader.partitions():
@@ -292,7 +320,10 @@ class TestMastersDataSource:
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
         from impulse_ds.mdf.datasources import (
-            MdfMastersDataSource, MdfMastersReader, MdfSignalsReader)
+            MdfMastersDataSource,
+            MdfMastersReader,
+            MdfSignalsReader,
+        )
         from impulse_ds.mdf.mdf4_reader import MDF4Reader
 
         opts = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "target_partition_mb": "16"}
@@ -320,8 +351,10 @@ class TestMastersDataSource:
 
         opts = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "target_partition_mb": "16"}
         _, orig = self._read(MdfSignalsReader(opts), ["channel_id", "time", "value"])
-        _, rle = self._read(MdfSignalsReader({**opts, "run_length_encoding": "true"}),
-                            ["channel_id", "tstart", "tend", "value"])
+        _, rle = self._read(
+            MdfSignalsReader({**opts, "run_length_encoding": "true"}),
+            ["channel_id", "tstart", "tend", "value"],
+        )
         _, masters = self._read(MdfMastersReader(opts), ["group_idx", "timestamp"])
         masters = {g: np.sort(d["timestamp"]) for g, d in masters.items()}
         org = MDF4Reader(os.path.join(EXAMPLE_DIR, EXAMPLE_FILES[0])).scan_channels_organized()
@@ -344,6 +377,7 @@ class TestAbsoluteTime:
     def _read(self, opts, cols):
         from collections import defaultdict
         from impulse_ds.mdf.datasources import MdfSignalsReader
+
         rd = MdfSignalsReader(opts)
         out = defaultdict(lambda: defaultdict(list))
         for p in rd.partitions():
@@ -366,18 +400,21 @@ class TestAbsoluteTime:
             pytest.skip("file has no HD start time")
 
         # Schema forces float64 time even when float32 requested.
-        sch = MdfSignalsDataSource({"path": EXAMPLE_DIR, "files": f,
-                                    "absolute_time": "true", "time_dtype": "float32"}).schema()
+        sch = MdfSignalsDataSource(
+            {"path": EXAMPLE_DIR, "files": f, "absolute_time": "true", "time_dtype": "float32"}
+        ).schema()
         assert sch["time"].dataType.simpleString() == "double"
 
         base = {"path": EXAMPLE_DIR, "files": f, "target_partition_mb": "16"}
         rel = self._read(base, ["time", "value"])
         ab = self._read({**base, "absolute_time": "true"}, ["time", "value"])
         for ch in rel:
-            rt = np.sort(rel[ch]["time"]); at = np.sort(ab[ch]["time"])
-            assert np.allclose(at, rt + start, atol=1e-3)        # offset applied
-            assert np.array_equal(np.sort(rel[ch]["value"]),     # values unchanged
-                                  np.sort(ab[ch]["value"]))
+            rt = np.sort(rel[ch]["time"])
+            at = np.sort(ab[ch]["time"])
+            assert np.allclose(at, rt + start, atol=1e-3)  # offset applied
+            assert np.array_equal(
+                np.sort(rel[ch]["value"]), np.sort(ab[ch]["value"])  # values unchanged
+            )
 
     def test_absolute_time_rle_and_masters_align(self):
         if not EXAMPLE_FILES:
@@ -395,7 +432,8 @@ class TestAbsoluteTime:
             out = defaultdict(list)
             for p in rd.partitions():
                 for b in rd.read(p):
-                    g = b.column("group_idx").to_numpy(); ts = b.column("timestamp").to_numpy()
+                    g = b.column("group_idx").to_numpy()
+                    ts = b.column("timestamp").to_numpy()
                     for k in np.unique(g):
                         out[int(k)].append(ts[g == k])
             return {k: np.sort(np.concatenate(v)) for k, v in out.items()}
@@ -418,15 +456,35 @@ class TestSchemaMatchesEmittedTypes:
             pytest.skip("No example files")
         from itertools import product
         from impulse_ds.mdf.datasources import MdfSignalsDataSource
-        spark2arrow = {"double": "double", "float": "float",
-                       "bigint": "int64", "int": "int32", "string": "string"}
-        base = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0],
-                "target_partition_mb": "8", "stripe_target_mb": "2"}
+
+        spark2arrow = {
+            "double": "double",
+            "float": "float",
+            "bigint": "int64",
+            "int": "int32",
+            "string": "string",
+        }
+        base = {
+            "path": EXAMPLE_DIR,
+            "files": EXAMPLE_FILES[0],
+            "target_partition_mb": "8",
+            "stripe_target_mb": "2",
+        }
         for abst, vdt, tdt, rle, part in product(
-                ["false", "true"], ["float64", "float32"], ["float64", "float32"],
-                ["false", "true"], ["group", "stripe"]):
-            opts = {**base, "absolute_time": abst, "value_dtype": vdt,
-                    "time_dtype": tdt, "run_length_encoding": rle, "partitioning": part}
+            ["false", "true"],
+            ["float64", "float32"],
+            ["float64", "float32"],
+            ["false", "true"],
+            ["group", "stripe"],
+        ):
+            opts = {
+                **base,
+                "absolute_time": abst,
+                "value_dtype": vdt,
+                "time_dtype": tdt,
+                "run_length_encoding": rle,
+                "partitioning": part,
+            }
             sch = MdfSignalsDataSource(dict(opts)).schema()
             declared = {f.name: spark2arrow[f.dataType.simpleString()] for f in sch.fields}
             reader = MdfSignalsReader(opts)
@@ -440,7 +498,8 @@ class TestSchemaMatchesEmittedTypes:
             if emitted is not None:
                 assert emitted == declared, (
                     f"schema/emit mismatch abs={abst} val={vdt} time={tdt} "
-                    f"rle={rle} part={part}: {declared} vs {emitted}")
+                    f"rle={rle} part={part}: {declared} vs {emitted}"
+                )
 
 
 class TestDatasourcesEdgeCases:
@@ -479,10 +538,11 @@ class TestDatasourcesEdgeCases:
 
         monkeypatch.setattr(
             "impulse_ds.mdf.mdf4_reader.MDF4Reader.read_header_start_epoch_seconds",
-            lambda self: None,
+            lambda _self: None,
         )
-        reader = MdfSignalsReader({"path": str(tmp_path), "files": "no_start.mf4",
-                                     "absolute_time": "true"})
+        reader = MdfSignalsReader(
+            {"path": str(tmp_path), "files": "no_start.mf4", "absolute_time": "true"}
+        )
         with pytest.raises(ValueError, match="no measurement start time"):
             reader.partitions()
 
@@ -500,11 +560,15 @@ class TestDatasourcesEdgeCases:
 
         monkeypatch.setattr(
             "impulse_ds.mdf.mdf4_reader.MDF4Reader.read_header_start_epoch_seconds",
-            lambda self: None,
+            lambda _self: None,
         )
-        reader = MdfMastersReader({
-            "path": str(tmp_path), "files": "no_start.mf4", "absolute_time": "true",
-        })
+        reader = MdfMastersReader(
+            {
+                "path": str(tmp_path),
+                "files": "no_start.mf4",
+                "absolute_time": "true",
+            }
+        )
         with pytest.raises(ValueError, match="no measurement start time"):
             reader.partitions()
 
@@ -512,12 +576,16 @@ class TestDatasourcesEdgeCases:
         from impulse_ds.mdf.datasources import MdfSignalsReader
 
         def _empty_scan(self):
-            return {"master_channels": {}, "signal_channels": [], "channel_id_map": {},
-                    "unsorted_dg_ctx": {}}
+            return {
+                "master_channels": {},
+                "signal_channels": [],
+                "channel_id_map": {},
+                "unsorted_dg_ctx": {},
+            }
 
         monkeypatch.setattr(
             "impulse_ds.mdf.datasources._resolve_file_list",
-            lambda opts: ["/fake/a.mf4"],
+            lambda _opts: ["/fake/a.mf4"],
         )
         monkeypatch.setattr(
             "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
@@ -533,12 +601,16 @@ class TestDatasourcesEdgeCases:
         from impulse_ds.mdf.datasources import MdfMastersReader
 
         def _no_masters(self):
-            return {"master_channels": {}, "signal_channels": [], "channel_id_map": {},
-                    "unsorted_dg_ctx": {}}
+            return {
+                "master_channels": {},
+                "signal_channels": [],
+                "channel_id_map": {},
+                "unsorted_dg_ctx": {},
+            }
 
         monkeypatch.setattr(
             "impulse_ds.mdf.datasources._resolve_file_list",
-            lambda opts: ["/fake/a.mf4"],
+            lambda _opts: ["/fake/a.mf4"],
         )
         monkeypatch.setattr(
             "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",

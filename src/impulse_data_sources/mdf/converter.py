@@ -12,20 +12,19 @@ Architecture:
 
 import time
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 
 from pyspark.sql import SparkSession
-from pyspark.sql.types import (
-    StructType, StructField, IntegerType, StringType
-)
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType
 
 from .mdf4_reader import (
-    MDF4Reader, ChannelInfo, CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER,
+    MDF4Reader,
+    ChannelInfo,
+    CN_TYPE_MASTER,
+    CN_TYPE_VIRTUAL_MASTER,
 )
 from .bin_packer import plan_partitions
 from .schemas import METADATA_SCHEMA
-
 
 _artifacts_shipped = False
 
@@ -49,6 +48,7 @@ def _ensure_artifacts_shipped(spark: SparkSession):
     import pathlib
     import zipfile
     import tempfile
+
     package_dir = pathlib.Path(__file__).parent
     impulse_ds_dir = package_dir.parent
     # Ship as a zip to preserve package structure (import impulse_ds.mdf.*)
@@ -64,6 +64,7 @@ def _ensure_artifacts_shipped(spark: SparkSession):
 @dataclass
 class ConversionResult:
     """Result of an MDF to Delta conversion."""
+
     file_uri: str
     file_path: str
     num_channels: int
@@ -152,16 +153,17 @@ class MDFToDeltaConverter:
             raise ValueError(f"No channels found in {file_path}")
 
         # Step 2: Identify master channels per group and build channel map
-        master_channels, signal_channels, channel_id_map = self._organize_channels(
-            all_channels
-        )
+        master_channels, signal_channels, channel_id_map = self._organize_channels(all_channels)
 
         # Step 3: Write metadata table
         self._write_metadata(signal_channels, channel_id_map, file_path, header_datetime)
 
         # Step 4: Plan record-range / channel-subset partitions
         partition_specs = self._plan(
-            file_path, master_channels, signal_channels, channel_id_map,
+            file_path,
+            master_channels,
+            signal_channels,
+            channel_id_map,
             unsorted_dg_ctx=reader._unsorted_dg_ctx,
         )
 
@@ -183,8 +185,8 @@ class MDFToDeltaConverter:
         )
 
     def _organize_channels(
-        self, channels: List[ChannelInfo]
-    ) -> Tuple[Dict[int, ChannelInfo], List[ChannelInfo], Dict[Tuple[int, int], int]]:
+        self, channels: list[ChannelInfo]
+    ) -> tuple[dict[int, ChannelInfo], list[ChannelInfo], dict[tuple[int, int], int]]:
         """
         Separate master and signal channels, assign channel IDs.
 
@@ -193,9 +195,9 @@ class MDFToDeltaConverter:
             - signal_channels: list of non-master channels
             - channel_id_map: {(group_idx, channel_idx): channel_id}
         """
-        master_channels: Dict[int, ChannelInfo] = {}
-        signal_channels: List[ChannelInfo] = []
-        channel_id_map: Dict[Tuple[int, int], int] = {}
+        master_channels: dict[int, ChannelInfo] = {}
+        signal_channels: list[ChannelInfo] = []
+        channel_id_map: dict[tuple[int, int], int] = {}
 
         channel_id = 0
         for ch in channels:
@@ -236,9 +238,13 @@ class MDFToDeltaConverter:
         """Plan partition specs for one file using this converter's settings.
         Shared by convert() and convert_batch_parallel()."""
         return plan_partitions(
-            file_path, master_channels, signal_channels, channel_id_map,
+            file_path,
+            master_channels,
+            signal_channels,
+            channel_id_map,
             target_partition_mb=self.target_partition_mb,
-            time_dtype=self.time_dtype, value_dtype=self.value_dtype,
+            time_dtype=self.time_dtype,
+            value_dtype=self.value_dtype,
             run_length_encoding=self.run_length_encoding,
             max_groups_per_partition=self.max_groups_per_partition,
             unsorted_dg_ctx=unsorted_dg_ctx,
@@ -246,19 +252,20 @@ class MDFToDeltaConverter:
 
     def _write_metadata(
         self,
-        signal_channels: List[ChannelInfo],
-        channel_id_map: Dict[Tuple[int, int], int],
+        signal_channels: list[ChannelInfo],
+        channel_id_map: dict[tuple[int, int], int],
         file_uri: str,
-        header_datetime: Optional[datetime],
+        header_datetime: datetime | None,
     ):
         """Write channel metadata to the metadata Delta table."""
         metadata_rows = self._metadata_rows(
-            signal_channels, channel_id_map, file_uri, header_datetime)
+            signal_channels, channel_id_map, file_uri, header_datetime
+        )
         if metadata_rows:
             meta_df = self.spark.createDataFrame(metadata_rows, schema=METADATA_SCHEMA)
             _write_metadata_df(meta_df, self.metadata_table, "append")
 
-    def _run_spark_conversion(self, partition_specs: List[dict], mode: str):
+    def _run_spark_conversion(self, partition_specs: list[dict], mode: str):
         """
         Execute the distributed conversion using mapInArrow for vectorized processing.
 
@@ -273,10 +280,12 @@ class MDFToDeltaConverter:
         # Create a seed DataFrame with one row per partition
         seed_df = self.spark.createDataFrame(
             [(i, spec_strings[i]) for i in range(len(spec_strings))],
-            schema=StructType([
-                StructField("partition_id", IntegerType(), False),
-                StructField("spec_json", StringType(), False),
-            ])
+            schema=StructType(
+                [
+                    StructField("partition_id", IntegerType(), False),
+                    StructField("spec_json", StringType(), False),
+                ]
+            ),
         ).repartition(len(spec_strings), "partition_id")
 
         # Use mapInArrow for zero-copy vectorized conversion. The output schema
@@ -286,7 +295,11 @@ class MDFToDeltaConverter:
         udf_func = _make_arrow_udf()
         td = partition_specs[0].get("time_dtype", "float64") if partition_specs else "float64"
         vd = partition_specs[0].get("value_dtype", "float64") if partition_specs else "float64"
-        rle = bool(partition_specs[0].get("run_length_encoding", False)) if partition_specs else False
+        rle = (
+            bool(partition_specs[0].get("run_length_encoding", False))
+            if partition_specs
+            else False
+        )
         result_df = seed_df.mapInArrow(udf_func, schema=_signals_spark_schema(td, vd, rle))
 
         # Write to Delta (plain write; see _write_signals_df for storage findings)
@@ -294,9 +307,9 @@ class MDFToDeltaConverter:
 
     def convert_batch(
         self,
-        file_paths: List[str],
+        file_paths: list[str],
         mode: str = "append",
-    ) -> List[ConversionResult]:
+    ) -> list[ConversionResult]:
         """
         Convert multiple MDF4 files in sequence; each row is tagged with its
         source file path (file_uri).
@@ -318,7 +331,7 @@ class MDFToDeltaConverter:
 
     def convert_batch_parallel(
         self,
-        file_paths: List[str],
+        file_paths: list[str],
         mode: str = "overwrite",
     ) -> ConversionResult:
         """
@@ -352,7 +365,10 @@ class MDFToDeltaConverter:
             reader = MDF4Reader(fp)
             channels = reader.scan_metadata()
             return (
-                idx, fp, channels, reader.read_header_datetime(),
+                idx,
+                fp,
+                channels,
+                reader.read_header_datetime(),
                 reader._unsorted_dg_ctx,
             )
 
@@ -363,7 +379,7 @@ class MDFToDeltaConverter:
                 key=lambda r: r[0],
             )
 
-        for i, file_path, all_channels_in_file, header_datetime, unsorted_ctx in scanned:
+        for _i, file_path, all_channels_in_file, header_datetime, unsorted_ctx in scanned:
             if not all_channels_in_file:
                 continue
 
@@ -371,12 +387,18 @@ class MDFToDeltaConverter:
                 all_channels_in_file
             )
 
-            all_metadata_rows.extend(self._metadata_rows(
-                signal_channels, channel_id_map, file_path, header_datetime))
-            all_partition_specs.extend(self._plan(
-                file_path, master_channels, signal_channels, channel_id_map,
-                unsorted_dg_ctx=unsorted_ctx,
-            ))
+            all_metadata_rows.extend(
+                self._metadata_rows(signal_channels, channel_id_map, file_path, header_datetime)
+            )
+            all_partition_specs.extend(
+                self._plan(
+                    file_path,
+                    master_channels,
+                    signal_channels,
+                    channel_id_map,
+                    unsorted_dg_ctx=unsorted_ctx,
+                )
+            )
 
             total_channels += len(signal_channels)
             total_samples += sum(ch.sample_count for ch in signal_channels)
@@ -433,8 +455,7 @@ def _ensure_clustered_table(spark, table: str, schema, cluster_cols: str):
     """
     ddl = _schema_to_ddl(schema)
     spark.sql(
-        f"CREATE TABLE IF NOT EXISTS {table} ({ddl}) "
-        f"USING DELTA CLUSTER BY ({cluster_cols})"
+        f"CREATE TABLE IF NOT EXISTS {table} ({ddl}) " f"USING DELTA CLUSTER BY ({cluster_cols})"
     )
     try:
         spark.sql(f"ALTER TABLE {table} CLUSTER BY ({cluster_cols})")
@@ -482,47 +503,54 @@ def _write_signals_df(df, table: str, mode: str):
     The clustered table is created from df.schema (not the fixed SIGNALS_SCHEMA)
     so a float32 time/value DataFrame produces a matching float table.
     """
-    _ensure_clustered_table(
-        df.sparkSession, table, df.schema, "file_uri, channel_id"
-    )
+    _ensure_clustered_table(df.sparkSession, table, df.schema, "file_uri, channel_id")
     df.write.format("delta").mode(mode).saveAsTable(table)
     try:
         df.sparkSession.sql(
-            f"ALTER TABLE {table} SET TBLPROPERTIES "
-            f"('delta.targetFileSize' = '128mb')"
+            f"ALTER TABLE {table} SET TBLPROPERTIES " f"('delta.targetFileSize' = '128mb')"
         )
     except Exception:
         # Property hint is best-effort; never fail the conversion over it.
         pass
 
 
-def _signals_spark_schema(time_dtype: str = "float64", value_dtype: str = "float64",
-                          run_length_encoding: bool = False):
+def _signals_spark_schema(
+    time_dtype: str = "float64", value_dtype: str = "float64", run_length_encoding: bool = False
+):
     """Spark StructType for the signals output; time/value follow the configured
     dtype (float32 halves their on-disk bytes). With run_length_encoding the
     per-sample `time` column is replaced by the [`tstart`, `tend`] interval."""
     from pyspark.sql.types import (
-        StructType, StructField, StringType, IntegerType, DoubleType, FloatType,
+        StructType,
+        StructField,
+        StringType,
+        IntegerType,
+        DoubleType,
+        FloatType,
     )
 
     def _ft(dt):
         return FloatType() if str(dt) == "float32" else DoubleType()
 
     if run_length_encoding:
-        return StructType([
+        return StructType(
+            [
+                StructField("file_uri", StringType(), False),
+                StructField("channel_id", IntegerType(), False),
+                StructField("tstart", _ft(time_dtype), False),
+                StructField("tend", _ft(time_dtype), False),
+                StructField("value", _ft(value_dtype), True),
+            ]
+        )
+
+    return StructType(
+        [
             StructField("file_uri", StringType(), False),
             StructField("channel_id", IntegerType(), False),
-            StructField("tstart", _ft(time_dtype), False),
-            StructField("tend", _ft(time_dtype), False),
+            StructField("time", _ft(time_dtype), False),
             StructField("value", _ft(value_dtype), True),
-        ])
-
-    return StructType([
-        StructField("file_uri", StringType(), False),
-        StructField("channel_id", IntegerType(), False),
-        StructField("time", _ft(time_dtype), False),
-        StructField("value", _ft(value_dtype), True),
-    ])
+        ]
+    )
 
 
 def _convert_partition_arrow(batch_iter):
@@ -534,7 +562,8 @@ def _convert_partition_arrow(batch_iter):
     import logging
     import pyarrow as pa
     from .udf_helpers import (
-        convert_spec_to_arrow_batches, convert_stripe_spec_to_arrow_batches,
+        convert_spec_to_arrow_batches,
+        convert_stripe_spec_to_arrow_batches,
         signals_arrow_schema,
     )
 
@@ -557,10 +586,14 @@ def _convert_partition_arrow(batch_iter):
             spec = json.loads(spec_json)
             # A stripe spec (Design B, byte-offset) carries "subblocks"; a group
             # spec (default) carries "channels". Dispatch to the matching decoder.
-            decode = (convert_stripe_spec_to_arrow_batches if "subblocks" in spec
-                      else convert_spec_to_arrow_batches)
+            decode = (
+                convert_stripe_spec_to_arrow_batches
+                if "subblocks" in spec
+                else convert_spec_to_arrow_batches
+            )
             for rb in decode(
-                spec, prof=prof,
+                spec,
+                prof=prof,
                 time_dtype=spec.get("time_dtype", "float64"),
                 value_dtype=spec.get("value_dtype", "float64"),
                 run_length_encoding=bool(spec.get("run_length_encoding", False)),
@@ -570,8 +603,10 @@ def _convert_partition_arrow(batch_iter):
 
         if not yielded:
             yield pa.RecordBatch.from_arrays(
-                [pa.array([], type=output_schema.field(i).type)
-                 for i in range(len(output_schema))],
+                [
+                    pa.array([], type=output_schema.field(i).type)
+                    for i in range(len(output_schema))
+                ],
                 schema=output_schema,
             )
 
@@ -579,5 +614,8 @@ def _convert_partition_arrow(batch_iter):
     # without raising the default level; it is a measurement line, not an error.
     log.warning(
         "MDF_PROFILE rows=%d read_ms=%.0f decode_ms=%.0f arrow_ms=%.0f",
-        prof["rows"], prof["read"] / 1e6, prof["decode"] / 1e6, prof["arrow"] / 1e6,
+        prof["rows"],
+        prof["read"] / 1e6,
+        prof["decode"] / 1e6,
+        prof["arrow"] / 1e6,
     )

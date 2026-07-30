@@ -155,7 +155,14 @@ class TestReadBlockChunks:
         with io.BytesIO(blob) as f:
             chunks = list(
                 _read_block_chunks(
-                    f, 0, 8, 10, row_start=2, row_end=5, prof=prof, log=log,
+                    f,
+                    0,
+                    8,
+                    10,
+                    row_start=2,
+                    row_end=5,
+                    prof=prof,
+                    log=log,
                 )
             )
         assert len(chunks) == 1
@@ -171,14 +178,22 @@ class TestReadBlockChunks:
         with io.BytesIO(blob) as f:
             chunks = list(
                 _read_block_chunks(
-                    f, dl_addr, 8, 4, row_start=1, row_end=3, prof=prof, log=log,
+                    f,
+                    dl_addr,
+                    8,
+                    4,
+                    row_start=1,
+                    row_end=3,
+                    prof=prof,
+                    log=log,
                 )
             )
         assert len(chunks) == 1
         raw, start = chunks[0]
         assert start == 1
         np.testing.assert_allclose(
-            np.frombuffer(raw, dtype=np.float64), [1.0, 2.0],
+            np.frombuffer(raw, dtype=np.float64),
+            [1.0, 2.0],
         )
 
 

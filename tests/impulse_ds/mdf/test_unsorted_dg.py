@@ -87,18 +87,42 @@ class TestPlanPartitionsUnsortedFields:
         from impulse_ds.mdf.mdf4_reader import ChannelInfo, CN_TYPE_MASTER
 
         ch = ChannelInfo(
-            group_idx=0, channel_idx=0, channel_name="Sig", unit="",
-            sample_count=2, data_type=4, bit_offset=0, byte_offset=12,
-            bit_count=64, channel_type=0, cn_block_addr=0, cg_block_addr=0,
-            dg_block_addr=100, data_block_addr=1000, record_size=20,
-            rec_id_size=4, record_id=1,
+            group_idx=0,
+            channel_idx=0,
+            channel_name="Sig",
+            unit="",
+            sample_count=2,
+            data_type=4,
+            bit_offset=0,
+            byte_offset=12,
+            bit_count=64,
+            channel_type=0,
+            cn_block_addr=0,
+            cg_block_addr=0,
+            dg_block_addr=100,
+            data_block_addr=1000,
+            record_size=20,
+            rec_id_size=4,
+            record_id=1,
         )
         master = ChannelInfo(
-            group_idx=0, channel_idx=0, channel_name="Time", unit="s",
-            sample_count=2, data_type=4, bit_offset=0, byte_offset=4,
-            bit_count=64, channel_type=2, cn_block_addr=0, cg_block_addr=0,
-            dg_block_addr=100, data_block_addr=1000, record_size=20,
-            rec_id_size=4, record_id=1,
+            group_idx=0,
+            channel_idx=0,
+            channel_name="Time",
+            unit="s",
+            sample_count=2,
+            data_type=4,
+            bit_offset=0,
+            byte_offset=4,
+            bit_count=64,
+            channel_type=2,
+            cn_block_addr=0,
+            cg_block_addr=0,
+            dg_block_addr=100,
+            data_block_addr=1000,
+            record_size=20,
+            rec_id_size=4,
+            record_id=1,
         )
         ctx = {100: {"rec_id_size": 4, "cg_sizes": {1: 20, 2: 20}}}
         specs = plan_partitions(
@@ -126,6 +150,7 @@ class TestConvertSpecUnsorted:
             dt += payload
             fd, path = tempfile.mkstemp(suffix=".mf4")
             import os
+
             os.write(fd, dt)
             os.close(fd)
             return path
@@ -189,15 +214,27 @@ class TestExtractAfterFilter:
             cg_record_sizes=cg_sizes,
         )
         master = {
-            "byte_offset": 4, "bit_offset": 0, "bit_count": 64,
-            "data_type": 4, "channel_type": 2, "cc_type": -1, "cc_params": [],
+            "byte_offset": 4,
+            "bit_offset": 0,
+            "bit_count": 64,
+            "data_type": 4,
+            "channel_type": 2,
+            "cc_type": -1,
+            "cc_params": [],
         }
         ch = {
-            "channel_type": 0, "data_type": 4, "bit_count": 64,
-            "byte_offset": 12, "bit_offset": 0, "record_size": record_size,
-            "cn_flags": 0, "invalidation_bit_pos": 0,
-            "invalidation_bytes": 0, "data_bytes": 16,
-            "cc_type": -1, "cc_params": [],
+            "channel_type": 0,
+            "data_type": 4,
+            "bit_count": 64,
+            "byte_offset": 12,
+            "bit_offset": 0,
+            "record_size": record_size,
+            "cn_flags": 0,
+            "invalidation_bit_pos": 0,
+            "invalidation_bytes": 0,
+            "data_bytes": 16,
+            "cc_type": -1,
+            "cc_params": [],
         }
         ts = extract_timestamps(prepared, record_size, master, index_offset=offset)
         vals = extract_signal(prepared, record_size, ch)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import struct
 import zlib
-from typing import List, Tuple
 
 import numpy as np
 
@@ -56,20 +55,14 @@ def make_dz_block(
     return header + compressed
 
 
-def make_dl_block(next_dl: int, data_addrs: List[int]) -> bytes:
+def make_dl_block(next_dl: int, data_addrs: list[int]) -> bytes:
     """Build a ##DL block pointing at ``data_addrs`` (link 0 = next_dl)."""
     dl_count = len(data_addrs)
     link_count = 1 + dl_count
     links = struct.pack(f"<{link_count}Q", next_dl, *data_addrs)
     body = links + b"\x00" + b"\x00" * 3 + struct.pack("<I", dl_count)
     length = 24 + len(body)
-    return (
-        b"##DL"
-        + b"\x00" * 4
-        + struct.pack("<Q", length)
-        + struct.pack("<Q", link_count)
-        + body
-    )
+    return b"##DL" + b"\x00" * 4 + struct.pack("<Q", length) + struct.pack("<Q", link_count) + body
 
 
 def make_hl_block(dl_addr: int) -> bytes:
@@ -86,9 +79,9 @@ def make_hl_block(dl_addr: int) -> bytes:
 
 
 def build_dl_file(
-    dt_payloads: List[bytes],
+    dt_payloads: list[bytes],
     wrap_hl: bool = False,
-) -> Tuple[bytes, int]:
+) -> tuple[bytes, int]:
     """Lay out DT sub-blocks + DL (optionally HL) in one buffer.
 
     Returns ``(file_bytes, data_block_addr)`` where ``data_block_addr`` is the
@@ -96,7 +89,7 @@ def build_dl_file(
     """
     # Avoid placing DT blocks at file offset 0 — the DL reader treats link 0 as null.
     blob = bytearray(b"\x00" * 8)
-    dt_addrs: List[int] = []
+    dt_addrs: list[int] = []
     for payload in dt_payloads:
         dt_addrs.append(len(blob))
         if payload[:4] in (b"##DT", b"##DZ"):
@@ -112,7 +105,7 @@ def build_dl_file(
     return bytes(blob), dl_addr
 
 
-def cyclic_dl_file() -> Tuple[bytes, int]:
+def cyclic_dl_file() -> tuple[bytes, int]:
     """DL whose next link points back to itself (cycle guard test)."""
     blob = bytearray(b"\x00" * 8)
     payload = make_dt_block(b"\x01\x02\x03\x04")
@@ -134,13 +127,7 @@ def bytes_io_at(data: bytes, offset: int = 0) -> io.BytesIO:
 def make_unknown_block(payload: bytes = b"\x00") -> bytes:
     """Build a non-DT/DZ/DL block for parse_subblocks fallback tests."""
     length = 24 + len(payload)
-    return (
-        b"##XX"
-        + b"\x00" * 4
-        + struct.pack("<Q", length)
-        + struct.pack("<Q", 0)
-        + payload
-    )
+    return b"##XX" + b"\x00" * 4 + struct.pack("<Q", length) + struct.pack("<Q", 0) + payload
 
 
 def make_cc_block(
@@ -163,9 +150,5 @@ def make_cc_block(
         header += struct.pack(f"<{cc_val_count}d", *params[:cc_val_count])
     length = 24 + len(header)
     return (
-        b"##CC"
-        + b"\x00" * 4
-        + struct.pack("<Q", length)
-        + struct.pack("<Q", link_count)
-        + header
+        b"##CC" + b"\x00" * 4 + struct.pack("<Q", length) + struct.pack("<Q", link_count) + header
     )

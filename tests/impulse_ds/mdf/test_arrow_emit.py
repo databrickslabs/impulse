@@ -63,6 +63,7 @@ class TestDlRowRangeEmit:
         records = [struct.pack("<d", float(i)) for i in range(6)]
         blob, dl_addr = build_dl_file(records)
         import tempfile
+
         fd, path = tempfile.mkstemp(suffix=".mf4")
         os.write(fd, blob)
         os.close(fd)

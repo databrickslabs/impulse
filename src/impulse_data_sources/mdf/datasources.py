@@ -157,8 +157,14 @@ class MdfSignalsDataSource(DataSource):
         # module-global function there forces a module import that can fail in
         # that context. Inline imports of pyspark types are always safe.
         from pyspark.sql.types import (
-            StructType, StructField, StringType, IntegerType, DoubleType, FloatType,
+            StructType,
+            StructField,
+            StringType,
+            IntegerType,
+            DoubleType,
+            FloatType,
         )
+
         absolute = self._absolute_time()
 
         def _ftype(opt):
@@ -168,23 +174,29 @@ class MdfSignalsDataSource(DataSource):
             # disagree on `value` and the writer fails (getDouble on a float vector).
             if absolute and opt == "time_dtype":
                 return DoubleType()
-            return FloatType() if str(self.options.get(opt, "float64")) == "float32" else DoubleType()
+            return (
+                FloatType() if str(self.options.get(opt, "float64")) == "float32" else DoubleType()
+            )
 
         if str(self.options.get("run_length_encoding", "false")).lower() == "true":
-            return StructType([
+            return StructType(
+                [
+                    StructField("file_uri", StringType(), False),
+                    StructField("channel_id", IntegerType(), False),
+                    StructField("tstart", _ftype("time_dtype"), False),
+                    StructField("tend", _ftype("time_dtype"), False),
+                    StructField("value", _ftype("value_dtype"), True),
+                ]
+            )
+
+        return StructType(
+            [
                 StructField("file_uri", StringType(), False),
                 StructField("channel_id", IntegerType(), False),
-                StructField("tstart", _ftype("time_dtype"), False),
-                StructField("tend", _ftype("time_dtype"), False),
+                StructField("time", _ftype("time_dtype"), False),
                 StructField("value", _ftype("value_dtype"), True),
-            ])
-
-        return StructType([
-            StructField("file_uri", StringType(), False),
-            StructField("channel_id", IntegerType(), False),
-            StructField("time", _ftype("time_dtype"), False),
-            StructField("value", _ftype("value_dtype"), True),
-        ])
+            ]
+        )
 
     def reader(self, schema):
         return MdfSignalsReader(self.options)
@@ -210,7 +222,9 @@ class MdfSignalsReader(DataSourceReader):
 
         file_paths = _resolve_file_list(self.options)
         target_partition_mb = float(self.options.get("target_partition_mb", "64"))
-        run_length_encoding = str(self.options.get("run_length_encoding", "false")).lower() == "true"
+        run_length_encoding = (
+            str(self.options.get("run_length_encoding", "false")).lower() == "true"
+        )
         max_groups_per_partition = int(self.options.get("max_groups_per_partition", "64"))
         absolute_time = str(self.options.get("absolute_time", "false")).lower() == "true"
         # partitioning: "group" (default, per-group/record-range) or "stripe"
@@ -229,16 +243,19 @@ class MdfSignalsReader(DataSourceReader):
                 if start is None:
                     raise ValueError(
                         f"absolute_time=true but {file_path} has no measurement "
-                        f"start time in its HD block")
+                        f"start time in its HD block"
+                    )
                 time_offset = start
 
             if partitioning == "stripe":
                 specs = plan_stripes_for_file(
                     file_path,
                     target_partition_mb=target_partition_mb,
-                    time_dtype=time_dtype, value_dtype=value_dtype,
+                    time_dtype=time_dtype,
+                    value_dtype=value_dtype,
                     run_length_encoding=run_length_encoding,
-                    time_offset=time_offset, stripe_target_mb=stripe_target_mb,
+                    time_offset=time_offset,
+                    stripe_target_mb=stripe_target_mb,
                 )
                 all_partition_specs.extend(json.dumps(s) for s in specs)
                 continue
@@ -253,7 +270,8 @@ class MdfSignalsReader(DataSourceReader):
                 organized["signal_channels"],
                 organized["channel_id_map"],
                 target_partition_mb=target_partition_mb,
-                time_dtype=time_dtype, value_dtype=value_dtype,
+                time_dtype=time_dtype,
+                value_dtype=value_dtype,
                 run_length_encoding=run_length_encoding,
                 max_groups_per_partition=max_groups_per_partition,
                 time_offset=time_offset,
@@ -280,7 +298,9 @@ class MdfSignalsReader(DataSourceReader):
         import json
         import logging
         from .udf_helpers import (
-            convert_spec_to_arrow_batches, convert_stripe_spec_to_arrow_batches)
+            convert_spec_to_arrow_batches,
+            convert_stripe_spec_to_arrow_batches,
+        )
 
         spec_json = partition.value
         if spec_json == "[]":
@@ -292,19 +312,32 @@ class MdfSignalsReader(DataSourceReader):
         # options for older specs.
         time_dtype = str(spec.get("time_dtype", self.options.get("time_dtype", "float64")))
         value_dtype = str(spec.get("value_dtype", self.options.get("value_dtype", "float64")))
-        run_length_encoding = bool(spec.get(
-            "run_length_encoding",
-            str(self.options.get("run_length_encoding", "false")).lower() == "true"))
+        run_length_encoding = bool(
+            spec.get(
+                "run_length_encoding",
+                str(self.options.get("run_length_encoding", "false")).lower() == "true",
+            )
+        )
         prof = {"read": 0, "decode": 0, "arrow": 0, "rows": 0}
         # Stripe spec (Design B) carries "subblocks"; group spec carries "channels".
-        decode = (convert_stripe_spec_to_arrow_batches if "subblocks" in spec
-                  else convert_spec_to_arrow_batches)
+        decode = (
+            convert_stripe_spec_to_arrow_batches
+            if "subblocks" in spec
+            else convert_spec_to_arrow_batches
+        )
         yield from decode(
-            spec, prof=prof, time_dtype=time_dtype, value_dtype=value_dtype,
-            run_length_encoding=run_length_encoding)
+            spec,
+            prof=prof,
+            time_dtype=time_dtype,
+            value_dtype=value_dtype,
+            run_length_encoding=run_length_encoding,
+        )
         logging.getLogger("impulse_ds.mdf.convert").warning(
             "MDF_PROFILE rows=%d read_ms=%.0f decode_ms=%.0f arrow_ms=%.0f",
-            prof["rows"], prof["read"] / 1e6, prof["decode"] / 1e6, prof["arrow"] / 1e6,
+            prof["rows"],
+            prof["read"] / 1e6,
+            prof["decode"] / 1e6,
+            prof["arrow"] / 1e6,
         )
 
 
@@ -359,16 +392,18 @@ class MdfMetadataReader(DataSourceReader):
 
         rows = []
         for ch_id, ch in enumerate(organized["signal_channels"]):
-            rows.append((
-                file_path,
-                ch_id,
-                ch.group_idx,
-                ch.channel_idx,
-                ch.channel_name,
-                ch.unit or "",
-                header_datetime,
-                ch.md_comment or None,
-            ))
+            rows.append(
+                (
+                    file_path,
+                    ch_id,
+                    ch.group_idx,
+                    ch.channel_idx,
+                    ch.channel_name,
+                    ch.unit or "",
+                    header_datetime,
+                    ch.md_comment or None,
+                )
+            )
 
         return iter(rows)
 
@@ -405,15 +440,27 @@ class MdfMastersDataSource(DataSource):
         master sample. timestamp is float (double unless time_dtype=float32, or
         absolute_time which forces double)."""
         from pyspark.sql.types import (
-            StructType, StructField, StringType, IntegerType, DoubleType, FloatType,
+            StructType,
+            StructField,
+            StringType,
+            IntegerType,
+            DoubleType,
+            FloatType,
         )
+
         absolute = str(self.options.get("absolute_time", "false")).lower() == "true"
-        ts_type = DoubleType() if absolute or str(self.options.get("time_dtype", "float64")) != "float32" else FloatType()
-        return StructType([
-            StructField("file_uri", StringType(), False),
-            StructField("group_idx", IntegerType(), False),
-            StructField("timestamp", ts_type, False),
-        ])
+        ts_type = (
+            DoubleType()
+            if absolute or str(self.options.get("time_dtype", "float64")) != "float32"
+            else FloatType()
+        )
+        return StructType(
+            [
+                StructField("file_uri", StringType(), False),
+                StructField("group_idx", IntegerType(), False),
+                StructField("timestamp", ts_type, False),
+            ]
+        )
 
     def reader(self, schema):
         return MdfMastersReader(self.options)
@@ -451,10 +498,12 @@ class MdfMastersReader(DataSourceReader):
                 if start is None:
                     raise ValueError(
                         f"absolute_time=true but {file_path} has no measurement "
-                        f"start time in its HD block")
+                        f"start time in its HD block"
+                    )
                 time_offset = start
             specs = plan_master_partitions(
-                file_path, organized["master_channels"],
+                file_path,
+                organized["master_channels"],
                 target_partition_mb=target_partition_mb,
                 time_dtype=time_dtype,
                 max_groups_per_partition=max_groups_per_partition,
@@ -482,9 +531,11 @@ class MdfMastersReader(DataSourceReader):
         # Use the dtype baked into the spec (reflects the absolute_time override).
         time_dtype = str(spec.get("time_dtype", self.options.get("time_dtype", "float64")))
         prof = {"read": 0, "decode": 0, "arrow": 0, "rows": 0}
-        yield from convert_master_spec_to_arrow_batches(
-            spec, prof=prof, time_dtype=time_dtype)
+        yield from convert_master_spec_to_arrow_batches(spec, prof=prof, time_dtype=time_dtype)
         logging.getLogger("impulse_ds.mdf.convert").warning(
             "MDF_PROFILE(masters) rows=%d read_ms=%.0f decode_ms=%.0f arrow_ms=%.0f",
-            prof["rows"], prof["read"] / 1e6, prof["decode"] / 1e6, prof["arrow"] / 1e6,
+            prof["rows"],
+            prof["read"] / 1e6,
+            prof["decode"] / 1e6,
+            prof["arrow"] / 1e6,
         )

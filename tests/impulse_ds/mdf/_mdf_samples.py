@@ -19,6 +19,7 @@ masters, and multi-file behaviour:
 A known header start time is set so the absolute_time path has something to add,
 and one channel carries an XML comment so md_comment is populated.
 """
+
 import atexit
 import datetime
 import os
@@ -29,6 +30,7 @@ import numpy as np
 
 try:
     from asammdf import MDF, Signal
+
     HAS_ASAMMDF = True
 except Exception:  # pragma: no cover - asammdf is a dev dependency
     HAS_ASAMMDF = False
@@ -45,7 +47,10 @@ def _build_file(path: str, compression: int) -> None:
     # Group 0: 100 samples at 10 Hz.
     t0 = (np.arange(100) * 0.1).astype(np.float64)
     speed = Signal(
-        samples=(t0 * 2.0), timestamps=t0, name="Speed", unit="km/h",
+        samples=(t0 * 2.0),
+        timestamps=t0,
+        name="Speed",
+        unit="km/h",
         comment="<CNcomment><TX>vehicle speed</TX></CNcomment>",
     )
     gear = np.zeros(100, dtype=np.int32)

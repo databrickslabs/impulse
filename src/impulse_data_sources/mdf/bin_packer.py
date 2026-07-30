@@ -8,8 +8,6 @@ file I/O. `plan_stripes_for_file` is the alternative byte-offset "stripe"
 planner, and `plan_master_partitions` plans the per-group master time base.
 """
 
-from typing import Dict, List
-
 from .mdf4_reader import MDF4Reader
 
 
@@ -26,7 +24,7 @@ def plan_partitions(
     max_groups_per_partition: int = 64,
     time_offset: float = 0.0,
     unsorted_dg_ctx: dict = None,
-) -> List[dict]:
+) -> list[dict]:
     """
     Plan Spark partitions for one MDF file, decoupling parallelism from channel
     count so executors stay saturated and a single dominant channel group no
@@ -69,7 +67,7 @@ def plan_partitions(
     target_rows = max(1, int(target_partition_mb * 1024 * 1024 / 16))
     ctx = unsorted_dg_ctx or {}
 
-    groups: Dict[int, list] = {}
+    groups: dict[int, list] = {}
     for ch in signal_channels:
         groups.setdefault(ch.group_idx, []).append(ch)
 
@@ -86,9 +84,14 @@ def plan_partitions(
         return d
 
     def _spec(ch_dicts, r0=None, r1=None):
-        s = {"file_path": file_path, "channels": ch_dicts,
-             "time_dtype": time_dtype, "value_dtype": value_dtype,
-             "run_length_encoding": run_length_encoding, "time_offset": time_offset}
+        s = {
+            "file_path": file_path,
+            "channels": ch_dicts,
+            "time_dtype": time_dtype,
+            "value_dtype": value_dtype,
+            "run_length_encoding": run_length_encoding,
+            "time_offset": time_offset,
+        }
         if r0 is not None:
             s["row_start"] = r0
             s["row_end"] = r1
@@ -100,10 +103,10 @@ def plan_partitions(
     # FUSE-mounted volume those are scattered cold reads ~10-25 ms each, i.e.
     # minutes for 30k+ groups — a planning blocker.) Block type is resolved at
     # READ time on executors instead (DT seek / DL sub-block range / DZ slice).
-    specs: List[dict] = []
+    specs: list[dict] = []
     # Open bin for coalescing small (single-partition) groups. Flushed when it
     # reaches ~target_rows of output or max_groups_per_partition groups.
-    pending_ch: List[dict] = []
+    pending_ch: list[dict] = []
     pending_rows = 0
     pending_groups = 0
 
@@ -126,7 +129,7 @@ def plan_partitions(
             # Wide group: split by channel subset (no channel-list duplication).
             ch_per_part = max(1, target_rows // group_records)
             for i in range(0, c, ch_per_part):
-                specs.append(_spec(ch_dicts[i:i + ch_per_part]))
+                specs.append(_spec(ch_dicts[i : i + ch_per_part]))
         else:
             rows_per_part = max(1, target_rows // c)
             if rows_per_part >= group_records:
@@ -159,7 +162,7 @@ def plan_master_partitions(
     max_groups_per_partition: int = 64,
     time_offset: float = 0.0,
     unsorted_dg_ctx: dict = None,
-) -> List[dict]:
+) -> list[dict]:
     """
     Plan Spark partitions for the MASTER channels of one MDF file — the time
     base of each acquisition group, one master per group, emitted as one row per
@@ -194,15 +197,19 @@ def plan_master_partitions(
         return entry
 
     def _spec(masters, r0=None, r1=None):
-        s = {"file_path": file_path,
-             "time_dtype": time_dtype, "masters": masters, "time_offset": time_offset}
+        s = {
+            "file_path": file_path,
+            "time_dtype": time_dtype,
+            "masters": masters,
+            "time_offset": time_offset,
+        }
         if r0 is not None:
             s["row_start"] = r0
             s["row_end"] = r1
         return s
 
-    specs: List[dict] = []
-    pending: List[dict] = []
+    specs: list[dict] = []
+    pending: list[dict] = []
     pending_rows = 0
 
     def _flush():
@@ -250,7 +257,7 @@ def plan_stripes_for_file(
     gap_threshold_mb: float = 8.0,
     max_subblocks_per_stripe: int = 4096,
     file_bytes: bytes = None,
-) -> List[dict]:
+) -> list[dict]:
     """Design B planner: read the file ONCE (in RAM), build a sub-block map, and
     pack sub-blocks — sorted by file offset — into contiguous byte-offset STRIPES.
 
@@ -293,7 +300,7 @@ def plan_stripes_for_file(
         return d
 
     bio = io.BytesIO(file_bytes)
-    by_group: Dict[int, list] = {}
+    by_group: dict[int, list] = {}
     for ch in signal_channels:
         by_group.setdefault(ch.group_idx, []).append(ch)
 
@@ -318,17 +325,19 @@ def plan_stripes_for_file(
         }
         meta.update(unsorted_fields_from_ctx(ch0.dg_block_addr, ch0.record_id, unsorted_dg_ctx))
         groups_meta[group_idx] = meta
-        for (soff, slen, rstart, rcount) in parse_subblocks(bio, ch0.data_block_addr, rs, sc):
+        for soff, slen, rstart, rcount in parse_subblocks(bio, ch0.data_block_addr, rs, sc):
             if rcount <= 0 and slen <= 0:
                 continue
-            subblocks.append({
-                "group_idx": group_idx,
-                "grp": ch0.data_block_addr,
-                "abs_off": soff,
-                "on_disk_len": slen,
-                "rec_start": rstart,
-                "rec_count": rcount,
-            })
+            subblocks.append(
+                {
+                    "group_idx": group_idx,
+                    "grp": ch0.data_block_addr,
+                    "abs_off": soff,
+                    "on_disk_len": slen,
+                    "rec_start": rstart,
+                    "rec_count": rcount,
+                }
+            )
 
     subblocks.sort(key=lambda s: s["abs_off"])
 
@@ -341,24 +350,34 @@ def plan_stripes_for_file(
     def _flush():
         nonlocal cur, cur_rows, cur_bytes, cur_lo, cur_hi, cur_grps
         if cur:
-            specs.append({
-                "file_path": file_path,
-                "byte_start": cur_lo, "byte_end": cur_hi,
-                "time_dtype": time_dtype, "value_dtype": value_dtype,
-                "run_length_encoding": run_length_encoding, "time_offset": time_offset,
-                "groups": {str(g): groups_meta[g] for g in cur_grps},
-                "subblocks": cur,
-            })
-            cur = []; cur_rows = cur_bytes = 0; cur_lo = cur_hi = None; cur_grps = set()
+            specs.append(
+                {
+                    "file_path": file_path,
+                    "byte_start": cur_lo,
+                    "byte_end": cur_hi,
+                    "time_dtype": time_dtype,
+                    "value_dtype": value_dtype,
+                    "run_length_encoding": run_length_encoding,
+                    "time_offset": time_offset,
+                    "groups": {str(g): groups_meta[g] for g in cur_grps},
+                    "subblocks": cur,
+                }
+            )
+            cur = []
+            cur_rows = cur_bytes = 0
+            cur_lo = cur_hi = None
+            cur_grps = set()
 
     for sb in subblocks:
         gidx = sb["group_idx"]
         rows = sb["rec_count"] * groups_meta[gidx]["n_channels"]
         gap = (sb["abs_off"] - cur_hi) if cur_hi is not None else 0
-        if cur and (cur_rows + rows > target_rows
-                    or cur_bytes + sb["on_disk_len"] > stripe_bytes_cap
-                    or gap > gap_threshold
-                    or len(cur) >= max_subblocks_per_stripe):
+        if cur and (
+            cur_rows + rows > target_rows
+            or cur_bytes + sb["on_disk_len"] > stripe_bytes_cap
+            or gap > gap_threshold
+            or len(cur) >= max_subblocks_per_stripe
+        ):
             _flush()
         cur.append(sb)
         cur_rows += rows

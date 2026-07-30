@@ -11,11 +11,8 @@ import os
 import pytest
 import numpy as np
 
-from impulse_ds.mdf.mdf4_reader import (
-    MDF4Reader, CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER
-)
+from impulse_ds.mdf.mdf4_reader import MDF4Reader, CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER
 from ._mdf_samples import sample_mdf_dir, START_TIME
-
 
 _DIR, _FILES = sample_mdf_dir()
 EXAMPLE_DIR = _DIR
@@ -51,8 +48,7 @@ class TestMDF4Reader:
         reader = MDF4Reader(mdf_file)
         channels = reader.scan_metadata()
         masters = [
-            ch for ch in channels
-            if ch.channel_type in (CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER)
+            ch for ch in channels if ch.channel_type in (CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER)
         ]
         assert len(masters) > 0, "No master (time) channels found"
 
@@ -63,10 +59,12 @@ class TestMDF4Reader:
         # Find a signal channel with data
         signal_ch = None
         for ch in channels:
-            if ch.channel_type not in (CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER):
-                if ch.sample_count > 0:
-                    signal_ch = ch
-                    break
+            if (
+                ch.channel_type not in (CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER)
+                and ch.sample_count > 0
+            ):
+                signal_ch = ch
+                break
 
         if signal_ch is None:
             pytest.skip("No signal channels with data")
@@ -99,10 +97,13 @@ class TestMDF4Reader:
 
         signal_ch = None
         for ch in channels:
-            if ch.channel_type not in (CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER):
-                if ch.sample_count > 0 and ch.group_idx in masters:
-                    signal_ch = ch
-                    break
+            if (
+                ch.channel_type not in (CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER)
+                and ch.sample_count > 0
+                and ch.group_idx in masters
+            ):
+                signal_ch = ch
+                break
 
         if signal_ch is None:
             pytest.skip("No suitable channel pair found")
@@ -146,6 +147,7 @@ class TestCrossValidation:
     def _check_asammdf(self):
         try:
             import asammdf
+
             self.asammdf = asammdf
         except ImportError:
             pytest.skip("asammdf not installed")
@@ -210,9 +212,7 @@ class TestCrossValidation:
 
             # asammdf
             try:
-                sig = mdf.get(
-                    ch.channel_name, group=ch.group_idx, index=ch.channel_idx
-                )
+                sig = mdf.get(ch.channel_name, group=ch.group_idx, index=ch.channel_idx)
             except Exception:
                 continue
 
@@ -224,10 +224,12 @@ class TestCrossValidation:
                 continue
 
             np.testing.assert_allclose(
-                our_values[:n], ref_values[:n],
-                rtol=1e-5, atol=1e-10,
+                our_values[:n],
+                ref_values[:n],
+                rtol=1e-5,
+                atol=1e-10,
                 err_msg=f"Mismatch for channel {ch.channel_name} "
-                        f"(group={ch.group_idx}, idx={ch.channel_idx})"
+                f"(group={ch.group_idx}, idx={ch.channel_idx})",
             )
             compared += 1
 
@@ -248,6 +250,7 @@ class TestCCConversion:
 
     def test_apply_cc_linear(self):
         from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+
         raw = np.array([0.0, 1.0, 2.0, 100.0])
         # linear: phys = 2.0 * raw + 10.0, params = (b=10.0, a=2.0)
         result = apply_cc_conversion(raw, 1, (10.0, 2.0))
@@ -255,6 +258,7 @@ class TestCCConversion:
 
     def test_apply_cc_rational(self):
         from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+
         raw = np.array([1.0, 2.0, 10.0])
         # rational: (0*X^2 + 2*X + 1) / (0*X^2 + 0*X + 1) = 2*X + 1
         result = apply_cc_conversion(raw, 2, (0.0, 2.0, 1.0, 0.0, 0.0, 1.0))
@@ -262,12 +266,14 @@ class TestCCConversion:
 
     def test_apply_cc_identity(self):
         from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+
         raw = np.array([42.0, -1.5, 0.0])
         result = apply_cc_conversion(raw, 0, ())
         np.testing.assert_array_equal(result, raw)
 
     def test_apply_cc_tabular_interp(self):
         from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+
         # Interleaved per spec: (key_0, val_0, key_1, val_1, key_2, val_2)
         raw = np.array([0.0, 50.0, 100.0, 150.0, 200.0])
         result = apply_cc_conversion(raw, 4, (0.0, 0.0, 100.0, 50.0, 200.0, 100.0))
@@ -275,6 +281,7 @@ class TestCCConversion:
 
     def test_apply_cc_no_conversion(self):
         from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+
         raw = np.array([1.0, 2.0, 3.0])
         result = apply_cc_conversion(raw, -1, ())
         np.testing.assert_array_equal(result, raw)
@@ -284,8 +291,9 @@ class TestCCConversion:
     def test_virtual_master_cc_applied(self):
         """Verify CC conversion is applied to virtual master timestamps."""
         from impulse_ds.mdf.udf_helpers import extract_timestamps
+
         # Simulate raw_data for 5 samples with 8-byte records (any content)
-        raw_data = b'\x00' * 40
+        raw_data = b"\x00" * 40
         record_size = 8
         master_info = {
             "channel_type": 3,  # virtual master
@@ -302,7 +310,8 @@ class TestCCConversion:
     def test_virtual_master_no_cc(self):
         """Virtual master without CC returns raw indices."""
         from impulse_ds.mdf.udf_helpers import extract_timestamps
-        raw_data = b'\x00' * 24
+
+        raw_data = b"\x00" * 24
         record_size = 8
         master_info = {
             "channel_type": 3,
@@ -325,56 +334,84 @@ class TestPlanPartitionsCoalescing:
     @staticmethod
     def _ch(gi, ci, samples, addr, ctype=0):
         from impulse_ds.mdf.mdf4_reader import ChannelInfo
+
         return ChannelInfo(
-            group_idx=gi, channel_idx=ci, channel_name=f"s{gi}_{ci}", unit="",
-            sample_count=samples, data_type=4, bit_offset=0, byte_offset=0,
-            bit_count=64, channel_type=ctype, cn_block_addr=0, cg_block_addr=0,
-            dg_block_addr=0, data_block_addr=addr, record_size=16, cn_flags=0,
-            invalidation_bit_pos=0, invalidation_bytes=0, data_bytes=8,
-            cc_type=-1, cc_params=[], rec_id_size=0, record_id=0)
+            group_idx=gi,
+            channel_idx=ci,
+            channel_name=f"s{gi}_{ci}",
+            unit="",
+            sample_count=samples,
+            data_type=4,
+            bit_offset=0,
+            byte_offset=0,
+            bit_count=64,
+            channel_type=ctype,
+            cn_block_addr=0,
+            cg_block_addr=0,
+            dg_block_addr=0,
+            data_block_addr=addr,
+            record_size=16,
+            cn_flags=0,
+            invalidation_bit_pos=0,
+            invalidation_bytes=0,
+            data_bytes=8,
+            cc_type=-1,
+            cc_params=[],
+            rec_id_size=0,
+            record_id=0,
+        )
 
     def _layout(self):
         signal, masters, cidmap, gi = [], {}, {}, 0
-        for _ in range(2000):                       # many tiny groups
+        for _ in range(2000):  # many tiny groups
             addr = 1000 + gi
             signal.append(self._ch(gi, 1, 100, addr))
             masters[gi] = self._ch(gi, 0, 100, addr, ctype=2)
-            cidmap[(gi, 1)] = gi; gi += 1
-        for _ in range(2):                          # big groups -> record-range split
+            cidmap[(gi, 1)] = gi
+            gi += 1
+        for _ in range(2):  # big groups -> record-range split
             addr = 1000 + gi
             signal.append(self._ch(gi, 1, 50_000_000, addr))
             masters[gi] = self._ch(gi, 0, 50_000_000, addr, ctype=2)
-            cidmap[(gi, 1)] = gi; gi += 1
+            cidmap[(gi, 1)] = gi
+            gi += 1
         return masters, signal, cidmap
 
     def test_coalesces_and_respects_bounds(self):
         from impulse_ds.mdf.bin_packer import plan_partitions
+
         masters, signal, cidmap = self._layout()
         cap = 64
         target_mb = 256
         target_rows = target_mb * 1024 * 1024 // 16
         specs = plan_partitions(
-            "f.mf4", masters, signal, cidmap,
-            target_partition_mb=target_mb, max_groups_per_partition=cap)
+            "f.mf4",
+            masters,
+            signal,
+            cidmap,
+            target_partition_mb=target_mb,
+            max_groups_per_partition=cap,
+        )
 
         # Far fewer specs than groups (2000 tiny would-be tasks collapse).
         assert len(specs) < 2000 / 10
         whole = [s for s in specs if "row_start" not in s]
         for s in whole:
             blocks = {c["data_block_addr"] for c in s["channels"]}
-            assert len(blocks) <= cap                     # group-count bound
+            assert len(blocks) <= cap  # group-count bound
             rows = sum(c["sample_count"] for c in s["channels"])
-            assert rows <= target_rows                    # output-row bound
+            assert rows <= target_rows  # output-row bound
 
         # Big groups still split by record range.
         assert any("row_start" in s for s in specs)
 
     def test_full_channel_coverage_exactly_once(self):
         from impulse_ds.mdf.bin_packer import plan_partitions
+
         masters, signal, cidmap = self._layout()
         specs = plan_partitions(
-            "f.mf4", masters, signal, cidmap,
-            target_partition_mb=256, max_groups_per_partition=64)
+            "f.mf4", masters, signal, cidmap, target_partition_mb=256, max_groups_per_partition=64
+        )
         # Every channel appears (whole-group once; ranged groups contiguously).
         whole_seen = set()
         ranges = {}
@@ -386,11 +423,11 @@ class TestPlanPartitionsCoalescing:
                 else:
                     assert key not in whole_seen, "channel double-counted"
                     whole_seen.add(key)
-        for key, ivs in ranges.items():
+        for _key, ivs in ranges.items():
             ivs.sort()
             assert ivs[0][0] == 0
-            for a, b in zip(ivs, ivs[1:]):
-                assert a[1] == b[0]                        # contiguous, no gaps/overlap
+            for a, b in zip(ivs, ivs[1:], strict=False):
+                assert a[1] == b[0]  # contiguous, no gaps/overlap
         all_keys = whole_seen | set(ranges)
         assert len(all_keys) == len(signal)
 
@@ -430,21 +467,41 @@ class TestMDF4ReaderExtended:
         scaled = [c for c in channels if c.channel_name == "Scaled"][0]
         assert scaled.cc_type == 1
         values = MDF4Reader.read_channel_data(
-            path, scaled.data_block_addr, scaled.record_size,
-            scaled.byte_offset, scaled.bit_offset, scaled.bit_count,
-            scaled.data_type, scaled.channel_type, scaled.sample_count,
-            cc_type=scaled.cc_type, cc_params=scaled.cc_params,
+            path,
+            scaled.data_block_addr,
+            scaled.record_size,
+            scaled.byte_offset,
+            scaled.bit_offset,
+            scaled.bit_count,
+            scaled.data_type,
+            scaled.channel_type,
+            scaled.sample_count,
+            cc_type=scaled.cc_type,
+            cc_params=scaled.cc_params,
         )
         np.testing.assert_allclose(values, np.arange(10) * 2.0 + 10.0)
 
     def test_channel_to_dict_unsorted_fields(self):
         from impulse_ds.mdf.mdf4_reader import ChannelInfo
+
         ch = ChannelInfo(
-            group_idx=0, channel_idx=0, channel_name="x", unit="",
-            sample_count=1, data_type=4, bit_offset=0, byte_offset=4,
-            bit_count=64, channel_type=0, cn_block_addr=0, cg_block_addr=0,
-            dg_block_addr=100, data_block_addr=1000, record_size=20,
-            rec_id_size=4, record_id=1,
+            group_idx=0,
+            channel_idx=0,
+            channel_name="x",
+            unit="",
+            sample_count=1,
+            data_type=4,
+            bit_offset=0,
+            byte_offset=4,
+            bit_count=64,
+            channel_type=0,
+            cn_block_addr=0,
+            cg_block_addr=0,
+            dg_block_addr=100,
+            data_block_addr=1000,
+            record_size=20,
+            rec_id_size=4,
+            record_id=1,
         )
         ctx = {100: {"rec_id_size": 4, "cg_sizes": {1: 20}}}
         d = MDF4Reader.channel_to_dict(ch, ctx)

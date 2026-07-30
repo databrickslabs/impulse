@@ -3,11 +3,10 @@ Decode raw MDF4 record bytes into float64 value / timestamp arrays: data-type
 interpretation, CC (channel conversion) scaling, and invalidation-bit handling.
 Vectorised with numpy; no file I/O.
 """
+
 import struct
-from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
-
 
 # MDF4 data type constants
 FLOAT_LE = 4
@@ -44,7 +43,9 @@ def convert_values(raw_bytes, data_type, bit_count, bit_offset, sample_count):
         if bit_count == 64:
             return raw_bytes[:, ::-1].copy().view(np.float64).reshape(sample_count).copy()
         elif bit_count == 32:
-            return raw_bytes[:, ::-1].copy().view(np.float32).reshape(sample_count).astype(np.float64)
+            return (
+                raw_bytes[:, ::-1].copy().view(np.float32).reshape(sample_count).astype(np.float64)
+            )
         return np.zeros(sample_count, dtype=np.float64)
     elif data_type in (UINT_LE, UINT_BE):
         is_be = data_type == UINT_BE
@@ -117,7 +118,9 @@ def convert_values(raw_bytes, data_type, bit_count, bit_offset, sample_count):
             vals = vals >> bit_offset
         vals = vals & ((1 << bit_count) - 1)
         sign_bit = np.uint64(1 << (bit_count - 1))
-        vals = np.where(vals & sign_bit, vals.astype(np.int64) - (1 << bit_count), vals.astype(np.int64))
+        vals = np.where(
+            vals & sign_bit, vals.astype(np.int64) - (1 << bit_count), vals.astype(np.int64)
+        )
         return vals.astype(np.float64)
     else:
         return np.zeros(sample_count, dtype=np.float64)
@@ -209,7 +212,7 @@ def apply_cc_conversion(values, cc_type, cc_params):
         uppers = np.array([cc_params[i * 3 + 1] for i in range(n)])
         phys_vals = np.array([cc_params[i * 3 + 2] for i in range(n)])
         # Find which range each value falls into
-        indices = np.searchsorted(lowers, values, side='right') - 1
+        indices = np.searchsorted(lowers, values, side="right") - 1
         indices = np.clip(indices, 0, n - 1)
         result = np.where(
             (values >= lowers[indices]) & (values < uppers[indices]),
@@ -233,7 +236,7 @@ def storage_record_id(record_id: int, rec_id_size: int) -> int:
     return record_id & mask
 
 
-def read_record_id(buf: Union[bytes, memoryview], offset: int, rec_id_size: int) -> int:
+def read_record_id(buf: bytes | memoryview, offset: int, rec_id_size: int) -> int:
     """Read a little-endian unsigned record ID from ``buf`` at ``offset``."""
     if rec_id_size <= 0:
         return 0
@@ -247,7 +250,7 @@ def filter_unsorted_records(
     raw_data: bytes,
     rec_id_size: int,
     target_record_id: int,
-    cg_record_sizes: Dict[int, int],
+    cg_record_sizes: dict[int, int],
 ) -> bytes:
     """Extract records belonging to ``target_record_id`` from an interleaved block."""
     if rec_id_size <= 0:
@@ -266,7 +269,7 @@ def filter_unsorted_records(
         if pos + rec_size > n:
             break
         if rid == target_record_id:
-            out.extend(raw_data[pos:pos + rec_size])
+            out.extend(raw_data[pos : pos + rec_size])
         pos += rec_size
     return bytes(out)
 
@@ -277,10 +280,10 @@ def prepare_cg_records(
     record_size: int,
     rec_id_size: int = 0,
     record_id: int = 0,
-    cg_record_sizes: Optional[Dict[int, int]] = None,
-    row_start: Optional[int] = None,
-    row_end: Optional[int] = None,
-) -> Tuple[bytes, int]:
+    cg_record_sizes: dict[int, int] | None = None,
+    row_start: int | None = None,
+    row_end: int | None = None,
+) -> tuple[bytes, int]:
     """Filter unsorted interleaved records and optionally slice by logical row range.
 
     Returns ``(prepared_bytes, index_offset)`` where ``index_offset`` is the
@@ -292,7 +295,10 @@ def prepare_cg_records(
         # JSON partition specs stringify dict keys; normalize back to int.
         cg_sizes = {int(k): v for k, v in cg_record_sizes.items()}
         raw_data = filter_unsorted_records(
-            raw_data, rec_id_size, record_id, cg_sizes,
+            raw_data,
+            rec_id_size,
+            record_id,
+            cg_sizes,
         )
 
     if record_size <= 0:
@@ -333,7 +339,7 @@ def extract_signal(raw_data, record_size, ch_spec):
     if ch_spec.get("channel_type") == 1:  # VLSD
         return np.full(actual, np.nan, dtype=np.float64)
 
-    usable = raw_data[:actual * record_size]
+    usable = raw_data[: actual * record_size]
     s_data_type = ch_spec["data_type"]
     s_bit_count = ch_spec["bit_count"]
     s_byte_offset = ch_spec["byte_offset"]
@@ -346,53 +352,83 @@ def extract_signal(raw_data, record_size, ch_spec):
     if s_bit_offset == 0:
         if s_data_type == FLOAT_LE and s_bit_count == 64 and s_byte_offset % 8 == 0:
             values = np.ndarray(
-                shape=(actual,), dtype=np.float64, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.float64,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).copy()
         elif s_data_type == FLOAT_LE and s_bit_count == 32 and s_byte_offset % 4 == 0:
             values = np.ndarray(
-                shape=(actual,), dtype=np.float32, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.float32,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         elif s_data_type == UINT_LE and s_bit_count == 16 and s_byte_offset % 2 == 0:
             values = np.ndarray(
-                shape=(actual,), dtype=np.uint16, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.uint16,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         elif s_data_type == UINT_LE and s_bit_count == 32 and s_byte_offset % 4 == 0:
             values = np.ndarray(
-                shape=(actual,), dtype=np.uint32, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.uint32,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         elif s_data_type == UINT_LE and s_bit_count == 8:
             values = np.ndarray(
-                shape=(actual,), dtype=np.uint8, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.uint8,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         elif s_data_type == SINT_LE and s_bit_count == 16 and s_byte_offset % 2 == 0:
             values = np.ndarray(
-                shape=(actual,), dtype=np.int16, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.int16,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         elif s_data_type == SINT_LE and s_bit_count == 32 and s_byte_offset % 4 == 0:
             values = np.ndarray(
-                shape=(actual,), dtype=np.int32, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.int32,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         elif s_data_type == SINT_LE and s_bit_count == 8:
             values = np.ndarray(
-                shape=(actual,), dtype=np.int8, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.int8,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         elif s_data_type == UINT_LE and s_bit_count == 64 and s_byte_offset % 8 == 0:
             values = np.ndarray(
-                shape=(actual,), dtype=np.uint64, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.uint64,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         elif s_data_type == SINT_LE and s_bit_count == 64 and s_byte_offset % 8 == 0:
             values = np.ndarray(
-                shape=(actual,), dtype=np.int64, buffer=buf,
-                offset=s_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.int64,
+                buffer=buf,
+                offset=s_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         else:
             sig_raw = extract_column_strided(usable, record_size, s_byte_offset, s_bytes, actual)
@@ -404,7 +440,9 @@ def extract_signal(raw_data, record_size, ch_spec):
     # Apply invalidation — pass buf to avoid redundant np.frombuffer
     cn_flags = ch_spec.get("cn_flags", 0)
     invalidation_bytes_nr = ch_spec.get("invalidation_bytes", 0)
-    if invalidation_bytes_nr > 0 and (cn_flags & (CN_FLAG_ALL_INVALID | CN_FLAG_INVALIDATION_PRESENT)):
+    if invalidation_bytes_nr > 0 and (
+        cn_flags & (CN_FLAG_ALL_INVALID | CN_FLAG_INVALIDATION_PRESENT)
+    ):
         signal_info = {
             "cn_flags": cn_flags,
             "invalidation_bit_pos": ch_spec.get("invalidation_bit_pos", 0),
@@ -435,7 +473,7 @@ def extract_timestamps(raw_data, record_size, master_info, index_offset=0):
     if master_info["channel_type"] == 3:  # virtual master
         timestamps = np.arange(index_offset, index_offset + actual, dtype=np.float64)
     else:
-        usable = raw_data[:actual * record_size]
+        usable = raw_data[: actual * record_size]
         m_bit_count = master_info["bit_count"]
         m_byte_offset = master_info["byte_offset"]
         m_bit_offset = master_info["bit_offset"]
@@ -444,23 +482,49 @@ def extract_timestamps(raw_data, record_size, master_info, index_offset=0):
 
         buf = np.frombuffer(usable, dtype=np.uint8)
 
-        if m_bit_offset == 0 and m_data_type == FLOAT_LE and m_bit_count == 64 and m_byte_offset % 8 == 0:
+        if (
+            m_bit_offset == 0
+            and m_data_type == FLOAT_LE
+            and m_bit_count == 64
+            and m_byte_offset % 8 == 0
+        ):
             timestamps = np.ndarray(
-                shape=(actual,), dtype=np.float64, buffer=buf,
-                offset=m_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.float64,
+                buffer=buf,
+                offset=m_byte_offset,
+                strides=(record_size,),
             ).copy()
-        elif m_bit_offset == 0 and m_data_type == FLOAT_LE and m_bit_count == 32 and m_byte_offset % 4 == 0:
+        elif (
+            m_bit_offset == 0
+            and m_data_type == FLOAT_LE
+            and m_bit_count == 32
+            and m_byte_offset % 4 == 0
+        ):
             timestamps = np.ndarray(
-                shape=(actual,), dtype=np.float32, buffer=buf,
-                offset=m_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.float32,
+                buffer=buf,
+                offset=m_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
-        elif m_bit_offset == 0 and m_data_type == UINT_LE and m_bit_count == 64 and m_byte_offset % 8 == 0:
+        elif (
+            m_bit_offset == 0
+            and m_data_type == UINT_LE
+            and m_bit_count == 64
+            and m_byte_offset % 8 == 0
+        ):
             timestamps = np.ndarray(
-                shape=(actual,), dtype=np.uint64, buffer=buf,
-                offset=m_byte_offset, strides=(record_size,),
+                shape=(actual,),
+                dtype=np.uint64,
+                buffer=buf,
+                offset=m_byte_offset,
+                strides=(record_size,),
             ).astype(np.float64)
         else:
-            master_raw = extract_column_strided(usable, record_size, m_byte_offset, m_bytes, actual)
+            master_raw = extract_column_strided(
+                usable, record_size, m_byte_offset, m_bytes, actual
+            )
             timestamps = convert_values(master_raw, m_data_type, m_bit_count, m_bit_offset, actual)
 
     # Apply CC conversion to master channel if present

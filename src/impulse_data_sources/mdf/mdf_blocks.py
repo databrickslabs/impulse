@@ -5,6 +5,7 @@ and stream record ranges. Pure binary helpers (struct/zlib/numpy) shared by the
 Arrow emitters; they operate on an open binary file object (real file or an
 in-memory ``BytesIO``).
 """
+
 import struct
 import zlib
 import numpy as np
@@ -44,7 +45,7 @@ def decompress_dz(f, dz_addr):
             pos = 0
             for col in range(cols):
                 col_size = rows + (1 if col < remainder else 0)
-                dest_idx[pos:pos + col_size] = np.arange(col_size) * cols + col
+                dest_idx[pos : pos + col_size] = np.arange(col_size) * cols + col
                 pos += col_size
             out = np.empty(len(src), dtype=np.uint8)
             out[dest_idx] = src
@@ -93,9 +94,9 @@ def resolve_dl_addr(f, data_block_addr):
     if bid == b"##DL":
         return data_block_addr
     if bid == b"##HL":
-        f.read(4)   # reserved
-        f.read(8)   # length
-        f.read(8)   # link_count
+        f.read(4)  # reserved
+        f.read(8)  # length
+        f.read(8)  # link_count
         hl_dl_first = struct.unpack("<Q", f.read(8))[0]
         return hl_dl_first or None
     return None
@@ -130,18 +131,18 @@ def _read_dl_blob(f, dl_addr):
 
 def _subblock_uncompressed_len(blob, off):
     """Uncompressed byte length of the sub-block at blob[off:] (no decompression)."""
-    if blob[off:off + 4] == b"##DZ":
-        return struct.unpack_from("<Q", blob, off + 32)[0]      # dz_org_size
-    return struct.unpack_from("<Q", blob, off + 8)[0] - 24       # ##DT length - header
+    if blob[off : off + 4] == b"##DZ":
+        return struct.unpack_from("<Q", blob, off + 32)[0]  # dz_org_size
+    return struct.unpack_from("<Q", blob, off + 8)[0] - 24  # ##DT length - header
 
 
 def _decompress_subblock_blob(blob, off):
     """Decompress (##DZ) or copy (##DT) the sub-block at blob[off:], from memory."""
-    if blob[off:off + 4] == b"##DZ":
+    if blob[off : off + 4] == b"##DZ":
         zip_type = blob[off + 26]
         zip_param = struct.unpack_from("<I", blob, off + 28)[0]
         data_len = struct.unpack_from("<Q", blob, off + 40)[0]
-        dec = zlib.decompress(bytes(blob[off + 48:off + 48 + data_len]))
+        dec = zlib.decompress(bytes(blob[off + 48 : off + 48 + data_len]))
         if zip_type == 1:  # transposed deflate -> un-transpose
             cols = zip_param
             rows = len(dec) // cols
@@ -154,14 +155,14 @@ def _decompress_subblock_blob(blob, off):
                 pos = 0
                 for col in range(cols):
                     cs = rows + (1 if col < remainder else 0)
-                    dest_idx[pos:pos + cs] = np.arange(cs) * cols + col
+                    dest_idx[pos : pos + cs] = np.arange(cs) * cols + col
                     pos += cs
                 out = np.empty(len(src), dtype=np.uint8)
                 out[dest_idx] = src
                 dec = out.tobytes()
         return dec
     length = struct.unpack_from("<Q", blob, off + 8)[0]
-    return bytes(blob[off + 24:off + 24 + (length - 24)])
+    return bytes(blob[off + 24 : off + 24 + (length - 24)])
 
 
 def _read_subblock_file(f, addr):
@@ -189,7 +190,9 @@ def _dl_subblock_meta(f, dl_addr):
         if covered:
             ondisk = struct.unpack_from("<Q", blob, off + 8)[0]
             covered = off + ondisk <= blen
-        ulen = _subblock_uncompressed_len(blob, off) if covered else len(_read_subblock_file(f, addr))
+        ulen = (
+            _subblock_uncompressed_len(blob, off) if covered else len(_read_subblock_file(f, addr))
+        )
         meta.append((addr, off, ulen, covered))
     return blob, lo, meta
 
@@ -201,9 +204,9 @@ def read_data_list_raw(f, dl_addr):
         return b""
     result = bytearray(sum(m[2] for m in meta))
     pos = 0
-    for addr, off, ulen, covered in meta:
+    for addr, off, _ulen, covered in meta:
         chunk = _decompress_subblock_blob(blob, off) if covered else _read_subblock_file(f, addr)
-        result[pos:pos + len(chunk)] = chunk
+        result[pos : pos + len(chunk)] = chunk
         pos += len(chunk)
     return bytes(result)
 
@@ -235,7 +238,9 @@ def read_data_list_range(f, dl_addr, record_size, row_start, row_end):
             continue
         if first is None:
             first = rs
-        parts.append(_decompress_subblock_blob(blob, off) if covered else _read_subblock_file(f, addr))
+        parts.append(
+            _decompress_subblock_blob(blob, off) if covered else _read_subblock_file(f, addr)
+        )
     if first is None:
         return b"", row_start
     raw = b"".join(parts)
@@ -288,9 +293,19 @@ def dt_data_extent(f, data_block_addr):
     return data_block_addr + 24, dt_block_len - 24
 
 
-def _read_block_chunks(f, data_block_addr, record_size, sample_count,
-                       row_start, row_end, prof, log,
-                       rec_id_size=0, record_id=0, cg_record_sizes=None):
+def _read_block_chunks(
+    f,
+    data_block_addr,
+    record_size,
+    sample_count,
+    row_start,
+    row_end,
+    prof,
+    log,
+    rec_id_size=0,
+    record_id=0,
+    cg_record_sizes=None,
+):
     """Yield (raw_bytes, start_record) for records [row_start, row_end) of one
     data block, using the SAME read strategy as the signals core: stream an
     uncompressed ##DT in record-aligned chunks, read only the overlapping
@@ -365,7 +380,7 @@ def _read_block_chunks(f, data_block_addr, record_size, sample_count,
     if row_start is not None:
         lo = max(0, min(row_start, total))
         hi = total if row_end is None else max(lo, min(row_end, total))
-        raw = raw[lo * record_size:hi * record_size]
+        raw = raw[lo * record_size : hi * record_size]
         start = lo
     else:
         start = 0
@@ -401,7 +416,7 @@ def parse_subblocks(f, data_block_addr, record_size, sample_count):
             length = struct.unpack("<Q", f.read(8))[0]
             if sid == b"##DZ":
                 f.seek(sa + 32)
-                ulen = struct.unpack("<Q", f.read(8))[0]   # dz_org_size (uncompressed)
+                ulen = struct.unpack("<Q", f.read(8))[0]  # dz_org_size (uncompressed)
             else:  # ##DT
                 ulen = length - 24
             rc = ulen // record_size if record_size else 0
