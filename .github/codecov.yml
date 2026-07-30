@@ -16,6 +16,20 @@ coverage:
         target: auto
         threshold: 0.5%
 
+# The test suite is sharded by component across parallel CI jobs; each shard uploads
+# coverage under its own flag. carryforward keeps a flag's last coverage on commits
+# where only the other shard ran. The project/patch statuses above operate on the merged total.
+flag_management:
+  default_rules:
+    carryforward: true
+flags:
+  query_engine:
+    paths:
+      - src/impulse_query_engine/
+  reporting:
+    paths:
+      - src/impulse_reporting/
+
 comment:                  # this is a top-level key
   layout: "diff, flags, files"
   behavior: default
