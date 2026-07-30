@@ -23,10 +23,11 @@ from .custom_statistic import (
     normalize_per_channel_statistics,
 )
 
-# Define supported statistics and their types
+# Define supported statistics and their types. StatisticType covers the numeric
+# built-ins (min/max/mean/median and start/end); string statistics are reserved.
 NUMERIC_STATISTICS = {stat.value for stat in StatisticType}
 STRING_STATISTICS = {}
-BUILTIN_STATISTIC_NAMES = NUMERIC_STATISTICS | {"start", "end"} | set(STRING_STATISTICS)
+BUILTIN_STATISTIC_NAMES = NUMERIC_STATISTICS | set(STRING_STATISTICS)
 
 
 class StatsAggregator(Aggregation):
@@ -108,9 +109,7 @@ class StatsAggregator(Aggregation):
         self._cross_channel_input_indices = self._resolve_cross_channel_inputs()
 
         # Separate numeric and string statistics for processing
-        self._numeric_stats = [
-            s for s in self.statistics if s in NUMERIC_STATISTICS or s in {"start", "end"}
-        ]
+        self._numeric_stats = [s for s in self.statistics if s in NUMERIC_STATISTICS]
         self._string_stats = [s for s in self.statistics if s in STRING_STATISTICS]
 
     def _validate_custom_statistic_labels(self) -> None:

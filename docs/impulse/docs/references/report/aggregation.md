@@ -273,6 +273,8 @@ A `ValueError` is raised if unsupported statistics are provided.
 ### Custom statistics
 
 Beyond the built-in labels, you can inject your own statistic functions. Each is declared as a descriptor
+(`PerChannelStatistic` / `CrossChannelStatistic`, see the
+[custom_statistic API reference](../api/impulse_query_engine/analyze/query/aggregations/custom_statistic.md))
 and returns a **sequence of scalars** mapped positionally to its `aggregation_labels`; a single-output
 statistic returns a one-element sequence. Custom outputs land in the fact table as ordinary
 `aggregation_label` / `statistic_value` rows — no schema change — and their labels are added to the
