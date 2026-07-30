@@ -864,6 +864,34 @@ def test_determine_aggregations_without_custom_statistics_has_no_extra_rows(spar
     assert len(rows) == 2
     assert {row["channel_name"] for row in rows} == {"ch_a", "ch_b"}
     assert {row["aggregation_label"] for row in rows} == {"min"}
+    # single-pass explode: an empty cross_channel_values must not leak a
+    # signal_index == -1 row, and every row must carry a non-null channel_name.
+    assert all(row["channel_name"] is not None for row in rows)
+
+
+def test_determine_aggregations_single_pass_preserves_channel_names(spark):
+    """The cross-channel name pass must not clobber per-channel channel_name.
+
+    Runs both a per-channel custom stat and cross-channel stats through the single
+    explode+union-free path and asserts per-channel rows keep their real channel
+    names while cross-channel rows take the descriptor name / label default.
+    """
+    stats_agg = _make_custom_stats_aggregator()
+    solved_df = _build_solved_df(spark, stats_agg.get_name())
+
+    rows = StatsAggregator.determine_aggregations(
+        spark, [stats_agg], solved_df=solved_df
+    ).collect()
+
+    # No row is left without a channel_name (the merge key must be non-null).
+    assert all(row["channel_name"] is not None for row in rows)
+    # Per-channel labels (built-in "min" + per-channel custom "rms") only ever
+    # appear under the real channel names — never the cross-channel default.
+    per_channel = [r for r in rows if r["aggregation_label"] in ("min", "rms")]
+    assert {r["channel_name"] for r in per_channel} == {"ch_a", "ch_b"}
+    # Cross-channel labels only appear under the descriptor name / label default.
+    cross_channel = [r for r in rows if r["aggregation_label"] in ("spread", "ratio")]
+    assert {r["channel_name"] for r in cross_channel} == {"combined", "ratio"}
 
 
 def _bounds(series, t_start, t_end):

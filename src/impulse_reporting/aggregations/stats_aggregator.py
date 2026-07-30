@@ -322,20 +322,20 @@ class StatsAggregator(Aggregation):
 
         result = solved_df.select("container_id", *stats_names)
 
-        base = (
+        # Single pass over the solved struct: per-channel and cross-channel stats
+        # are exploded together (see _explode_stats_values), so ``result`` and the
+        # upstream solve are traversed only once. The two channel-name passes run in
+        # sequence over the one frame: _add_channel_name_column names signal_index
+        # >= 0 rows, then _add_cross_channel_name_column names the signal_index == -1
+        # rows while preserving the per-channel names already set.
+        df = (
             result.transform(StatsAggregator._unpivot_measurement_info(stats_names))
             .transform(StatsAggregator._extract_stats_info)
             .transform(StatsAggregator._add_event_id_column(aggregations))
             .transform(StatsAggregator._add_event_name_column(aggregations))
-        )
-        per_channel_df = base.transform(StatsAggregator._explode_stats_values).transform(
-            StatsAggregator._add_channel_name_column(aggregations)
-        )
-        cross_channel_df = base.transform(StatsAggregator._explode_cross_channel_values).transform(
-            StatsAggregator._add_cross_channel_name_column(aggregations)
-        )
-        df = (
-            per_channel_df.unionByName(cross_channel_df)
+            .transform(StatsAggregator._explode_stats_values)
+            .transform(StatsAggregator._add_channel_name_column(aggregations))
+            .transform(StatsAggregator._add_cross_channel_name_column(aggregations))
             .transform(StatsAggregator._add_event_instance_id_column)
             .transform(StatsAggregator._add_visual_id_column(aggregations))
             .select(STATS_AGGREGATOR_FACT_SCHEMA.fieldNames())
@@ -464,31 +464,46 @@ class StatsAggregator(Aggregation):
     @staticmethod
     def _explode_stats_values(df: DataFrame) -> DataFrame:
         """
-        Explode the statistics values into individual rows per signal and interval.
+        Explode per-channel and cross-channel statistics into one row per
+        (signal, interval, statistic) in a single pass.
+
+        Per-channel rows carry ``signal_index`` 0..N-1 (mapped to a real channel
+        name downstream); cross-channel rows carry ``signal_index = -1``. Both are
+        exploded from a single combined signal axis so ``df`` (and the upstream
+        solve) is traversed only once.
 
         Parameters
         ----------
         df : pyspark.sql.DataFrame
-            DataFrame containing nested statistics values.
+            DataFrame containing ``event_timestamps``, ``numeric_values`` and
+            ``cross_channel_values``.
 
         Returns
         -------
         pyspark.sql.DataFrame
             DataFrame with exploded statistics for each signal and interval.
         """
-        # Step 1: Explode by signal index to get one row per signal
-        # numeric_values is array of arrays: [[{stats for interval 0}, {stats for interval 1}], ...]
-        # Each outer array element corresponds to a signal
+        # Step 1: Explode by signal index to get one row per signal.
+        #
+        # Per-channel stats live in ``numeric_values`` (array<array<map>>, one inner
+        # list per signal). Cross-channel stats live in ``cross_channel_values``
+        # (array<map>, one map per interval) — exactly one signal's worth. Prepend
+        # them as the first entry of the signal axis so both explode in a single
+        # pass; ``signal_index = pos - 1`` then maps cross-channel to -1 and real
+        # signals to 0..N-1. This avoids forking ``df`` (which would re-run the
+        # upstream solve). An empty ``cross_channel_values`` prepends ``[[]]`` — a
+        # length-0 interval list that zips to zero rows, so no spurious -1 row.
+        all_signal_values = f.concat(
+            f.array(f.col("cross_channel_values")), f.col("numeric_values")
+        )
         df_with_signal = df.select(
             "container_id",
             "stats_name",
             "event_id",
             "event_name",
             "event_timestamps",
-            f.posexplode(f.col("numeric_values")).alias(
-                "signal_index", "signal_stats_per_interval"
-            ),
-        )
+            f.posexplode(all_signal_values).alias("pos", "signal_stats_per_interval"),
+        ).withColumn("signal_index", f.col("pos") - 1)
 
         # Step 2: Explode by interval - zip event_timestamps with signal_stats_per_interval.
         # Both are aligned per interval (event_timestamps is canonical, one entry per
@@ -529,71 +544,23 @@ class StatsAggregator(Aggregation):
         )
 
     @staticmethod
-    def _explode_cross_channel_values(df: DataFrame) -> DataFrame:
-        """
-        Explode the cross-channel statistics values into one row per interval and statistic.
-
-        ``event_timestamps`` is canonical (one entry per non-degenerate interval),
-        aligned with ``cross_channel_values``, so the two zip 1:1. Aggregations
-        without cross-channel statistics have an empty ``cross_channel_values``
-        array and contribute no rows.
-
-        Parameters
-        ----------
-        df : pyspark.sql.DataFrame
-            DataFrame containing ``event_timestamps`` and ``cross_channel_values``.
-
-        Returns
-        -------
-        pyspark.sql.DataFrame
-            DataFrame with one row per cross-channel statistic and interval,
-            matching the column layout of ``_explode_stats_values``.
-        """
-        df_with_interval = df.select(
-            "container_id",
-            "stats_name",
-            "event_id",
-            "event_name",
-            f.posexplode(
-                f.arrays_zip(f.col("event_timestamps"), f.col("cross_channel_values"))
-            ).alias("interval_index", "zipped"),
-        )
-
-        df_with_timestamps = df_with_interval.select(
-            "container_id",
-            "stats_name",
-            "event_id",
-            "event_name",
-            f.lit(-1).alias("signal_index"),
-            f.col("zipped.event_timestamps").getItem(0).alias("start_ts"),
-            f.col("zipped.event_timestamps").getItem(1).alias("end_ts"),
-            f.col("zipped.cross_channel_values").alias("statistics"),
-        )
-
-        return df_with_timestamps.select(
-            "container_id",
-            "stats_name",
-            "event_name",
-            "event_id",
-            "signal_index",
-            "start_ts",
-            "end_ts",
-            f.explode(f.col("statistics")).alias("aggregation_label", "statistic_value"),
-        )
-
-    @staticmethod
     def _add_cross_channel_name_column(
         aggregations: list[StatsAggregator],
     ) -> Callable[..., DataFrame]:
         """
         Add a channel_name column for cross-channel statistic rows.
 
-        Descriptors with an explicit ``channel_name`` apply it to all of their
-        output rows (matched on the descriptor's effective labels — its
-        ``aggregation_labels``); all other rows default to their
-        ``aggregation_label``, which is non-null and stable as required by the
-        fact table's merge keys. A ``channel_name`` equal to a real input channel
-        name is allowed and pivots the statistic into that channel's rows.
+        This pass runs after ``_add_channel_name_column`` over the same frame, so
+        it only touches cross-channel rows (``signal_index == -1``) and preserves
+        the per-channel ``channel_name`` already set on ``signal_index >= 0`` rows.
+
+        For a cross-channel row, a descriptor with an explicit ``channel_name``
+        applies it to all of that descriptor's output rows (matched on its
+        ``aggregation_labels``); cross-channel rows without an explicit
+        ``channel_name`` default to their ``aggregation_label``, which is non-null
+        and stable as required by the fact table's merge keys. A ``channel_name``
+        equal to a real input channel name is allowed and pivots the statistic
+        into that channel's rows.
 
         Parameters
         ----------
@@ -607,6 +574,7 @@ class StatsAggregator(Aggregation):
         """
 
         def _(df: DataFrame) -> DataFrame:
+            is_cross_channel = f.col("signal_index") == f.lit(-1)
             col_expr = None
             for agg in aggregations:
                 if agg is None:
@@ -616,18 +584,26 @@ class StatsAggregator(Aggregation):
                     if statistic.channel_name is None:
                         continue
                     labels = statistic.aggregation_labels
-                    condition = (f.col("stats_name") == f.lit(agg_name)) & (
-                        f.col("aggregation_label").isin(labels)
+                    condition = (
+                        is_cross_channel
+                        & (f.col("stats_name") == f.lit(agg_name))
+                        & (f.col("aggregation_label").isin(labels))
                     )
                     if col_expr is None:
                         col_expr = f.when(condition, f.lit(statistic.channel_name))
                     else:
                         col_expr = col_expr.when(condition, f.lit(statistic.channel_name))
 
+            # Cross-channel rows without an explicit descriptor channel_name default
+            # to their aggregation_label; per-channel rows keep the channel_name the
+            # previous pass set (never overwritten here).
+            cross_channel_default = f.when(is_cross_channel, f.col("aggregation_label")).otherwise(
+                f.col("channel_name")
+            )
             channel_name_column = (
-                col_expr.otherwise(f.col("aggregation_label"))
+                col_expr.otherwise(cross_channel_default)
                 if col_expr is not None
-                else f.col("aggregation_label")
+                else cross_channel_default
             )
             return df.withColumn("channel_name", channel_name_column)
 
