@@ -128,9 +128,53 @@ page.add_aggregation(stats)
 | `event`             | `Event`                      | No       | Scope; if omitted, covers the entire series.            |
 | `desc`              | `str`                        | No       | Description.                                            |
 | `values_unit`       | `str`                        | No       | Unit of the statistic values.                           |
+| `per_channel_custom_statistics`   | `list[PerChannelStatistic]`   | No | Custom stats computed per channel per interval. |
+| `cross_channel_custom_statistics` | `list[CrossChannelStatistic]` | No | Custom stats computed per interval across channels. |
 
-Supported statistics: `"min"`, `"max"`, `"mean"` (duration-weighted), `"median"` (duration-weighted),
+Supported built-in statistics: `"min"`, `"max"`, `"mean"` (duration-weighted), `"median"` (duration-weighted),
 `"start"` (first value), `"end"` (last value). Unsupported labels raise `ValueError`.
+
+### Custom statistics
+
+Inject your own statistic functions via descriptors from
+`impulse_query_engine.analyze.query.aggregations.custom_statistic`. Each `func` returns a **sequence** of
+scalars mapped positionally to its `aggregation_labels` (a single-output stat returns a one-element
+sequence, e.g. `[value]`). Custom outputs become ordinary `aggregation_label` / `statistic_value` fact rows
+(no schema change) and their labels join the dimension's `statistics` array.
+
+- **`PerChannelStatistic(func, aggregation_labels, params={})`** — once per channel per interval; fact rows
+  keep the real channel name. `func(series: SampleSeries, t_start, t_end, **params) -> Sequence[float]`.
+- **`CrossChannelStatistic(func, aggregation_labels, inputs=None, channel_name=None, params={})`** — once
+  per interval over `inputs` (all channels when `None`); fact rows use `channel_name` (or the label when
+  `None`). `func(series: list[SampleSeries], t_start, t_end, **params) -> Sequence[float]`.
+
+```python
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
+    PerChannelStatistic, CrossChannelStatistic,
+)
+
+def percentiles(series, t_start, t_end):
+    return [float(np.nanpercentile(series.values, 50)),
+            float(np.nanpercentile(series.values, 90))]
+
+stats = StatsAggregator(
+    name="custom_stats",
+    input_expressions=[eng_rpm, veh_spd],
+    channel_names=["Engine RPM", "Vehicle Speed"],
+    statistics=["min", "max"],
+    event=container_event,
+    per_channel_custom_statistics=[
+        PerChannelStatistic(func=percentiles, aggregation_labels=["p50", "p90"]),
+    ],
+    cross_channel_custom_statistics=[
+        CrossChannelStatistic(func=corr, aggregation_labels=["corr"], channel_name="rpm_vs_speed"),
+    ],
+)
+```
+
+Labels must be globally unique and must not shadow a built-in. `func` is cloudpickled to executors, so use
+a module-level importable function and never capture Spark objects. Labels, `func`, `inputs`, and `params`
+are part of the definition hash.
 
 ## PointValueAggregator
 

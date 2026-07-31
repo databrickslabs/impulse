@@ -143,7 +143,7 @@ class TestDefaultSolverIntegration:
 
         assert result.count() == 3
         for row in result.collect():
-            event_timestamps, numeric_values, _ = row["rpm_when_fast"]
+            event_timestamps, numeric_values, _, _ = row["rpm_when_fast"]
             assert len(numeric_values) == 1
             for event_stats in numeric_values[0]:
                 assert {"min", "max", "mean"}.issubset(event_stats.keys())

@@ -19,6 +19,7 @@ loaders:
       - impulse_query_engine.analyze.metadata.tag_expression
       - impulse_query_engine.analyze.metadata.metric_expression
       - impulse_query_engine.analyze.query.aggregations.statistic_type
+      - impulse_query_engine.analyze.query.aggregations.custom_statistic
       - impulse_query_engine.analyze.query.solvers.default_solver
       - impulse_query_engine.analyze.query.solvers.solver_config
       - impulse_query_engine.analyze.query.solvers.query_solver

@@ -20,8 +20,8 @@ the narrow result to a gold fact table, and update it incrementally.
 Structurally parallels :class:`BasicEvent` (holds an aliased expression,
 name-derived id, SHA-256 definition hash) but — like ``ContainerEvent`` — it
 drives its own solve via ``QueryBuilder.solve_calculated_channels`` rather than
-riding the centralized wide ``solved_df``.  Accordingly :meth:`get_expression`
-returns ``None`` so it is excluded from the batch solve.
+riding the centralized wide ``solved_df``.  It is dispatched separately from
+the batch solve (never passed to ``collect_solvable_expressions``).
 
 **Arguments**:
 
@@ -78,13 +78,10 @@ Return the deterministic entity id (also the fact/dimension ``channel_id``).
 #### get\_expression
 
 ```python
-def get_expression() -> TimeSeriesExpression | None
+def get_expression() -> TimeSeriesExpression
 ```
 
-Return ``None`` — calculated channels drive their own narrow solve.
-
-Returning ``None`` keeps this channel out of the centralized wide batch
-solve (``collect_solvable_expressions``), mirroring ``ContainerEvent``.
+Return the wrapped query-engine ``CalculatedChannel`` expression.
 
 
 #### get\_expression\_str
