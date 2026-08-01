@@ -12,6 +12,17 @@ from pyspark.sql import SparkSession
 import impulse_query_engine.schema as S
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 
+# The on-Databricks end-to-end suite (tests/e2e) needs a real workspace and the
+# `databricks-labs-pytester` plugin. Skip collecting it whenever that plugin is
+# absent — i.e. the local dev / default-CI environment — so `make test` and the
+# acceptance shards only ever run the local-Spark suites. Inside the serverless
+# job the plugin IS installed, so `pytest tests/e2e` collects it normally.
+collect_ignore_glob = []
+try:
+    import databricks.labs.pytester  # noqa: F401
+except ImportError:
+    collect_ignore_glob.append("e2e/*")
+
 
 @pytest.fixture(scope="session")
 def spark() -> SparkSession:

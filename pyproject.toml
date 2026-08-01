@@ -55,6 +55,16 @@ dev = [
     "black==26.3.1"
 ]
 
+# Dependencies for the on-Databricks end-to-end suite (tests/e2e). These run
+# INSIDE a serverless job (see databricks.yml), so pyspark/delta come from the
+# runtime, not from here — only the workspace/isolation tooling is declared.
+# `databricks-labs-pytester` provides the ephemeral-schema / volume fixtures;
+# our tests/e2e/conftest.py overrides its `spark`/`sql_backend` fixtures to use
+# the ambient in-job session instead of Databricks Connect + a SQL warehouse.
+e2e = [
+    "databricks-labs-pytester==0.7.4",
+]
+
 # Setuptools options
 [tool.setuptools.dynamic]
 version = {file = ["VERSION"]}
@@ -68,6 +78,13 @@ exclude = ["src/*/demos"]
 pythonpath = [".", "src/impulse_reporting"]
 testpaths = ["tests"]
 addopts = "--junitxml=test-results.xml --cov=src --cov-report=html --cov-report=xml:coverage.xml --cov-report=term-missing"
+# The on-Databricks suite (tests/e2e) is skipped automatically by
+# tests/conftest.py when `databricks-labs-pytester` isn't installed (the local
+# / default env), so `make test` and the CI shards never collect it. Inside the
+# serverless job the package IS installed and `pytest tests/e2e` collects it.
+markers = [
+    "e2e: end-to-end tests that run against a real Databricks workspace (opt-in; see tests/e2e).",
+]
 
 # Default dependency groups
 [tool.uv]

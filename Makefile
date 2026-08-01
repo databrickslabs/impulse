@@ -38,6 +38,14 @@ coverage:
 	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=html
 	open htmlcov/index.html
 
+# Run the on-Databricks end-to-end suite as a serverless job. Requires the
+# Databricks CLI and workspace auth in the environment (DATABRICKS_HOST +
+# oauth-m2m, or a configured profile). Deploys the bundle (which builds the
+# wheel) then runs the job; a pytest failure inside the job fails `bundle run`.
+test-e2e:
+	databricks bundle deploy -t e2e
+	databricks bundle run e2e_tests -t e2e
+
 build:
 	uv build --require-hashes --build-constraints=.build-constraints.txt
 
@@ -56,4 +64,4 @@ fork-sync:
 	./.github/scripts/fork-sync-pr.sh $(PR)
 
 .DEFAULT: all
-.PHONY: all clean dev lint fmt test coverage build lock-dependencies fork-sync
+.PHONY: all clean dev lint fmt test test-e2e coverage build lock-dependencies fork-sync

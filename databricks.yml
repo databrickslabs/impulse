@@ -1,0 +1,37 @@
+# Databricks Asset Bundle for the on-Databricks end-to-end tests.
+#
+# Deploys a single serverless job that installs the impulse wheel + the e2e
+# test dependencies and runs `tests/e2e/run_in_job.py` (pytest) inside the
+# workspace. Driven from CI by `databricks bundle deploy && databricks bundle
+# run e2e_tests` (see .github/workflows/e2e.yml). Auth is provided by the
+# environment (OAuth M2M service principal); nothing sensitive lives here.
+bundle:
+  name: impulse-e2e
+
+# Build the wheel as a bundle artifact so its /Workspace path exists at job
+# runtime and can be referenced as a task library.
+artifacts:
+  impulse_wheel:
+    type: whl
+    # Clean first so the `../dist/*.whl` dependency glob in resources/e2e_job.yml
+    # matches exactly one (fresh) wheel, never a stale build left in dist/.
+    build: rm -rf dist && uv build --wheel
+    path: .
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: UC catalog the e2e tests create their ephemeral schemas under.
+    default: impulse_tests
+
+targets:
+  # The only target: the Azure workspace where the CI service principal has
+  # rights on the `impulse_tests` catalog. Host and auth both come from the
+  # environment (DATABRICKS_HOST + oauth-m2m, picked up by the CLI's unified
+  # auth), so the workspace URL lives in exactly one place — the secret — and
+  # is not pinned in the repo.
+  e2e:
+    default: true
+    mode: development

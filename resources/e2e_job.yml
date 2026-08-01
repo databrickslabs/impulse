@@ -1,0 +1,34 @@
+# Serverless job that runs the impulse e2e suite inside the workspace.
+resources:
+  jobs:
+    e2e_tests:
+      name: "impulse e2e tests"
+
+      # Fail the run if it hangs; the suite itself is minutes-long.
+      timeout_seconds: 3600
+      max_concurrent_runs: 1
+
+      tasks:
+        - task_key: run_e2e
+          # Serverless Python task: runs the pytest entry point. A non-zero
+          # exit (pytest failures) fails the task -> fails `bundle run` -> CI.
+          # The catalog is passed as a positional arg; run_in_job.py exports it
+          # as IMPULSE_E2E_CATALOG for the conftest fixtures.
+          spark_python_task:
+            python_file: ../tests/e2e/run_in_job.py
+            parameters:
+              - "--catalog"
+              - ${var.catalog}
+          environment_key: e2e_env
+
+      # Serverless base environment. Version 5 matches the runtime impulse is
+      # confirmed to run on (Spark 4.0 / Python 3.12). The impulse wheel is
+      # built by the bundle artifact; e2e-only tooling is added here. pyspark /
+      # delta are preinstalled in the serverless image, so they are NOT listed.
+      environments:
+        - environment_key: e2e_env
+          spec:
+            environment_version: "5"
+            dependencies:
+              - ../dist/*.whl
+              - databricks-labs-pytester==0.7.4

@@ -1,0 +1,83 @@
+name: e2e
+
+# End-to-end tests against a real Databricks workspace. These run the impulse
+# report pipeline on serverless compute (see databricks.yml / resources/), so
+# they are deliberately kept OFF the PR path (acceptance.yml owns fast local
+# tests) and run nightly + on demand instead.
+on:
+  # TEMPORARY — remove before merging to main. Lets the workflow run on pushes
+  # to the feature branch so it can be validated before it lands on the default
+  # branch (schedule/workflow_dispatch only trigger from main).
+  push:
+    branches:
+      - feature/e2e_tests_on_databricks
+  schedule:
+    # 04:00 UTC daily.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Same fork gate as acceptance.yml: fork runs get no OIDC token / secrets, so
+  # skip them. (Scheduled runs and workspace-authorized dispatches only.)
+  not-a-fork:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+    steps:
+      - run: echo "Not a fork, proceeding"
+
+  e2e:
+    name: E2E on Databricks (serverless)
+    needs: not-a-fork
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    # The protected environment gates the Databricks SP secrets behind required
+    # reviewers so they are never exposed to an untrusted run.
+    environment: e2e
+    permissions:
+      # id-token: write is for JFrog OIDC (dependency install). Databricks auth
+      # is OAuth M2M via the secrets below, not GitHub OIDC.
+      id-token: write
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      DATABRICKS_AUTH_TYPE: oauth-m2m
+      # Serverless compute for the deployed job.
+      DATABRICKS_SERVERLESS_COMPUTE_ID: auto
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: false
+          version: "0.11.2"
+          checksum: "7ac2ca0449c8d68dae9b99e635cd3bc9b22a4cb1de64b7c43716398447d42981"
+
+      - name: Setup for JFrog
+        uses: ./.github/actions/jfrog-auth
+
+      - name: Install dependencies
+        run: make dev
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@8821c27b1fe57472264eeb6e50c1f31d69552f28 # v1.10.0
+
+      # `bundle deploy` builds the wheel via the `impulse_wheel` artifact
+      # (rm -rf dist && uv build --wheel), so no separate build step is needed.
+      - name: Deploy bundle
+        run: databricks bundle deploy -t e2e
+
+      - name: Run e2e job
+        # Non-zero exit (any pytest failure inside the job) fails this step.
+        run: databricks bundle run e2e_tests -t e2e
