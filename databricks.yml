@@ -24,7 +24,7 @@ include:
 variables:
   catalog:
     description: UC catalog the e2e tests create their ephemeral schemas under.
-    default: impulse_tests
+    default: impulse_tests_catalog
 
 targets:
   # The only target: the Azure workspace where the CI service principal has
