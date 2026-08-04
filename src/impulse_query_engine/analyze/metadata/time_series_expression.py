@@ -244,6 +244,54 @@ class TimeSeriesExpression(abc.ABC):
         """
         pass
 
+    def get_poi_selectors(self) -> list[Any]:
+        """Return all POI leaves reachable from this expression.
+
+        Concrete default returning ``[]`` so every existing expression node is
+        POI-free unless it overrides this (``PoiSelector`` returns ``[self]``;
+        ``TimeSeriesOp`` and ``TimeSeriesAliasSelector`` walk their children).  This is
+        the parallel of :meth:`get_selectors` for the POI pipeline: POI leaves return
+        ``[]`` from ``get_selectors`` so they stay out of the channel-match stages, and
+        are collected here instead.
+
+        Returns
+        -------
+        list
+            POI selector leaves (``PoiSelector`` instances); possibly with duplicates,
+            deduplicated by :meth:`collect_poi_selectors`.
+        """
+        return []
+
+    @staticmethod
+    def collect_poi_selectors(expressions: Iterable[Any]) -> list[Any]:
+        """Collect deduplicated POI leaves from a list of expressions.
+
+        Mirrors :meth:`collect_selectors`: walks each ``TimeSeriesExpression``'s
+        :meth:`get_poi_selectors`, skips non-expressions, and deduplicates by
+        ``selector_id`` preserving discovery order.
+
+        Parameters
+        ----------
+        expressions : Iterable[Any]
+            Items to walk; non-``TimeSeriesExpression`` entries are skipped.
+
+        Returns
+        -------
+        list
+            Deduplicated POI selectors in discovery order.
+        """
+        selectors: list[Any] = []
+        seen_ids: set = set()
+        for expression in expressions:
+            if not isinstance(expression, TimeSeriesExpression):
+                continue
+            for selector in expression.get_poi_selectors():
+                if selector.selector_id in seen_ids:
+                    continue
+                seen_ids.add(selector.selector_id)
+                selectors.append(selector)
+        return selectors
+
     @staticmethod
     def collect_selectors(
         expressions: Iterable[Any],
@@ -882,6 +930,12 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
             result.extend(alias.get_selectors())
         return result
 
+    def get_poi_selectors(self) -> list[Any]:
+        result: list[Any] = []
+        for alias in self._aliases:
+            result.extend(alias.get_poi_selectors())
+        return result
+
     def __str__(self):
         """
         String representation.
@@ -990,6 +1044,16 @@ class TimeSeriesOp(TimeSeriesExpression):
         for kwarg in self.kwargs.values():
             if isinstance(kwarg, TimeSeriesExpression):
                 result.extend(kwarg.get_selectors())
+        return result
+
+    def get_poi_selectors(self) -> list[Any]:
+        result: list[Any] = []
+        for arg in self.args:
+            if isinstance(arg, TimeSeriesExpression):
+                result.extend(arg.get_poi_selectors())
+        for kwarg in self.kwargs.values():
+            if isinstance(kwarg, TimeSeriesExpression):
+                result.extend(kwarg.get_poi_selectors())
         return result
 
     def build(self, cache: SeriesCache):

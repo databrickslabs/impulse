@@ -85,6 +85,33 @@ class JoinKey(BaseModel):
     metrics_col: str
 
 
+class PoiConfig(TableConfig):
+    """``TableConfig`` for the optional POI table.
+
+    Follows :class:`ChannelMappingConfig` in extending :class:`TableConfig` with a few
+    typed fields.  ``column_name_mapping`` handles container binding without a join: a
+    producer that keys POI rows on ``recording_session_id`` maps it to ``container_id``.
+
+    Attributes
+    ----------
+    ts_column : str
+        Physical column (after ``column_name_mapping``) holding the POI occurrence time.
+        **Must be a datetime / Spark ``timestamp`` column** — the solver reads it directly
+        as an absolute instant (via ``unix_micros``) with no unit or origin assumptions.
+        This is enforced by convention/documentation, not by the engine: a non-timestamp
+        column would resolve to nonsensical instants.  See the POI section of the silver
+        layer schema docs.
+    dedup_order_by : list[str]
+        Deterministic tiebreak columns for the "one row per (kind, instant)" dedup.  Two
+        POI rows can share an instant and collide in the gold MERGE (event ids are
+        ``crc32(cid::name::start::end)`` with ``start == end`` for a point), so the dedup
+        needs a *total* order.
+    """
+
+    ts_column: str = "timestamp"
+    dedup_order_by: list[str] = []
+
+
 class ChannelMappingConfig(TableConfig):
     """``TableConfig`` plus an optional alias-resolution join-key spec.
 
@@ -133,6 +160,10 @@ class SolverConfig(BaseModel):
         Column mappings and filters for the channel data table.
     unit_conversion : TableConfig
         Column mappings and filters for the unit conversion table.
+    poi : PoiConfig
+        Column mappings, filters, time base and dedup order for the optional POI
+        (point-of-interest) table.  Inert unless a ``poi_table`` is configured on the
+        database.
     """
 
     project_id: str | None = None
@@ -144,6 +175,7 @@ class SolverConfig(BaseModel):
     channel_mapping: ChannelMappingConfig = ChannelMappingConfig()
     channels: TableConfig = TableConfig()
     unit_conversion: TableConfig = TableConfig()
+    poi: PoiConfig = PoiConfig()
 
     # ------------------------------------------------------------------
     # Class methods
@@ -370,6 +402,20 @@ class SolverConfig(BaseModel):
         return [(jk.mapping_col, jk.metrics_col) for jk in self.channel_mapping.join_keys]
 
     @property
+    def poi_ts_col(self) -> str:
+        """Internal column name for the resolved POI instant (integer microseconds).
+
+        This is the *normalized* column ``filter_poi`` produces from the physical
+        ``PoiConfig.ts_column`` after time-base resolution — not the physical column.
+        """
+        return "ts"
+
+    @property
+    def poi_selector_id_col(self) -> str:
+        """Internal column name tagging each POI row with the selector that matched it."""
+        return "selector_id"
+
+    @property
     def col_map(self) -> dict[str, str]:
         """Short-key → internal-column-name mapping for UDFs and caches."""
         return {
@@ -379,4 +425,13 @@ class SolverConfig(BaseModel):
             "te": self.tend_col,
             "val": self.value_col,
             "conv": self.conversion_factor_col,
+        }
+
+    @property
+    def poi_col_map(self) -> dict[str, str]:
+        """Short-key → internal-column-name mapping for the POI cache/UDF path."""
+        return {
+            "cid": self.container_id_col,
+            "ts": self.poi_ts_col,
+            "sel": self.poi_selector_id_col,
         }

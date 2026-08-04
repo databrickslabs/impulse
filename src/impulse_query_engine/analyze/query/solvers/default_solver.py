@@ -24,7 +24,13 @@ if TYPE_CHECKING:
 
 
 class TimeSeriesCache(SeriesCache):
-    def __init__(self, pdf, col_map: dict[str, str]):
+    def __init__(
+        self,
+        pdf,
+        col_map: dict[str, str],
+        poi_pdf=None,
+        poi_col_map: dict[str, str] | None = None,
+    ):
         """
         Initialize the TimeSeriesCache.
 
@@ -39,12 +45,23 @@ class TimeSeriesCache(SeriesCache):
             the caller's frame is reordered by ``(cid, ch, ts)`` and its
             index reset.  The sort makes each channel's rows contiguous,
             which the constructor exploits to build a ``(cid, ch)`` →
-            ``(start, stop)`` range index for :meth:`load_blob`.
+            ``(start, stop)`` range index for :meth:`load_blob`.  May be
+            **empty** (a POI-only container in the cogroup path); the range
+            index is then empty and only :meth:`resolve_poi` returns data.
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
             ``"conv"`` column is optional in *pdf*.
+        poi_pdf : pd.DataFrame, optional
+            This container's resolved POI rows from ``filter_poi`` — already
+            time-base-normalized (integer-µs ``ts``), deduped, and tagged with
+            a ``selector_id``.  ``None`` when the query has no POI selectors.
+        poi_col_map : dict[str, str], optional
+            Mapping with keys ``"cid"``, ``"ts"``, ``"sel"`` to the POI-frame
+            column names.  Required when *poi_pdf* is given.
         """
+        self._poi_pdf = poi_pdf
+        self._poi_col_map = poi_col_map or {}
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
         self._ts_col = col_map["ts"]
@@ -97,6 +114,35 @@ class TimeSeriesCache(SeriesCache):
             return self.mdf[idx]
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
+
+    def resolve_poi(self, selection):
+        """Return this container's POI rows matching *selection*, renamed to ``ts``.
+
+        The Spark-side ``filter_poi`` already evaluated every POI predicate and tagged
+        each surviving row with the matching ``selector_id``, so here we only select the
+        rows carrying this selector's id — the UDF never sees POI rows it cannot use.  The
+        resolved-instant column is exposed as ``ts`` (what :meth:`PoiSelector.build`
+        reads).
+
+        Parameters
+        ----------
+        selection : PoiSelector
+            The asking POI leaf; ``selection.selector_id`` selects its rows.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Rows with a ``ts`` column (integer µs).  Empty when this container has no
+            matching POI rows.
+        """
+        if self._poi_pdf is None or len(self._poi_pdf) == 0:
+            return pd.DataFrame(columns=["ts"])
+        sel_col = self._poi_col_map["sel"]
+        ts_col = self._poi_col_map["ts"]
+        rows = self._poi_pdf[self._poi_pdf[sel_col] == selection.selector_id]
+        if ts_col != "ts":
+            rows = rows.rename(columns={ts_col: "ts"})
+        return rows
 
     def load_blob(self, mid, cid, uses_alias: bool = False):
         """
@@ -899,6 +945,125 @@ class DefaultSolver(QuerySolver):
         return channels_df
 
     # ------------------------------------------------------------------
+    # POI stage
+    # ------------------------------------------------------------------
+
+    def filter_poi(self, spark, db, container_df, poi_selectors) -> DataFrame | None:
+        """Resolve POI rows for the selected containers into a narrow, solve-ready frame.
+
+        Modeled on :meth:`filter_aliased_channel_metrics`: apply
+        ``column_name_mapping`` → ``project_id`` → per-table ``filters``, restrict to the
+        candidate containers, resolve the ``ts_column`` datetime to integer microseconds,
+        and dedup to one row per ``(selector, container, instant)`` with a deterministic
+        total order.
+
+        The output is narrow (``container_id``, ``ts``, ``selector_id``) and each row is
+        tagged with the ``selector_id`` of the POI leaf whose predicate it satisfied, so
+        the per-container cache can hand each selector exactly its rows without
+        re-evaluating predicates.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        db : MeasurementDB
+            Measurement database; reads ``db.poi(spark)``.
+        container_df : pyspark.sql.DataFrame
+            Stage-2 container frame — already container-filtered and incremental-scoped.
+        poi_selectors : list[PoiSelector]
+            POI leaves collected from the selections.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame or None
+            ``None`` when there are no POI selectors.  Otherwise
+            ``(container_id, ts, selector_id)``.
+        """
+        if not poi_selectors:
+            return None
+
+        poi_cfg = self.config.poi
+        container_id_col = self.config.container_id_col
+        ts_col = self.config.poi_ts_col
+        sel_col = self.config.poi_selector_id_col
+
+        poi = db.poi(spark)
+        poi = self._apply_column_mapping(poi, poi_cfg.column_name_mapping)
+
+        if self.config.project_id is not None and self.config.project_id_col in poi.columns:
+            poi = poi.where(F.col(self.config.project_id_col) == self.config.project_id)
+        for col_name, value in poi_cfg.filters.items():
+            poi = poi.where(F.col(col_name) == value)
+
+        # Keep only rows matching some selector; tag each with its selector_id. Rows
+        # matching several selectors are exploded so each selector sees its own copy.
+        poi = poi.where(self._build_expr(poi_selectors))
+        sel_when = F.array(
+            *[
+                F.when(s.get_selector_expr(), F.lit(s.selector_id))
+                for s in poi_selectors
+            ]
+        )
+        poi = poi.withColumn(
+            sel_col,
+            F.explode(F.array_compact(sel_when)),
+        )
+
+        # Restrict to candidate containers with a left_semi join: filters without
+        # widening, and no POI row can be duplicated by a repeated container key. This is
+        # what replaces the old inner-join container binding (POI_PROPOSAL_REVIEW.md §2).
+        poi = poi.join(
+            F.broadcast(container_df.select(container_id_col).distinct()),
+            on=[container_id_col],
+            how="left_semi",
+        )
+
+        poi = self._resolve_poi_time_base(poi)
+        poi = self._dedup_poi(poi, poi_selectors)
+
+        # POI is a pure occurrence log (Option D): ship only keys, the resolved instant,
+        # and the selector id. Values at an occurrence come from sampling the measured
+        # channel (channel.where(poi)), not from POI columns, so no attribute columns.
+        return poi.select(container_id_col, ts_col, sel_col)
+
+    def _resolve_poi_time_base(self, poi) -> DataFrame:
+        """Add the internal integer-microsecond ``ts`` column from ``PoiConfig.ts_column``.
+
+        ``ts_column`` must be a datetime / Spark ``timestamp`` column (enforced by
+        documentation, see the silver-layer schema docs). It is read directly as an
+        absolute instant via ``unix_micros`` — no unit or per-container-origin assumptions.
+        A non-timestamp column would silently resolve to nonsensical instants, which is why
+        the datetime requirement is stated explicitly.
+        """
+        ts_col = self.config.poi_ts_col
+        return poi.withColumn(
+            ts_col, F.unix_micros(F.col(self.config.poi.ts_column).cast("timestamp"))
+        )
+
+    def _dedup_poi(self, poi, poi_selectors) -> DataFrame:
+        """Collapse to one row per ``(selector_id, container, instant)``, deterministically.
+
+        Two POI rows can share an instant; the gold event id is
+        ``crc32(cid::name::start::end)`` with ``start == end`` for a point, so duplicates
+        collide in the MERGE.  The dedup order is ``PoiConfig.dedup_order_by`` (any columns
+        present on the frame) then a stable fallback, giving a *total* order so the
+        surviving row is deterministic across shuffles.
+        """
+        container_id_col = self.config.container_id_col
+        ts_col = self.config.poi_ts_col
+        sel_col = self.config.poi_selector_id_col
+
+        order_cols = [
+            F.col(c).asc_nulls_last()
+            for c in self.config.poi.dedup_order_by
+            if c in poi.columns
+        ]
+        order_cols.append(F.col(ts_col).asc_nulls_last())
+        dedup_window = Window.partitionBy(sel_col, container_id_col, ts_col).orderBy(*order_cols)
+        poi = poi.withColumn("_poi_rank", F.row_number().over(dedup_window))
+        return poi.where(F.col("_poi_rank") == 1).drop("_poi_rank")
+
+    # ------------------------------------------------------------------
     # Solve
     # ------------------------------------------------------------------
 
@@ -932,7 +1097,41 @@ class DefaultSolver(QuerySolver):
             result[s._alias] = [res]
         return pd.DataFrame(result)
 
-    def solve(self, query, channels_df, selections, dtypes) -> DataFrame:
+    @staticmethod
+    def _solve_udf_with_poi(
+        chan_pdf,
+        poi_pdf,
+        selections: Iterable,
+        col_map: dict[str, str],
+        poi_col_map: dict[str, str],
+    ) -> pd.DataFrame:
+        """Cogroup UDF: solve one container from its channel frame *and* its POI frame.
+
+        Cogroup is full-outer, so exactly one of the two frames may be empty:
+
+        - channels-only container → ``poi_pdf`` empty (channels still solve),
+        - POI-only container → ``chan_pdf`` empty (POI still solves).
+
+        The container id is read from whichever frame is non-empty, so a POI-only
+        container does not ``IndexError`` on ``chan_pdf[cid].iloc[0]``.
+        """
+        cid_col = col_map["cid"]
+        src = chan_pdf if len(chan_pdf) > 0 else poi_pdf
+        src_cid_col = cid_col if len(chan_pdf) > 0 else poi_col_map["cid"]
+        result = {cid_col: [src[src_cid_col].iloc[0]]}
+        cache = TimeSeriesCache(
+            chan_pdf, col_map=col_map, poi_pdf=poi_pdf, poi_col_map=poi_col_map
+        )
+        for s in selections:
+            res = s.build(cache)
+            if hasattr(res, "serialize") and callable(res.serialize):
+                res = res.serialize()
+            elif hasattr(res, "get_data") and callable(res.get_data):
+                res = res.get_data()
+            result[s._alias] = [res]
+        return pd.DataFrame(result)
+
+    def solve(self, query, channels_df, selections, dtypes, poi_df=None) -> DataFrame:
         """
         Solve the query by grouping channels and applying selections.
 
@@ -942,6 +1141,10 @@ class DefaultSolver(QuerySolver):
         per-channel conversion factors are computed and propagated into
         the grouped-map UDF so that time-series values are converted from
         the source to the target unit on the fly.
+
+        When *poi_df* is present the solve forks to a ``cogroup`` of the channel data and
+        the POI frame by ``container_id`` — full-outer, so channel-only and POI-only
+        containers both still emit a row.  A plain ``GROUPED_MAP`` is used otherwise.
 
         Parameters
         ----------
@@ -953,6 +1156,8 @@ class DefaultSolver(QuerySolver):
             List of selection expressions to apply.
         dtypes : list
             List of data types for each selection.
+        poi_df : pyspark.sql.DataFrame, optional
+            Resolved POI frame from :meth:`filter_poi`, or ``None``.
 
         Returns
         -------
@@ -961,14 +1166,57 @@ class DefaultSolver(QuerySolver):
         """
         col_map = self.config.col_map
         q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
-
         schema = self._build_solve_output_schema(q, selections, dtypes)
+
+        if poi_df is not None:
+            return self._apply_cogrouped_map(
+                query, joined_df, poi_df, selections, schema, col_map
+            )
+
         solve_udf = F.pandas_udf(
             partial(DefaultSolver._solve_udf, selections=selections, col_map=col_map),
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )
         return self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
+
+    def _apply_cogrouped_map(
+        self, query, joined_df, poi_df, selections, schema, col_map
+    ) -> DataFrame:
+        """Cogroup channel data with the POI frame by container and run the POI UDF.
+
+        The container set is the **union** of channel-bearing and POI-bearing containers
+        — derived from the cogroup itself rather than the channel-match frame — so a
+        POI-only query (no ``q.channel(...)``) still produces rows.  This is the fix for
+        the silent-empty POI-only query in ``POI_PROPOSAL_REVIEW.md`` §3.1: a plain
+        ``GROUPED_MAP`` short-circuits when the channel-match frame is empty, but a
+        cogroup whose right side carries the POI containers does not.
+        """
+        container_id_col = self.config.container_id_col
+        poi_col_map = self.config.poi_col_map
+
+        # container_count is the union of both sides; if it is zero there is genuinely
+        # nothing to solve (no channels AND no POI), so an empty frame is correct.
+        container_count = (
+            joined_df.select(container_id_col)
+            .union(poi_df.select(container_id_col))
+            .distinct()
+            .count()
+        )
+        if container_count == 0:
+            return self.spark.createDataFrame([], schema=schema)
+
+        left = joined_df.repartition(container_count, container_id_col).groupBy(container_id_col)
+        right = poi_df.repartition(container_count, container_id_col).groupBy(container_id_col)
+        return left.cogroup(right).applyInPandas(
+            partial(
+                DefaultSolver._solve_udf_with_poi,
+                selections=selections,
+                col_map=col_map,
+                poi_col_map=poi_col_map,
+            ),
+            schema=schema,
+        )
 
     def _prepare_channels_join(self, query, channels_df) -> tuple[DataFrame, DataFrame, int]:
         """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.

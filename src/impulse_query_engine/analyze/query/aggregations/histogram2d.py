@@ -133,6 +133,9 @@ class Histogram2DDuration(Aggregation):
     def get_selectors(self) -> list[TimeSeriesSelector]:
         return self.x_selection.get_selectors() + self.y_selection.get_selectors()
 
+    def get_poi_selectors(self) -> list:
+        return self.x_selection.get_poi_selectors() + self.y_selection.get_poi_selectors()
+
 
 class Histogram2DCustomWeights(Aggregation):
     """Class representing a 2D histogram aggregation in a report with custom weights."""
@@ -309,4 +312,11 @@ class Histogram2DCustomWeights(Aggregation):
             self.x_selection.get_selectors()
             + self.y_selection.get_selectors()
             + self.weights_expr.get_selectors()
+        )
+
+    def get_poi_selectors(self) -> list:
+        return (
+            self.x_selection.get_poi_selectors()
+            + self.y_selection.get_poi_selectors()
+            + self.weights_expr.get_poi_selectors()
         )

@@ -70,3 +70,26 @@ CHANNELS_SCHEMA_WITHOUT_RLE = T.StructType(
         T.StructField("value", T.DoubleType()),
     ]
 )
+
+# Optional POI (point-of-interest) table. One row per occurrence (e.g. "AEB fired here").
+# A POI is a point in time — no duration, no sample rate, no value that persists between
+# entries. Under Option D, POI is a pure occurrence log: it always evaluates to a
+# PointsInTime, and a signal's value *at* an occurrence comes from sampling the measured
+# channel (``q.channel(...).where(q.poi(...))``), not from a POI column. Non-spine columns
+# (``poi_type``, ``duration``, ``event_type``, …) are row-filterable via
+# ``q.poi(...).having(q.poi_metric("duration") > 5)``. This schema mirrors the external
+# ``tech_rds_dev.poi.poi`` table and is used for fixtures.
+POI_SCHEMA = T.StructType(
+    [
+        T.StructField("container_id", T.LongType(), nullable=False),
+        # Occurrence time. This is PoiConfig.ts_column and MUST be a datetime / timestamp
+        # column: the solver reads it directly as an absolute instant (unix_micros), with
+        # no unit or origin assumptions.
+        T.StructField("timestamp", T.TimestampType()),
+        # Kind discriminator: q.poi(poi_type="aeb") filters on this.
+        T.StructField("poi_type", T.StringType()),
+        # Row-filterable spine columns (q.poi_metric(...) in a .having(...) predicate).
+        T.StructField("duration", T.DoubleType()),
+        T.StructField("event_type", T.StringType()),
+    ]
+)

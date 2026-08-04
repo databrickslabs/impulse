@@ -23,5 +23,5 @@ class InMemorySolver(QuerySolver):
     def filter_channel_metrics(self, spark, db, channel_df, selectors) -> DataFrame:
         raise NotImplementedError
 
-    def solve(self, query, channels_df, selections, dtypes=None):
+    def solve(self, query, channels_df, selections, dtypes=None, poi_df=None):
         raise NotImplementedError

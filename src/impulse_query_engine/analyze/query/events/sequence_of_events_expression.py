@@ -104,6 +104,12 @@ class SequenceOfEventsExpression(TimeSeriesExpression):
             result.extend(expr.get_selectors())
         return result
 
+    def get_poi_selectors(self) -> list:
+        result: list = []
+        for expr in self.expressions:
+            result.extend(expr.get_poi_selectors())
+        return result
+
     def get_selector_expr(self):
         """
         Return the combined selector expression (OR of all children).

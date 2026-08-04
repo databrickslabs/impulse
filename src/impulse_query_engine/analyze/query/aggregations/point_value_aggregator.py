@@ -195,3 +195,17 @@ class PointValueAggregator(Aggregation):
         if self.event_expression is not None:
             result.extend(self.event_expression.get_selectors())
         return result
+
+    def get_poi_selectors(self) -> list:
+        """Return all POI leaves reachable from the input and event expressions.
+
+        This is what lets a POI scope a ``PointValueAggregator``: the event
+        expression is a ``PoiSelector`` (a ``PointsInTime``), and the report's
+        POI collection walks into it here so ``filter_poi`` runs for it.
+        """
+        result: list = []
+        for expr in self.input_expressions:
+            result.extend(expr.get_poi_selectors())
+        if self.event_expression is not None:
+            result.extend(self.event_expression.get_poi_selectors())
+        return result

@@ -5,6 +5,8 @@ import pyspark.sql.types as T
 from pyspark.sql import DataFrame
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricSelector
+from impulse_query_engine.analyze.metadata.poi_expression import PoiMetricSelector
+from impulse_query_engine.analyze.metadata.poi_selector import PoiSelector, poi_expr
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     RequiresDeserialization,
@@ -38,6 +40,10 @@ class QueryBuilder:
         self.selections = []
         self.result_objects = []
         self.result_dtypes = []
+        # Per-solve POI frame. Set inside _run_filter_pipeline and cleared at its top so a
+        # frame scoped to one container set can never leak into the next solve() — the
+        # correctness rule from POI_PROPOSAL_REVIEW.md §3.2. Never a long-lived cache.
+        self._poi_df = None
 
     def where(self, *args):
         """
@@ -161,6 +167,60 @@ class QueryBuilder:
                 expr = expr & (TagSelector(k) == str(arg))
         return TimeSeriesSelector(expr, uses_alias=True)
 
+    def poi(self, **kind_filters) -> PoiSelector:
+        """
+        Create a POI (point-of-interest) selector.
+
+        A POI is a point in time from the configured ``poi_table`` (one row per
+        occurrence, e.g. "AEB fired here"). It always evaluates to :class:`PointsInTime` —
+        the instants of the matching occurrences.
+
+        Row filtering:
+
+        - equality kwargs pick the occurrences: ``q.poi(poi_type="aeb")``;
+        - extra predicates go through :meth:`PoiSelector.having` with :meth:`poi_metric`:
+          ``q.poi(poi_type="aeb").having(q.poi_metric("duration") > 5)``.
+
+        To read a signal's value *at* each occurrence, sample the measured channel rather
+        than a POI column: ``q.channel("Vehicle Speed Sensor").where(q.poi(poi_type="aeb"))``.
+
+        Parameters
+        ----------
+        **kind_filters : dict
+            Column → value equality pairs identifying the rows, e.g. ``poi_type="aeb"``.
+
+        Returns
+        -------
+        PoiSelector
+            The POI expression leaf.
+        """
+        return PoiSelector(poi_expr(**kind_filters))
+
+    def poi_metric(self, name: str, cast_type: str | None = None) -> PoiMetricSelector:
+        """
+        Create a POI column selector for row-filtering, à la :meth:`metric`.
+
+        ``q.poi_metric("duration") > 5`` builds a predicate over the wide, typed POI
+        table — the analogue of ``q.metric("duration_ms") > 5`` over ``container_metrics``.
+        Because POI columns are natively typed, **no cast is needed** for numeric
+        comparisons (unlike ``q.tag``, whose EAV string ``value`` forces one). Pass to
+        :meth:`PoiSelector.having`.
+
+        Parameters
+        ----------
+        name : str
+            The POI column name (after ``PoiConfig.column_name_mapping``).
+        cast_type : str or None, optional
+            Optional Spark cast, for the rare column whose physical type is not what the
+            comparison needs. Defaults to ``None`` (native type).
+
+        Returns
+        -------
+        PoiMetricSelector
+            A column reference; compare it to build a predicate.
+        """
+        return PoiMetricSelector(name, cast_type=cast_type)
+
     def select(self, *args) -> Self:
         """
         Set the selection expressions for the query.
@@ -238,7 +298,13 @@ class QueryBuilder:
 
         channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
 
-        return solver.solve(self, channel_metrics_df, self.selections, self.result_dtypes)
+        return solver.solve(
+            self,
+            channel_metrics_df,
+            self.selections,
+            self.result_dtypes,
+            poi_df=self._poi_df,
+        )
 
     def _run_filter_pipeline(self, spark, solver, pre_filtered_containers_df) -> DataFrame:
         """Run the shared metadata filter pipeline and return the channel-match frame.
@@ -250,6 +316,12 @@ class QueryBuilder:
         ``solver`` call.  Returns the ``(container_id, channel_id, selector_ids …)``
         DataFrame identifying the channels selected by the current selections.
         """
+        # Clear any POI frame from a previous solve BEFORE running the pipeline: it is
+        # scoped to that solve's container set, and this QueryBuilder is reused across the
+        # two differently-scoped solves inside one determine_report() (see
+        # POI_PROPOSAL_REVIEW.md §3.2). Never carry it over.
+        self._poi_df = None
+
         # extract selectors upfront
         direct_selectors = TimeSeriesExpression.collect_selectors(
             self.selections, uses_alias=False
@@ -257,6 +329,7 @@ class QueryBuilder:
         aliased_selectors = TimeSeriesExpression.collect_selectors(
             self.selections, uses_alias=True
         )
+        poi_selectors = TimeSeriesExpression.collect_poi_selectors(self.selections)
 
         # create Query
         tags_df = solver.filter_container_tags(spark, self)
@@ -267,6 +340,14 @@ class QueryBuilder:
         channel_metrics_df = solver.filter_channel_metrics(
             spark, self.db, channel_tags_df, direct_selectors
         )
+
+        # POI stage: resolve POI rows for the *container* frame (metrics_df) — already
+        # container-filtered and incremental-scoped. Keyed off the stage-2 frame rather
+        # than the channel-match frame so a POI-only query (no q.channel(...)) still has a
+        # non-empty container set (POI_PROPOSAL_REVIEW.md §3.1). No-op / None on solvers
+        # that don't support POI, so POI-free queries are unaffected.
+        if len(poi_selectors) > 0:
+            self._poi_df = solver.filter_poi(spark, self.db, metrics_df, poi_selectors)
 
         if len(aliased_selectors) > 0:
             # Aliased resolution must run against the full tag-filtered container

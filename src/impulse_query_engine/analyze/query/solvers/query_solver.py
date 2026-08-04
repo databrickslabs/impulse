@@ -392,8 +392,38 @@ class QuerySolver(ABC):
         """
         pass
 
+    def filter_poi(self, spark, db: MeasurementDB, container_df, poi_selectors):
+        """
+        Optional POI stage: resolve POI rows for the selected containers.
+
+        Non-abstract and returns ``None`` by default — mirroring the no-op
+        :meth:`filter_candidates` — so solvers that do not support POI (``BlobSolver``,
+        ``InMemorySolver``) need no changes and a POI-free query is unaffected.  Solvers
+        that support POI (``DefaultSolver``) override this to produce a narrow, per-
+        container, deduped, time-base-resolved POI frame tagged with ``selector_id``.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        db : MeasurementDB
+            Measurement database for table access (reads ``db.poi(spark)``).
+        container_df : pyspark.sql.DataFrame
+            The stage-2 container frame — already container-filtered and
+            incremental-scoped.  POI is restricted to these containers with a
+            ``left_semi`` join so no POI row is dropped or duplicated.
+        poi_selectors : list
+            The ``PoiSelector`` leaves collected from the selections.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame or None
+            ``None`` when there are no POI selectors or the solver does not support POI.
+        """
+        return None
+
     @abc.abstractmethod
-    def solve(self, query, channels_df, selections, dtypes):
+    def solve(self, query, channels_df, selections, dtypes, poi_df=None):
         """
         Stage 6: Solve query.
 
@@ -407,6 +437,11 @@ class QuerySolver(ABC):
             List of selection expressions to apply.
         dtypes : list
             List of data types for each selection.
+        poi_df : pyspark.sql.DataFrame, optional
+            The resolved POI frame from :meth:`filter_poi`, or ``None`` when the query
+            has no POI selectors.  When present, the solver co-groups it with the channel
+            data by ``container_id`` (full-outer) so POI-only and channel-only containers
+            both still produce results.
 
         Returns
         -------

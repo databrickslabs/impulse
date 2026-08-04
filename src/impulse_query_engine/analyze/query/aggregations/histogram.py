@@ -144,6 +144,9 @@ class HistogramDuration(Aggregation):
     def get_selectors(self) -> list[TimeSeriesSelector]:
         return self.selection.get_selectors()
 
+    def get_poi_selectors(self) -> list:
+        return self.selection.get_poi_selectors()
+
 
 class HistogramCustomWeights(Aggregation):
     def __init__(
@@ -287,3 +290,6 @@ class HistogramCustomWeights(Aggregation):
 
     def get_selectors(self) -> list[TimeSeriesSelector]:
         return self.selection.get_selectors() + self.weights.get_selectors()
+
+    def get_poi_selectors(self) -> list:
+        return self.selection.get_poi_selectors() + self.weights.get_poi_selectors()

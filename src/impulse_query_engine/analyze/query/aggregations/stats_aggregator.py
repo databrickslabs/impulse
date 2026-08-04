@@ -590,6 +590,14 @@ class StatsAggregator(Aggregation):
             result.extend(self.event_expression.get_selectors())
         return result
 
+    def get_poi_selectors(self) -> list:
+        result: list = []
+        for expr in self.input_expressions:
+            result.extend(expr.get_poi_selectors())
+        if self.event_expression is not None:
+            result.extend(self.event_expression.get_poi_selectors())
+        return result
+
     def weighted_median(self, durations, values):
         """Calculate duration-weighted median for RLE compressed data."""
         # Extract the slice

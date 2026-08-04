@@ -149,6 +149,7 @@ class Source(BaseModel):
     channels_uri: Annotated[str, AfterValidator(is_valid_table_name)]
     channel_mapping_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
     unit_conversion_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
+    poi_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
 
 
 class UnitySink(BaseModel):

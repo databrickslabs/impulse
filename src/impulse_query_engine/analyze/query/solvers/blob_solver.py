@@ -128,9 +128,12 @@ class BlobSolver(QuerySolver):
             result[s._alias] = s.build(cache)
         return result
 
-    def solve(self, query, channels_df, selections, dtypes=None):
+    def solve(self, query, channels_df, selections, dtypes=None, poi_df=None):
         """
         Solve the query by grouping channels and applying selections.
+
+        ``poi_df`` is accepted for interface compatibility with
+        :meth:`QuerySolver.solve` and ignored — ``BlobSolver`` does not support POI.
 
         Parameters
         ----------
