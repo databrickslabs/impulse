@@ -2,8 +2,9 @@
 
 from unittest.mock import create_autospec
 
+import pyspark.sql.functions as F
 from databricks.sdk import WorkspaceClient
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Window
 
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     ChannelMappingConfig,
@@ -320,3 +321,56 @@ def add_histograms_aggregations(
         my_first_page.add_aggregation(stats_agg)
 
     return report
+
+
+def clone_silver_with_shrunk_container(
+    spark: SparkSession,
+    *,
+    updated_container_id: int,
+    shrink_channel_ids: list[int],
+    keep_n: int,
+    cm_table: str,
+    channels_table: str,
+    src_cm: str = "spark_catalog.silver.container_metrics",
+    src_channels: str = "spark_catalog.silver.channels",
+) -> None:
+    """Clone silver tables so one container is 'updated' and shrunk, for incremental tests.
+
+    Writes two scratch silver tables used to drive an incremental re-run that must
+    prune stale gold rows:
+
+    - ``cm_table`` — a copy of ``src_cm`` with an added ``timestamp`` column set to
+      ``current_timestamp()`` for ``updated_container_id`` (so it is detected as
+      updated) and ``2020-01-01`` for every other container (so they are skipped).
+    - ``channels_table`` — a copy of ``src_channels`` with the rows of
+      ``updated_container_id`` for each channel in ``shrink_channel_ids`` truncated
+      to only the first ``keep_n`` by ``tstart``; all other rows are kept as-is.
+
+    Parameters
+    ----------
+    spark : SparkSession
+    updated_container_id : int
+        Container flagged as updated and whose signals are shrunk.
+    shrink_channel_ids : list[int]
+        Channel ids (of the updated container) to truncate.
+    keep_n : int
+        Number of earliest (by ``tstart``) rows to keep per shrunk channel.
+    cm_table, channels_table : str
+        Fully-qualified names of the scratch tables to write.
+    src_cm, src_channels : str
+        Source silver tables to clone from.
+    """
+    spark.read.table(src_cm).withColumn(
+        "timestamp",
+        F.when(F.col("container_id") == updated_container_id, F.current_timestamp()).otherwise(
+            F.lit("2020-01-01 00:00:00").cast("timestamp")
+        ),
+    ).write.format("delta").mode("overwrite").saveAsTable(cm_table)
+
+    rn = F.row_number().over(Window.partitionBy("container_id", "channel_id").orderBy("tstart"))
+    shrink_target = (F.col("container_id") == updated_container_id) & (
+        F.col("channel_id").isin(shrink_channel_ids)
+    )
+    spark.read.table(src_channels).withColumn("_rn", rn).filter(
+        ~shrink_target | (F.col("_rn") <= keep_n)
+    ).drop("_rn").write.format("delta").mode("overwrite").saveAsTable(channels_table)

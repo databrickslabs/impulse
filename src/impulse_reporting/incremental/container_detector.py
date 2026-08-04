@@ -99,6 +99,47 @@ class ContainerUpsertDetector:
         upserted = new_containers.unionByName(updated_containers).dropDuplicates(["container_id"])
         return upserted
 
+    def detect_updated_containers(
+        self,
+        silver_containers_df: DataFrame,
+        gold_measurement_dim_table: str,
+        silver_last_modified_col: str = "last_modified",
+        gold_last_modified_col: str = "last_modified",
+    ) -> DataFrame | None:
+        """Detect only UPDATED containers (present in gold with a newer silver timestamp).
+
+        Unlike :meth:`detect_upserted_containers`, this excludes NEW containers.
+        Only containers that already have gold rows can have *stale* rows, so this
+        is the correct set for scoping delete-by-source pruning.
+
+        Parameters
+        ----------
+        silver_containers_df : DataFrame
+            Container metrics from silver layer. Must contain ``container_id``.
+        gold_measurement_dim_table : str
+            URI of the gold measurement_dimension table.
+        silver_last_modified_col : str, optional
+            Silver freshness column, by default ``"last_modified"``.
+        gold_last_modified_col : str, optional
+            Gold freshness column, by default ``"last_modified"``.
+
+        Returns
+        -------
+        DataFrame | None
+            Updated containers (silver schema), or None if the gold table
+            doesn't exist.
+        """
+        if not self._table_exists(gold_measurement_dim_table):
+            return None
+
+        gold_df = self.spark.read.table(gold_measurement_dim_table)
+        return self._identify_updated_containers(
+            silver_containers_df,
+            gold_df,
+            silver_last_modified_col,
+            gold_last_modified_col,
+        )
+
     def _identify_new_containers(self, silver_df: DataFrame, gold_df: DataFrame) -> DataFrame:
         """
         Identify containers in silver but not in gold using left anti-join.

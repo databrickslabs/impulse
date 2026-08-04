@@ -320,3 +320,79 @@ def test_table_exists_returns_false_for_nonexistent_table(spark):
     result = comparator._table_exists("nonexistent_catalog.nonexistent_schema.nonexistent_table")
 
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Calculated channel variant (group_calculated_channels_by_hash_change)
+# ---------------------------------------------------------------------------
+def _calc_channel(name, factor=3.6, identity=None):
+    from impulse_reporting.channels.calculated_channel import CalculatedChannel
+
+    return CalculatedChannel(
+        name=name,
+        expr=TimeSeriesSelector(None) * factor,
+        identity=identity or {"channel_name": name, "data_key": "CALC"},
+    )
+
+
+def test_all_calculated_channels_changed_when_table_does_not_exist(spark):
+    """All channels are changed when the gold dimension table doesn't exist."""
+    comparator = DefinitionHashComparator(spark)
+    channels = [_calc_channel("speed_kmh"), _calc_channel("rpm_x2")]
+
+    changed, unchanged = comparator.group_calculated_channels_by_hash_change(
+        channels=channels,
+        dimension_table="nonexistent_catalog.nonexistent_schema.nonexistent_table",
+    )
+
+    assert len(changed) == 2
+    assert len(unchanged) == 0
+
+
+def test_unchanged_calculated_channel_with_matching_hash(spark):
+    """A channel whose stored hash matches is marked unchanged."""
+    comparator = DefinitionHashComparator(spark)
+    ch = _calc_channel("speed_kmh")
+
+    dimension_data = [Row(channel_id=ch.get_id(), definition_hash=ch.determine_definition_hash())]
+    spark.createDataFrame(dimension_data).write.mode("overwrite").saveAsTable(
+        "spark_catalog.default.test_calc_channel_dim_match"
+    )
+
+    try:
+        changed, unchanged = comparator.group_calculated_channels_by_hash_change(
+            channels=[ch],
+            dimension_table="spark_catalog.default.test_calc_channel_dim_match",
+        )
+        assert changed == []
+        assert unchanged == [ch]
+    finally:
+        spark.sql("DROP TABLE IF EXISTS spark_catalog.default.test_calc_channel_dim_match")
+
+
+def test_changed_calculated_channel_with_different_hash(spark):
+    """A channel whose expression changed (different hash) is marked changed."""
+    comparator = DefinitionHashComparator(spark)
+    ch = _calc_channel("speed_kmh", factor=3.7)
+
+    # Store a stale hash (as if the channel was previously defined with * 3.6).
+    stale = _calc_channel("speed_kmh", factor=3.6)
+    dimension_data = [
+        Row(channel_id=stale.get_id(), definition_hash=stale.determine_definition_hash())
+    ]
+    spark.createDataFrame(dimension_data).write.mode("overwrite").saveAsTable(
+        "spark_catalog.default.test_calc_channel_dim_changed"
+    )
+
+    try:
+        changed, unchanged = comparator.group_calculated_channels_by_hash_change(
+            channels=[ch],
+            dimension_table="spark_catalog.default.test_calc_channel_dim_changed",
+        )
+        # Same identity → same channel_id as the stored row, but the expression
+        # hash differs, so it must be classified as changed.
+        assert ch.get_id() == stale.get_id()
+        assert changed == [ch]
+        assert unchanged == []
+    finally:
+        spark.sql("DROP TABLE IF EXISTS spark_catalog.default.test_calc_channel_dim_changed")

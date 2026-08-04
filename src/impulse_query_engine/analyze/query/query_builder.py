@@ -11,7 +11,11 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
     TimeSeriesSelector,
 )
+from impulse_query_engine.analyze.query.channels.calculated_channel import (
+    CalculatedChannel,
+)
 from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
+from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .solvers.blob_solver import BlobSolver
 from .solvers.query_solver import QuerySolver
@@ -232,6 +236,20 @@ class QueryBuilder:
             self.result_dtypes,
         ) = self._determine_result_objects_dtypes()
 
+        channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
+
+        return solver.solve(self, channel_metrics_df, self.selections, self.result_dtypes)
+
+    def _run_filter_pipeline(self, spark, solver, pre_filtered_containers_df) -> DataFrame:
+        """Run the shared metadata filter pipeline and return the channel-match frame.
+
+        Extracts the selector split, the four filter stages
+        (container tags → container metrics → channel tags → channel metrics) and
+        the optional channel-alias resolution that both :meth:`solve` and
+        :meth:`solve_calculated_channels` drive before their differing final
+        ``solver`` call.  Returns the ``(container_id, channel_id, selector_ids …)``
+        DataFrame identifying the channels selected by the current selections.
+        """
         # extract selectors upfront
         direct_selectors = TimeSeriesExpression.collect_selectors(
             self.selections, uses_alias=False
@@ -260,7 +278,80 @@ class QueryBuilder:
                 spark, channel_metrics_df, aliased_channel_metrics_df
             )
 
-        return solver.solve(self, channel_metrics_df, self.selections, self.result_dtypes)
+        return channel_metrics_df
+
+    @telemetry_logger("query", "solve_calculated_channels")
+    def solve_calculated_channels(
+        self,
+        spark,
+        solver: QuerySolver = BlobSolver(),
+        pre_filtered_containers_df: DataFrame = None,
+    ) -> DataFrame:
+        """
+        Compute calculated channels and return a narrow silver-shaped DataFrame.
+
+        Every selection must be a :class:`CalculatedChannel`.  This runs the same
+        metadata filter pipeline as :meth:`solve` (resolving the input channels
+        each calculated channel depends on), then evaluates each calculated
+        channel per container and emits rows in the silver ``channel_data`` shape
+        — ``container_id, channel_id, tstart, tend, value`` — plus a single
+        ``identity`` ``MapType(string, string)`` column holding each channel's
+        identity dict.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Spark session used for query execution.
+        solver : QuerySolver, optional
+            Query solver to use.  Must implement ``solve_calculated_channels``
+            (``DefaultSolver`` does); the default ``BlobSolver`` does not.
+        pre_filtered_containers_df : DataFrame, optional
+            Pre-filtered container metrics for incremental processing.  When
+            provided, only these containers are processed; when None, all
+            containers matching the query filters are processed.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            Narrow DataFrame ``[container_id, channel_id, tstart, tend, value,
+            identity]``.
+
+        Raises
+        ------
+        ValueError
+            If any selection is not a ``CalculatedChannel``, or if a wrapped
+            expression does not evaluate to a ``SampleSeries``.
+        """
+        self._validate_calculated_channels()
+
+        channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
+
+        return solver.solve_calculated_channels(self, channel_metrics_df, self.selections)
+
+    def _validate_calculated_channels(self) -> None:
+        """Validate the selections for :meth:`solve_calculated_channels`.
+
+        Every selection must be a ``CalculatedChannel`` and each wrapped
+        expression must evaluate to a ``SampleSeries``.  Identity key sets need
+        not match across selections — the identity is emitted as a single
+        self-describing ``MapType`` column, so heterogeneous keys are fine.
+        """
+        if not self.selections:
+            raise ValueError(
+                "solve_calculated_channels() requires at least one CalculatedChannel."
+            )
+
+        for i, s in enumerate(self.selections):
+            if not isinstance(s, CalculatedChannel):
+                raise ValueError(
+                    "solve_calculated_channels() requires all selections to be "
+                    f"CalculatedChannel; got {type(s).__name__} at index {i}."
+                )
+            s.expr.require_evaluation_type(
+                SampleSeries,
+                owner="CalculatedChannel",
+                example="q.channel(channel_name='raw_speed') * 3.6",
+            )
 
     @telemetry_logger("query", "to_pandas")
     def toPandas(self, spark, solver: QuerySolver = BlobSolver()) -> pd.DataFrame:

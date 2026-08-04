@@ -9,6 +9,7 @@ from impulse_reporting.config.config_parser import (
     IncrementalConfig,
     ImpulseConfig,
     MetricFilter,
+    RawEncoder,
     Solvers,
     TagFilter,
     is_valid_table_name,
@@ -127,6 +128,32 @@ def test_impulse_config_drop_implausible_data_rejects_rle():
         },
     }
     with pytest.raises(ValidationError, match="requires data_type=RAW"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_impulse_config_raw_encoder_interval():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "raw_encoder": "INTERVAL",
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.raw_encoder is RawEncoder.INTERVAL
+
+
+def test_impulse_config_raw_encoder_rejects_unknown_value():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "raw_encoder": "BOGUS",
+        },
+    }
+    with pytest.raises(ValidationError):
         ImpulseConfig.model_validate(config_json)
 
 

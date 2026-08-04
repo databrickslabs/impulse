@@ -99,6 +99,53 @@ class QuerySolver(ABC):
             entries.append(T.StructField(s._alias, dtype))
         return T.StructType(entries)
 
+    def _build_calculated_channels_udf_schema(self, channels: DataFrame) -> T.StructType:
+        """Build the grouped-map UDF return schema for calculated channels.
+
+        This describes what :meth:`DefaultSolver._solve_calculated_channels_udf`
+        returns — the narrow silver ``channel_data`` columns
+        (``container_id, channel_id, tstart, tend, value``).  The ``identity``
+        map is *not* part of this schema: it is constant per ``channel_id`` and
+        appended by :meth:`solve_calculated_channels` after the UDF runs, so it
+        never crosses the Arrow boundary.
+
+        The ``container_id``, ``channel_id``, ``tstart``, and ``tend`` field types
+        are derived from *channels* (the column-mapped channels DataFrame) so they
+        match the physical source types.
+
+        Parameters
+        ----------
+        channels : pyspark.sql.DataFrame
+            The column-mapped channels DataFrame whose ``container_id`` /
+            ``channel_id`` / ``tstart`` / ``tend`` column types are authoritative.
+
+        Returns
+        -------
+        pyspark.sql.types.StructType
+            ``[container_id, channel_id, tstart, tend, value]``.
+        """
+        return T.StructType(
+            [
+                T.StructField(
+                    self.config.container_id_col,
+                    channels.schema[self.config.container_id_col].dataType,
+                ),
+                T.StructField(
+                    self.config.channel_id_col,
+                    channels.schema[self.config.channel_id_col].dataType,
+                ),
+                T.StructField(
+                    self.config.tstart_col,
+                    channels.schema[self.config.tstart_col].dataType,
+                ),
+                T.StructField(
+                    self.config.tend_col,
+                    channels.schema[self.config.tend_col].dataType,
+                ),
+                T.StructField(self.config.value_col, T.DoubleType()),
+            ]
+        )
+
     def _empty_channel_match_df(self, spark, db: MeasurementDB) -> DataFrame:
         """Return an empty ``(container_id, channel_id, selector_ids)`` DataFrame.
 
@@ -367,3 +414,31 @@ class QuerySolver(ABC):
             DataFrame containing results for each container.
         """
         pass
+
+    def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
+        """
+        Solve calculated channels into a narrow, silver-shaped DataFrame.
+
+        Optional stage, parallel to :meth:`solve` but emitting many rows per
+        container (the exploded ``SampleSeries`` of each ``CalculatedChannel``)
+        instead of one wide row.  Solvers that support calculated channels
+        (e.g. ``DefaultSolver``) override this; the base implementation raises.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object containing database and filter information.
+        channels_df : pyspark.sql.DataFrame
+            Channel-match DataFrame from the filter pipeline.
+        selections : list
+            List of ``CalculatedChannel`` selections to evaluate.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            Narrow ``[container_id, channel_id, tstart, tend, value,
+            identity]`` DataFrame (``identity`` is a ``MapType(string, string)``).
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support calculated channels"
+        )

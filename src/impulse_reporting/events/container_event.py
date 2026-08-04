@@ -176,8 +176,8 @@ class ContainerEvent(Event):
         )
 
         # Rename silver columns to gold event fact column names and cast
-        # timestamps from TIMESTAMP to LongType so the DataFrame is
-        # union-compatible with BasicEvent (which produces numeric ts).
+        # timestamps to DoubleType so the DataFrame is union-compatible with
+        # the other event types on the shared event_instance_fact table
         # Silver-side names come from SolverConfig so customers can remap
         # physical column names via column_name_mapping. Gold-side names
         # ("start_ts", "end_ts") are owned by EVENT_INSTANCE_FACT_SCHEMA.
@@ -185,8 +185,8 @@ class ContainerEvent(Event):
         stop_ts_col = solver.config.stop_ts_col
         df = (
             container_metrics_df.withColumnRenamed(stop_ts_col, "end_ts")
-            .withColumn("start_ts", f.col(start_ts_col).cast("long"))
-            .withColumn("end_ts", f.col("end_ts").cast("long"))
+            .withColumn("start_ts", f.col(start_ts_col).cast("double"))
+            .withColumn("end_ts", f.col("end_ts").cast("double"))
         )
 
         # Add event_name from the first event in the list

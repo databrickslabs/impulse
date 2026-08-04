@@ -254,6 +254,8 @@ page.add_aggregation(stats)
 | `desc`               | `str`                        | No       | Description.                                                                          |
 | `agg_type`           | `str`                        | No       | Aggregation type identifier. Defaults to `"stats_aggregator"`.                        |
 | `values_unit`        | `str`                        | No       | Unit of the statistic values.                                                         |
+| `per_channel_custom_statistics`  | `list[PerChannelStatistic]`  | No | Custom statistics computed once per channel per interval (see below).       |
+| `cross_channel_custom_statistics`| `list[CrossChannelStatistic]`| No | Custom statistics computed once per interval across a set of channels (see below). |
 
 ### Supported statistics
 
@@ -268,6 +270,77 @@ page.add_aggregation(stats)
 
 A `ValueError` is raised if unsupported statistics are provided.
 
+### Custom statistics
+
+Beyond the built-in labels, you can inject your own statistic functions. Each is declared as a descriptor
+(`PerChannelStatistic` / `CrossChannelStatistic`, see the
+[custom_statistic API reference](../api/impulse_query_engine/analyze/query/aggregations/custom_statistic.md))
+and returns a **sequence of scalars** mapped positionally to its `aggregation_labels`; a single-output
+statistic returns a one-element sequence. Custom outputs land in the fact table as ordinary
+`aggregation_label` / `statistic_value` rows — no schema change — and their labels are added to the
+dimension row's `statistics` array.
+
+There are two kinds:
+
+- **Per-channel** (`PerChannelStatistic`) — computed once per input channel per interval, exactly like a
+  built-in. Fact rows carry the **real channel name**. Signature:
+  `func(series: SampleSeries, t_start: float, t_end: float, **params) -> Sequence[float]`.
+- **Cross-channel** (`CrossChannelStatistic`) — computed once per interval across a set of channels. Fact
+  rows carry the descriptor's `channel_name` (or the output label when it is `None`). Signature:
+  `func(series: list[SampleSeries], t_start: float, t_end: float, **params) -> Sequence[float]`.
+
+```python
+import numpy as np
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
+    PerChannelStatistic,
+    CrossChannelStatistic,
+)
+
+def percentiles(series, t_start, t_end):          # per-channel, multi-output
+    return [float(np.nanpercentile(series.values, 50)),
+            float(np.nanpercentile(series.values, 90))]
+
+def spread(series, t_start, t_end):               # cross-channel, single output
+    values = [v for s in series for v in s.values]
+    return [float(max(values) - min(values))] if values else [float("nan")]
+
+stats = StatsAggregator(
+    name="custom_stats",
+    input_expressions=[eng_rpm, veh_spd],
+    channel_names=["Engine RPM", "Vehicle Speed"],
+    statistics=["min", "max"],
+    event=eng_rpm_event,
+    per_channel_custom_statistics=[
+        PerChannelStatistic(func=percentiles, aggregation_labels=["p50", "p90"]),
+    ],
+    cross_channel_custom_statistics=[
+        CrossChannelStatistic(func=spread, aggregation_labels=["spread"],
+                              channel_name="rpm_speed_spread"),
+    ],
+)
+```
+
+**Descriptor fields**
+
+| Field                | Applies to        | Description                                                                             |
+|----------------------|-------------------|-----------------------------------------------------------------------------------------|
+| `func`               | both              | Callable returning a sequence of scalars (length must equal `aggregation_labels`).      |
+| `aggregation_labels` | both (required)   | Output labels; become `aggregation_label`s in the fact table. Non-empty, unique.        |
+| `params`             | both              | Keyword arguments passed to `func` on every call. Keys must be valid identifiers.       |
+| `inputs`             | cross-channel     | Names (from `channel_names`) of the channels to pass, in order. `None` passes all.      |
+| `channel_name`       | cross-channel     | `channel_name` for all output rows. `None` uses each output's `aggregation_label`.      |
+
+Notes:
+
+- Labels must be **globally unique** across built-ins and all custom statistics, and must not shadow a
+  built-in label.
+- `func` is cloudpickled to Spark executors: use a module-level importable function and never capture
+  Spark objects.
+- A statistic's `func`, labels, resolved inputs, `params`, and (for cross-channel) `channel_name` are part
+  of the definition hash, so changing any of them triggers reprocessing. `channel_name` is included because
+  it is the fact table's merge key — a rename must recompute so old-name rows are pruned rather than left
+  stale in incremental mode.
+
 ### Output schema
 
 **stats_aggregator_fact:**
@@ -276,10 +349,10 @@ A `ValueError` is raised if unsupported statistics are provided.
 |---------------------|----------|--------------------------------------------------|
 | `container_id`      | `int`    | Container identifier.                            |
 | `visual_id`         | `int`    | Foreign key to `stats_aggregator_dimension`.     |
-| `channel_name`      | `str`    | Signal display name.                             |
+| `channel_name`      | `str`    | Signal display name (or a cross-channel statistic's `channel_name`). |
 | `event_id`          | `int`    | Event identifier.                                |
 | `event_instance_id` | `long`   | Foreign key to `event_instance_fact`.            |
-| `aggregation_label` | `str`    | Statistic label (e.g. `"mean"`).                 |
+| `aggregation_label` | `str`    | Statistic label — a built-in (e.g. `"mean"`) or a custom `aggregation_labels` entry. |
 | `statistic_value`   | `double` | Computed statistic value.                        |
 
 **stats_aggregator_dimension:**
@@ -292,7 +365,7 @@ A `ValueError` is raised if unsupported statistics are provided.
 | `page_number`        | `int`        | Page number.                   |
 | `description`        | `str`        | Description.                   |
 | `agg_type`           | `str`        | Aggregation type identifier.   |
-| `statistics`         | `array[str]` | Requested statistic labels.    |
+| `statistics`         | `array[str]` | All output labels: built-ins plus every custom statistic's `aggregation_labels`. |
 | `channel_names`      | `array[str]` | Signal display names.          |
 | `signal_expressions` | `array[str]` | TSAL expression strings.       |
 | `values_unit`        | `str`        | Unit of statistic values.      |

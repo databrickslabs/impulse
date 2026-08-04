@@ -28,7 +28,11 @@ def __init__(name: str,
              event: Event | None = None,
              desc: str = None,
              agg_type: str = "stats_aggregator",
-             values_unit: str = None)
+             values_unit: str = None,
+             cross_channel_custom_statistics: list[CrossChannelStatistic]
+             | None = None,
+             per_channel_custom_statistics: list[PerChannelStatistic]
+             | None = None)
 ```
 
 Initialize a StatsAggregator object.
@@ -44,6 +48,16 @@ are computed over the entire time series.
 - `desc` (`str`): Description of the aggregation.
 - `agg_type` (`str`): Type of aggregation, defaults to "stats_aggregator".
 - `values_unit` (`str`): Unit of the statistic values.
+- `cross_channel_custom_statistics` (`list of CrossChannelStatistic`): Custom statistics computed once per event interval across each
+descriptor's declared input channels (referencing ``channel_names``;
+all channels when none are declared). Fact rows carry the
+descriptor's ``channel_name`` (applied to all its output labels),
+defaulting to each output's ``aggregation_label``. See
+``impulse_query_engine`` ``StatsAggregator`` for the callable contract.
+- `per_channel_custom_statistics` (`list of PerChannelStatistic`): Custom statistics computed once per input channel and event interval,
+exactly like a built-in statistic. Fact rows carry the real channel
+names. Descriptor ``params`` are passed to the callable as keyword
+arguments.
 
 #### get\_id
 
@@ -176,8 +190,14 @@ Only includes computation-affecting attributes:
 - input_expressions
 - statistics to be calculated
 - event expression if there is any
+- custom statistics (name, kind, declared input indices, and function
+  bytecode, so implementation or input-wiring changes invalidate cached
+  results; only appended when custom statistics are configured so
+  aggregators without them keep their previous hash)
 
-Excludes: name, desc, signal_name, units, page_number, report_id
+Excludes: name, desc, signal_name, units, page_number, report_id, and the
+cross-channel descriptors' channel_name (presentation metadata, like
+channel_names).
 
 **Returns**:
 

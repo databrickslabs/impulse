@@ -44,6 +44,10 @@ rather than RLE format (tstart/tend columns).
 - `drop_implausible_data` (`bool`): Whether to drop data points marked as implausible before
 processing.  Requires an ``is_plausible`` column in the
 silver layer.
+- `raw_encoder` (`RawEncoder`): Which encoder converts RAW point data into intervals for solving.
+``RawEncoder.RLE`` (default) run-length encodes equal-valued runs;
+``RawEncoder.INTERVAL`` only derives ``tend`` and drops exact
+duplicates.  Only consulted when ``is_raw_data`` is ``True``.
 
 #### filter\_container\_tags
 
@@ -284,4 +288,30 @@ the source to the target unit on the fly.
 **Returns**:
 
 `pyspark.sql.DataFrame`: DataFrame containing results for each container.
+
+#### solve\_calculated\_channels
+
+```python
+def solve_calculated_channels(query, channels_df, selections) -> DataFrame
+```
+
+Solve calculated channels by grouping channels and exploding each result.
+
+Structurally parallels :meth:`solve` — sharing the
+:meth:`_prepare_channels_join` prelude and :meth:`_apply_grouped_map`
+tail — but the grouped-map UDF emits narrow silver-shaped rows (many per
+container) instead of one wide row.  Output columns are
+``[container_id, channel_id, tstart, tend, value, identity]`` where
+``identity`` is a ``MapType(string, string)`` holding the channel's
+identity dict.
+
+**Arguments**:
+
+- `query` (`QueryBuilder`): Query object containing database and filter information.
+- `channels_df` (`pyspark.sql.DataFrame`): Channel-match DataFrame from the filter pipeline.
+- `selections` (`list`): List of ``CalculatedChannel`` selections to evaluate.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: Narrow DataFrame of calculated-channel samples.
 

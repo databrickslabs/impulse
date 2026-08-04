@@ -60,7 +60,8 @@ The Gold layer uses a **star schema** with fact and dimension tables. All table 
 | `event_instance_fact`  | One row per event instance per container | Materialized time windows where an event condition holds. |
 | `histogram_fact`       | One row per bin per container            | 1D histogram bin values, duration-weighted.               |
 | `histogram2d_fact`     | One row per (x, y) bin per container     | 2D histogram bin values, duration-weighted.               |
-| `stats_aggregator_fact` | One row per signal per event instance    | Descriptive statistics (min, max, mean, median).          |
+| `stats_aggregator_fact` | One row per statistic label per signal per event instance | Descriptive statistics (built-in min/max/mean/median and any custom statistics). |
+| `calculated_channel_fact` | One row per sample interval per container | Materialized derived signal (a *channel*, not a summary), in the silver `channels` shape. |
 
 ### Dimension tables
 
@@ -71,14 +72,16 @@ The Gold layer uses a **star schema** with fact and dimension tables. All table 
 | `histogram_dimension`    | Histogram metadata (bins, signal info, units).                     |
 | `histogram2d_dimension`  | 2D histogram metadata (axes, bins, signal info, units).            |
 | `stats_aggregator_dimension` | Statistics metadata (channel names, aggregation labels).       |
+| `calculated_channel_dimension` | Calculated-channel definitions (name, expression, identity). |
 
 ### Join pattern
 
-Fact and dimension tables are connected through three key columns:
+Fact and dimension tables are connected through these key columns:
 
 - **`container_id`** -- links all fact tables to `measurement_dimension`
 - **`event_id`** -- links `event_instance_fact`, `histogram_fact`, and `histogram2d_fact` to `event_dimension`
 - **`visual_id`** -- links each aggregation fact table to its corresponding dimension table
+- **`channel_id`** -- links `calculated_channel_fact` to `calculated_channel_dimension`
 
 `stats_aggregator_fact` additionally joins to `event_instance_fact` via `event_instance_id`, enabling per-interval breakdowns.
 
@@ -93,3 +96,4 @@ Fact and dimension tables are connected through three key columns:
 | **Channel**     | A time-series signal within a container (e.g. "Engine RPM"). Identified by `(container_id, channel_id)`. | `channels`, `channel_metrics`, `channel_tags` |
 | **Event**       | A time window of interest, defined by a condition or spanning the full recording. | `event_dimension`, `event_instance_fact`          |
 | **Aggregation** | A computation over channel data within event windows (histogram, 2D histogram, or statistics).      | `*_fact`, `*_dimension`                          |
+| **Calculated channel** | A derived time-series signal computed from existing channels and materialized at the same per-sample grain. | `calculated_channel_dimension`, `calculated_channel_fact` |
