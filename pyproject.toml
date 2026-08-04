@@ -138,7 +138,7 @@ ignore = [
 convention = "numpy"
 
 [tool.ruff.lint.isort]
-known-first-party = ["impulse_query_engine", "impulse_reporting", "impulse_ds", "impulse_data_sources"]
+known-first-party = ["impulse_query_engine", "impulse_reporting", "impulse_data_sources"]
 
 [tool.black]
 line-length = 99

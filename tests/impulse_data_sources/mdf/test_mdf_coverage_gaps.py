@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from impulse_ds.mdf.arrow_emit import (
+from impulse_data_sources.mdf.arrow_emit import (
     _eq_nan,
     _emit_prepared_signal_group,
     _make_signal_emitters,
@@ -20,7 +20,7 @@ from impulse_ds.mdf.arrow_emit import (
     convert_stripe_spec_to_arrow_batches,
     signals_arrow_schema,
 )
-from impulse_ds.mdf.mdf4_reader import (
+from impulse_data_sources.mdf.mdf4_reader import (
     BLOCK_ID_CC,
     BLOCK_ID_HD,
     ChannelInfo,
@@ -28,7 +28,7 @@ from impulse_ds.mdf.mdf4_reader import (
     CN_TYPE_VIRTUAL_MASTER,
     MDF4Reader,
 )
-from impulse_ds.mdf.mdf_blocks import (
+from impulse_data_sources.mdf.mdf_blocks import (
     _decompress_subblock_blob,
     _read_block_chunks,
     _read_subblock_file,
@@ -36,7 +36,7 @@ from impulse_ds.mdf.mdf_blocks import (
     read_data_list_range,
     read_raw_data,
 )
-from impulse_ds.mdf.mdf_decode import (
+from impulse_data_sources.mdf.mdf_decode import (
     CC_IDENTITY,
     CC_LINEAR,
     CC_RATIONAL,
@@ -59,7 +59,7 @@ from impulse_ds.mdf.mdf_decode import (
     storage_record_id,
     unsorted_fields_from_ctx,
 )
-from impulse_ds.mdf.datasources import MdfMastersReader, MdfSignalsReader
+from impulse_data_sources.mdf.datasources import MdfMastersReader, MdfSignalsReader
 from ._block_fixtures import build_dl_file, make_dt_block, make_dz_block
 from ._mdf_samples import sample_mdf_dir
 
@@ -359,7 +359,7 @@ class TestArrowEmitCoverage:
         path = f"{d}/{files[1]}"
         with open(path, "rb") as fh:
             fb = fh.read()
-        from impulse_ds.mdf.bin_packer import plan_stripes_for_file
+        from impulse_data_sources.mdf.bin_packer import plan_stripes_for_file
 
         specs = plan_stripes_for_file(path, file_bytes=fb, stripe_target_mb=0.001)
         total = sum(b.num_rows for s in specs for b in convert_stripe_spec_to_arrow_batches(s))
@@ -396,7 +396,7 @@ class TestArrowEmitCoverage:
         d, files = sample_mdf_dir()
         if not files:
             pytest.skip("no samples")
-        from impulse_ds.mdf.datasources import MdfMastersDataSource, MdfSignalsDataSource
+        from impulse_data_sources.mdf.datasources import MdfMastersDataSource, MdfSignalsDataSource
 
         opts = {"path": d, "files": files[0], "time_dtype": "float32", "value_dtype": "float32"}
         assert MdfSignalsDataSource(opts).schema()["value"].dataType.simpleString() == "float"
@@ -540,7 +540,7 @@ class TestMdf4ReaderCoverage:
 
     def test_metadata_reader_empty_path(self):
         from pyspark.sql.datasource import InputPartition
-        from impulse_ds.mdf.datasources import MdfMetadataReader
+        from impulse_data_sources.mdf.datasources import MdfMetadataReader
 
         reader = MdfMetadataReader({"path": "/tmp", "files": "x.mf4"})
         assert list(reader.read(InputPartition({"file_path": ""}))) == []
@@ -555,11 +555,11 @@ class TestMdf4ReaderCoverage:
             }
 
         monkeypatch.setattr(
-            "impulse_ds.mdf.datasources._resolve_file_list",
+            "impulse_data_sources.mdf.datasources._resolve_file_list",
             lambda _o: ["/x.mf4"],
         )
         monkeypatch.setattr(
-            "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
+            "impulse_data_sources.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
             _no_masters,
         )
         reader = MdfMastersReader({"path": "/x", "files": "a.mf4"})
@@ -856,7 +856,7 @@ class TestMdfBlocksMoreCoverage:
         assert out == payload
 
     def test_collect_dl_stops_on_non_dl_block(self):
-        from impulse_ds.mdf.mdf_blocks import _collect_dl_block_addrs
+        from impulse_data_sources.mdf.mdf_blocks import _collect_dl_block_addrs
         from ._block_fixtures import make_dl_block
 
         bad = b"##XX" + b"\x00" * 20
@@ -869,7 +869,7 @@ class TestMdfBlocksMoreCoverage:
         assert addrs == [len(bad)]
 
     def test_read_dl_blob_short_header(self):
-        from impulse_ds.mdf.mdf_blocks import _read_dl_blob
+        from impulse_data_sources.mdf.mdf_blocks import _read_dl_blob
 
         blob, dl_addr = build_dl_file([struct.pack("<d", 1.0)])
         with io.BytesIO(blob[:20]) as f:
@@ -877,7 +877,7 @@ class TestMdfBlocksMoreCoverage:
         assert b == b""
 
     def test_read_data_list_raw_empty_meta(self):
-        from impulse_ds.mdf.mdf_blocks import read_data_list_raw
+        from impulse_data_sources.mdf.mdf_blocks import read_data_list_raw
 
         empty_dl = b"##DL" + b"\x00" * 4 + struct.pack("<Q", 32) + struct.pack("<Q", 1)
         empty_dl += struct.pack("<Q", 0) + b"\x00" * 4 + struct.pack("<I", 0)
@@ -931,7 +931,7 @@ class TestMdfBlocksMoreCoverage:
 
     def test_read_block_chunks_extent_error_and_empty_dt(self, monkeypatch):
         import logging
-        from impulse_ds.mdf import mdf_blocks as mb
+        from impulse_data_sources.mdf import mdf_blocks as mb
 
         def _raise(*a, **k):
             raise OSError("extent")
@@ -967,8 +967,8 @@ class TestArrowEmitMoreCoverage:
         if len(files) < 2:
             pytest.skip("no compressed sample")
         path = f"{d}/{files[1]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1009,9 +1009,9 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_master_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
-        from impulse_ds.mdf.udf_helpers import convert_master_spec_to_arrow_batches
+        from impulse_data_sources.mdf.bin_packer import plan_master_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.udf_helpers import convert_master_spec_to_arrow_batches
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_master_partitions(
@@ -1103,8 +1103,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1124,8 +1124,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1144,7 +1144,7 @@ class TestArrowEmitMoreCoverage:
         def _boom(*a, **k):
             raise OSError("read fail")
 
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit.read_raw_data", _boom)
+        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.read_raw_data", _boom)
         assert list(convert_spec_to_arrow_batches(spec)) == []
 
     def test_rle_carry_value_change_at_boundary(self):
@@ -1242,8 +1242,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1263,14 +1263,14 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_stripes_for_file
+        from impulse_data_sources.mdf.bin_packer import plan_stripes_for_file
 
         specs = plan_stripes_for_file(path, stripe_target_mb=0.001)
 
         def _bad_decompress(*a, **k):
             raise ValueError("bad")
 
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit._decompress_subblock_blob", _bad_decompress)
+        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit._decompress_subblock_blob", _bad_decompress)
         assert list(convert_stripe_spec_to_arrow_batches(specs[0])) == []
 
     def test_convert_spec_extent_error_and_empty_slice(self, monkeypatch):
@@ -1278,8 +1278,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1296,7 +1296,7 @@ class TestArrowEmitMoreCoverage:
         def _raise(*a, **k):
             raise OSError("extent")
 
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit.dt_data_extent", _raise)
+        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.dt_data_extent", _raise)
         assert list(convert_spec_to_arrow_batches(spec)) == []
 
     def test_master_spec_zero_record_size(self):
@@ -1319,8 +1319,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1342,8 +1342,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1399,7 +1399,7 @@ class TestArrowEmitMoreCoverage:
             def _bad(*a, **k):
                 raise ValueError("bad")
 
-            monkeypatch.setattr("impulse_ds.mdf.arrow_emit._decompress_subblock_blob", _bad)
+            monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit._decompress_subblock_blob", _bad)
             assert list(convert_stripe_spec_to_arrow_batches(spec)) == []
         finally:
             Path(path).unlink(missing_ok=True)
@@ -1468,8 +1468,8 @@ class TestArrowEmitMoreCoverage:
         if len(files) < 2:
             pytest.skip("no compressed sample")
         path = f"{d}/{files[1]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1514,13 +1514,13 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions, plan_stripes_for_file
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions, plan_stripes_for_file
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         def _boom(*a, **k):
             raise ValueError("extract failed")
 
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _boom)
+        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.extract_signal", _boom)
         org = MDF4Reader(path).scan_channels_organized()
         spec = plan_partitions(
             path,
@@ -1558,8 +1558,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         specs = plan_partitions(
@@ -1613,11 +1613,11 @@ class TestArrowEmitMoreCoverage:
             return empty_closed, None
 
         monkeypatch.setattr(
-            "impulse_ds.mdf.arrow_emit._rle_compress_chunk",
+            "impulse_data_sources.mdf.arrow_emit._rle_compress_chunk",
             _empty_closed,
         )
         assert list(emit_rle(np.array([0.0]), np.array([1.0]), 1)) == []
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit._rle_flush", lambda _c: None)
+        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit._rle_flush", lambda _c: None)
         emit_rle2, flush_rle2 = _make_signal_emitters(
             "/f.mf4",
             signals_arrow_schema(run_length_encoding=True),
@@ -1629,7 +1629,7 @@ class TestArrowEmitMoreCoverage:
             prof,
         )
         monkeypatch.setattr(
-            "impulse_ds.mdf.arrow_emit._rle_compress_chunk",
+            "impulse_data_sources.mdf.arrow_emit._rle_compress_chunk",
             lambda _ts, _vs, _carry: (None, [1.0, 0.0, 0.0]),
         )
         assert list(emit_rle2(np.array([0.0]), np.array([1.0]), 1)) == []
@@ -1660,7 +1660,7 @@ class TestArrowEmitMoreCoverage:
         def _none(*a, **k):
             return None
 
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _none)
+        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.extract_signal", _none)
         assert (
             list(
                 _emit_prepared_signal_group(
@@ -1682,7 +1682,7 @@ class TestArrowEmitMoreCoverage:
         def _boom(*a, **k):
             raise RuntimeError("boom")
 
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _boom)
+        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.extract_signal", _boom)
         assert (
             list(
                 _emit_prepared_signal_group(
@@ -1753,7 +1753,7 @@ class TestArrowEmitMoreCoverage:
             def _none_sig(raw_data, record_size, ch_spec):
                 return None
 
-            monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _none_sig)
+            monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.extract_signal", _none_sig)
             assert (
                 list(
                     convert_spec_to_arrow_batches(
@@ -1771,7 +1771,7 @@ class TestArrowEmitMoreCoverage:
             def _boom_sig(raw_data, record_size, ch_spec):
                 raise ValueError("extract")
 
-            monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", _boom_sig)
+            monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.extract_signal", _boom_sig)
             assert (
                 list(
                     convert_spec_to_arrow_batches(
@@ -1804,7 +1804,7 @@ class TestArrowEmitMoreCoverage:
             def _read_fail(*a, **k):
                 raise OSError("read fail")
 
-            monkeypatch.setattr("impulse_ds.mdf.arrow_emit.read_raw_data", _read_fail)
+            monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.read_raw_data", _read_fail)
             assert list(convert_spec_to_arrow_batches(spec)) == []
         finally:
             Path(path).unlink(missing_ok=True)
@@ -1836,8 +1836,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         spec = plan_partitions(
@@ -1879,8 +1879,8 @@ class TestArrowEmitMoreCoverage:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[0]}"
-        from impulse_ds.mdf.bin_packer import plan_partitions
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         org = MDF4Reader(path).scan_channels_organized()
         spec = plan_partitions(
@@ -1890,7 +1890,7 @@ class TestArrowEmitMoreCoverage:
             org["channel_id_map"],
             target_partition_mb=16,
         )[0]
-        monkeypatch.setattr("impulse_ds.mdf.arrow_emit.extract_signal", lambda *_a, **_k: None)
+        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.extract_signal", lambda *_a, **_k: None)
         assert list(convert_spec_to_arrow_batches(spec)) == []
 
     def test_stripe_short_subblock_and_none_values(self, monkeypatch):
@@ -1925,7 +1925,7 @@ class TestArrowEmitMoreCoverage:
             }
             assert list(convert_stripe_spec_to_arrow_batches(spec)) == []
             monkeypatch.setattr(
-                "impulse_ds.mdf.arrow_emit.extract_signal",
+                "impulse_data_sources.mdf.arrow_emit.extract_signal",
                 lambda *_a, **_k: None,
             )
             assert list(convert_stripe_spec_to_arrow_batches(spec)) == []

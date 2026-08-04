@@ -1,13 +1,13 @@
-"""Tests for impulse_ds.mdf.bin_packer partition planners."""
+"""Tests for impulse_data_sources.mdf.bin_packer partition planners."""
 
 import pytest
 
-from impulse_ds.mdf.bin_packer import (
+from impulse_data_sources.mdf.bin_packer import (
     plan_master_partitions,
     plan_partitions,
     plan_stripes_for_file,
 )
-from impulse_ds.mdf.mdf4_reader import ChannelInfo, CN_TYPE_MASTER
+from impulse_data_sources.mdf.mdf4_reader import ChannelInfo, CN_TYPE_MASTER
 from ._mdf_samples import sample_mdf_dir
 
 
@@ -137,7 +137,7 @@ class TestPlanPartitionsExtended:
         path = f"{d}/{files[0]}"
         with open(path, "rb") as fh:
             fb = fh.read()
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         organized = MDF4Reader(file_bytes=fb).scan_channels_organized()
         organized = dict(organized)

@@ -30,13 +30,13 @@ _artifacts_shipped = False
 
 
 def _ensure_artifacts_shipped(spark: SparkSession):
-    """Ship the impulse_ds.mdf package to Spark workers once per session.
+    """Ship the impulse_data_sources.mdf package to Spark workers once per session.
 
     NOTE: this `addArtifact(pyfile=True)` reaches mapInArrow UDF workers (which
     import the package at runtime, by-value serialized) but does NOT reach the
     server's `create_data_source` worker, which deserializes the registered
     custom data-source class BY REFERENCE and therefore must
-    `import impulse_ds.mdf` at that point. So the mapInArrow conversion path
+    `import impulse_data_sources.mdf` at that point. So the mapInArrow conversion path
     works with only this shipped artifact, while the `mdf_signals`/`mdf_metadata`
     data sources additionally require the package to be importable cluster-side
     (e.g. installed as a cluster library). A warm-up mapInArrow was tried and did
@@ -50,13 +50,13 @@ def _ensure_artifacts_shipped(spark: SparkSession):
     import tempfile
 
     package_dir = pathlib.Path(__file__).parent
-    impulse_ds_dir = package_dir.parent
-    # Ship as a zip to preserve package structure (import impulse_ds.mdf.*)
-    zip_path = pathlib.Path(tempfile.gettempdir()) / "impulse_ds_mdf.zip"
+    impulse_data_sources_dir = package_dir.parent
+    # Ship as a zip to preserve package structure (import impulse_data_sources.mdf.*)
+    zip_path = pathlib.Path(tempfile.gettempdir()) / "impulse_data_sources_mdf.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(impulse_ds_dir / "__init__.py", "impulse_ds/__init__.py")
+        zf.write(impulse_data_sources_dir / "__init__.py", "impulse_data_sources/__init__.py")
         for py_file in package_dir.glob("*.py"):
-            zf.write(py_file, f"impulse_ds/mdf/{py_file.name}")
+            zf.write(py_file, f"impulse_data_sources/mdf/{py_file.name}")
     spark.addArtifact(str(zip_path), pyfile=True)
     _artifacts_shipped = True
 
@@ -291,7 +291,7 @@ class MDFToDeltaConverter:
         # Use mapInArrow for zero-copy vectorized conversion. The output schema
         # follows the dtype carried in the specs (time/value may be float32).
         # _make_arrow_udf returns a local function that cloudpickle can serialize
-        # without requiring the impulse_ds.mdf module on workers
+        # without requiring the impulse_data_sources.mdf module on workers
         udf_func = _make_arrow_udf()
         td = partition_specs[0].get("time_dtype", "float64") if partition_specs else "float64"
         vd = partition_specs[0].get("value_dtype", "float64") if partition_specs else "float64"
@@ -429,7 +429,7 @@ class MDFToDeltaConverter:
 def _make_arrow_udf():
     """Return the Arrow UDF with __module__ set so cloudpickle serializes it inline."""
     func = _convert_partition_arrow
-    # Prevent cloudpickle from trying to import impulse_ds.mdf on workers
+    # Prevent cloudpickle from trying to import impulse_data_sources.mdf on workers
     func.__module__ = "__main__"
     func.__qualname__ = "_convert_partition_arrow"
     return func
@@ -567,7 +567,7 @@ def _convert_partition_arrow(batch_iter):
         signals_arrow_schema,
     )
 
-    log = logging.getLogger("impulse_ds.mdf.convert")
+    log = logging.getLogger("impulse_data_sources.mdf.convert")
     prof = {"read": 0, "decode": 0, "arrow": 0, "rows": 0}
 
     for batch in batch_iter:

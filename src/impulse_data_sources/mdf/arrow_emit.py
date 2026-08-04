@@ -383,7 +383,7 @@ def convert_spec_to_arrow_batches(
     import time
     import logging
 
-    log = logging.getLogger("impulse_ds.mdf.convert")
+    log = logging.getLogger("impulse_data_sources.mdf.convert")
     _now = time.perf_counter_ns
     if prof is None:
         prof = {"read": 0, "decode": 0, "arrow": 0, "rows": 0}
@@ -654,7 +654,7 @@ def convert_master_spec_to_arrow_batches(spec, prof=None, time_dtype="float64"):
     import logging
     import pyarrow as pa
 
-    log = logging.getLogger("impulse_ds.mdf.convert")
+    log = logging.getLogger("impulse_data_sources.mdf.convert")
     _now = time.perf_counter_ns
     if prof is None:
         prof = {"read": 0, "decode": 0, "arrow": 0, "rows": 0}
@@ -762,7 +762,7 @@ def convert_stripe_spec_to_arrow_batches(
     import time
     import logging
 
-    log = logging.getLogger("impulse_ds.mdf.convert")
+    log = logging.getLogger("impulse_data_sources.mdf.convert")
     _now = time.perf_counter_ns
     if prof is None:
         prof = {"read": 0, "decode": 0, "arrow": 0, "rows": 0}

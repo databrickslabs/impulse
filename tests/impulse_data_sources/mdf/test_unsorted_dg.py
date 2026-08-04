@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from impulse_ds.mdf.mdf_decode import (
+from impulse_data_sources.mdf.mdf_decode import (
     filter_unsorted_records,
     prepare_cg_records,
     read_record_id,
@@ -15,9 +15,9 @@ from impulse_ds.mdf.mdf_decode import (
     extract_signal,
     extract_timestamps,
 )
-from impulse_ds.mdf.mdf4_reader import MDF4Reader
-from impulse_ds.mdf.bin_packer import plan_partitions
-from impulse_ds.mdf.udf_helpers import convert_spec_to_arrow_batches
+from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
+from impulse_data_sources.mdf.bin_packer import plan_partitions
+from impulse_data_sources.mdf.udf_helpers import convert_spec_to_arrow_batches
 
 
 def _build_interleaved_block():
@@ -84,7 +84,7 @@ class TestPrepareCgRecords:
 
 class TestPlanPartitionsUnsortedFields:
     def test_specs_carry_unsorted_metadata(self):
-        from impulse_ds.mdf.mdf4_reader import ChannelInfo, CN_TYPE_MASTER
+        from impulse_data_sources.mdf.mdf4_reader import ChannelInfo, CN_TYPE_MASTER
 
         ch = ChannelInfo(
             group_idx=0,

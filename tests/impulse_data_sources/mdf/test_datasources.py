@@ -9,8 +9,8 @@ import os
 import pytest
 import numpy as np
 
-from impulse_ds.mdf.mdf4_reader import MDF4Reader
-from impulse_ds.mdf.datasources import (
+from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
+from impulse_data_sources.mdf.datasources import (
     _resolve_file_list,
     MdfMetadataReader,
     MdfSignalsReader,
@@ -119,7 +119,7 @@ class TestMetadataReader:
         assert len(partitions) == 1
         rows = list(reader.read(partitions[0]))
         assert len(rows) > 0
-        from impulse_ds.mdf.schemas import METADATA_SCHEMA
+        from impulse_data_sources.mdf.schemas import METADATA_SCHEMA
 
         assert len(rows[0]) == len(METADATA_SCHEMA.fields)  # md_comment included
         (
@@ -197,7 +197,7 @@ class TestRunLengthEncoding:
     def test_rle_schema(self):
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
-        from impulse_ds.mdf.datasources import MdfSignalsDataSource
+        from impulse_data_sources.mdf.datasources import MdfSignalsDataSource
 
         opts = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "run_length_encoding": "true"}
         sch = MdfSignalsDataSource(dict(opts)).schema()
@@ -244,7 +244,7 @@ class TestRunLengthEncoding:
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
         from collections import defaultdict
-        from impulse_ds.mdf.udf_helpers import _rle_run_starts
+        from impulse_data_sources.mdf.udf_helpers import _rle_run_starts
 
         base = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "target_partition_mb": "16"}
         _, plain = self._read(base)
@@ -319,12 +319,12 @@ class TestMastersDataSource:
     def test_masters_schema_and_grid(self):
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
-        from impulse_ds.mdf.datasources import (
+        from impulse_data_sources.mdf.datasources import (
             MdfMastersDataSource,
             MdfMastersReader,
             MdfSignalsReader,
         )
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         opts = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "target_partition_mb": "16"}
         sch = MdfMastersDataSource(dict(opts)).schema()
@@ -346,8 +346,8 @@ class TestMastersDataSource:
     def test_reverse_rle_recovers_originals(self):
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
-        from impulse_ds.mdf.datasources import MdfMastersReader, MdfSignalsReader
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.datasources import MdfMastersReader, MdfSignalsReader
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         opts = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "target_partition_mb": "16"}
         _, orig = self._read(MdfSignalsReader(opts), ["channel_id", "time", "value"])
@@ -376,7 +376,7 @@ class TestMastersDataSource:
 class TestAbsoluteTime:
     def _read(self, opts, cols):
         from collections import defaultdict
-        from impulse_ds.mdf.datasources import MdfSignalsReader
+        from impulse_data_sources.mdf.datasources import MdfSignalsReader
 
         rd = MdfSignalsReader(opts)
         out = defaultdict(lambda: defaultdict(list))
@@ -392,7 +392,7 @@ class TestAbsoluteTime:
     def test_absolute_time_adds_start_and_forces_float64(self):
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
-        from impulse_ds.mdf.datasources import MdfSignalsDataSource
+        from impulse_data_sources.mdf.datasources import MdfSignalsDataSource
 
         f = EXAMPLE_FILES[0]
         start = MDF4Reader(os.path.join(EXAMPLE_DIR, f)).read_header_start_epoch_seconds()
@@ -420,7 +420,7 @@ class TestAbsoluteTime:
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
         from collections import defaultdict
-        from impulse_ds.mdf.datasources import MdfMastersReader
+        from impulse_data_sources.mdf.datasources import MdfMastersReader
 
         f = EXAMPLE_FILES[0]
         start = MDF4Reader(os.path.join(EXAMPLE_DIR, f)).read_header_start_epoch_seconds()
@@ -455,7 +455,7 @@ class TestSchemaMatchesEmittedTypes:
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
         from itertools import product
-        from impulse_ds.mdf.datasources import MdfSignalsDataSource
+        from impulse_data_sources.mdf.datasources import MdfSignalsDataSource
 
         spark2arrow = {
             "double": "double",
@@ -504,7 +504,7 @@ class TestSchemaMatchesEmittedTypes:
 
 class TestDatasourcesEdgeCases:
     def test_metadata_read_empty_file_path(self):
-        from impulse_ds.mdf.datasources import MdfMetadataReader
+        from impulse_data_sources.mdf.datasources import MdfMetadataReader
         from pyspark.sql.datasource import InputPartition
 
         reader = MdfMetadataReader({"path": "/unused"})
@@ -514,7 +514,7 @@ class TestDatasourcesEdgeCases:
     def test_masters_schema_float32(self):
         if not EXAMPLE_FILES:
             pytest.skip("No example files")
-        from impulse_ds.mdf.datasources import MdfMastersDataSource, MdfMastersReader
+        from impulse_data_sources.mdf.datasources import MdfMastersDataSource, MdfMastersReader
 
         opts = {"path": EXAMPLE_DIR, "files": EXAMPLE_FILES[0], "time_dtype": "float32"}
         sch = MdfMastersDataSource(dict(opts)).schema()
@@ -537,7 +537,7 @@ class TestDatasourcesEdgeCases:
         mdf.close()
 
         monkeypatch.setattr(
-            "impulse_ds.mdf.mdf4_reader.MDF4Reader.read_header_start_epoch_seconds",
+            "impulse_data_sources.mdf.mdf4_reader.MDF4Reader.read_header_start_epoch_seconds",
             lambda _self: None,
         )
         reader = MdfSignalsReader(
@@ -549,7 +549,7 @@ class TestDatasourcesEdgeCases:
     def test_masters_absolute_time_raises_without_hd_start(self, tmp_path, monkeypatch):
         from asammdf import MDF, Signal
         import numpy as np
-        from impulse_ds.mdf.datasources import MdfMastersReader
+        from impulse_data_sources.mdf.datasources import MdfMastersReader
 
         path = tmp_path / "no_start.mf4"
         mdf = MDF(version="4.10")
@@ -559,7 +559,7 @@ class TestDatasourcesEdgeCases:
         mdf.close()
 
         monkeypatch.setattr(
-            "impulse_ds.mdf.mdf4_reader.MDF4Reader.read_header_start_epoch_seconds",
+            "impulse_data_sources.mdf.mdf4_reader.MDF4Reader.read_header_start_epoch_seconds",
             lambda _self: None,
         )
         reader = MdfMastersReader(
@@ -573,7 +573,7 @@ class TestDatasourcesEdgeCases:
             reader.partitions()
 
     def test_signals_empty_partitions_when_no_signals(self, monkeypatch):
-        from impulse_ds.mdf.datasources import MdfSignalsReader
+        from impulse_data_sources.mdf.datasources import MdfSignalsReader
 
         def _empty_scan(self):
             return {
@@ -584,11 +584,11 @@ class TestDatasourcesEdgeCases:
             }
 
         monkeypatch.setattr(
-            "impulse_ds.mdf.datasources._resolve_file_list",
+            "impulse_data_sources.mdf.datasources._resolve_file_list",
             lambda _opts: ["/fake/a.mf4"],
         )
         monkeypatch.setattr(
-            "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
+            "impulse_data_sources.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
             _empty_scan,
         )
         reader = MdfSignalsReader({"path": "/x", "files": "a.mf4"})
@@ -598,7 +598,7 @@ class TestDatasourcesEdgeCases:
         assert list(reader.read(parts[0])) == []
 
     def test_masters_empty_when_no_masters(self, monkeypatch):
-        from impulse_ds.mdf.datasources import MdfMastersReader
+        from impulse_data_sources.mdf.datasources import MdfMastersReader
 
         def _no_masters(self):
             return {
@@ -609,11 +609,11 @@ class TestDatasourcesEdgeCases:
             }
 
         monkeypatch.setattr(
-            "impulse_ds.mdf.datasources._resolve_file_list",
+            "impulse_data_sources.mdf.datasources._resolve_file_list",
             lambda _opts: ["/fake/a.mf4"],
         )
         monkeypatch.setattr(
-            "impulse_ds.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
+            "impulse_data_sources.mdf.mdf4_reader.MDF4Reader.scan_channels_organized",
             _no_masters,
         )
         reader = MdfMastersReader({"path": "/x", "files": "a.mf4"})

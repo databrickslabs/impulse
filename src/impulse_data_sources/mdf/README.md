@@ -1,4 +1,4 @@
-# impulse_ds.mdf
+# impulse_data_sources.mdf
 
 > ⚠️ **Experimental** — see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for spec
 > coverage gaps and backlog items.
@@ -38,7 +38,7 @@ import the package).
 
 ```python
 from databricks.sdk import WorkspaceClient
-from impulse_ds.mdf import register_mdf_datasources
+from impulse_data_sources.mdf import register_mdf_datasources
 
 register_mdf_datasources(spark, WorkspaceClient())
 
@@ -168,7 +168,7 @@ Also works over Databricks Connect (no cluster install needed — uses the
 `mapInArrow` path with shipped artifacts).
 
 ```python
-from impulse_ds.mdf import MDFToDeltaConverter
+from impulse_data_sources.mdf import MDFToDeltaConverter
 conv = MDFToDeltaConverter(
     spark,
     signals_table="cat.sch.signals",     # CLUSTER BY (file_uri, channel_id)
@@ -186,7 +186,7 @@ conv.convert_batch(["/Volumes/.../a.mf4", ...]) # many files, sequential
 ### Low-level reader
 
 ```python
-from impulse_ds.mdf import MDF4Reader
+from impulse_data_sources.mdf import MDF4Reader
 r = MDF4Reader("/path/drive.mf4")            # or MDF4Reader(file_bytes=blob)
 org = r.scan_channels_organized()            # masters / signals / channel_id_map
 r.read_header_datetime()                     # measurement start (UTC)
@@ -196,7 +196,7 @@ r.read_header_datetime()                     # measurement start (UTC)
 
 ## Module layout
 
-Package path: `src/impulse_ds/mdf/`
+Package path: `src/impulse_data_sources/mdf/`
 
 
 | module           | responsibility                                                                            |

@@ -11,7 +11,7 @@ import os
 import pytest
 import numpy as np
 
-from impulse_ds.mdf.mdf4_reader import MDF4Reader, CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER
+from impulse_data_sources.mdf.mdf4_reader import MDF4Reader, CN_TYPE_MASTER, CN_TYPE_VIRTUAL_MASTER
 from ._mdf_samples import sample_mdf_dir, START_TIME
 
 _DIR, _FILES = sample_mdf_dir()
@@ -249,7 +249,7 @@ class TestCCConversion:
             assert isinstance(ch.cc_params, tuple)
 
     def test_apply_cc_linear(self):
-        from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+        from impulse_data_sources.mdf.udf_helpers import apply_cc_conversion
 
         raw = np.array([0.0, 1.0, 2.0, 100.0])
         # linear: phys = 2.0 * raw + 10.0, params = (b=10.0, a=2.0)
@@ -257,7 +257,7 @@ class TestCCConversion:
         np.testing.assert_allclose(result, [10.0, 12.0, 14.0, 210.0])
 
     def test_apply_cc_rational(self):
-        from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+        from impulse_data_sources.mdf.udf_helpers import apply_cc_conversion
 
         raw = np.array([1.0, 2.0, 10.0])
         # rational: (0*X^2 + 2*X + 1) / (0*X^2 + 0*X + 1) = 2*X + 1
@@ -265,14 +265,14 @@ class TestCCConversion:
         np.testing.assert_allclose(result, [3.0, 5.0, 21.0])
 
     def test_apply_cc_identity(self):
-        from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+        from impulse_data_sources.mdf.udf_helpers import apply_cc_conversion
 
         raw = np.array([42.0, -1.5, 0.0])
         result = apply_cc_conversion(raw, 0, ())
         np.testing.assert_array_equal(result, raw)
 
     def test_apply_cc_tabular_interp(self):
-        from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+        from impulse_data_sources.mdf.udf_helpers import apply_cc_conversion
 
         # Interleaved per spec: (key_0, val_0, key_1, val_1, key_2, val_2)
         raw = np.array([0.0, 50.0, 100.0, 150.0, 200.0])
@@ -280,7 +280,7 @@ class TestCCConversion:
         np.testing.assert_allclose(result, [0.0, 25.0, 50.0, 75.0, 100.0])
 
     def test_apply_cc_no_conversion(self):
-        from impulse_ds.mdf.udf_helpers import apply_cc_conversion
+        from impulse_data_sources.mdf.udf_helpers import apply_cc_conversion
 
         raw = np.array([1.0, 2.0, 3.0])
         result = apply_cc_conversion(raw, -1, ())
@@ -290,7 +290,7 @@ class TestCCConversion:
 
     def test_virtual_master_cc_applied(self):
         """Verify CC conversion is applied to virtual master timestamps."""
-        from impulse_ds.mdf.udf_helpers import extract_timestamps
+        from impulse_data_sources.mdf.udf_helpers import extract_timestamps
 
         # Simulate raw_data for 5 samples with 8-byte records (any content)
         raw_data = b"\x00" * 40
@@ -309,7 +309,7 @@ class TestCCConversion:
 
     def test_virtual_master_no_cc(self):
         """Virtual master without CC returns raw indices."""
-        from impulse_ds.mdf.udf_helpers import extract_timestamps
+        from impulse_data_sources.mdf.udf_helpers import extract_timestamps
 
         raw_data = b"\x00" * 24
         record_size = 8
@@ -333,7 +333,7 @@ class TestPlanPartitionsCoalescing:
 
     @staticmethod
     def _ch(gi, ci, samples, addr, ctype=0):
-        from impulse_ds.mdf.mdf4_reader import ChannelInfo
+        from impulse_data_sources.mdf.mdf4_reader import ChannelInfo
 
         return ChannelInfo(
             group_idx=gi,
@@ -378,7 +378,7 @@ class TestPlanPartitionsCoalescing:
         return masters, signal, cidmap
 
     def test_coalesces_and_respects_bounds(self):
-        from impulse_ds.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
 
         masters, signal, cidmap = self._layout()
         cap = 64
@@ -406,7 +406,7 @@ class TestPlanPartitionsCoalescing:
         assert any("row_start" in s for s in specs)
 
     def test_full_channel_coverage_exactly_once(self):
-        from impulse_ds.mdf.bin_packer import plan_partitions
+        from impulse_data_sources.mdf.bin_packer import plan_partitions
 
         masters, signal, cidmap = self._layout()
         specs = plan_partitions(
@@ -482,7 +482,7 @@ class TestMDF4ReaderExtended:
         np.testing.assert_allclose(values, np.arange(10) * 2.0 + 10.0)
 
     def test_channel_to_dict_unsorted_fields(self):
-        from impulse_ds.mdf.mdf4_reader import ChannelInfo
+        from impulse_data_sources.mdf.mdf4_reader import ChannelInfo
 
         ch = ChannelInfo(
             group_idx=0,

@@ -1,6 +1,6 @@
 # Known limitations
 
-`impulse_ds.mdf` is **experimental** and under active development. It does **not**
+`impulse_data_sources.mdf` is **experimental** and under active development. It does **not**
 yet fully implement the [ASAM MDF4](https://www.asam.net/standards/detail/mdf/)
 specification. Some block types, encodings, compression modes, and edge cases may
 be missing or behave differently than reference tools. Validate outputs against

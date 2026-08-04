@@ -1,11 +1,11 @@
-"""Unit tests for impulse_ds.mdf.mdf_decode."""
+"""Unit tests for impulse_data_sources.mdf.mdf_decode."""
 
 import struct
 
 import numpy as np
 import pytest
 
-from impulse_ds.mdf.mdf_decode import (
+from impulse_data_sources.mdf.mdf_decode import (
     CN_FLAG_ALL_INVALID,
     CN_FLAG_INVALIDATION_PRESENT,
     CC_RANGE_TO_VALUE,

@@ -7,7 +7,7 @@ parallelised across Spark workers.
 
 Public API (lazy-loaded to avoid importing PySpark unless needed)::
 
-    from impulse_ds.mdf import (
+    from impulse_data_sources.mdf import (
         MDFToDeltaConverter,
         MDF4Reader,
         register_mdf_datasources,
@@ -52,4 +52,4 @@ def __getattr__(name):
             "MdfMetadataDataSource": MdfMetadataDataSource,
             "MdfMastersDataSource": MdfMastersDataSource,
         }[name]
-    raise AttributeError(f"module 'impulse_ds.mdf' has no attribute {name!r}")
+    raise AttributeError(f"module 'impulse_data_sources.mdf' has no attribute {name!r}")

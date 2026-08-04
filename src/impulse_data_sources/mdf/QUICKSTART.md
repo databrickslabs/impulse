@@ -1,13 +1,13 @@
 # MDF data sources — quickstart
 
-Read ASAM MDF4 files as Spark DataFrames. Install the `impulse_ds` package on the
+Read ASAM MDF4 files as Spark DataFrames. Install the `impulse_data_sources` package on the
 cluster, then register the three data sources once per session.
 
 ## Setup
 
 ```python
 from databricks.sdk import WorkspaceClient
-from impulse_ds.mdf import register_mdf_datasources
+from impulse_data_sources.mdf import register_mdf_datasources
 
 register_mdf_datasources(spark, WorkspaceClient())
 ```

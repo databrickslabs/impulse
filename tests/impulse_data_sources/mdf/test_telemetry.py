@@ -6,8 +6,8 @@ import pytest
 from databricks.sdk import WorkspaceClient
 
 from impulse_query_engine import __version__
-from impulse_ds.mdf import datasources
-from impulse_ds.mdf.datasources import (
+from impulse_data_sources.mdf import datasources
+from impulse_data_sources.mdf.datasources import (
     MdfMetadataDataSource,
     MdfMetadataReader,
     MdfMastersDataSource,

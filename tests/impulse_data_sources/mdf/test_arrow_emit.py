@@ -1,4 +1,4 @@
-"""Integration tests for impulse_ds.mdf.arrow_emit decode paths."""
+"""Integration tests for impulse_data_sources.mdf.arrow_emit decode paths."""
 
 import os
 import struct
@@ -7,10 +7,10 @@ from collections import defaultdict
 import numpy as np
 import pytest
 
-from impulse_ds.mdf.arrow_emit import _rle_compress_chunk, _rle_flush
-from impulse_ds.mdf.bin_packer import plan_stripes_for_file
-from impulse_ds.mdf.datasources import MdfSignalsReader
-from impulse_ds.mdf.udf_helpers import (
+from impulse_data_sources.mdf.arrow_emit import _rle_compress_chunk, _rle_flush
+from impulse_data_sources.mdf.bin_packer import plan_stripes_for_file
+from impulse_data_sources.mdf.datasources import MdfSignalsReader
+from impulse_data_sources.mdf.udf_helpers import (
     convert_spec_to_arrow_batches,
     convert_stripe_spec_to_arrow_batches,
 )

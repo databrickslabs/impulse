@@ -9,7 +9,7 @@ Provides three data sources:
 
 Usage:
     from databricks.sdk import WorkspaceClient
-    from impulse_ds.mdf import register_mdf_datasources
+    from impulse_data_sources.mdf import register_mdf_datasources
 
     register_mdf_datasources(spark, WorkspaceClient())
 
@@ -332,7 +332,7 @@ class MdfSignalsReader(DataSourceReader):
             value_dtype=value_dtype,
             run_length_encoding=run_length_encoding,
         )
-        logging.getLogger("impulse_ds.mdf.convert").warning(
+        logging.getLogger("impulse_data_sources.mdf.convert").warning(
             "MDF_PROFILE rows=%d read_ms=%.0f decode_ms=%.0f arrow_ms=%.0f",
             prof["rows"],
             prof["read"] / 1e6,
@@ -532,7 +532,7 @@ class MdfMastersReader(DataSourceReader):
         time_dtype = str(spec.get("time_dtype", self.options.get("time_dtype", "float64")))
         prof = {"read": 0, "decode": 0, "arrow": 0, "rows": 0}
         yield from convert_master_spec_to_arrow_batches(spec, prof=prof, time_dtype=time_dtype)
-        logging.getLogger("impulse_ds.mdf.convert").warning(
+        logging.getLogger("impulse_data_sources.mdf.convert").warning(
             "MDF_PROFILE(masters) rows=%d read_ms=%.0f decode_ms=%.0f arrow_ms=%.0f",
             prof["rows"],
             prof["read"] / 1e6,

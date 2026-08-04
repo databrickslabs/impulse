@@ -1,4 +1,4 @@
-"""Unit tests for impulse_ds.mdf.mdf_blocks binary I/O."""
+"""Unit tests for impulse_data_sources.mdf.mdf_blocks binary I/O."""
 
 import io
 import logging
@@ -7,7 +7,7 @@ import struct
 import numpy as np
 import pytest
 
-from impulse_ds.mdf.mdf_blocks import (
+from impulse_data_sources.mdf.mdf_blocks import (
     _collect_dl_block_addrs,
     _read_block_chunks,
     _read_dl_blob,
@@ -72,7 +72,7 @@ class TestDtDzBlocks:
         if not files:
             pytest.skip("no samples")
         path = f"{d}/{files[1]}"  # sample_b compressed
-        from impulse_ds.mdf.mdf4_reader import MDF4Reader
+        from impulse_data_sources.mdf.mdf4_reader import MDF4Reader
 
         ch = MDF4Reader(path).scan_metadata()[0]
         with open(path, "rb") as f:
