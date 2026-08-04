@@ -1270,7 +1270,9 @@ class TestArrowEmitMoreCoverage:
         def _bad_decompress(*a, **k):
             raise ValueError("bad")
 
-        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit._decompress_subblock_blob", _bad_decompress)
+        monkeypatch.setattr(
+            "impulse_data_sources.mdf.arrow_emit._decompress_subblock_blob", _bad_decompress
+        )
         assert list(convert_stripe_spec_to_arrow_batches(specs[0])) == []
 
     def test_convert_spec_extent_error_and_empty_slice(self, monkeypatch):
@@ -1399,7 +1401,9 @@ class TestArrowEmitMoreCoverage:
             def _bad(*a, **k):
                 raise ValueError("bad")
 
-            monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit._decompress_subblock_blob", _bad)
+            monkeypatch.setattr(
+                "impulse_data_sources.mdf.arrow_emit._decompress_subblock_blob", _bad
+            )
             assert list(convert_stripe_spec_to_arrow_batches(spec)) == []
         finally:
             Path(path).unlink(missing_ok=True)
@@ -1890,7 +1894,9 @@ class TestArrowEmitMoreCoverage:
             org["channel_id_map"],
             target_partition_mb=16,
         )[0]
-        monkeypatch.setattr("impulse_data_sources.mdf.arrow_emit.extract_signal", lambda *_a, **_k: None)
+        monkeypatch.setattr(
+            "impulse_data_sources.mdf.arrow_emit.extract_signal", lambda *_a, **_k: None
+        )
         assert list(convert_spec_to_arrow_batches(spec)) == []
 
     def test_stripe_short_subblock_and_none_values(self, monkeypatch):

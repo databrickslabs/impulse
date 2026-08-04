@@ -39,9 +39,9 @@ coverage:
 	open htmlcov/index.html
 
 mdf-coverage:
-	$(UV_RUN) coverage run -m pytest tests/impulse_ds/mdf -q --no-cov
-	$(UV_RUN) coverage report --include='src/impulse_ds/mdf/*' \
-	  --omit='src/impulse_ds/mdf/converter.py' \
+	$(UV_RUN) coverage run -m pytest tests/impulse_data_sources/mdf -q --no-cov
+	$(UV_RUN) coverage report --include='src/impulse_data_sources/mdf/*' \
+	  --omit='src/impulse_data_sources/mdf/converter.py' \
 	  --fail-under=95 --precision=1
 
 build:
