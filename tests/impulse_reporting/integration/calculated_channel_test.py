@@ -515,3 +515,30 @@ def test_channel_metrics_incremental_is_idempotent(spark):
     r2.persist_results()
 
     assert spark.read.table(_METRICS).count() == count_before
+
+
+def test_channel_metrics_custom_kpis(spark):
+    # A non-default KPI selection controls which KPI columns are emitted.
+    report = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(
+            _config(
+                is_enabled=False,
+                calculated_channels=CalculatedChannels(
+                    emit_channel_metrics=True, kpis=["min", "max"]
+                ),
+            )
+        ),
+    )
+    _add_channel(report, factor=3.6)
+    report.determine_report()
+    report.persist_results()
+
+    metrics = spark.read.table(_METRICS)
+    # Only the selected KPIs are present; the dropped defaults are absent.
+    assert "min" in metrics.columns
+    assert "max" in metrics.columns
+    assert "mean" not in metrics.columns
+    assert "duration" not in metrics.columns

@@ -16,8 +16,25 @@ from impulse_query_engine.analyze.query.channels.calculated_channel import (
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.model.series.sample_series import SampleSeries
+from impulse_reporting.channels.calculated_channel_kpis import (
+    DEFAULT_KPIS,
+    build_kpi_columns,
+)
 from impulse_reporting.persist.dimension_schema import CALCULATED_CHANNEL_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import CALCULATED_CHANNEL_FACT_SCHEMA
+
+
+def _union_identity_keys(channels: list[CalculatedChannel]) -> list[str]:
+    """Return the sorted union of identity keys across ``channels``.
+
+    Used to build the dynamic identity columns of the calculated-channel metrics
+    table: every key any channel declares becomes a column (null on channels that
+    omit it). Sorting gives a stable, order-independent column layout.
+    """
+    keys: set[str] = set()
+    for channel in channels:
+        keys.update(channel.identity)
+    return sorted(keys)
 
 
 class CalculatedChannel:
@@ -217,6 +234,7 @@ class CalculatedChannel:
         fact_df: DataFrame | None,
         *,
         attribute_columns: list[str] | None = None,
+        kpis: list[str] | None = None,
     ) -> DataFrame | None:
         """Derive a silver-shaped ``channel_metrics`` DataFrame from the fact rows.
 
@@ -224,16 +242,15 @@ class CalculatedChannel:
         table; this builds its companion ``channel_metrics`` so the pair can serve
         as an Impulse silver source.  Metrics are aggregated **directly from the
         narrow fact rows** (``container_id, channel_id, tstart, tend, value``),
-        grouped by ``(container_id, channel_id)`` with duration-weighted semantics
-        matching :class:`SampleSeries` (``dur = tend - tstart``).
+        grouped by ``(container_id, channel_id)``.
 
         The output schema is **dynamic**: fixed columns ``container_id,
-        channel_id, type, data_type, duration, min, max, mean`` plus one column per
-        identity key (the union across all ``channels``) and one per configured
-        attribute key.  Identity/attribute values are pulled from each channel's
-        in-memory ``identity`` / ``attributes`` dicts (null where a channel omits a
-        key).  On an identity/attribute key collision, identity wins and the
-        attribute is skipped.
+        channel_id, type, data_type`` plus one column per configured KPI (see
+        ``kpis``), one per identity key (the union across all ``channels``), and one
+        per configured attribute key.  Identity/attribute values are pulled from
+        each channel's in-memory ``identity`` / ``attributes`` dicts (null where a
+        channel omits a key).  On an identity/attribute key collision, identity wins
+        and the attribute is skipped.
 
         Parameters
         ----------
@@ -248,6 +265,10 @@ class CalculatedChannel:
         attribute_columns : list of str, optional
             Attribute keys to surface as columns.  Default/empty → no attribute
             columns.  A key no channel defines yields an all-null column.
+        kpis : list of str, optional
+            KPI names to compute (see ``calculated_channel_kpis.KPI_BUILDERS``); the
+            output carries one column per name, in order.  ``None`` → the default
+            KPIs (``duration, min, max, mean``).
 
         Returns
         -------
@@ -259,29 +280,15 @@ class CalculatedChannel:
             return None
 
         attribute_columns = list(attribute_columns or [])
+        kpis = list(kpis) if kpis is not None else list(DEFAULT_KPIS)
 
-        # Duration-weighted aggregation matching SampleSeries semantics. NaN values
-        # are nulled so Spark's min/max/sum skip them (matching np.nanmin / nanmax /
-        # nansum); the mean denominator keeps every interval's duration.
-        dur = F.col("tend") - F.col("tstart")
-        value = F.col("value")
-        non_nan_value = F.when(~F.isnan(value), value)
-        weighted_value = F.when(~F.isnan(value), value * dur).otherwise(F.lit(0.0))
-        agg_df = fact_df.groupBy("container_id", "channel_id").agg(
-            (F.max("tend") - F.min("tstart")).alias("duration"),
-            F.min(non_nan_value).alias("min"),
-            F.max(non_nan_value).alias("max"),
-            (F.sum(weighted_value) / F.sum(dur)).alias("mean"),
-        )
+        # KPI aggregations are built from the registry (single extension point), so
+        # the computed columns and the projection below both follow ``kpis``.
+        agg_df = fact_df.groupBy("container_id", "channel_id").agg(*build_kpi_columns(kpis))
 
         # Union of identity keys (stable order); attribute columns lose to identity
         # on a key collision.
-        identity_keys: list[str] = []
-        for channel in channels:
-            for key in channel.identity:
-                if key not in identity_keys:
-                    identity_keys.append(key)
-        identity_keys.sort()
+        identity_keys = _union_identity_keys(channels)
         effective_attribute_keys = [k for k in attribute_columns if k not in identity_keys]
 
         # Per-channel metadata frame. channel_id is cast to the fact's channel_id
@@ -312,6 +319,7 @@ class CalculatedChannel:
             ["container_id", "channel_id"]
             + identity_keys
             + effective_attribute_keys
-            + ["type", "data_type", "duration", "min", "max", "mean"]
+            + ["type", "data_type"]
+            + kpis
         )
         return result.select(*ordered_columns)

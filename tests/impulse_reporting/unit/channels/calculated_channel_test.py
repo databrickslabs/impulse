@@ -223,6 +223,24 @@ class TestDetermineChannelMetrics:
         # (10*1) / (1+1) = 5.0
         assert r["mean"] == pytest.approx(5.0)
 
+    def test_zero_total_duration_mean_is_null_not_error(self, spark):
+        # A group of only zero-duration point-in-time samples (tstart == tend) has
+        # sum(dur) == 0. Under ANSI mode (Spark 4.0 default) plain division would
+        # raise DIVIDE_BY_ZERO; try_divide yields a null mean instead.
+        ch = CalculatedChannel("a", TimeSeriesSelector(None) * 1.0, {"channel_name": "s"})
+        cid = ch.get_id()
+        fact = spark.createDataFrame(
+            [(1, cid, 5, 5, 10.0), (1, cid, 7, 7, 20.0)], schema=_FACT_SCHEMA
+        )
+        r = CalculatedChannel.determine_channel_metrics(
+            spark, [ch], fact, attribute_columns=[]
+        ).collect()[0]
+        assert r["duration"] == 2  # max(tend) - min(tstart) = 7 - 5
+        assert r["mean"] is None
+        # min/max still resolve from the values.
+        assert r["min"] == 10.0
+        assert r["max"] == 20.0
+
     def test_dynamic_identity_columns_union(self, spark):
         # Two channels with DIFFERENT identity keys → output has the union, null
         # where a channel omits a key.
@@ -299,3 +317,45 @@ class TestDetermineChannelMetrics:
         )
         assert out.columns.count("unit") == 1
         assert out.collect()[0]["unit"] == "identity_unit"
+
+    def test_kpis_subset_only_emits_selected(self, spark):
+        # Selecting a subset yields only those KPI columns (plus the fixed
+        # container/channel/identity/type/data_type columns).
+        ch = CalculatedChannel("a", TimeSeriesSelector(None) * 1.0, {"channel_name": "s"})
+        fact = spark.createDataFrame([(1, ch.get_id(), 0, 2, 10.0)], schema=_FACT_SCHEMA)
+        out = CalculatedChannel.determine_channel_metrics(
+            spark, [ch], fact, attribute_columns=[], kpis=["mean"]
+        )
+        assert out.columns == [
+            "container_id",
+            "channel_id",
+            "channel_name",
+            "type",
+            "data_type",
+            "mean",
+        ]
+        assert out.collect()[0]["mean"] == pytest.approx(10.0)
+
+    def test_kpis_order_is_preserved(self, spark):
+        # The KPI columns appear in the configured order (tail of the schema).
+        ch = CalculatedChannel("a", TimeSeriesSelector(None) * 1.0, {"channel_name": "s"})
+        fact = spark.createDataFrame([(1, ch.get_id(), 0, 2, 10.0)], schema=_FACT_SCHEMA)
+        out = CalculatedChannel.determine_channel_metrics(
+            spark, [ch], fact, attribute_columns=[], kpis=["max", "min", "duration"]
+        )
+        assert out.columns[-3:] == ["max", "min", "duration"]
+
+    def test_kpis_default_is_the_four(self, spark):
+        # kpis=None → default duration, min, max, mean (in order).
+        ch = CalculatedChannel("a", TimeSeriesSelector(None) * 1.0, {"channel_name": "s"})
+        fact = spark.createDataFrame([(1, ch.get_id(), 0, 2, 10.0)], schema=_FACT_SCHEMA)
+        out = CalculatedChannel.determine_channel_metrics(spark, [ch], fact, attribute_columns=[])
+        assert out.columns[-4:] == ["duration", "min", "max", "mean"]
+
+    def test_unknown_kpi_raises(self, spark):
+        ch = CalculatedChannel("a", TimeSeriesSelector(None) * 1.0, {"channel_name": "s"})
+        fact = spark.createDataFrame([(1, ch.get_id(), 0, 2, 10.0)], schema=_FACT_SCHEMA)
+        with pytest.raises(ValueError, match="Unknown calculated-channel KPI"):
+            CalculatedChannel.determine_channel_metrics(
+                spark, [ch], fact, attribute_columns=[], kpis=["bogus"]
+            )

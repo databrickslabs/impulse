@@ -6,6 +6,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
+from impulse_reporting.channels.calculated_channel_kpis import DEFAULT_KPIS, KPI_BUILDERS
 
 
 def is_valid_table_name(table_name: str) -> str:
@@ -451,10 +452,15 @@ class CalculatedChannels(BaseModel):
         table (e.g. ``["unit"]``). Empty (the default) → no attribute columns.
         Identity keys are always surfaced dynamically and win over an
         attribute key of the same name.
+    kpis : list of str, default=["duration", "min", "max", "mean"]
+        KPIs computed on the metrics table, one column per name. Each must be a
+        registered KPI (see ``calculated_channel_kpis.KPI_BUILDERS``); an unknown
+        name is rejected at validation. Duplicates are removed (order preserved).
     """
 
     emit_channel_metrics: bool = False
     attribute_columns: list[str] = []
+    kpis: list[str] = list(DEFAULT_KPIS)
 
     @field_validator("attribute_columns", mode="after")
     @classmethod
@@ -463,6 +469,20 @@ class CalculatedChannels(BaseModel):
         normalized: list[str] = []
         for name in value:
             is_valid_unity_entity_name(name)
+            if name not in seen:
+                seen.add(name)
+                normalized.append(name)
+        return normalized
+
+    @field_validator("kpis", mode="after")
+    @classmethod
+    def _normalize_kpis(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for name in value:
+            if name not in KPI_BUILDERS:
+                valid = ", ".join(sorted(KPI_BUILDERS))
+                raise ValueError(f"Unknown calculated-channel KPI: {name}. Valid KPIs: {valid}.")
             if name not in seen:
                 seen.add(name)
                 normalized.append(name)

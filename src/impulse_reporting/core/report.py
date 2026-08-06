@@ -1108,6 +1108,7 @@ class Report:
         self.calculated_channel_metrics_dfs = {}
         if self.config.calculated_channels.emit_channel_metrics:
             attribute_columns = self.config.calculated_channels.attribute_columns
+            kpis = self.config.calculated_channels.kpis
             changed_metrics: dict = {}
             unchanged_metrics: dict = {}
             for type_name, full_channels in channels_by_type.items():
@@ -1122,6 +1123,7 @@ class Report:
                         full_channels,
                         changed_fact,
                         attribute_columns=attribute_columns,
+                        kpis=kpis,
                     )
                 if unchanged_fact is not None:
                     unchanged_metrics[type_name] = cls.determine_channel_metrics(
@@ -1129,6 +1131,7 @@ class Report:
                         full_channels,
                         unchanged_fact,
                         attribute_columns=attribute_columns,
+                        kpis=kpis,
                     )
             self.calculated_channel_metrics_dfs = merge_changed_unchanged(
                 changed_metrics, unchanged_metrics
