@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 
+import pyspark.sql.functions as F
+import pyspark.sql.types as T
 from pyspark.sql import DataFrame, Row, SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -206,3 +208,110 @@ class CalculatedChannel:
         """
         rows = [channel.as_spark_row() for channel in channels]
         return spark.createDataFrame(rows, schema=CALCULATED_CHANNEL_DIMENSION_SCHEMA)
+
+    @classmethod
+    def determine_channel_metrics(
+        cls,
+        spark: SparkSession,
+        channels: list[CalculatedChannel],
+        fact_df: DataFrame | None,
+        *,
+        attribute_columns: list[str] | None = None,
+    ) -> DataFrame | None:
+        """Derive a silver-shaped ``channel_metrics`` DataFrame from the fact rows.
+
+        The calculated-channel fact table already matches the silver ``channels``
+        table; this builds its companion ``channel_metrics`` so the pair can serve
+        as an Impulse silver source.  Metrics are aggregated **directly from the
+        narrow fact rows** (``container_id, channel_id, tstart, tend, value``),
+        grouped by ``(container_id, channel_id)`` with duration-weighted semantics
+        matching :class:`SampleSeries` (``dur = tend - tstart``).
+
+        The output schema is **dynamic**: fixed columns ``container_id,
+        channel_id, type, data_type, duration, min, max, mean`` plus one column per
+        identity key (the union across all ``channels``) and one per configured
+        attribute key.  Identity/attribute values are pulled from each channel's
+        in-memory ``identity`` / ``attributes`` dicts (null where a channel omits a
+        key).  On an identity/attribute key collision, identity wins and the
+        attribute is skipped.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Session used to build the per-channel metadata frame.
+        channels : list of CalculatedChannel
+            The channels whose fact rows are in ``fact_df``; supply identity and
+            attributes.
+        fact_df : DataFrame or None
+            Narrow fact DataFrame (output of :meth:`determine_calculated_channels`).
+            ``None`` returns ``None``.
+        attribute_columns : list of str, optional
+            Attribute keys to surface as columns.  Default/empty → no attribute
+            columns.  A key no channel defines yields an all-null column.
+
+        Returns
+        -------
+        DataFrame or None
+            The dynamic-schema metrics DataFrame, or ``None`` when ``fact_df`` is
+            ``None``.
+        """
+        if fact_df is None:
+            return None
+
+        attribute_columns = list(attribute_columns or [])
+
+        # Duration-weighted aggregation matching SampleSeries semantics. NaN values
+        # are nulled so Spark's min/max/sum skip them (matching np.nanmin / nanmax /
+        # nansum); the mean denominator keeps every interval's duration.
+        dur = F.col("tend") - F.col("tstart")
+        value = F.col("value")
+        non_nan_value = F.when(~F.isnan(value), value)
+        weighted_value = F.when(~F.isnan(value), value * dur).otherwise(F.lit(0.0))
+        agg_df = fact_df.groupBy("container_id", "channel_id").agg(
+            (F.max("tend") - F.min("tstart")).alias("duration"),
+            F.min(non_nan_value).alias("min"),
+            F.max(non_nan_value).alias("max"),
+            (F.sum(weighted_value) / F.sum(dur)).alias("mean"),
+        )
+
+        # Union of identity keys (stable order); attribute columns lose to identity
+        # on a key collision.
+        identity_keys: list[str] = []
+        for channel in channels:
+            for key in channel.identity:
+                if key not in identity_keys:
+                    identity_keys.append(key)
+        identity_keys.sort()
+        effective_attribute_keys = [k for k in attribute_columns if k not in identity_keys]
+
+        # Per-channel metadata frame. channel_id is cast to the fact's channel_id
+        # type so the join keys line up regardless of int/long width.
+        channel_id_type = fact_df.schema["channel_id"].dataType
+        meta_schema = T.StructType(
+            [T.StructField("channel_id", channel_id_type, False)]
+            + [T.StructField(k, T.StringType(), True) for k in identity_keys]
+            + [T.StructField(k, T.StringType(), True) for k in effective_attribute_keys]
+        )
+        meta_rows = []
+        for channel in channels:
+            row: dict = {"channel_id": channel.get_id()}
+            for key in identity_keys:
+                row[key] = channel.identity.get(key)
+            for key in effective_attribute_keys:
+                row[key] = channel.attributes.get(key)
+            meta_rows.append(Row(**row))
+        meta_df = spark.createDataFrame(meta_rows, schema=meta_schema)
+
+        result = (
+            agg_df.join(meta_df, on="channel_id", how="left")
+            .withColumn("type", F.lit("CALC"))
+            .withColumn("data_type", F.lit("double"))
+        )
+
+        ordered_columns = (
+            ["container_id", "channel_id"]
+            + identity_keys
+            + effective_attribute_keys
+            + ["type", "data_type", "duration", "min", "max", "mean"]
+        )
+        return result.select(*ordered_columns)

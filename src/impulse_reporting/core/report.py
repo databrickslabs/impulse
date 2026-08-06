@@ -106,6 +106,7 @@ class Report:
         self.aggregation_metadata_dfs = {}
         self.calculated_channel_dfs = {}
         self.calculated_channel_metadata_dfs = {}
+        self.calculated_channel_metrics_dfs = {}
         self.container_dimension_df = None
         self.channel_mapping_resolution_dimension_df = None
         self._is_incremental = None
@@ -598,6 +599,10 @@ class Report:
         persist_facts_full(self.calculated_channel_dfs, ChannelType, storage_factory)
         persist_dimensions_full(self.calculated_channel_metadata_dfs, ChannelType, storage_factory)
 
+        # optional calculated channel metrics table (dynamic schema — stored
+        # directly without the fixed-schema projecting writer)
+        self._persist_channel_metrics(incremental=False)
+
         # persist measurement dimensions
         if self.container_dimension_df:
             writer = storage_factory.create_container_dimension_writer()
@@ -708,6 +713,13 @@ class Report:
             merge_keys=["channel_id"],
         )
 
+        # Optional calculated channel metrics table (dynamic schema — merged
+        # directly, scoping the delete-by-source to updated containers).
+        self._persist_channel_metrics(
+            incremental=True,
+            updated_container_ids=updated_container_ids,
+        )
+
         # Persist the measurement dimension LAST (as ``_persist_full`` does). It
         # holds the gold timestamp that container-update detection compares
         # against; the fact solves above are lazy, so writing it earlier would
@@ -738,6 +750,72 @@ class Report:
                     solver_cfg.channel_alias_col,
                 ],
             )
+
+    def _persist_channel_metrics(
+        self,
+        *,
+        incremental: bool,
+        updated_container_ids: list | None = None,
+    ):
+        """Persist the optional calculated-channel metrics table(s).
+
+        The metrics schema is dynamic (identity/attribute columns vary per
+        report), so this bypasses the fixed-schema ``DefaultReportEntityWriter``
+        and stores the already-shaped DataFrame directly — mirroring the
+        ``container_dimension`` special-case. Full mode overwrites; incremental
+        mode upserts on ``(container_id, channel_id)`` and prunes stale rows from
+        updated containers via ``merge_incremental``.
+
+        Parameters
+        ----------
+        incremental : bool
+            Whether to merge (True) or overwrite (False).
+        updated_container_ids : list, optional
+            Ids of updated containers, scoping the incremental delete-by-source.
+        """
+        from functools import reduce
+
+        import pyspark.sql.functions as F
+
+        if not self.calculated_channel_metrics_dfs:
+            return
+
+        transformer = ReportEntityTransformer()
+        updated_container_ids = updated_container_ids or []
+
+        # Group per-type metrics dfs by output table (parallels persist_facts_*).
+        dfs_by_table: dict[str, list[DataFrame]] = {}
+        for type_name, dfs in self.calculated_channel_metrics_dfs.items():
+            if isinstance(dfs, dict):
+                candidates = [dfs.get(key) for key in ("changed", "unchanged")]
+            else:
+                candidates = [dfs]
+            table_dfs = [df for df in candidates if df is not None]
+            if not table_dfs:
+                continue
+            table_name = ChannelType[type_name].get_metrics_table_name()
+            dfs_by_table.setdefault(table_name, []).extend(table_dfs)
+
+        for table_name, dfs_list in dfs_by_table.items():
+            entity_type = ChannelType.get_any_for_metrics_table(table_name)
+            # Resolve the metrics URI directly (no fixed-schema writer).
+            uri = self.sink.config.get_output_uri_channel_metrics_table(entity_type)
+            combined = reduce(lambda a, b: a.unionByName(b), dfs_list)
+            df_enriched = combined.transform(transformer.add_meta_information)
+            if incremental:
+                delete_conditions = []
+                if updated_container_ids:
+                    delete_conditions.append(
+                        F.col("target.container_id").isin(updated_container_ids)
+                    )
+                self.sink.merge_incremental(
+                    df_enriched,
+                    uri,
+                    ["container_id", "channel_id"],
+                    delete_conditions=delete_conditions,
+                )
+            else:
+                self.sink.store(df_enriched, uri)
 
     def _transform_for_persistence(
         self,
@@ -1021,6 +1099,40 @@ class Report:
         self.calculated_channel_metadata_dfs = build_metadata_dfs(
             channels_by_type, ChannelType, self.spark
         )
+
+        # Optionally derive a silver-shaped channel_metrics table from the fact
+        # rows so the fact + metrics pair can serve as an Impulse silver source.
+        # Identity/attribute columns are derived dynamically; the full per-type
+        # channel list is passed to both buckets so changed/unchanged share a
+        # schema (extra channels are ignored by the fact-driven left join).
+        self.calculated_channel_metrics_dfs = {}
+        if self.config.calculated_channels.emit_channel_metrics:
+            attribute_columns = self.config.calculated_channels.attribute_columns
+            changed_metrics: dict = {}
+            unchanged_metrics: dict = {}
+            for type_name, full_channels in channels_by_type.items():
+                if not full_channels:
+                    continue
+                cls = ChannelType[type_name].value
+                changed_fact = changed_channel_dfs.get(type_name)
+                unchanged_fact = unchanged_channel_dfs.get(type_name)
+                if changed_fact is not None:
+                    changed_metrics[type_name] = cls.determine_channel_metrics(
+                        self.spark,
+                        full_channels,
+                        changed_fact,
+                        attribute_columns=attribute_columns,
+                    )
+                if unchanged_fact is not None:
+                    unchanged_metrics[type_name] = cls.determine_channel_metrics(
+                        self.spark,
+                        full_channels,
+                        unchanged_fact,
+                        attribute_columns=attribute_columns,
+                    )
+            self.calculated_channel_metrics_dfs = merge_changed_unchanged(
+                changed_metrics, unchanged_metrics
+            )
 
         # Determine container dimension
         self.container_dimension_df = ContainerDimension.get_dimension(
