@@ -5,6 +5,7 @@ import pyspark.sql.types as T
 from pyspark.sql import DataFrame
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricSelector
+from impulse_query_engine.analyze.metadata.poi_channel_selector import PoiChannelSelector
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     RequiresDeserialization,
@@ -149,6 +150,25 @@ class QueryBuilder:
                 expr = expr & (TagSelector(k) == str(arg))
         return TimeSeriesSelector(expr)
 
+    def poi_channel(self, channel_name: str) -> PoiChannelSelector:
+        """
+        Create a POI channel selector: one ``poi_type`` read as a PointsInTimeSeries.
+
+        POI is a *wide* table, so channel identity is plain column-equality on
+        ``poi_type`` (not an EAV tag selector). Row refinements (network, ecu …)
+        are applied on the returned selector via ``.having(...)``, not here.
+
+        Parameters
+        ----------
+        channel_name : str
+            The ``poi_type`` identifying this channel (e.g. ``"charging_error"``).
+
+        Returns
+        -------
+        PoiChannelSelector
+        """
+        return PoiChannelSelector(poi_type=channel_name)
+
     def channel_with_alias(self, **kwargs) -> TimeSeriesSelector:
         if self.db.config.channel_mapping_table is None:
             raise ValueError("channel_mapping_table is not configured")
@@ -236,19 +256,39 @@ class QueryBuilder:
             self.result_dtypes,
         ) = self._determine_result_objects_dtypes()
 
-        channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
+        channel_metrics_df, poi_rows_df = self._run_filter_pipeline(
+            spark, solver, pre_filtered_containers_df
+        )
 
-        return solver.solve(self, channel_metrics_df, self.selections, self.result_dtypes)
+        return solver.solve(
+            self,
+            channel_metrics_df,
+            self.selections,
+            self.result_dtypes,
+            poi_rows_df=poi_rows_df,
+        )
 
-    def _run_filter_pipeline(self, spark, solver, pre_filtered_containers_df) -> DataFrame:
-        """Run the shared metadata filter pipeline and return the channel-match frame.
+    def _run_filter_pipeline(
+        self, spark, solver, pre_filtered_containers_df
+    ) -> tuple[DataFrame, DataFrame | None]:
+        """Run the shared metadata filter pipeline.
 
         Extracts the selector split, the four filter stages
         (container tags → container metrics → channel tags → channel metrics) and
         the optional channel-alias resolution that both :meth:`solve` and
         :meth:`solve_calculated_channels` drive before their differing final
-        ``solver`` call.  Returns the ``(container_id, channel_id, selector_ids …)``
-        DataFrame identifying the channels selected by the current selections.
+        ``solver`` call.
+
+        Returns
+        -------
+        tuple[DataFrame, DataFrame | None]
+            ``(channel_metrics_df, poi_rows_df)`` — the
+            ``(container_id, channel_id, selector_ids …)`` channel-match frame,
+            and the channel-data-shaped POI union rows from Stage P (or ``None``
+            when the query has no ``poi_channel`` selections). POI rows are kept
+            separate here because they must be unioned into the solve frame
+            *after* the ``channels`` inner join (their synthetic channel_ids have
+            no rows in the physical ``channels`` table).
         """
         # extract selectors upfront
         direct_selectors = TimeSeriesExpression.collect_selectors(
@@ -257,6 +297,7 @@ class QueryBuilder:
         aliased_selectors = TimeSeriesExpression.collect_selectors(
             self.selections, uses_alias=True
         )
+        poi_channel_selectors = TimeSeriesExpression.collect_poi_channel_selectors(self.selections)
 
         # create Query
         tags_df = solver.filter_container_tags(spark, self)
@@ -278,7 +319,16 @@ class QueryBuilder:
                 spark, channel_metrics_df, aliased_channel_metrics_df
             )
 
-        return channel_metrics_df
+        # Stage P: shape POI channel rows for any poi_channel selections, scoped
+        # to the surviving containers. Gated on presence so non-POI reports never
+        # read the poi table.
+        poi_rows_df = None
+        if len(poi_channel_selectors) > 0:
+            poi_rows_df = solver.filter_poi_channels(
+                spark, self, metrics_df, poi_channel_selectors
+            )
+
+        return channel_metrics_df, poi_rows_df
 
     @telemetry_logger("query", "solve_calculated_channels")
     def solve_calculated_channels(
@@ -324,7 +374,10 @@ class QueryBuilder:
         """
         self._validate_calculated_channels()
 
-        channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
+        # POI channels are not valid calculated-channel inputs; ignore poi_rows_df.
+        channel_metrics_df, _poi_rows_df = self._run_filter_pipeline(
+            spark, solver, pre_filtered_containers_df
+        )
 
         return solver.solve_calculated_channels(self, channel_metrics_df, self.selections)
 

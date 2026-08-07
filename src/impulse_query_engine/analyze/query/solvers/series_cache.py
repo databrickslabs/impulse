@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 import pandas as pd
 
+from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 
@@ -48,3 +49,40 @@ class SeriesCache(ABC):
             The loaded sample series object.
         """
         pass
+
+    @abstractmethod
+    def load_poi_blob(self, mid, cid) -> PointsInTimeSeries:
+        """
+        Load a POI channel as a :class:`PointsInTimeSeries` — the POI twin of
+        :meth:`load_blob`.
+
+        Concrete default: **no POI rows** — an empty series. Caches that back
+        ``poi_channel`` selections (e.g. :class:`TimeSeriesCache`) override this
+        to slice the container's POI rows from the shared ``(cid, ch)`` index.
+        The default lets caches that never see POI — notably the empty cache used
+        for type inference in ``_determine_result_objects_dtypes`` — build a
+        ``PoiChannelSelector`` (to an empty ``PointsInTimeSeries``) for free.
+
+        Parameters
+        ----------
+        mid : Any
+            Container id.
+        cid : Any
+            The POI channel's synthetic channel id.
+
+        Returns
+        -------
+        PointsInTimeSeries
+        """
+        pass
+
+    @property
+    def container_id(self):
+        """The container id this per-container cache holds (``None`` if empty).
+
+        Default is ``None``; caches backed by a per-container frame (e.g.
+        :class:`TimeSeriesCache`) override it. Used by ``PoiChannelSelector.build``
+        to address :meth:`load_poi_blob`. The default keeps type-inference caches
+        (e.g. the empty cache) working without holding any data.
+        """
+        return None

@@ -1,3 +1,4 @@
+from impulse_query_engine.model.series import PointsInTimeSeries
 from .series_cache import SeriesCache
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
@@ -45,3 +46,6 @@ class EmptyTimeSeriesCache(SeriesCache):
             An empty SampleSeries object.
         """
         return SampleSeries.empty()
+
+    def load_poi_blob(self, mid, cid) -> PointsInTimeSeries:
+        return PointsInTimeSeries.empty()

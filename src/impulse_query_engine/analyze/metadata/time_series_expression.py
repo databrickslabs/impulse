@@ -286,6 +286,48 @@ class TimeSeriesExpression(abc.ABC):
                 selectors.append(selector)
         return selectors
 
+    def get_poi_channel_selectors(self) -> list:
+        """Return all POI channel selectors reachable from this expression.
+
+        Parallels :meth:`get_selectors` for the POI-channel path. The base
+        default is empty; :class:`PoiChannelSelector` returns ``[self]`` and
+        wrapping expressions (ops, aggregations) recurse into their children.
+
+        Returns
+        -------
+        list of PoiChannelSelector
+        """
+        return []
+
+    @staticmethod
+    def collect_poi_channel_selectors(expressions: Iterable[Any]) -> list:
+        """Collect deduplicated POI channel selectors from a list of expressions.
+
+        Mirrors :meth:`collect_selectors`: walks each item's
+        ``get_poi_channel_selectors()``, skips non-``TimeSeriesExpression``
+        entries, and deduplicates by ``selector_id`` preserving discovery order.
+
+        Parameters
+        ----------
+        expressions : Iterable[Any]
+            Items to walk; non-``TimeSeriesExpression`` entries are skipped.
+
+        Returns
+        -------
+        list of PoiChannelSelector
+        """
+        selectors: list = []
+        seen_ids: set = set()
+        for expression in expressions:
+            if not isinstance(expression, TimeSeriesExpression):
+                continue
+            for selector in expression.get_poi_channel_selectors():
+                if selector.selector_id in seen_ids:
+                    continue
+                seen_ids.add(selector.selector_id)
+                selectors.append(selector)
+        return selectors
+
     @abc.abstractmethod
     def __str__(self) -> str:
         """
@@ -990,6 +1032,18 @@ class TimeSeriesOp(TimeSeriesExpression):
         for kwarg in self.kwargs.values():
             if isinstance(kwarg, TimeSeriesExpression):
                 result.extend(kwarg.get_selectors())
+        return result
+
+    def get_poi_channel_selectors(self) -> list:
+        """Recurse into args/kwargs so POI channels nested in an op (e.g. inside
+        ``soc.where(charging == "err")``) are discovered by the POI walker."""
+        result: list = []
+        for arg in self.args:
+            if isinstance(arg, TimeSeriesExpression):
+                result.extend(arg.get_poi_channel_selectors())
+        for kwarg in self.kwargs.values():
+            if isinstance(kwarg, TimeSeriesExpression):
+                result.extend(kwarg.get_poi_channel_selectors())
         return result
 
     def build(self, cache: SeriesCache):

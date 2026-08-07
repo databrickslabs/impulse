@@ -1,0 +1,4 @@
+container_id,project,brand,model,duration_ms,num_channels
+1,SAMPLE_PROJECT,Seat,Leon,40,2
+2,SAMPLE_PROJECT,Seat,Ibiza,30,2
+3,SAMPLE_PROJECT,Seat,Ateca,0,0

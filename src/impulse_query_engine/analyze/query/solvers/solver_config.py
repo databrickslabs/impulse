@@ -85,6 +85,36 @@ class JoinKey(BaseModel):
     metrics_col: str
 
 
+class PoiConfig(TableConfig):
+    """``TableConfig`` plus the POI table's timestamp / value / type column names.
+
+    POI is a *wide* table (one row per occurrence in time). For the poi_channel
+    feature it is read at query time, and each ``poi_type`` becomes a channel
+    whose ``(ts, value)`` points form a ``PointsInTimeSeries``. These names are
+    the internal column names **after** ``column_name_mapping`` has been applied.
+
+    Attributes
+    ----------
+    ts_column : str
+        Column carrying the occurrence timestamp (default ``"timestamp_abs"``).
+    value_column : str
+        Column carrying the POI value that becomes the series value
+        (default ``"value"``).
+    poi_type_column : str
+        Column identifying the POI kind, matched against a
+        ``PoiChannelSelector``'s ``poi_type`` (default ``"poi_type"``).
+    """
+
+    ts_column: str = "timestamp_abs"
+    value_column: str = "value"
+    poi_type_column: str = "poi_type"
+
+ # todo we need to support timestamp in following formats: timestamp, unix time as long/double
+ # todo needs to mimic channels capabilities
+
+ # todo we need to discuss how to proceed with categorical str values now we just support numeric
+
+
 class ChannelMappingConfig(TableConfig):
     """``TableConfig`` plus an optional alias-resolution join-key spec.
 
@@ -144,6 +174,7 @@ class SolverConfig(BaseModel):
     channel_mapping: ChannelMappingConfig = ChannelMappingConfig()
     channels: TableConfig = TableConfig()
     unit_conversion: TableConfig = TableConfig()
+    poi: PoiConfig = PoiConfig()
 
     # ------------------------------------------------------------------
     # Class methods
@@ -380,3 +411,22 @@ class SolverConfig(BaseModel):
             "val": self.value_col,
             "conv": self.conversion_factor_col,
         }
+
+    # ------------------------------------------------------------------
+    # POI channel column names
+    # ------------------------------------------------------------------
+
+    @property
+    def poi_type_col(self) -> str:
+        """Internal column name for the POI kind on the poi table."""
+        return self.poi.poi_type_column
+
+    @property
+    def poi_ts_col(self) -> str:
+        """Internal column name for the POI occurrence timestamp."""
+        return self.poi.ts_column
+
+    @property
+    def poi_value_col(self) -> str:
+        """Internal column name for the POI value that becomes the series value."""
+        return self.poi.value_column

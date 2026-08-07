@@ -8,6 +8,24 @@ import pyspark.sql.functions as F
 from pyspark.sql import Column
 
 
+def array_contains(arr, value):
+    """``operator``-style callable: does array ``arr`` contain ``value``?
+
+    Analogous to ``operator.eq`` — a plain function usable in the
+    :class:`MetricOp` operation slot — but dual-backend so a ``MetricOp`` built
+    with it evaluates in **both** paths:
+
+    - Spark ``Column`` (``get_selector_expr``) → ``F.array_contains(arr, value)``
+    - pandas ``Series`` of lists (``build_pandas``) → per-row membership.
+
+    ``array_contains`` has no ``operator`` equivalent, so this fills that gap
+    while keeping ``.contains`` structurally identical to the comparison ops.
+    """
+    if isinstance(arr, Column):
+        return F.array_contains(arr, value)
+    return arr.apply(lambda a: value in (a if a is not None else []))
+
+
 class MetricExpression(abc.ABC):
     def __eq__(self, other):
         """
@@ -168,6 +186,28 @@ class MetricExpression(abc.ABC):
             Metric operation representing logical AND.
         """
         return MetricOp(operator.and_, other, self)
+
+    def contains(self, value) -> "MetricOp":
+        """
+        Membership test for an ``array`` metric: keep rows whose array contains
+        ``value``. Uses the dual-backend :func:`array_contains` operator, so it
+        works in both the Spark (``get_selector_expr``) and pandas
+        (``build_pandas``) paths — symmetric with the comparison ops.
+
+        Used for POI-backed metrics whose values are stored as a plain array,
+        e.g. ``q.metric("poi_defect_values").contains("P108B-17")`` alongside a
+        separate scalar ``q.metric("poi_defect_count") >= 3``.
+
+        Parameters
+        ----------
+        value
+            The element to test for membership.
+
+        Returns
+        -------
+        MetricOp
+        """
+        return MetricOp(array_contains, self, value)
 
     @abc.abstractmethod
     def get_selector_expr(self) -> Column:

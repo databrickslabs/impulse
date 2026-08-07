@@ -476,3 +476,36 @@ def key_value_store_unit_conversion_db_no_table(
     cfg.channel_mapping_table = "channel_mapping"
     # Explicitly leave unit_conversion_table = None
     return MeasurementDB(cfg, ws=mock_workspace_client)
+
+
+@pytest.fixture
+def poi_integration_db(spark, mock_workspace_client) -> MeasurementDB:
+    """MeasurementDB for POI-channel integration tests.
+
+    Loads ``tests/unit/data/poi_integration_csv`` (EAV container_tags + wide
+    container_metrics/channel_metrics/channels + channel_mapping + a ``poi``
+    table). Timestamps are second-scale so POI ``timestamp_abs`` (cast to epoch
+    seconds by Stage P) lands inside the channel sample intervals. Container 3
+    has POI rows but no channel data — the POI-only container case.
+    """
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    base_path = base_path[: base_path.find("tests")]
+    d = f"{base_path}/tests/unit/data/poi_integration_csv"
+    options = {"header": "True", "delimiter": ",", "inferSchema": "True"}
+
+    def _load(name):
+        return spark.read.options(**options).csv(f"{d}/{name}.csv")
+
+    tables = {
+        "container_tags": _load("container_tags"),
+        "container_metrics": _load("container_metrics"),
+        "channel_metrics": _load("channel_metrics"),
+        "channels": _load("channels"),
+        "channel_mapping": _load("channel_mapping"),
+        # timestamp_abs parses to a proper TimestampType via inferSchema
+        "poi": _load("poi"),
+    }
+    cfg = MeasurementDBConfig.for_debug(tables)
+    cfg.channel_mapping_table = "channel_mapping"
+    cfg.poi_table = "poi"
+    return MeasurementDB(cfg, ws=mock_workspace_client)

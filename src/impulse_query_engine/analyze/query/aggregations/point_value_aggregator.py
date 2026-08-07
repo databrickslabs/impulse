@@ -195,3 +195,13 @@ class PointValueAggregator(Aggregation):
         if self.event_expression is not None:
             result.extend(self.event_expression.get_selectors())
         return result
+
+    def get_poi_channel_selectors(self) -> list:
+        """Return POI channel selectors reachable from the input/event expressions,
+        so a ``poi_channel`` used as an input or event is discovered by Stage P."""
+        result: list = []
+        for expr in self.input_expressions:
+            result.extend(expr.get_poi_channel_selectors())
+        if self.event_expression is not None:
+            result.extend(self.event_expression.get_poi_channel_selectors())
+        return result

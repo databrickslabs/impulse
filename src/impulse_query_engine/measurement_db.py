@@ -16,6 +16,7 @@ class MeasurementDBConfig:
         channels_uri=None,
         channel_mapping_table=None,
         unit_conversion_table=None,
+        poi_table=None,
         table_locations: str = "external_locations",
     ):
         self.container_tags_table = container_tags_table
@@ -25,6 +26,7 @@ class MeasurementDBConfig:
         self.channels_uri = channels_uri
         self.channel_mapping_table = channel_mapping_table
         self.unit_conversion_table = unit_conversion_table
+        self.poi_table = poi_table
         self.table_locations = table_locations
         self.debug_tables = None
 
@@ -64,6 +66,7 @@ class MeasurementDBConfig:
             unit_conversion_table=(
                 "unit_conversion" if "unit_conversion" in debug_tables else None
             ),
+            poi_table="poi" if "poi" in debug_tables else None,
             table_locations="debug",
         )
         cfg.debug_tables = debug_tables
@@ -112,6 +115,11 @@ class MeasurementDB:
         if self.config.unit_conversion_table is None:
             raise ValueError("unit_conversion_table is not configured")
         return self._read_table(spark, self.config.unit_conversion_table)
+
+    def poi(self, spark) -> DataFrame:
+        if self.config.poi_table is None:
+            raise ValueError("poi_table is not configured")
+        return self._read_table(spark, self.config.poi_table)
 
     def channel_uri(self):
         return self.config.channels_uri

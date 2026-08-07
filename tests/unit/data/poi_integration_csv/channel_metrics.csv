@@ -1,0 +1,5 @@
+container_id,channel_id,channel_name,data_key,group_idx,channel_idx,unit,sample_count,min,max,mean,begin_ms,end_ms,duration_ms,sample_rate,value_type
+1,5,Engine RPM,TM,1,1,rpm,4,800,3000,1550,0,40,40,0.1,DOUBLE
+1,7,Vehicle Speed Sensor,TM,1,2,kmh,4,0,80,40,0,40,40,0.1,DOUBLE
+2,5,Engine RPM,TM,1,1,rpm,3,1000,2500,1833,0,30,30,0.1,DOUBLE
+2,7,Vehicle Speed Sensor,TM,1,2,kmh,3,30,55,41,0,30,30,0.1,DOUBLE
