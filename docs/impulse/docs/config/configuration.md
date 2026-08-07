@@ -76,9 +76,10 @@ Defines where gold-layer tables are written.
 
 | Field          | Type  | Required | Description                           |
 |----------------|-------|----------|---------------------------------------|
-| `catalog`      | `str` | Yes      | Target catalog name.                  |
-| `schema`       | `str` | Yes      | Target schema name.                   |
-| `table_prefix` | `str` | Yes      | Prefix for all generated table names. |
+| `catalog`             | `str`  | Yes      | Target catalog name.                  |
+| `schema`              | `str`  | Yes      | Target schema name.                   |
+| `table_prefix`        | `str`  | Yes      | Prefix for all generated table names. |
+| `cleanup_temp_tables` | `bool` | No       | Drop the batch-solving `__impulse_temp_*` tables from this schema after `persist_results()` completes successfully. Defaults to `false`. Overridable per call via `persist_results(cleanup_temp_tables=...)`. |
 
 Output tables are named `{table_prefix}_{entity}` (e.g.
 `my_report_histogram_fact`).
