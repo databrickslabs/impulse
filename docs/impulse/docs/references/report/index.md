@@ -44,7 +44,7 @@ Either `config` or `config_path` must be provided.
 | `add_calculated_channel(channel)`   | Registers a [`CalculatedChannel`](./channel.md) with the report.                                                              | `channel`: `CalculatedChannel` instance.                                                        |
 | `get_calculated_channels()`         | Returns the list of registered calculated channels.                                                                           | --                                                                                              |
 | `determine_report(is_incremental)`  | Computes all events, aggregations, calculated channels, and container dimensions. Results are stored on the report object.     | `is_incremental`: `bool` or `None`. Mode hint; overridden by `config.incremental` when present. See [Incremental processing](#incremental-processing). |
-| `persist_results()`                 | Writes all computed results (fact and dimension tables) to the configured Gold layer sink.                                     | --                                                                                              |
+| `persist_results(cleanup_temp_tables)` | Writes all computed results (fact and dimension tables) to the configured Gold layer sink.                                  | `cleanup_temp_tables`: `bool` or `None`. When truthy, drops the batch-solving `__impulse_temp_*` tables after a successful write; `None` (default) falls back to `config.unity_sink.cleanup_temp_tables`. |
 
 ### Execution workflow
 

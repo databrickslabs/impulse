@@ -131,6 +131,25 @@ def test_impulse_config_drop_implausible_data_rejects_rle():
         ImpulseConfig.model_validate(config_json)
 
 
+def test_impulse_config_cleanup_temp_tables_defaults_to_false():
+    config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
+    assert config.unity_sink.cleanup_temp_tables is False
+
+
+def test_impulse_config_cleanup_temp_tables_enabled():
+    config_json = {
+        **impulse_config_JSON,
+        "unity_sink": {
+            "catalog": "test_catalog",
+            "schema": "test_schema",
+            "table_prefix": "test_prefix",
+            "cleanup_temp_tables": True,
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.unity_sink.cleanup_temp_tables is True
+
+
 def test_impulse_config_raw_encoder_interval():
     config_json = {
         **impulse_config_JSON,
