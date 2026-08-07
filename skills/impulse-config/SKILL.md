@@ -62,11 +62,12 @@ Maps the silver-layer input tables. Values are full Unity Catalog paths (`catalo
 
 Where gold tables are written. Output tables are named `{table_prefix}_{entity}`.
 
-| Field          | Required | Description        |
-|----------------|----------|--------------------|
-| `catalog`      | Yes      | Target catalog.    |
-| `schema`       | Yes      | Target schema.     |
-| `table_prefix` | Yes      | Prefix for tables. |
+| Field                 | Required | Description        |
+|-----------------------|----------|--------------------|
+| `catalog`             | Yes      | Target catalog.    |
+| `schema`              | Yes      | Target schema.     |
+| `table_prefix`        | Yes      | Prefix for tables. |
+| `cleanup_temp_tables` | No       | Drop the batch-solving `__impulse_temp_*` tables from the schema after `persist_results()` succeeds. Defaults to `false`. Overridable per call via `persist_results(cleanup_temp_tables=...)`. |
 
 **Sinkless mode:** omit `unity_sink` entirely. `determine_report()` still computes everything and
 exposes it on the report object, but `persist_results()` becomes a no-op. Use it for ad-hoc analysis,

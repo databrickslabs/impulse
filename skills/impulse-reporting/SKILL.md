@@ -47,7 +47,9 @@ Exactly one of `config` / `config_path` must be provided.
 Useful methods: `get_db()` → the `MeasurementDB` for signal selection; `get_solver()` → the configured
 solver; `get_sink_config()` → the resolved sink; `add_event(event)`; `add_page(page)`;
 `add_calculated_channel(channel)` (see `impulse-channels`); `determine_report(is_incremental=None)`;
-`persist_results()`.
+`persist_results(cleanup_temp_tables=None)` (pass `True`/`False` to override the
+`unity_sink.cleanup_temp_tables` config flag for dropping `__impulse_temp_*` tables after a
+successful write).
 
 ## The lifecycle
 
