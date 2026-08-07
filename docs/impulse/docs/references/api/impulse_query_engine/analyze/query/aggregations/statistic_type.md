@@ -20,4 +20,6 @@ Enumeration of supported statistic types for aggregations.
 - `MAX` (`str`): Maximum value statistic.
 - `MEAN` (`str`): Mean (average) value statistic.
 - `MEDIAN` (`str`): Median value statistic.
+- `START` (`str`): First value in the interval.
+- `END` (`str`): Last value in the interval.
 

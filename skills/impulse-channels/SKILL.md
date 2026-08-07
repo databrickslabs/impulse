@@ -5,8 +5,8 @@ description: >
   channels and materialized at the same per-sample grain. Use when the user wants to "add a calculated
   channel", derive/persist a signal (e.g. "speed in km/h", "power = rpm × torque"), materialize a virtual
   signal into a queryable table, or run `solve_calculated_channels`. Covers the reporting-layer
-  CalculatedChannel, the ad-hoc `QueryBuilder.solve_calculated_channels` endpoint, and the
-  calculated_channel_fact/dimension gold output.
+  CalculatedChannel, the ad-hoc `QueryBuilder.solve_calculated_channels` endpoint, the
+  calculated_channel_fact/dimension gold output, and the optional calculated_channel_metrics table.
 ---
 
 # Impulse — calculated channels
@@ -97,6 +97,30 @@ across selections.
 `tstart`, `tend`, `value`. Same narrow, run-length-encoded shape as the silver `channels` table. The
 identity is **not** on the fact — it lives on the dimension; join on `channel_id` (and to
 `measurement_dimension` on `container_id`; see `impulse-data-model`).
+
+## Optional channel metrics table
+
+`calculated_channel_fact` already matches the silver `channels` shape, so a calculated channel needs only a
+companion `channel_metrics` table to become an Impulse silver source. Set
+`config.calculated_channels.emit_channel_metrics = True` to also write `calculated_channel_metrics`, shaped
+like silver `channel_metrics` (one row per `(container_id, channel_id)`, derived from the fact rows).
+
+```python
+from impulse_reporting.config.config_parser import CalculatedChannels
+
+# in the ImpulseConfig:
+calculated_channels = CalculatedChannels(
+    emit_channel_metrics=True,
+    attribute_columns=["unit"],          # attribute keys to surface as columns; default []
+    kpis=["duration", "min", "max", "mean"],  # default; each must be a registered KPI
+)
+```
+
+The schema is **dynamic**: fixed `container_id`, `channel_id`, `type` (`"CALC"`), `data_type` (`"double"`),
+one column per configured KPI, one per identity key (union across the report's channels), and one per
+`attribute_columns` entry. `null` fills a key a channel omits; an identity key wins over an attribute key of
+the same name. KPIs are duration-weighted; an unknown KPI name is rejected at config validation. Adding a
+new KPI is a one-line entry in `impulse_reporting.channels.calculated_channel_kpis.KPI_BUILDERS`.
 
 ## Incremental
 

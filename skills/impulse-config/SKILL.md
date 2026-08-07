@@ -6,7 +6,7 @@ description: >
   "configure an Impulse report", set the source/sink tables, filter which containers are processed,
   choose RLE vs RAW, turn on incremental processing, run without writing (sinkless), remap column
   names, or scope by project. Covers source, unity_sink, container_filters, query_engine, solver_config,
-  incremental, and measurement_dimensions, all validated by Pydantic.
+  incremental, measurement_dimensions, and calculated_channels, all validated by Pydantic.
 ---
 
 # Impulse — configuration
@@ -40,6 +40,7 @@ config = {
     },
     "incremental": {"enabled": True},
     "measurement_dimensions": ["container_id", "vehicle_key", "start_ts", "stop_ts"],
+    "calculated_channels": {"emit_channel_metrics": True, "attribute_columns": ["unit"]},  # optional
 }
 ```
 
@@ -172,3 +173,19 @@ List of `container_metrics` columns (post-mapping **internal** names) to surface
 Default: `["container_id", "start_ts", "stop_ts"]`. Keep `container_id` — it is the incremental upsert
 key and the join key to fact tables. Any column present in your post-mapping `container_metrics`
 DataFrame is valid; a missing one fails the run fast with a `ValueError` naming it.
+
+## calculated_channels (optional)
+
+Controls the optional `calculated_channel_metrics` table. Off by default; when on, it is written alongside
+`calculated_channel_fact` / `calculated_channel_dimension` in the silver `channel_metrics` shape, so the
+fact + metrics pair can serve as an Impulse silver source. See `impulse-channels`.
+
+| Field                  | Default                              | Description                                                                 |
+|------------------------|--------------------------------------|-----------------------------------------------------------------------------|
+| `emit_channel_metrics` | `false`                              | Turn on the `calculated_channel_metrics` table.                             |
+| `attribute_columns`    | `[]`                                 | Calculated-channel `attributes` keys to surface as columns (e.g. `["unit"]`). |
+| `kpis`                 | `["duration", "min", "max", "mean"]` | KPIs computed per `(container_id, channel_id)`, one column each.            |
+
+Each metrics row is one `(container_id, channel_id)` pair with the selected `kpis` (duration-weighted) plus
+dynamic identity columns (union of `identity` keys) and the configured `attribute_columns`; identity wins
+over an attribute of the same name. An unknown KPI name is rejected at config validation.

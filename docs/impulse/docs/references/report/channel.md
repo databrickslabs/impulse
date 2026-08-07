@@ -138,3 +138,33 @@ run-length-encoded shape as the silver `channels` table.
 Both tables carry the configurable `table_prefix` (e.g. `{prefix}_calculated_channel_fact`). See the
 [gold layer schema](../../data_model/gold_layer_event_normalized.md) for how they fit the star schema, and
 [incremental processing](./index.md#incremental-processing) for how definition changes are reprocessed.
+
+---
+
+## Optional channel metrics table
+
+Because `calculated_channel_fact` already matches the silver `channels` shape, a calculated channel needs
+only a companion `channel_metrics` table to serve as an Impulse silver source in its own right. Set
+[`config.calculated_channels.emit_channel_metrics`](../../config/configuration.md#calculated_channels-optional)
+to also write a `calculated_channel_metrics` table, shaped like the silver `channel_metrics` table.
+
+### calculated_channel_metrics
+
+One row per `(container_id, channel_id)`, derived directly from the fact rows. The schema is **dynamic**:
+fixed columns plus one column per configured KPI, one per identity key (the union of `identity` keys across
+the report's channels), and one per configured attribute key.
+
+| Column         | Type     | Description                                                                                     |
+|----------------|----------|-------------------------------------------------------------------------------------------------|
+| `container_id` | `int`    | Container identifier. Type is inherited from the silver source.                                 |
+| `channel_id`   | `long`   | Calculated-channel identifier (matches the fact and dimension).                                 |
+| *identity cols*| `str`    | One column per identity key (e.g. `channel_name`, `data_key`); `null` where a channel omits it. |
+| *attribute cols*| `str`   | One column per `attribute_columns` entry (e.g. `unit`); `null` where a channel omits it.        |
+| `type`         | `str`    | `"CALC"`.                                                                                        |
+| `data_type`    | `str`    | `"double"`.                                                                                      |
+| *kpi cols*     | `double` | One column per configured KPI, in order (default `duration`, `min`, `max`, `mean`).             |
+
+The KPIs are duration-weighted (matching the silver ingestion semantics): `duration` is the span
+`max(tend) - min(tstart)`, `min` / `max` ignore NaN values, and `mean` is the duration-weighted average.
+Select which KPIs to compute via `config.calculated_channels.kpis`; an identity key wins over an attribute
+key of the same name.

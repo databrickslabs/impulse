@@ -96,6 +96,7 @@ A star schema. Every table is prefixed with your configured `table_prefix` (e.g.
 | `histogram2d_fact`      | One row per (x, y) bin per container     |
 | `stats_aggregator_fact` | One row per statistic label per signal per event instance |
 | `calculated_channel_fact` | One row per sample interval per container (a derived signal, silver `channels` shape) |
+| `calculated_channel_metrics` | One row per calculated channel per container (optional; silver `channel_metrics` shape). Written only when `config.calculated_channels.emit_channel_metrics` is set. See `impulse-channels`. |
 
 **Dimension tables**
 

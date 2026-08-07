@@ -352,6 +352,40 @@ mode-resolution rules and what counts as a definition change.
 
 ---
 
+## calculated_channels (optional)
+
+Controls the optional `calculated_channel_metrics` output. By default a report
+writes calculated channels to `calculated_channel_fact` (the derived signal) and
+`calculated_channel_dimension` (the definitions). Setting `emit_channel_metrics`
+adds a third table, `calculated_channel_metrics`, shaped like the silver
+`channel_metrics` table so the fact + metrics pair can serve as an Impulse silver
+source. See the [Channels reference](../references/report/channel.md) for the
+output schema.
+
+| Field                 | Type        | Default                              | Description                                                                                       |
+|-----------------------|-------------|--------------------------------------|---------------------------------------------------------------------------------------------------|
+| `emit_channel_metrics`| `bool`      | `false`                              | Turns on the `calculated_channel_metrics` table.                                                  |
+| `attribute_columns`   | `list[str]` | `[]`                                 | Calculated-channel `attributes` keys to surface as columns on the metrics table (e.g. `["unit"]`). |
+| `kpis`                | `list[str]` | `["duration", "min", "max", "mean"]` | KPIs computed per `(container_id, channel_id)`, one column each. Must be registered KPI names.     |
+
+When enabled, each row of `calculated_channel_metrics` is one
+`(container_id, channel_id)` pair, carrying the selected `kpis` plus dynamic
+identity columns (the union of `identity` keys across the report's channels) and
+the configured `attribute_columns`. A channel that omits an identity or attribute
+key gets `null` for that column; an identity key wins over an attribute key of the
+same name.
+
+The available `kpis` are `duration`, `min`, `max`, and `mean` (all
+duration-weighted, matching the silver ingestion semantics). An unknown KPI name is
+rejected at config validation with a `ValueError` naming the valid KPIs.
+
+:::note Off by default
+When `emit_channel_metrics` is `false` (the default), no metrics table is written
+and `attribute_columns` / `kpis` have no effect.
+:::
+
+---
+
 ## measurement_dimensions (optional)
 
 List of `container_metrics` column names to surface into the gold-layer

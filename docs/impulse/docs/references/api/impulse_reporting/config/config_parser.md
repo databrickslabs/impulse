@@ -237,6 +237,27 @@ Configuration for incremental processing behavior.
 - `silver_last_modified_column` (`str, default="timestamp"`): Column name in the silver layer used for freshness comparison.
 - `gold_last_modified_column` (`str, default="last_modified"`): Column name in the gold layer used for freshness comparison.
 
+## CalculatedChannels
+
+```python
+class CalculatedChannels(BaseModel)
+```
+
+Configuration for calculated-channel outputs.
+
+**Arguments**:
+
+- `emit_channel_metrics` (`bool, default=False`): When True, also emit a ``calculated_channel_metrics`` gold table (silver
+``channel_metrics`` shape) alongside the calculated-channel fact table, so
+the fact + metrics pair can serve as an Impulse silver source.
+- `attribute_columns` (`list of str, default=[]`): Calculated-channel attribute keys to surface as columns on the metrics
+table (e.g. ``["unit"]``). Empty (the default) → no attribute columns.
+Identity keys are always surfaced dynamically and win over an
+attribute key of the same name.
+- `kpis` (`list of str, default=["duration", "min", "max", "mean"]`): KPIs computed on the metrics table, one column per name. Each must be a
+registered KPI (see ``calculated_channel_kpis.KPI_BUILDERS``); an unknown
+name is rejected at validation. Duplicates are removed (order preserved).
+
 ## ImpulseConfig
 
 ```python
@@ -257,6 +278,9 @@ Attributes
      Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
  incremental : IncrementalConfig, optional
      Optional incremental processing configuration. Defaults to IncrementalConfig().
+ calculated_channels : CalculatedChannels, optional
+     Optional calculated-channel output configuration (e.g. opting in to the
+     ``calculated_channel_metrics`` table). Defaults to CalculatedChannels().
  measurement_dimensions : list of str, optional
      Column names to surface from ``container_metrics`` into the
      gold-layer ``measurement_dimension`` table. Names are matched

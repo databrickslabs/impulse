@@ -186,6 +186,18 @@ calculated_channel_fact {
     timestamp _created_at
 }
 
+calculated_channel_metrics {
+    int container_id
+    long channel_id
+    string type
+    string data_type
+    double duration
+    double min
+    double max
+    double mean
+    timestamp _created_at
+}
+
 histogram_fact }o--|| event_dimension: event_id
 histogram2d_fact }o--|| event_dimension: event_id
 stats_aggregator_fact }o--|| event_instance_fact: event_instance_id
@@ -221,7 +233,8 @@ guaranteed.
 | `{prefix}_histogram2d_fact`      | `container_id`, `visual_id`, `event_id`, `x_bin_id`, `y_bin_id`                        | 2D histogram bin values per container.                       |
 | `{prefix}_stats_aggregator_fact` | `container_id`, `visual_id`, `event_instance_id`, `channel_name`, `aggregation_label`  | Statistics values per signal, event instance, and container. |
 | `{prefix}_event_instance_fact`   | `container_id`, `event_id`, `event_instance_id`                                        | Materialized event occurrences with start/end timestamps.    |
-| `{prefix}_calculated_channel_fact` | `container_id`, `channel_id`, `tstart`                                               | Materialized derived signal — one row per sample interval, in the silver `channels` shape (`tstart`, `tend`, `value`). The channel's identity lives on `calculated_channel_dimension`, joined via `channel_id`. |
+| `{prefix}_calculated_channel_fact` | `container_id`, `channel_id`, `tstart`                                               | Materialized derived signal, one row per sample interval, in the silver `channels` shape (`tstart`, `tend`, `value`). The channel's identity lives on `calculated_channel_dimension`, joined via `channel_id`. |
+| `{prefix}_calculated_channel_metrics` | `container_id`, `channel_id`                                                       | Optional per-channel metrics in the silver `channel_metrics` shape, so the fact + metrics pair can serve as an Impulse silver source. Written only when [`config.calculated_channels.emit_channel_metrics`](../config/configuration.md#calculated_channels-optional) is set. Carries the configured `kpis` plus dynamic identity/attribute columns. See [Channels](../references/report/channel.md). |
 
 ---
 
