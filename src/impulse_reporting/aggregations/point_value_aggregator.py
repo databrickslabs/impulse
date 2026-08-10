@@ -363,10 +363,8 @@ class PointValueAggregator(Aggregation):
         """
         Calculate the definition hash for the aggregation.
 
-        Only includes computation-affecting attributes: input expressions, the event
-        expression, and channel_names (the fact table's ``channel_name`` merge key, so
-        a rename forces a recompute). Excludes name, description, units, page_number,
-        report_id.
+        Only includes computation-affecting attributes: input expressions and the event
+        expression. Excludes name, description, units, page_number, report_id.
 
         Returns
         -------
@@ -385,7 +383,6 @@ class PointValueAggregator(Aggregation):
             input_expr_strs,  # Input expressions
             "value",  # constant aggregation label
             event_expr_str,  # Event (points) expression
-            repr(self.channel_names),  # fact-table channel_name merge key
         ]
         hash_input = "::".join(hash_components)
 

@@ -544,22 +544,13 @@ class Report:
             raise ValueError(error_message)
 
     @telemetry_logger("report", "persist_results")
-    def persist_results(self, cleanup_temp_tables: bool | None = None):
+    def persist_results(self):
         """
         Persist report results using appropriate strategy based on definition changes.
 
         Uses tracked state from determine_report() to decide persistence strategy:
         - Changed definitions: replaceWhere (atomic delete + insert)
         - Unchanged definitions: MERGE (upsert)
-
-        Parameters
-        ----------
-        cleanup_temp_tables : bool, optional
-            Whether to drop the batch-solving ``__impulse_temp_*`` tables from the
-            sink schema after persistence completes successfully.
-            - True/False: use this value, overriding the config flag.
-            - None (default): fall back to ``config.unity_sink.cleanup_temp_tables``
-              (which itself defaults to False).
 
         Returns
         -------
@@ -579,20 +570,6 @@ class Report:
             )
         else:
             self._persist_full()
-
-        # Only drop the current run's temp tables once persistence has succeeded.
-        if self._resolve_cleanup_temp_tables(cleanup_temp_tables):
-            self._cleanup_temp_tables()
-
-    def _resolve_cleanup_temp_tables(self, cleanup: bool | None) -> bool:
-        """Resolve whether to drop temp tables: explicit arg wins, else config flag.
-
-        ``self.config.unity_sink`` is guaranteed non-None when called, since
-        ``persist_results`` returns early unless a sink is configured.
-        """
-        if cleanup is not None:
-            return cleanup
-        return bool(self.config.unity_sink.cleanup_temp_tables)
 
     def _persist_full(self):
         """

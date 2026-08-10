@@ -17,15 +17,9 @@ class StatisticType(Enum):
         Mean (average) value statistic.
     MEDIAN : str
         Median value statistic.
-    START : str
-        First value in the interval.
-    END : str
-        Last value in the interval.
     """
 
     MIN = "min"
     MAX = "max"
     MEAN = "mean"
     MEDIAN = "median"
-    START = "start"
-    END = "end"

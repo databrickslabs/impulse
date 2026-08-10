@@ -37,6 +37,23 @@ class QuerySolver(ABC):
     def __init__(self, config: SolverConfig = None):
         self.config = config or SolverConfig()
 
+    def __init_subclass__(cls, **kwargs):
+        """Auto-register every concrete ``QuerySolver`` subclass under its name.
+
+        Runs at class-definition time for any subclass, so a solver is selectable
+        by its class name in ``query_engine.solver`` without an explicit
+        ``@register_solver`` decorator. Registration is additive and never
+        overwrites, so an explicit decorator (custom name / aliases / config
+        subclass) still takes precedence — see :func:`auto_register_solver`.
+
+        Imported locally to avoid a circular import (``registry`` imports this
+        module).
+        """
+        super().__init_subclass__(**kwargs)
+        from .registry import auto_register_solver
+
+        auto_register_solver(cls)
+
     @classmethod
     def from_config(cls, ctx: "SolverBuildContext") -> "QuerySolver":
         """Build a solver from a :class:`SolverBuildContext`.
