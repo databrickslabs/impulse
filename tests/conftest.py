@@ -509,3 +509,38 @@ def poi_integration_db(spark, mock_workspace_client) -> MeasurementDB:
     cfg.channel_mapping_table = "channel_mapping"
     cfg.poi_table = "poi"
     return MeasurementDB(cfg, ws=mock_workspace_client)
+
+
+@pytest.fixture
+def poi_integration_eav_db(spark, mock_workspace_client) -> MeasurementDB:
+    """POI fixture in **EAV channel mode** (``channel_tags_table`` set).
+
+    Same POI/channel data as :func:`poi_integration_db`, but with an EAV
+    ``channel_tags`` table added. That flips channel matching from wide mode
+    (selectors applied to ``channel_metrics`` columns) to EAV mode (selectors
+    resolved against ``channel_tags``, the channel-less-container drop happening in
+    ``filter_channel_tags`` rather than ``filter_channel_metrics``). Container 3
+    still has POI but no channel — the POI-only container must survive regardless
+    of channel-matching mode.
+    """
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    base_path = base_path[: base_path.find("tests")]
+    d = f"{base_path}/tests/unit/data/poi_integration_csv"
+    options = {"header": "True", "delimiter": ",", "inferSchema": "True"}
+
+    def _load(name):
+        return spark.read.options(**options).csv(f"{d}/{name}.csv")
+
+    tables = {
+        "container_tags": _load("container_tags"),
+        "container_metrics": _load("container_metrics"),
+        "channel_metrics": _load("channel_metrics"),
+        "channels": _load("channels"),
+        "channel_mapping": _load("channel_mapping"),
+        "channel_tags": _load("channel_tags"),  # ← enables EAV channel mode
+        "poi": _load("poi"),
+    }
+    cfg = MeasurementDBConfig.for_debug(tables)
+    cfg.channel_mapping_table = "channel_mapping"
+    cfg.poi_table = "poi"
+    return MeasurementDB(cfg, ws=mock_workspace_client)

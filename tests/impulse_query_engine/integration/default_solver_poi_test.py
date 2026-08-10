@@ -450,3 +450,56 @@ class TestDefaultSolverPoiChannelIntegration:
         )
         with pytest.raises(TypeError, match="categorical"):
             query.select(agg.alias("bad")).solve(spark=spark, solver=solver)
+
+    def test_poi_only_container_survives_in_eav_channel_mode(
+        self, spark: SparkSession, poi_integration_eav_db: MeasurementDB
+    ):
+        """POI-only containers survive regardless of the channel-matching mode.
+
+        The wide-mode tests exercise the drop in ``filter_channel_metrics``; this
+        one uses an EAV ``channel_tags`` table (``channel_tags_table`` set), so the
+        channel-less-container drop happens one stage earlier, in
+        ``filter_channel_tags``. Either way a POI-only query is scoped to
+        ``metrics_df`` (the full container set), so container 3 — POI but no
+        channel — still emits its charging_error series.
+        """
+        # Precondition: this fixture really is in EAV mode (the other one is wide).
+        assert poi_integration_eav_db.config.channel_tags_table is not None
+
+        solver = DefaultSolver(spark, config=_poi_cfg())
+        query = poi_integration_eav_db.query
+        charging = query.poi_channel(channel_name="charging_error")
+
+        result = query.select(charging.alias("charging")).solve(spark=spark, solver=solver)
+
+        rows = {r.container_id: r["charging"] for r in result.collect()}
+        # same expected POI series as wide mode — container 3 is POI-only yet present
+        assert [list(p) for p in rows[1]] == [[5.0, 0.0], [15.0, 1.0], [25.0, 0.0]]
+        assert [list(p) for p in rows[2]] == [[25.0, 1.0]]
+        assert [list(p) for p in rows[3]] == [[7.0, 1.0]]
+
+    def test_channel_gated_by_poi_in_eav_channel_mode(
+        self, spark: SparkSession, poi_integration_eav_db: MeasurementDB
+    ):
+        """A measured channel resolved via EAV channel_tags, gated by a POI channel.
+
+        Confirms the POI union composes with the EAV channel path (not just wide
+        mode): Engine RPM resolves through ``channel_tags``, then is sampled at the
+        charging_error instants.
+        """
+        assert poi_integration_eav_db.config.channel_tags_table is not None
+
+        solver = DefaultSolver(spark, config=_poi_cfg())
+        query = poi_integration_eav_db.query
+        rpm = query.channel(channel_name="Engine RPM")
+        charging = query.poi_channel(channel_name="charging_error")
+
+        result = query.select(
+            rpm.where(charging == 1.0).alias("rpm_at_error"),
+        ).solve(spark=spark, solver=solver)
+
+        rows = {r.container_id: r["rpm_at_error"] for r in result.collect()}
+        # container 1: err@15 → RPM [10,20)=3000
+        assert [list(p) for p in rows[1]] == [[15.0, 3000.0]]
+        # container 2: err@25 → RPM [20,30)=2500
+        assert [list(p) for p in rows[2]] == [[25.0, 2500.0]]
