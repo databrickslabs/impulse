@@ -161,7 +161,7 @@ class PoiTransformer:
         tstart_col = self.config.tstart_col
         tend_col = self.config.tend_col
         value_col = self.config.value_col
-        value_str_col = self.config.value_str_col
+        poi_value_str_col = self.config.poi_value_str_col
         type_col = self.config.poi_type_col
         ts_col = self.config.poi_ts_col
         val_col = self.config.poi_value_col
@@ -194,7 +194,7 @@ class PoiTransformer:
                 rows = rows.where(F.col(col_name) == expected)
             chid = poi_synthetic_channel_id(s.selector_id)
             # The source POI ``value`` is a single string column. Carry the raw
-            # string in ``value_str`` and leave the numeric ``value`` null;
+            # string in ``poi_value_str`` and leave the numeric ``value`` null;
             # ``load_poi_blob`` interprets per the selector's dtype (parse to
             # double, or keep categorical). This keeps one POI value column and
             # defers numeric parsing to load time.
@@ -205,7 +205,7 @@ class PoiTransformer:
                     ts_double.alias(tstart_col),
                     ts_double.alias(tend_col),  # zero-duration: tend == tstart
                     F.lit(None).cast("double").alias(value_col),
-                    F.col(val_col).cast("string").alias(value_str_col),
+                    F.col(val_col).cast("string").alias(poi_value_str_col),
                     F.array(F.lit(s.selector_id)).alias("selector_ids"),
                 )
             )

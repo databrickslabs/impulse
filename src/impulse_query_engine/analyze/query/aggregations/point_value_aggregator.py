@@ -9,7 +9,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
 from impulse_query_engine.model.series.points_in_time_series_string import (
-    reject_categorical_input as _reject_categorical_input,
+    reject_categorical_inputs as _reject_categorical_inputs,
 )
 
 from .aggregation import Aggregation
@@ -112,14 +112,15 @@ class PointValueAggregator(Aggregation):
         """
         points = self.event_expression.build(cache)
 
+        input_series = [expr.build(cache) for expr in self.input_expressions]
+        # A categorical (string) POI channel has no numeric value to sample; only
+        # numeric inputs are valid here (a string POI belongs in event_expression
+        # as a gate). Reject at build time (also runs at plan time).
+        _reject_categorical_inputs(input_series, "PointValueAggregator")
+
         point_timestamps: list[list[float]] = []
         values: list[list[float]] = []
-        for i, expr in enumerate(self.input_expressions):
-            sample_series = expr.build(cache)
-            # A categorical POI channel has no numeric value to sample; only a
-            # numeric input is valid here (a string POI belongs in event_expression
-            # as a gate). Reject at build time (also runs at plan time).
-            _reject_categorical_input(sample_series, f"input[{i}]", "PointValueAggregator")
+        for sample_series in input_series:
             pit_series = sample_series.where(points)
             point_timestamps.append(pit_series.tstarts.tolist())
             values.append(pit_series.values.tolist())

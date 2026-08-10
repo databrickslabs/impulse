@@ -275,16 +275,17 @@ class SolverConfig(BaseModel):
         return "value"
 
     @property
-    def value_str_col(self) -> str:
-        """Internal column name for a POI channel's **string** value.
+    def poi_value_str_col(self) -> str:
+        """Internal solve-frame column name for a POI channel's **string** value.
 
         POI values may be categorical (defect codes, state labels). They can't
         ride the numeric ``value`` column when unioned with real channel data, so
-        a ``dtype="string"`` POI channel carries its raw value here instead; the
-        numeric ``value`` column is null for those rows (and this column is null
-        for real channels / numeric POI). See :meth:`PointsInTimeSeriesString`.
+        a POI channel carries its raw value here instead; the numeric ``value``
+        column is null for those rows (and this column is null for real channels).
+        This is an internal frame column, not a source-table column. See
+        :meth:`PointsInTimeSeriesString`.
         """
-        return "value_str"
+        return "poi_value_str"
 
     @property
     def tag_key_col(self) -> str:
@@ -433,7 +434,12 @@ class SolverConfig(BaseModel):
             "ts": self.tstart_col,
             "te": self.tend_col,
             "val": self.value_col,
-            "val_str": self.value_str_col,
+            # Internal frame column (NOT a source column): the POI source value is a
+            # single VARCHAR, but real channels' `value` is numeric double, so the two
+            # can't share one typed column in the unioned solve frame. POI carries its
+            # raw string here; the numeric `value` is null for POI rows. Interpreted
+            # per the POI channel's dtype at load time (parse to double, or keep string).
+            "val_str": self.poi_value_str_col,
             "conv": self.conversion_factor_col,
         }
 

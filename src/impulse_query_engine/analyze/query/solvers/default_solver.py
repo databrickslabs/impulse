@@ -60,7 +60,11 @@ class TimeSeriesCache(SeriesCache):
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
-        # value / value_str are per-row sample data, not per-channel metadata.
+        # value (numeric, real channels) and poi_value_str (string, POI) are both
+        # per-row sample data, not per-channel metadata — exclude both from mdf.
+        # They are separate columns because a numeric channel value and a string
+        # POI value can't share one typed column in the unioned frame; each row
+        # populates exactly one and leaves the other null.
         per_row_cols = {self._ts_col, self._te_col, self._val_col, self._val_str_col}
         meta_cols = [c for c in pdf.columns if c not in per_row_cols]
         meta_source = pdf
@@ -153,7 +157,7 @@ class TimeSeriesCache(SeriesCache):
         rather than an interval series.
 
         The POI ``value`` is carried through the frame as a **string** (in the
-        ``value_str`` column). *dtype* decides interpretation: ``"double"`` parses
+        ``poi_value_str`` column). *dtype* decides interpretation: ``"double"`` parses
         it to numeric → :class:`PointsInTimeSeries`; ``"string"`` keeps it
         categorical → :class:`PointsInTimeSeriesString`.
 
@@ -180,7 +184,7 @@ class TimeSeriesCache(SeriesCache):
         """
         lo, hi = self._ranges.get((mid, cid), (0, 0))
         s = self.pdf.iloc[lo:hi]
-        # POI carries its value in value_str (string); value is null for POI rows.
+        # POI carries its value in poi_value_str (string); value is null for POI rows.
         str_vals = s[self._val_str_col] if self._val_str_col in s.columns else s[self._val_col]
         # tstart carries the instant; tend == tstart for a zero-duration sample.
         if dtype == "string":
@@ -195,7 +199,6 @@ class TimeSeriesCache(SeriesCache):
                 f"{list(bad)[:5]} but dtype='double'. Use dtype='string' for categorical POI."
             )
         return PointsInTimeSeries(s[self._ts_col], numeric)
-
 
 class DefaultSolver(QuerySolver):
     """
@@ -1261,7 +1264,7 @@ class DefaultSolver(QuerySolver):
 
         # Align POI columns that are shared with the channel frame to the channel
         # frame's types (e.g. tstart/tend may be Long on channels but Double from
-        # POI). Columns POI has that the channel frame lacks (e.g. value_str) are
+        # POI). Columns POI has that the channel frame lacks (e.g. poi_value_str) are
         # kept as-is; unionByName(allowMissingColumns=True) back-fills them as null
         # on the channel side. This preserves POI's string value column.
         target_types = {f.name: f.dataType for f in joined_df.schema.fields}

@@ -167,6 +167,3 @@ class PoiChannelSelector(TimeSeriesExpression):
             refine = ",".join(f"{k}={v}" for k, v in sorted(self._having.items()))
             return f"PoiChannelSelector<{self.poi_type}|{refine}>"
         return f"PoiChannelSelector<{self.poi_type}>"
-
-        #todo should we do it like MetricSelector?? There it's just key?
-        # todo we need to decide how the layout looks like that this receives

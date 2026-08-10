@@ -11,6 +11,15 @@ from .points_in_time import PointsInTime
 from .points_in_time_series import PointsInTimeSeries
 
 
+def _op_unsupported(op: str) -> str:
+    """Message for a numeric operation attempted on a categorical string series."""
+    return (
+        f"{op} is not defined for PointsInTimeSeriesString (categorical values). "
+        "Use a numeric POI channel (dtype='double') for arithmetic/ordering/stats, "
+        "or == / != to select instants by value."
+    )
+
+
 class PointsInTimeSeriesString(PointsInTimeSeries):
     """A :class:`PointsInTimeSeries` whose values are **strings** (categorical).
 
@@ -83,56 +92,52 @@ class PointsInTimeSeriesString(PointsInTimeSeries):
 
     __hash__ = None
 
-    def _unsupported(self, op: str):
-        raise TypeError(
-            f"{op} is not defined for PointsInTimeSeriesString (categorical values). "
-            "Use a numeric POI channel (dtype='double') for arithmetic/ordering/stats, "
-            "or == / != to select instants by value."
-        )
-
+    # Numeric operations are undefined on categorical values. Each raises
+    # directly (rather than delegating) with a consistent message built by
+    # ``_op_unsupported``, so a misuse fails loudly instead of coercing to NaN.
     def __lt__(self, other):
-        self._unsupported("<")
+        raise TypeError(_op_unsupported("<"))
 
     def __le__(self, other):
-        self._unsupported("<=")
+        raise TypeError(_op_unsupported("<="))
 
     def __gt__(self, other):
-        self._unsupported(">")
+        raise TypeError(_op_unsupported(">"))
 
     def __ge__(self, other):
-        self._unsupported(">=")
+        raise TypeError(_op_unsupported(">="))
 
     def __add__(self, other):
-        self._unsupported("+")
+        raise TypeError(_op_unsupported("+"))
 
     __radd__ = __add__
 
     def __sub__(self, other):
-        self._unsupported("-")
+        raise TypeError(_op_unsupported("-"))
 
     __rsub__ = __sub__
 
     def __mul__(self, other):
-        self._unsupported("*")
+        raise TypeError(_op_unsupported("*"))
 
     __rmul__ = __mul__
 
     def __truediv__(self, other):
-        self._unsupported("/")
+        raise TypeError(_op_unsupported("/"))
 
     __rtruediv__ = __truediv__
 
     def sum(self):
-        self._unsupported("sum()")
+        raise TypeError(_op_unsupported("sum()"))
 
     def mean(self):
-        self._unsupported("mean()")
+        raise TypeError(_op_unsupported("mean()"))
 
     def min(self):
-        self._unsupported("min()")
+        raise TypeError(_op_unsupported("min()"))
 
     def max(self):
-        self._unsupported("max()")
+        raise TypeError(_op_unsupported("max()"))
 
     def __str__(self) -> str:
         return f"<PointsInTimeSeriesString({self.start_time()}..cnt:{len(self)}..{self.end_time()})>"
@@ -143,8 +148,8 @@ class PointsInTimeSeriesString(PointsInTimeSeries):
         return PointsInTimeSeriesString([], [])
 
 
-def reject_categorical_input(series, name: str, owner: str) -> None:
-    """Raise if *series* is a categorical (string-valued) point series.
+def reject_categorical_inputs(series_list, owner: str, names=None) -> None:
+    """Raise if any built input *series* is a categorical (string-valued) series.
 
     Numeric aggregations (mean/min/max/…) are meaningless on categorical POI
     values, so an aggregator must reject a ``PointsInTimeSeriesString`` passed as
@@ -155,22 +160,24 @@ def reject_categorical_input(series, name: str, owner: str) -> None:
 
     Parameters
     ----------
-    series : Any
-        The built input series to check.
-    name : str
-        The input's name/alias, for the error message.
+    series_list : Iterable
+        The built input series to check, in input order.
     owner : str
         The aggregator class name, for the error message.
+    names : list of str, optional
+        Input names parallel to *series_list*; falls back to ``input[i]``.
 
     Raises
     ------
     TypeError
-        If *series* is a :class:`PointsInTimeSeriesString`.
+        If any element is a :class:`PointsInTimeSeriesString`.
     """
-    if isinstance(series, PointsInTimeSeriesString):
-        raise TypeError(
-            f"{owner} received a categorical (string-valued) POI channel as input "
-            f"{name!r}. Numeric aggregation over string values is undefined. Use a "
-            "numeric POI channel (dtype='double') as an aggregation input, or use the "
-            "string channel only as a gate/event (e.g. channel.where(poi == 'CODE'))."
-        )
+    for i, series in enumerate(series_list):
+        if isinstance(series, PointsInTimeSeriesString):
+            name = names[i] if names and i < len(names) else f"input[{i}]"
+            raise TypeError(
+                f"{owner} received a categorical (string-valued) POI channel as input "
+                f"{name!r}. Numeric aggregation over string values is undefined. Use a "
+                "numeric POI channel (dtype='double') as an aggregation input, or use the "
+                "string channel only as a gate/event (e.g. channel.where(poi == 'CODE'))."
+            )

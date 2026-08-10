@@ -14,7 +14,7 @@ from impulse_query_engine.analyze.query.aggregations.statistic_type import Stati
 from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
 from impulse_query_engine.model.series.intervals import Intervals
 from impulse_query_engine.model.series.points_in_time_series_string import (
-    reject_categorical_input as _reject_categorical_input,
+    reject_categorical_inputs as _reject_categorical_inputs,
 )
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
@@ -303,12 +303,11 @@ class StatsAggregator(Aggregation):
               empty when no cross-channel statistics are configured
         """
         # Step 1: Evaluate input expressions to get SampleSeries instances
-        sample_series_list: list[SampleSeries] = []
-        names = self.input_names or [f"input[{i}]" for i in range(len(self.input_expressions))]
-        for name, expr in zip(names, self.input_expressions, strict=False):
-            series = expr.build(cache)
-            _reject_categorical_input(series, name, "StatsAggregator")
-            sample_series_list.append(series)
+        sample_series_list: list[SampleSeries] = [
+            expr.build(cache) for expr in self.input_expressions
+        ]
+        # A categorical (string) POI channel has no numeric value to aggregate.
+        _reject_categorical_inputs(sample_series_list, "StatsAggregator", self.input_names)
 
         # Step 2: Evaluate event_expression to get Intervals
         if self.event_expression is None:
