@@ -275,6 +275,18 @@ class SolverConfig(BaseModel):
         return "value"
 
     @property
+    def value_str_col(self) -> str:
+        """Internal column name for a POI channel's **string** value.
+
+        POI values may be categorical (defect codes, state labels). They can't
+        ride the numeric ``value`` column when unioned with real channel data, so
+        a ``dtype="string"`` POI channel carries its raw value here instead; the
+        numeric ``value`` column is null for those rows (and this column is null
+        for real channels / numeric POI). See :meth:`PointsInTimeSeriesString`.
+        """
+        return "value_str"
+
+    @property
     def tag_key_col(self) -> str:
         """Internal column name for the attribute key on the container_tags (EAV) table."""
         return "key"
@@ -421,6 +433,7 @@ class SolverConfig(BaseModel):
             "ts": self.tstart_col,
             "te": self.tend_col,
             "val": self.value_col,
+            "val_str": self.value_str_col,
             "conv": self.conversion_factor_col,
         }
 

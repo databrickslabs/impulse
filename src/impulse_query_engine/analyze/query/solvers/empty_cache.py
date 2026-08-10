@@ -47,5 +47,5 @@ class EmptyTimeSeriesCache(SeriesCache):
         """
         return SampleSeries.empty()
 
-    def load_poi_blob(self, mid, cid) -> PointsInTimeSeries:
+    def load_poi_blob(self, mid, cid, dtype: str = "double") -> PointsInTimeSeries:
         return PointsInTimeSeries.empty()

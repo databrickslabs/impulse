@@ -12,6 +12,9 @@ from pyspark.sql import DataFrame, Window
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
+from impulse_query_engine.model.series.points_in_time_series_string import (
+    PointsInTimeSeriesString,
+)
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .poi_transformer import PoiTransformer, poi_synthetic_channel_id
@@ -52,13 +55,14 @@ class TimeSeriesCache(SeriesCache):
         self._ts_col = col_map["ts"]
         self._te_col = col_map["te"]
         self._val_col = col_map["val"]
+        self._val_str_col = col_map.get("val_str")
         self._conv_col = col_map.get("conv")
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
-        meta_cols = [
-            c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
-        ]
+        # value / value_str are per-row sample data, not per-channel metadata.
+        per_row_cols = {self._ts_col, self._te_col, self._val_col, self._val_str_col}
+        meta_cols = [c for c in pdf.columns if c not in per_row_cols]
         meta_source = pdf
         if "selector_ids" in pdf.columns:
             meta_source = pdf.loc[pdf["selector_ids"].notna()]
@@ -135,7 +139,7 @@ class TimeSeriesCache(SeriesCache):
                 values = values * factor
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
-    def load_poi_blob(self, mid, cid) -> PointsInTimeSeries:
+    def load_poi_blob(self, mid, cid, dtype: str = "double") -> PointsInTimeSeries:
         """
         Load a POI channel as a :class:`PointsInTimeSeries` — the POI twin of
         :meth:`load_blob`.
@@ -148,6 +152,11 @@ class TimeSeriesCache(SeriesCache):
         differs only in what it builds: an instant series (``ts``, ``value``)
         rather than an interval series.
 
+        The POI ``value`` is carried through the frame as a **string** (in the
+        ``value_str`` column). *dtype* decides interpretation: ``"double"`` parses
+        it to numeric → :class:`PointsInTimeSeries`; ``"string"`` keeps it
+        categorical → :class:`PointsInTimeSeriesString`.
+
         Parameters
         ----------
         mid : Any
@@ -155,17 +164,37 @@ class TimeSeriesCache(SeriesCache):
         cid : Any
             The POI channel's synthetic channel id
             (see :func:`poi_synthetic_channel_id`).
+        dtype : str, optional
+            ``"double"`` (default) or ``"string"``; see above.
 
         Returns
         -------
-        PointsInTimeSeries
-            The POI channel's ``(ts, value)`` points; empty when the container
-            has no rows for this synthetic channel.
+        PointsInTimeSeries or PointsInTimeSeriesString
+            The POI channel's points; empty when the container has no rows for
+            this synthetic channel.
+
+        Raises
+        ------
+        ValueError
+            When ``dtype="double"`` but a value cannot be parsed as numeric.
         """
         lo, hi = self._ranges.get((mid, cid), (0, 0))
         s = self.pdf.iloc[lo:hi]
+        # POI carries its value in value_str (string); value is null for POI rows.
+        str_vals = s[self._val_str_col] if self._val_str_col in s.columns else s[self._val_col]
         # tstart carries the instant; tend == tstart for a zero-duration sample.
-        return PointsInTimeSeries(s[self._ts_col], s[self._val_col])
+        if dtype == "string":
+            return PointsInTimeSeriesString(s[self._ts_col], str_vals)
+        # numeric: parse the string values to double, failing loudly on bad input
+        # rather than silently producing NaN.
+        numeric = pd.to_numeric(str_vals, errors="coerce")
+        if len(str_vals) > 0 and numeric.isna().any() and str_vals.notna().any():
+            bad = str_vals[numeric.isna() & str_vals.notna()].unique()
+            raise ValueError(
+                f"POI channel (synthetic channel_id {cid}) has non-numeric value(s) "
+                f"{list(bad)[:5]} but dtype='double'. Use dtype='string' for categorical POI."
+            )
+        return PointsInTimeSeries(s[self._ts_col], numeric)
 
 
 class DefaultSolver(QuerySolver):
@@ -1230,12 +1259,16 @@ class DefaultSolver(QuerySolver):
             ``joined_df`` with the POI rows appended.
         """
 
-        #todo test I dont understand what happens here
+        # Align POI columns that are shared with the channel frame to the channel
+        # frame's types (e.g. tstart/tend may be Long on channels but Double from
+        # POI). Columns POI has that the channel frame lacks (e.g. value_str) are
+        # kept as-is; unionByName(allowMissingColumns=True) back-fills them as null
+        # on the channel side. This preserves POI's string value column.
         target_types = {f.name: f.dataType for f in joined_df.schema.fields}
         poi_aligned = poi_rows_df.select(
             *[
                 F.col(c).cast(target_types[c]).alias(c) if c in target_types else F.col(c)
-                for c in joined_df.columns
+                for c in poi_rows_df.columns
             ]
         )
         return joined_df.unionByName(poi_aligned, allowMissingColumns=True)

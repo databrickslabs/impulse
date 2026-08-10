@@ -150,7 +150,7 @@ class QueryBuilder:
                 expr = expr & (TagSelector(k) == str(arg))
         return TimeSeriesSelector(expr)
 
-    def poi_channel(self, channel_name: str) -> PoiChannelSelector:
+    def poi_channel(self, channel_name: str, dtype: str = "double") -> PoiChannelSelector:
         """
         Create a POI channel selector: one ``poi_type`` read as a PointsInTimeSeries.
 
@@ -162,12 +162,16 @@ class QueryBuilder:
         ----------
         channel_name : str
             The ``poi_type`` identifying this channel (e.g. ``"charging_error"``).
+        dtype : str, optional
+            How to interpret the POI ``value``: ``"double"`` (default, numeric) or
+            ``"string"`` (categorical, e.g. defect codes / state labels). Defaults
+            to numeric so existing behavior is unchanged.
 
         Returns
         -------
         PoiChannelSelector
         """
-        return PoiChannelSelector(poi_type=channel_name)
+        return PoiChannelSelector(poi_type=channel_name, dtype=dtype)
 
     def channel_with_alias(self, **kwargs) -> TimeSeriesSelector:
         if self.db.config.channel_mapping_table is None:

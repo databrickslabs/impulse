@@ -169,7 +169,9 @@ class QuerySolver(ABC):
                         self.config.channel_id_col,
                         ref.schema[self.config.channel_id_col].dataType,
                     ),
-                    T.StructField("selector_ids", T.ArrayType(T.IntegerType())),
+                    # selector_id is an unsigned crc32 (up to 2**32-1), which
+                    # overflows IntegerType (max 2**31-1) — must be LongType.
+                    T.StructField("selector_ids", T.ArrayType(T.LongType())),
                 ]
             ),
         )
@@ -192,14 +194,17 @@ class QuerySolver(ABC):
         pyspark.sql.Column
             A column expression suitable for ``df.withColumn("selector_id", …)``.
         """
+        # selector_id is an unsigned crc32 (up to 2**32-1); a lit above 2**31-1
+        # would infer IntegerType and overflow. Cast every branch to long so the
+        # column (and the selector_ids array built from it) is always LongType,
+        # regardless of which selector hashes appear in a given query.
         selector_expr = None
         for selection in filters:
+            branch = F.lit(selection.selector_id).cast(T.LongType())
             if selector_expr is None:
-                selector_expr = F.when(selection.get_selector_expr(), F.lit(selection.selector_id))
+                selector_expr = F.when(selection.get_selector_expr(), branch)
             else:
-                selector_expr = selector_expr.when(
-                    selection.get_selector_expr(), F.lit(selection.selector_id)
-                )
+                selector_expr = selector_expr.when(selection.get_selector_expr(), branch)
         return selector_expr
 
     @abc.abstractmethod

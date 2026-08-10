@@ -22,10 +22,21 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
+from impulse_query_engine.model.series.points_in_time_series_string import (
+    PointsInTimeSeriesString,
+)
+
+# Accepted ``dtype`` values and the empty series each maps to. ``"double"`` is
+# the default (numeric), so POI channels stay numeric unless a categorical value
+# type is requested explicitly.
+_SERIES_FOR_DTYPE = {
+    "double": PointsInTimeSeries,
+    "string": PointsInTimeSeriesString,
+}
 
 
 class PoiChannelSelector(TimeSeriesExpression):
-    def __init__(self, poi_type: str, having: dict | None = None):
+    def __init__(self, poi_type: str, dtype: str = "double", having: dict | None = None):
         """
         Initialize a PoiChannelSelector.
 
@@ -33,11 +44,21 @@ class PoiChannelSelector(TimeSeriesExpression):
         ----------
         poi_type : str
             The ``poi_type`` identifying this channel (e.g. ``"charging_error"``).
+        dtype : str, optional
+            How to interpret the POI ``value``: ``"double"`` (default, numeric →
+            :class:`PointsInTimeSeries`) or ``"string"`` (categorical →
+            :class:`PointsInTimeSeriesString`). The source ``value`` column is a
+            single string column; this only decides interpretation at build time.
         having : dict or None, optional
             Column-equality refinements applied to the POI rows (e.g.
             ``{"network": "FD3"}``). Prefer building these via :meth:`having`.
         """
+        if dtype not in _SERIES_FOR_DTYPE:
+            raise ValueError(
+                f"PoiChannelSelector dtype must be one of {sorted(_SERIES_FOR_DTYPE)}; got {dtype!r}."
+            )
         self.poi_type = poi_type
+        self.value_dtype = dtype
         self._having = dict(having) if having else {}
         TimeSeriesExpression.__init__(self, is_single_signal=True)
 
@@ -45,7 +66,7 @@ class PoiChannelSelector(TimeSeriesExpression):
         """
         Return a new selector with extra column-equality row refinements ANDed on.
 
-        Immutable: the receiver is unchanged.
+        Immutable: the receiver is unchanged (``dtype`` is preserved).
 
         Parameters
         ----------
@@ -56,7 +77,9 @@ class PoiChannelSelector(TimeSeriesExpression):
         -------
         PoiChannelSelector
         """
-        return PoiChannelSelector(self.poi_type, {**self._having, **filters})
+        return PoiChannelSelector(
+            self.poi_type, dtype=self.value_dtype, having={**self._having, **filters}
+        )
 
     @property
     def row_filters(self) -> dict:
@@ -65,27 +88,38 @@ class PoiChannelSelector(TimeSeriesExpression):
 
     @property
     def selector_id(self) -> int:
-        """Stable identity over ``(poi_type, sorted(having))``."""
-        key = (self.poi_type, tuple(sorted(self._having.items())))
+        """Stable identity over ``(poi_type, dtype, sorted(having))``.
+
+        ``dtype`` is part of the identity because two selectors differing only by
+        value interpretation produce different output series types, so they must
+        resolve as distinct channels.
+        """
+        key = (self.poi_type, self.value_dtype, tuple(sorted(self._having.items())))
         return zlib.crc32(str(key).encode())
 
-    def dtype(self):
-        """Spark data type of the selection result: ``array<array<double>>``.
+    def _empty_series(self):
+        """The empty result series matching this selector's ``dtype``."""
+        return _SERIES_FOR_DTYPE[self.value_dtype].empty()
 
-        Matches :meth:`PointsInTimeSeries.dtype`; the solve UDF serializes the
-        result via ``get_data()`` (list of ``[ts, value]`` pairs).
+    def dtype(self):
+        """Spark data type of the selection result.
+
+        ``array<array<double>>`` for numeric (``dtype="double"``), or the
+        string series' struct-of-parallel-arrays for ``dtype="string"``. The solve
+        UDF serializes the built series via ``get_data()``.
         """
-        return PointsInTimeSeries.empty().dtype()
+        return self._empty_series().dtype()
 
     def build(self, cache) -> PointsInTimeSeries:
         """
-        Build a PointsInTimeSeries from this container's POI rows.
+        Build a PointsInTimeSeries (numeric or string) from this container's POI rows.
 
         Structurally identical to :meth:`TimeSeriesSelector.build`: ``resolve`` the
         rows this selector matches (POI union rows were stamped with this
         selector's ``selector_id`` in Stage P), read their ``(container_id,
-        channel_id)``, then ``load_poi_blob``. Runs inside the per-container solve
-        UDF; rows are already resident (no I/O).
+        channel_id)``, then ``load_poi_blob`` with this selector's ``dtype`` so the
+        value column is interpreted numerically or kept categorical. Runs inside the
+        per-container solve UDF; rows are already resident (no I/O).
 
         Parameters
         ----------
@@ -94,14 +128,14 @@ class PoiChannelSelector(TimeSeriesExpression):
 
         Returns
         -------
-        PointsInTimeSeries
+        PointsInTimeSeries or PointsInTimeSeriesString
         """
         candidates = cache.resolve(self)
         if len(candidates) == 0:
-            return PointsInTimeSeries.empty()
+            return self._empty_series()
         mid = candidates.container_id.iloc[0]
         cid = candidates.channel_id.iloc[0]
-        return cache.load_poi_blob(mid, cid)
+        return cache.load_poi_blob(mid, cid, dtype=self.value_dtype)
 
     # --- pipeline routing: POI channels are NOT channel-pipeline selectors ---
 

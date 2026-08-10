@@ -13,6 +13,9 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.aggregations.statistic_type import StatisticType
 from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
 from impulse_query_engine.model.series.intervals import Intervals
+from impulse_query_engine.model.series.points_in_time_series_string import (
+    reject_categorical_input as _reject_categorical_input,
+)
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .aggregation import Aggregation
@@ -301,8 +304,10 @@ class StatsAggregator(Aggregation):
         """
         # Step 1: Evaluate input expressions to get SampleSeries instances
         sample_series_list: list[SampleSeries] = []
-        for expr in self.input_expressions:
+        names = self.input_names or [f"input[{i}]" for i in range(len(self.input_expressions))]
+        for name, expr in zip(names, self.input_expressions, strict=False):
             series = expr.build(cache)
+            _reject_categorical_input(series, name, "StatsAggregator")
             sample_series_list.append(series)
 
         # Step 2: Evaluate event_expression to get Intervals
