@@ -34,6 +34,8 @@ class PointsInTimeSeries:
         assert len(tstarts) == len(values)
         self.tstarts = np.array(tstarts, dtype=np.float64)
         self.values = np.array(values, dtype=np.float64)
+        # todo evaluate: we could use this and add a new self.values_str for example so we don't need PointsInTimeSeriesString
+        # add self._series_type this distinguises between both
 
     def dtype(self):
         """
@@ -44,6 +46,7 @@ class PointsInTimeSeries:
         pyspark.sql.types.ArrayType
             Spark ArrayType for points in time series: [[tstart_1, value_1], ...].
         """
+        #todo needs if else
         return T.ArrayType(T.ArrayType(T.DoubleType()))
 
     def get_data(self) -> list:
@@ -417,6 +420,8 @@ class PointsInTimeSeries:
 
     def __ge__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTime:
         """Return points where this series is greater than or equal to another."""
+
+        # todo check here for double checking if its a string value
         return self.__apply_op(np.greater_equal, other)
 
     def __lt__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTime:

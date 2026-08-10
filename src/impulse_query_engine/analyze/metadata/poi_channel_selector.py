@@ -10,8 +10,10 @@ A POI Channel
   collected via the parallel ``get_poi_channel_selectors()`` walker,
 - builds to a ``PointsInTimeSeries`` instead of a ``SampleSeries``.
 
-Row refinements (``network="FD3"`` …) are applied via :meth:`having`, kept
-separate from the ``poi_type`` identity passed to ``q.poi_channel``.
+Row refinements (``network="FD3"`` …) are passed as extra keyword arguments to
+``q.poi_channel`` (e.g. ``q.poi_channel("defect", network="FD3")``), mirroring
+``q.channel(**kwargs)``; multiple kwargs are ANDed. They are ANDed onto the
+``poi_type`` identity and applied as equality predicates on the POI rows.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ _SERIES_FOR_DTYPE = {
 
 
 class PoiChannelSelector(TimeSeriesExpression):
-    def __init__(self, poi_type: str, dtype: str = "double", having: dict | None = None):
+    def __init__(self, poi_type: str, dtype: str = "double", row_filters: dict | None = None):
         """
         Initialize a PoiChannelSelector.
 
@@ -49,9 +51,10 @@ class PoiChannelSelector(TimeSeriesExpression):
             :class:`PointsInTimeSeries`) or ``"string"`` (categorical →
             :class:`PointsInTimeSeriesString`). The source ``value`` column is a
             single string column; this only decides interpretation at build time.
-        having : dict or None, optional
-            Column-equality refinements applied to the POI rows (e.g.
-            ``{"network": "FD3"}``). Prefer building these via :meth:`having`.
+        row_filters : dict or None, optional
+            Column-equality refinements ANDed onto the POI rows (e.g.
+            ``{"network": "FD3"}``). Built by :meth:`QueryBuilder.poi_channel` from
+            its extra keyword arguments (``q.poi_channel("defect", network="FD3")``).
         """
         if dtype not in _SERIES_FOR_DTYPE:
             raise ValueError(
@@ -59,42 +62,24 @@ class PoiChannelSelector(TimeSeriesExpression):
             )
         self.poi_type = poi_type
         self.value_dtype = dtype
-        self._having = dict(having) if having else {}
+        self._row_filters = dict(row_filters) if row_filters else {}
         TimeSeriesExpression.__init__(self, is_single_signal=True)
-
-    def having(self, **filters) -> "PoiChannelSelector":
-        """
-        Return a new selector with extra column-equality row refinements ANDed on.
-
-        Immutable: the receiver is unchanged (``dtype`` is preserved).
-
-        Parameters
-        ----------
-        **filters : dict
-            ``column == value`` restrictions on the POI rows (e.g. ``network="FD3"``).
-
-        Returns
-        -------
-        PoiChannelSelector
-        """
-        return PoiChannelSelector(
-            self.poi_type, dtype=self.value_dtype, having={**self._having, **filters}
-        )
 
     @property
     def row_filters(self) -> dict:
-        """The column-equality refinements applied on top of ``poi_type``."""
-        return self._having
+        """The column-equality refinements ANDed onto ``poi_type`` (from kwargs)."""
+        return self._row_filters
 
     @property
     def selector_id(self) -> int:
-        """Stable identity over ``(poi_type, dtype, sorted(having))``.
+        """Stable identity over ``(poi_type, dtype, sorted(row_filters))``.
 
         ``dtype`` is part of the identity because two selectors differing only by
         value interpretation produce different output series types, so they must
-        resolve as distinct channels.
+        resolve as distinct channels. ``row_filters`` are part of it because two
+        selectors differing only by refinement carry different row subsets.
         """
-        key = (self.poi_type, self.value_dtype, tuple(sorted(self._having.items())))
+        key = (self.poi_type, self.value_dtype, tuple(sorted(self._row_filters.items())))
         return zlib.crc32(str(key).encode())
 
     def _empty_series(self):
@@ -163,7 +148,7 @@ class PoiChannelSelector(TimeSeriesExpression):
         return self.__str__()
 
     def __str__(self):
-        if self._having:
-            refine = ",".join(f"{k}={v}" for k, v in sorted(self._having.items()))
+        if self._row_filters:
+            refine = ",".join(f"{k}={v}" for k, v in sorted(self._row_filters.items()))
             return f"PoiChannelSelector<{self.poi_type}|{refine}>"
         return f"PoiChannelSelector<{self.poi_type}>"

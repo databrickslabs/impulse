@@ -263,18 +263,18 @@ class TestDefaultSolverPoiChannelIntegration:
         # container 1: full charging_error series
         assert [list(p) for p in rows[1]] == [[5.0, 0.0], [15.0, 1.0], [25.0, 0.0]]
 
-    def test_having_refines_poi_rows_by_column(
+    def test_row_filter_kwarg_refines_poi_rows_by_column(
         self, spark: SparkSession, poi_integration_db: MeasurementDB
     ):
-        """``.having(network=...)`` narrows a POI channel to matching rows only.
+        """A row-filter kwarg narrows a POI channel to matching rows only.
 
         Fixture defect POIs: container 1 @12 (value 108, network FD3), container 2
-        @8 (value 200, network INFO). ``poi_channel("defect").having(network="FD3")``
+        @8 (value 200, network INFO). ``poi_channel("defect", network="FD3")``
         must keep only container 1's defect and drop container 2's INFO defect.
         """
         solver = DefaultSolver(spark, config=_poi_cfg())
         query = poi_integration_db.query
-        defect_fd3 = query.poi_channel(channel_name="defect").having(network="FD3")
+        defect_fd3 = query.poi_channel(channel_name="defect", network="FD3")
 
         result = query.select(defect_fd3.alias("defect")).solve(spark=spark, solver=solver)
 
@@ -285,10 +285,10 @@ class TestDefaultSolverPoiChannelIntegration:
         # FD3 defect, so it does not appear at all
         assert 2 not in rows
 
-    def test_having_variants_are_distinct_channels(
+    def test_row_filter_variants_are_distinct_channels(
         self, spark: SparkSession, poi_integration_db: MeasurementDB
     ):
-        """Two ``.having()`` variants of the same poi_type are distinct channels
+        """Two row-filter variants of the same poi_type are distinct channels
         carrying distinct row subsets (the per-selector shaping fix).
 
         Selecting both ``defect|network=FD3`` and ``defect|network=INFO`` in one
@@ -297,8 +297,8 @@ class TestDefaultSolverPoiChannelIntegration:
         """
         solver = DefaultSolver(spark, config=_poi_cfg())
         query = poi_integration_db.query
-        defect_fd3 = query.poi_channel(channel_name="defect").having(network="FD3")
-        defect_info = query.poi_channel(channel_name="defect").having(network="INFO")
+        defect_fd3 = query.poi_channel(channel_name="defect", network="FD3")
+        defect_info = query.poi_channel(channel_name="defect", network="INFO")
 
         result = query.select(
             defect_fd3.alias("fd3"),
@@ -330,8 +330,12 @@ class TestDefaultSolverPoiChannelIntegration:
         solver = DefaultSolver(spark, config=_poi_cfg())
         query = poi_integration_db.query
         rpm = query.channel(channel_name="Engine RPM")
+
         charging = query.poi_channel(channel_name="charging_error")
         defect = query.poi_channel(channel_name="defect")
+
+
+        #todo include test which proves container metrics can be joined with new contains functionallity
 
         # instants where a charging error AND a defect coincide (exact timestamp)
         coincident = (charging == 1.0) & defect.to_points_in_time()

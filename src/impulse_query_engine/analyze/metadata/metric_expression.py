@@ -8,6 +8,12 @@ import pyspark.sql.functions as F
 from pyspark.sql import Column
 
 
+"""
+q.metric("poi_defect_values").contains("P0420")
+q.metric("poi_defect_count") >= 5  
+"""
+
+
 def array_contains(arr, value):
     """``operator``-style callable: does array ``arr`` contain ``value``?
 
@@ -22,7 +28,7 @@ def array_contains(arr, value):
     while keeping ``.contains`` structurally identical to the comparison ops.
     """
     if isinstance(arr, Column):
-        return F.array_contains(arr, value)
+        return F.array_contains(arr, value) # todo double check if this is enforceable
     return arr.apply(lambda a: value in (a if a is not None else []))
 
 

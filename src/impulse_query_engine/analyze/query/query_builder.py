@@ -150,13 +150,18 @@ class QueryBuilder:
                 expr = expr & (TagSelector(k) == str(arg))
         return TimeSeriesSelector(expr)
 
-    def poi_channel(self, channel_name: str, dtype: str = "double") -> PoiChannelSelector:
+    def poi_channel(
+        self, channel_name: str, dtype: str = "double", **row_filters
+    ) -> PoiChannelSelector:
         """
         Create a POI channel selector: one ``poi_type`` read as a PointsInTimeSeries.
 
         POI is a *wide* table, so channel identity is plain column-equality on
-        ``poi_type`` (not an EAV tag selector). Row refinements (network, ecu …)
-        are applied on the returned selector via ``.having(...)``, not here.
+        ``poi_type`` (not an EAV tag selector). Additional row refinements are
+        passed as extra keyword arguments — mirroring ``q.channel(**kwargs)`` —
+        and are ANDed onto the ``poi_type`` (e.g.
+        ``q.poi_channel("defect", network="FD3", ecu="2")`` keeps only defect rows
+        whose ``network == "FD3"`` and ``ecu == "2"``).
 
         Parameters
         ----------
@@ -166,12 +171,16 @@ class QueryBuilder:
             How to interpret the POI ``value``: ``"double"`` (default, numeric) or
             ``"string"`` (categorical, e.g. defect codes / state labels). Defaults
             to numeric so existing behavior is unchanged.
+        **row_filters
+            Column-equality refinements on the POI rows, ANDed together (e.g.
+            ``network="FD3"``). ``channel_name`` and ``dtype`` are reserved and
+            are not treated as row filters.
 
         Returns
         -------
         PoiChannelSelector
         """
-        return PoiChannelSelector(poi_type=channel_name, dtype=dtype)
+        return PoiChannelSelector(poi_type=channel_name, dtype=dtype, row_filters=row_filters)
 
     def channel_with_alias(self, **kwargs) -> TimeSeriesSelector:
         if self.db.config.channel_mapping_table is None:

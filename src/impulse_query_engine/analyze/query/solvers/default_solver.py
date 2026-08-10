@@ -406,7 +406,7 @@ class DefaultSolver(QuerySolver):
         # ``q.metric("poi_defect_values").contains(...)`` filter runs through the
         # *same* MetricExpression path below — no separate POI stage/type. Gated
         # purely on config, so non-POI reports are unaffected.
-        if query.db.config.poi_table is not None and self.config.poi_types:
+        if query.db.config.poi_table is not None and self.config.poi_types: #todo move this to stellantis solver this is a given for this
             poi = self._apply_column_mapping(
                 query.db.poi(self.spark), self.config.poi.column_name_mapping
             )
@@ -1016,6 +1016,10 @@ class DefaultSolver(QuerySolver):
     # ------------------------------------------------------------------
     # Solve
     # ------------------------------------------------------------------
+
+    # todo make the poi table generic
+    #
+
 
     @staticmethod
     def _solve_udf(pdf, selections: Iterable, col_map: dict[str, str]) -> pd.DataFrame:

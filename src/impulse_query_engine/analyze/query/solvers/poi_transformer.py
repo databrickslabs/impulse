@@ -128,16 +128,16 @@ class PoiTransformer:
 
         Restricts to the surviving containers via a semi-join, then shapes **each
         selector independently**: filters to that selector's ``poi_type`` and its
-        ``.having()`` row refinements (``row_filters``), and emits rows in the
-        ``channels`` shape — ``(container_id, channel_id, tstart, tend, value,
-        selector_ids)`` — with each occurrence a zero-duration sample under the
-        selector's own synthetic negative ``channel_id`` (see
-        :func:`poi_synthetic_channel_id`).
+        ``row_filters`` (the column-equality refinements from
+        ``q.poi_channel(...)``'s extra kwargs), and emits rows in the ``channels``
+        shape — ``(container_id, channel_id, tstart, tend, value, selector_ids)`` —
+        with each occurrence a zero-duration sample under the selector's own
+        synthetic negative ``channel_id`` (see :func:`poi_synthetic_channel_id`).
 
-        Per-selector (not per-``poi_type``) shaping is what makes ``.having()``
-        work: two selectors sharing a ``poi_type`` but differing by their row
-        refinements have distinct ``selector_id``s / synthetic ``channel_id``s and
-        must carry distinct row subsets. ``load_poi_blob`` for a given channel
+        Per-selector (not per-``poi_type``) shaping is what makes row refinements
+        work: two selectors sharing a ``poi_type`` but differing by their
+        ``row_filters`` have distinct ``selector_id``s / synthetic ``channel_id``s
+        and must carry distinct row subsets. ``load_poi_blob`` for a given channel
         then reads exactly that selector's filtered rows.
 
         Parameters
@@ -178,18 +178,20 @@ class PoiTransformer:
         # ts as double epoch-seconds so it shares the channel time axis.
         ts_double = F.col(ts_col).cast("timestamp").cast("double")
 
+
+
         # Shape each selector INDEPENDENTLY, not per poi_type. Two selectors can
-        # share a poi_type but differ by their ``.having()`` row refinements (and
-        # therefore have different selector_ids); keying by poi_type would collapse
-        # them. Per selector we filter to its poi_type AND its row_filters, then
-        # emit its rows under its own synthetic channel_id — so ``load_poi_blob``
-        # for that channel reads exactly this selector's subset.
+        # share a poi_type but differ by their row_filters (and therefore have
+        # different selector_ids); keying by poi_type would collapse them. Per
+        # selector we filter to its poi_type AND its row_filters, then emit its
+        # rows under its own synthetic channel_id — so ``load_poi_blob`` for that
+        # channel reads exactly this selector's subset.
         frames = []
-        for s in poi_selectors:
+        for s in poi_selectors:         # todo this should be also part of the stellantis solver
             rows = scoped.where(F.col(type_col) == s.poi_type)
-            # ``.having(col=value)`` row refinements: equality on POI columns
-            # (e.g. network="FD3"). Applied at read time so the resulting series
-            # contains only the matching occurrences.
+            # row_filters: equality on POI columns (e.g. network="FD3"), from the
+            # extra kwargs to q.poi_channel(...). Applied at read time so the
+            # resulting series contains only the matching occurrences.
             for col_name, expected in s.row_filters.items():
                 rows = rows.where(F.col(col_name) == expected)
             chid = poi_synthetic_channel_id(s.selector_id)
