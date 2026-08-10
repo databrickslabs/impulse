@@ -256,7 +256,7 @@ class QueryBuilder:
             self.result_dtypes,
         ) = self._determine_result_objects_dtypes()
 
-        channel_metrics_df, poi_rows_df = self._run_filter_pipeline(
+        channel_metrics_df, container_scope_df = self._run_filter_pipeline(
             spark, solver, pre_filtered_containers_df
         )
 
@@ -265,13 +265,13 @@ class QueryBuilder:
             channel_metrics_df,
             self.selections,
             self.result_dtypes,
-            poi_rows_df=poi_rows_df,
+            container_scope_df=container_scope_df,
         )
 
     def _run_filter_pipeline(
         self, spark, solver, pre_filtered_containers_df
-    ) -> tuple[DataFrame, DataFrame | None]:
-        """Run the shared metadata filter pipeline.
+    ) -> tuple[DataFrame, DataFrame]:
+        """Run the shared metadata filter pipeline and return the match frame + scope.
 
         Extracts the selector split, the four filter stages
         (container tags → container metrics → channel tags → channel metrics) and
@@ -279,16 +279,21 @@ class QueryBuilder:
         :meth:`solve_calculated_channels` drive before their differing final
         ``solver`` call.
 
-        Returns
-        -------
-        tuple[DataFrame, DataFrame | None]
-            ``(channel_metrics_df, poi_rows_df)`` — the
-            ``(container_id, channel_id, selector_ids …)`` channel-match frame,
-            and the channel-data-shaped POI union rows from Stage P (or ``None``
-            when the query has no ``poi_channel`` selections). POI rows are kept
-            separate here because they must be unioned into the solve frame
-            *after* the ``channels`` inner join (their synthetic channel_ids have
-            no rows in the physical ``channels`` table).
+        Returns a **2-tuple** ``(channel_metrics_df, container_scope_df)``:
+
+        - ``channel_metrics_df`` — the ``(container_id, channel_id, selector_ids …)``
+          channel-match frame, pruned to containers that have a matching channel.
+        - ``container_scope_df`` — the ``metrics_df`` full surviving container set
+          (tags ∩ container metrics), **including channel-less containers**. This
+          is the scope POI channels are read against (a ``poi_channel`` is a
+          selection, not a channel filter, so it must survive for containers that
+          have no measured channel). ``solve`` threads it into
+          ``_build_solve_frame``; ``solve_calculated_channels`` discards it
+          (calculated channels never carry POI).
+
+        POI channel rows are **not** produced here — they are a solve-input, not a
+        filter, so ``DefaultSolver.solve`` reads and unions them in
+        ``_build_solve_frame`` beside the channel-data read.
         """
         # extract selectors upfront
         direct_selectors = TimeSeriesExpression.collect_selectors(
@@ -297,7 +302,6 @@ class QueryBuilder:
         aliased_selectors = TimeSeriesExpression.collect_selectors(
             self.selections, uses_alias=True
         )
-        poi_channel_selectors = TimeSeriesExpression.collect_poi_channel_selectors(self.selections)
 
         # create Query
         tags_df = solver.filter_container_tags(spark, self)
@@ -319,16 +323,7 @@ class QueryBuilder:
                 spark, channel_metrics_df, aliased_channel_metrics_df
             )
 
-        # Stage P: shape POI channel rows for any poi_channel selections, scoped
-        # to the surviving containers. Gated on presence so non-POI reports never
-        # read the poi table.
-        poi_rows_df = None
-        if len(poi_channel_selectors) > 0:
-            poi_rows_df = solver.filter_poi_channels(
-                spark, self, metrics_df, poi_channel_selectors
-            )
-
-        return channel_metrics_df, poi_rows_df
+        return channel_metrics_df, metrics_df
 
     @telemetry_logger("query", "solve_calculated_channels")
     def solve_calculated_channels(
@@ -374,8 +369,10 @@ class QueryBuilder:
         """
         self._validate_calculated_channels()
 
-        # POI channels are not valid calculated-channel inputs; ignore poi_rows_df.
-        channel_metrics_df, _poi_rows_df = self._run_filter_pipeline(
+        # Discard the container scope: calculated channels never carry POI, so the
+        # full surviving-container set (used only to scope the POI read) is unused
+        # here. The unpack is still required — the pipeline returns a 2-tuple.
+        channel_metrics_df, _ = self._run_filter_pipeline(
             spark, solver, pre_filtered_containers_df
         )
 

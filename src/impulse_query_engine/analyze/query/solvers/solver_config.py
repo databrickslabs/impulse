@@ -88,26 +88,38 @@ class JoinKey(BaseModel):
 class PoiConfig(TableConfig):
     """``TableConfig`` plus the POI table's timestamp / value / type column names.
 
-    POI is a *wide* table (one row per occurrence in time). For the poi_channel
-    feature it is read at query time, and each ``poi_type`` becomes a channel
-    whose ``(ts, value)`` points form a ``PointsInTimeSeries``. These names are
-    the internal column names **after** ``column_name_mapping`` has been applied.
+    POI is a *wide* table (one row per occurrence in time). It backs two features:
+
+    - the ``poi_channel`` selection, where each ``poi_type`` becomes a channel
+      whose ``(ts, value)`` points form a ``PointsInTimeSeries``;
+    - the **container filter**, where POI is rolled up to one row per container
+      (per :class:`PoiContainerTransformer`) with, for each configured
+      ``poi_type``, a ``poi_<type>_values`` set column and a ``poi_<type>_count``
+      total — so containers can be filtered by POI like any other metric.
+
+    These names are the internal column names **after** ``column_name_mapping``.
 
     Attributes
     ----------
     ts_column : str
         Column carrying the occurrence timestamp (default ``"timestamp_abs"``).
     value_column : str
-        Column carrying the POI value that becomes the series value
-        (default ``"value"``).
+        Column carrying the POI value (default ``"value"``).
     poi_type_column : str
         Column identifying the POI kind, matched against a
-        ``PoiChannelSelector``'s ``poi_type`` (default ``"poi_type"``).
+        ``PoiChannelSelector``'s ``poi_type`` / the configured ``poi_types``
+        (default ``"poi_type"``).
+    poi_types : list[str]
+        The POI types to surface as container-filter columns. The rollup emits a
+        ``poi_<type>_values`` + ``poi_<type>_count`` pair for each entry here
+        (the count is ``COUNT(*)`` of that type's rows). Empty means no POI
+        container-filter columns are produced.
     """
 
     ts_column: str = "timestamp_abs"
     value_column: str = "value"
     poi_type_column: str = "poi_type"
+    poi_types: list[str] = ["defect"]
 
  # todo we need to support timestamp in following formats: timestamp, unix time as long/double
  # todo needs to mimic channels capabilities
@@ -430,3 +442,18 @@ class SolverConfig(BaseModel):
     def poi_value_col(self) -> str:
         """Internal column name for the POI value that becomes the series value."""
         return self.poi.value_column
+
+    @property
+    def poi_types(self) -> list[str]:
+        """The POI types surfaced as container-filter columns by the rollup."""
+        return self.poi.poi_types
+
+    @staticmethod
+    def poi_values_col(poi_type: str) -> str:
+        """Rolled-up column holding the distinct values seen for ``poi_type``."""
+        return f"poi_{poi_type}_values"
+
+    @staticmethod
+    def poi_count_col(poi_type: str) -> str:
+        """Rolled-up column holding the total occurrence count for ``poi_type``."""
+        return f"poi_{poi_type}_count"

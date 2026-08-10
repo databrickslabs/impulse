@@ -4,9 +4,7 @@ A ``PoiChannelSelector`` treats one ``poi_type`` as a channel: the POI rows of
 that type, read as ``(timestamp, value)`` per container, become a
 ``PointsInTimeSeries`` (a value at each instant).
 
-Unlike :class:`TimeSeriesSelector` (which resolves EAV channel tags through the
-channel pipeline), a POI channel:
-
+A POI Channel
 - is resolved against the *wide* ``poi`` table with plain column-equality,
 - stays **out** of the channel pipeline (``get_selectors() -> []``) and is
   collected via the parallel ``get_poi_channel_selectors()`` walker,
@@ -83,27 +81,27 @@ class PoiChannelSelector(TimeSeriesExpression):
         """
         Build a PointsInTimeSeries from this container's POI rows.
 
-        Mirrors :meth:`TimeSeriesSelector.build`: resolve the channel id, then
-        load its rows. For POI the id is the deterministic synthetic channel id
-        derived from ``selector_id`` (POI rows were stamped with it in Stage P),
-        and the load is :meth:`SeriesCache.load_poi_blob`. Runs inside the
-        per-container solve UDF; rows are already resident (no I/O).
+        Structurally identical to :meth:`TimeSeriesSelector.build`: ``resolve`` the
+        rows this selector matches (POI union rows were stamped with this
+        selector's ``selector_id`` in Stage P), read their ``(container_id,
+        channel_id)``, then ``load_poi_blob``. Runs inside the per-container solve
+        UDF; rows are already resident (no I/O).
 
         Parameters
         ----------
         cache : SeriesCache
-            Per-container cache exposing ``container_id`` and ``load_poi_blob``.
+            Per-container cache exposing ``resolve`` and ``load_poi_blob``.
 
         Returns
         -------
         PointsInTimeSeries
         """
-        from impulse_query_engine.analyze.query.solvers.default_solver import (
-            poi_synthetic_channel_id,
-        )
-
-        cid = poi_synthetic_channel_id(self.selector_id)
-        return cache.load_poi_blob(cache.container_id, cid)
+        candidates = cache.resolve(self)
+        if len(candidates) == 0:
+            return PointsInTimeSeries.empty()
+        mid = candidates.container_id.iloc[0]
+        cid = candidates.channel_id.iloc[0]
+        return cache.load_poi_blob(mid, cid)
 
     # --- pipeline routing: POI channels are NOT channel-pipeline selectors ---
 
@@ -135,3 +133,6 @@ class PoiChannelSelector(TimeSeriesExpression):
             refine = ",".join(f"{k}={v}" for k, v in sorted(self._having.items()))
             return f"PoiChannelSelector<{self.poi_type}|{refine}>"
         return f"PoiChannelSelector<{self.poi_type}>"
+
+        #todo should we do it like MetricSelector?? There it's just key?
+        # todo we need to decide how the layout looks like that this receives

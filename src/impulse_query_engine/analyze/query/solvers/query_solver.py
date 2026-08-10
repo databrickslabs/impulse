@@ -393,7 +393,7 @@ class QuerySolver(ABC):
         pass
 
     @abc.abstractmethod
-    def solve(self, query, channels_df, selections, dtypes):
+    def solve(self, query, channels_df, selections, dtypes, container_scope_df=None):
         """
         Stage 6: Solve query.
 
@@ -407,6 +407,10 @@ class QuerySolver(ABC):
             List of selection expressions to apply.
         dtypes : list
             List of data types for each selection.
+        container_scope_df : pyspark.sql.DataFrame, optional
+            The full surviving-container set from the filter pipeline, used to
+            scope the POI-channel read so channel-less containers still emit their
+            POI. Solvers without POI-channel support may ignore it.
 
         Returns
         -------

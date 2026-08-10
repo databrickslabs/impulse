@@ -128,7 +128,7 @@ class BlobSolver(QuerySolver):
             result[s._alias] = s.build(cache)
         return result
 
-    def solve(self, query, channels_df, selections, dtypes=None):
+    def solve(self, query, channels_df, selections, dtypes=None, container_scope_df=None):
         """
         Solve the query by grouping channels and applying selections.
 
@@ -142,6 +142,10 @@ class BlobSolver(QuerySolver):
             List of selection expressions to apply.
         dtypes : list, optional
             List of data types for each selection.
+        container_scope_df : pyspark.sql.DataFrame, optional
+            Accepted for interface parity with ``DefaultSolver.solve`` (the POI
+            channel scope). ``BlobSolver`` does not support POI channels, so this
+            is ignored.
 
         Returns
         -------

@@ -124,6 +124,7 @@ class MeasurementDB:
     def channel_uri(self):
         return self.config.channels_uri
 
+# todo check which type of timestamps do we support for channels??
 
 class InMemoryMeasurementDB(MeasurementDB):
     @property

@@ -75,14 +75,3 @@ class SeriesCache(ABC):
         PointsInTimeSeries
         """
         pass
-
-    @property
-    def container_id(self):
-        """The container id this per-container cache holds (``None`` if empty).
-
-        Default is ``None``; caches backed by a per-container frame (e.g.
-        :class:`TimeSeriesCache`) override it. Used by ``PoiChannelSelector.build``
-        to address :meth:`load_poi_blob`. The default keeps type-inference caches
-        (e.g. the empty cache) working without holding any data.
-        """
-        return None

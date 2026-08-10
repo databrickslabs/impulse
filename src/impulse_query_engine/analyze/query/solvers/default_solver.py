@@ -14,6 +14,7 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
+from .poi_transformer import PoiTransformer, poi_synthetic_channel_id
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
 from .solver_config import RawEncoder, SolverConfig
@@ -134,13 +135,6 @@ class TimeSeriesCache(SeriesCache):
                 values = values * factor
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
-    @property
-    def container_id(self):
-        """The container id this per-container cache holds (``None`` if empty)."""
-        if len(self.pdf) == 0:
-            return None
-        return self.pdf[self._cid_col].iloc[0]
-
     def load_poi_blob(self, mid, cid) -> PointsInTimeSeries:
         """
         Load a POI channel as a :class:`PointsInTimeSeries` — the POI twin of
@@ -172,17 +166,6 @@ class TimeSeriesCache(SeriesCache):
         s = self.pdf.iloc[lo:hi]
         # tstart carries the instant; tend == tstart for a zero-duration sample.
         return PointsInTimeSeries(s[self._ts_col], s[self._val_col])
-
-
-def poi_synthetic_channel_id(selector_id: int) -> int:
-    """Map a POI channel selector_id to a synthetic ``channel_id``.
-
-    Real channel ids are non-negative; POI channels get a **negative** id from a
-    disjoint namespace so they slot into the same ``(container_id, channel_id)``
-    frame/index without ever colliding with a real channel. The result fits a
-    signed 32-bit int.
-    """
-    return -(int(selector_id) % 2_000_000_000) - 1 #todo move to own class?
 
 
 class DefaultSolver(QuerySolver):
@@ -386,6 +369,18 @@ class DefaultSolver(QuerySolver):
             metrics, self.config.container_metrics.column_name_mapping
         )
 
+        # Augment with POI rollup columns (poi_<type>_values / poi_<type>_count)
+        # when POI is configured, so a ``q.metric("poi_defect_count") >= 5`` or
+        # ``q.metric("poi_defect_values").contains(...)`` filter runs through the
+        # *same* MetricExpression path below — no separate POI stage/type. Gated
+        # purely on config, so non-POI reports are unaffected.
+        if query.db.config.poi_table is not None and self.config.poi_types:
+            poi = self._apply_column_mapping(
+                query.db.poi(self.spark), self.config.poi.column_name_mapping
+            )
+            rolled = PoiTransformer(self.config).to_container_granularity(poi)
+            metrics = self._augment_with_poi(metrics, rolled)
+
         if self.config.project_id is not None:
             metrics = metrics.where(F.col(self.config.project_id_col) == self.config.project_id)
 
@@ -404,81 +399,42 @@ class DefaultSolver(QuerySolver):
             how="inner",
         ).dropDuplicates([container_id_col])
 
-    def filter_poi_channels(self, spark, query, containers_df, poi_selectors) -> DataFrame:
-        """
-        Stage P: read the ``poi`` table and shape it as **channel-data union rows**.
+    def _augment_with_poi(self, metrics_df, rolled_poi_df) -> DataFrame:
+        """Left-join the POI container rollup onto the container-metrics frame.
 
-        Reads ``poi``, applies the per-table ``column_name_mapping``, prunes to
-        the ``poi_type``s referenced by *poi_selectors*, restricts to the
-        surviving containers via a semi-join, and emits rows in the same shape as
-        the ``channels`` data — ``(container_id, channel_id, tstart, tend, value,
-        selector_ids)`` — where each POI occurrence is a **zero-duration sample**
-        (``tstart == tend == ts``) under a **synthetic negative ``channel_id``**
-        (disjoint from real channel ids). These rows are later *unioned* into the
-        solve frame, so a POI channel resolves through the same per-container
-        range index as a normal channel (see ``TimeSeriesCache.load_poi_blob``).
-
-        The read is lazy and the whole method is gated by the caller on POI
-        selectors being present, so non-POI reports never touch the ``poi`` table.
+        Adds each configured type's ``poi_<type>_values`` / ``poi_<type>_count``
+        columns to ``metrics_df`` so ``MetricExpression`` filters can reference
+        them like any other metric. Containers absent from the rollup (no POI of
+        the configured types) get an **empty value set** and **count 0** rather
+        than null, so ``.contains(...)`` / ``>= N`` predicates are well-defined
+        (a null would drop the row instead of comparing).
 
         Parameters
         ----------
-        spark : SparkSession
-            Spark session used for query execution.
-        query : QueryBuilder
-            Query object providing the database handle.
-        containers_df : pyspark.sql.DataFrame
-            Surviving containers (output of :meth:`filter_container_metrics`),
-            used to prune POI rows via a semi-join.
-        poi_selectors : list[PoiChannelSelector]
-            POI channel selectors whose ``poi_type``s must be read.
+        metrics_df : pyspark.sql.DataFrame
+            The column-mapped ``container_metrics`` frame.
+        rolled_poi_df : pyspark.sql.DataFrame
+            One row per container from :class:`PoiContainerTransformer`.
 
         Returns
         -------
         pyspark.sql.DataFrame
-            Channel-data-shaped union rows for the requested POI channels.
+            ``metrics_df`` plus the POI rollup columns.
         """
         container_id_col = self.config.container_id_col
-        channel_id_col = self.config.channel_id_col
-        tstart_col = self.config.tstart_col
-        tend_col = self.config.tend_col
-        value_col = self.config.value_col
-        type_col = self.config.poi_type_col
-        ts_col = self.config.poi_ts_col
-        val_col = self.config.poi_value_col
-
-        # poi_type -> synthetic channel id (negative, disjoint from real ids)
-        type_to_ch = {
-            s.poi_type: poi_synthetic_channel_id(s.selector_id) for s in poi_selectors
-        }
-        # poi_type -> selector_id (for the selector_ids array; cache matches by it)
-        type_to_sel = {s.poi_type: s.selector_id for s in poi_selectors}
-
-        poi = query.db.poi(spark)
-        poi = self._apply_column_mapping(poi, self.config.poi.column_name_mapping)
-        poi = poi.where(F.col(type_col).isin(list(type_to_ch.keys())))
-
-        # Prune to surviving containers (semi-join; keeps POI grain, no fan-out).
-        poi = poi.join(
-            F.broadcast(containers_df.select(container_id_col).distinct()),
-            on=container_id_col,
-            how="left_semi",
+        joined = metrics_df.join(
+            F.broadcast(rolled_poi_df), on=container_id_col, how="left"
         )
-
-        # ts as double epoch-seconds so it shares the channel time axis.
-        ts_double = F.col(ts_col).cast("timestamp").cast("double")
-
-        ch_map = F.create_map([F.lit(x) for kv in type_to_ch.items() for x in kv])
-        sel_map = F.create_map([F.lit(x) for kv in type_to_sel.items() for x in kv])
-
-        return poi.select(
-            F.col(container_id_col).alias(container_id_col),
-            ch_map[F.col(type_col)].alias(channel_id_col),
-            ts_double.alias(tstart_col),
-            ts_double.alias(tend_col),  # zero-duration: tend == tstart
-            F.col(val_col).cast("double").alias(value_col),
-            F.array(sel_map[F.col(type_col)]).alias("selector_ids"),
-        )
+        for t in self.config.poi_types:
+            values_col = self.config.poi_values_col(t)
+            count_col = self.config.poi_count_col(t)
+            joined = joined.withColumn(
+                values_col,
+                F.when(
+                    F.col(values_col).isNull(), F.array().cast("array<string>")
+                ).otherwise(F.col(values_col)),
+            ).withColumn(count_col, F.coalesce(F.col(count_col), F.lit(0).cast("long")))
+        return joined
 
     def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
         """
@@ -1059,7 +1015,9 @@ class DefaultSolver(QuerySolver):
             result[s._alias] = [res]
         return pd.DataFrame(result)
 
-    def solve(self, query, channels_df, selections, dtypes, poi_rows_df=None) -> DataFrame:
+    def solve(
+        self, query, channels_df, selections, dtypes, container_scope_df=None
+    ) -> DataFrame:
         """
         Solve the query by grouping channels and applying selections.
 
@@ -1069,6 +1027,11 @@ class DefaultSolver(QuerySolver):
         per-channel conversion factors are computed and propagated into
         the grouped-map UDF so that time-series values are converted from
         the source to the target unit on the fly.
+
+        POI channel selections (``q.poi_channel(...)``) are read and unioned into
+        the solve frame here (see :meth:`_build_solve_frame`); the POI read is
+        scoped to *container_scope_df* (the full surviving-container set), so a POI
+        channel resolves even for containers that carry no measured channel.
 
         Parameters
         ----------
@@ -1080,11 +1043,11 @@ class DefaultSolver(QuerySolver):
             List of selection expressions to apply.
         dtypes : list
             List of data types for each selection.
-        poi_rows_df : pyspark.sql.DataFrame or None, optional
-            Channel-data-shaped POI union rows from :meth:`filter_poi_channels`.
-            When provided, they are unioned into the per-container solve frame so
-            ``poi_channel`` selections resolve alongside measured channels.
-            ``None`` when the query has no POI channels.
+        container_scope_df : pyspark.sql.DataFrame, optional
+            The full surviving-container set (tags ∩ container metrics) from the
+            filter pipeline, used to scope the POI-channel read so channel-less
+            containers still emit their POI. When ``None``, POI falls back to the
+            channel-match scope (paired-only behavior).
 
         Returns
         -------
@@ -1092,7 +1055,9 @@ class DefaultSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count = self._build_solve_frame(query, channels_df, poi_rows_df)
+        q, joined_df, container_count = self._build_solve_frame(
+            query, channels_df, selections, container_scope_df=container_scope_df
+        )
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
@@ -1103,29 +1068,39 @@ class DefaultSolver(QuerySolver):
         return self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
 
     def _build_solve_frame(
-        self, query, channels_df, poi_rows_df=None
+        self, query, channels_df, selections, container_scope_df=None
     ) -> tuple[DataFrame, DataFrame, int]:
         """Assemble the per-container frame fed to the grouped-map solve UDF.
 
-        Composes the channel-data join (:meth:`_prepare_channels_join`) with the
-        optional POI-channel union (:meth:`_union_poi_rows`), then counts the
-        distinct containers across the final frame. The container count is
-        computed **here**, after any POI union, so POI-only containers are
-        included in the count.
+        Joins the channel data (:meth:`_prepare_channels_join`) and, when the
+        selections contain ``poi_channel`` selectors, reads the POI table and
+        unions its channel-shaped rows (:meth:`PoiTransformer.to_channel_rows` +
+        :meth:`_union_poi_rows`). The container count is computed **after** any
+        POI union so containers reached only via POI are included.
+
+        The POI read happens here — beside the channel-data read — rather than in
+        the filter pipeline: it is a solve-input concern, not a filter. It is
+        scoped to *container_scope_df* (the full surviving-container set), so a POI
+        channel resolves for **every** surviving container, including those with no
+        selected measured channel and POI-only reports. When *container_scope_df*
+        is ``None`` it falls back to the channel-match scope (``channels_df``),
+        i.e. POI resolves only for containers that also carry a measured channel.
 
         Only :meth:`solve` uses this; ``solve_calculated_channels`` calls
         :meth:`_prepare_channels_join` directly (calculated channels never carry
-        POI), which keeps the POI concern out of the shared channel-join prelude.
+        POI), keeping the POI concern out of the shared channel-join prelude.
 
         Parameters
         ----------
         query : QueryBuilder
-            Query object containing database and filter information.
+            Query object providing the database handle and POI config.
         channels_df : pyspark.sql.DataFrame
             Channel-match DataFrame from the filter pipeline.
-        poi_rows_df : pyspark.sql.DataFrame or None, optional
-            Channel-data-shaped POI union rows from :meth:`filter_poi_channels`,
-            or ``None`` when the query has no ``poi_channel`` selections.
+        selections : list
+            Selection expressions; walked for ``poi_channel`` selectors.
+        container_scope_df : pyspark.sql.DataFrame, optional
+            The full surviving-container set to scope the POI read to. When
+            ``None``, POI is scoped to ``channels_df`` (paired-only behavior).
 
         Returns
         -------
@@ -1134,9 +1109,24 @@ class DefaultSolver(QuerySolver):
             channel-data DataFrame (authoritative for output id types), the frame
             fed to the grouped-map UDF, and the number of distinct containers.
         """
+        from impulse_query_engine.analyze.metadata.time_series_expression import (
+            TimeSeriesExpression,
+        )
+
         q, joined_df, _ = self._prepare_channels_join(query, channels_df)
-        if poi_rows_df is not None:
-            joined_df = self._union_poi_rows(joined_df, poi_rows_df)
+
+        poi_selectors = TimeSeriesExpression.collect_poi_channel_selectors(selections)
+        if poi_selectors and query.db.config.poi_table is not None:
+            poi = self._apply_column_mapping(
+                query.db.poi(self.spark), self.config.poi.column_name_mapping
+            )
+            # Scope POI to the full surviving-container set so channel-less
+            # containers (and POI-only reports) keep their POI; fall back to the
+            # channel-match set when no scope was threaded in.
+            poi_scope = container_scope_df if container_scope_df is not None else channels_df
+            poi_rows = PoiTransformer(self.config).to_channel_rows(poi, poi_selectors, poi_scope)
+            joined_df = self._union_poi_rows(joined_df, poi_rows)
+
         container_count = joined_df.select(self.config.container_id_col).distinct().count()
         return q, joined_df, container_count
 
@@ -1204,8 +1194,7 @@ class DefaultSolver(QuerySolver):
             F.broadcast(channels_df),
             on=[self.config.container_id_col, self.config.channel_id_col],
         )
-
-        container_count = joined_df.select(self.config.container_id_col).distinct().count()
+        container_count = channels_df.select(self.config.container_id_col).distinct().count()
         return q, joined_df, container_count
 
     def _union_poi_rows(self, joined_df: DataFrame, poi_rows_df: DataFrame) -> DataFrame:
@@ -1240,6 +1229,8 @@ class DefaultSolver(QuerySolver):
         pyspark.sql.DataFrame
             ``joined_df`` with the POI rows appended.
         """
+
+        #todo test I dont understand what happens here
         target_types = {f.name: f.dataType for f in joined_df.schema.fields}
         poi_aligned = poi_rows_df.select(
             *[
