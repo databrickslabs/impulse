@@ -169,6 +169,11 @@ class UnitySink(BaseModel):
         Target schema name for output tables.
     table_prefix : str
         Prefix to use for generated output table names.
+    cleanup_temp_tables : bool
+        When ``True``, the intermediate ``__impulse_temp_*`` tables written to this
+        sink during batch solving are dropped after ``persist_results()`` completes
+        successfully. Defaults to ``False`` (temp tables are retained for inspection
+        and only cleared at the start of the next report run).
 
     Notes
     -----
@@ -181,6 +186,7 @@ class UnitySink(BaseModel):
         str,
         AfterValidator(lambda v: v if v == "" else is_valid_unity_entity_name(v)),
     ]
+    cleanup_temp_tables: bool = False
 
 
 class Comparator(str, Enum):

@@ -180,7 +180,7 @@ class QuerySolver(ABC):
         schemas stay compatible regardless of the physical id types.
         """
         ref = self._apply_column_mapping(
-            self.load_channel_metrics(db, spark), self.config.channel_metrics.column_name_mapping
+            db.channel_metrics(spark), self.config.channel_metrics.column_name_mapping
         )
         return spark.createDataFrame(
             [],
