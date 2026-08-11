@@ -132,3 +132,104 @@ class TestComposition:
         )
         # A-or-C → {1,2,3}; container_id <= 2 → {1,2}; AND → {1,2}
         assert _survivors(array_metric_db, spark, pred) == {1, 2}
+
+
+@pytest.fixture
+def duplicate_array_metric_db(spark: SparkSession) -> MeasurementDB:
+    """DB whose array column carries duplicate elements within a container.
+
+    c1 → [A, A, B]   c2 → [A]   (c1's repeated A must not change membership logic)
+    """
+    schema = T.StructType(
+        [
+            T.StructField("container_id", T.LongType()),
+            T.StructField("poi_defect_values", T.ArrayType(T.StringType())),
+        ]
+    )
+    container_metrics = spark.createDataFrame(
+        [(1, ["A", "A", "B"]), (2, ["A"])],
+        schema=schema,
+    )
+    cfg = MeasurementDBConfig.for_debug({"container_metrics": container_metrics})
+    return MeasurementDB(cfg, ws=create_autospec(WorkspaceClient))
+
+
+class TestDuplicateElements:
+    """Membership is set-based: repeated elements in the stored array or in the
+    candidate list must not change which containers survive."""
+
+    def test_contains_all_handles_duplicates_in_stored_array(
+        self, spark: SparkSession, duplicate_array_metric_db: MeasurementDB
+    ):
+        """c1=[A,A,B] contains both A and B despite the repeated A → kept."""
+        pred = MetricSelector("poi_defect_values").contains_all(["A", "B"])
+        assert _survivors(duplicate_array_metric_db, spark, pred) == {1}
+
+    def test_contains_all_handles_duplicate_values_in_query(
+        self, spark: SparkSession, duplicate_array_metric_db: MeasurementDB
+    ):
+        """A duplicated candidate (``["A", "A"]``) is de-duplicated, so it behaves
+        like ``["A"]`` → every container holding A survives (c1, c2)."""
+        pred = MetricSelector("poi_defect_values").contains_all(["A", "A"])
+        assert _survivors(duplicate_array_metric_db, spark, pred) == {1, 2}
+
+
+@pytest.fixture
+def numeric_array_metric_db(spark: SparkSession) -> MeasurementDB:
+    """DB whose array column is ``array<long>`` rather than ``array<string>``."""
+    schema = T.StructType(
+        [
+            T.StructField("container_id", T.LongType()),
+            T.StructField("codes", T.ArrayType(T.LongType())),
+        ]
+    )
+    container_metrics = spark.createDataFrame(
+        [(1, [10, 20]), (2, [20]), (3, [30])],
+        schema=schema,
+    )
+    cfg = MeasurementDBConfig.for_debug({"container_metrics": container_metrics})
+    return MeasurementDB(cfg, ws=create_autospec(WorkspaceClient))
+
+
+class TestNonStringArrays:
+    """The operators are element-type agnostic; exercise a numeric array column."""
+
+    def test_contains_numeric(self, spark: SparkSession, numeric_array_metric_db: MeasurementDB):
+        pred = MetricSelector("codes").contains(20)
+        assert _survivors(numeric_array_metric_db, spark, pred) == {1, 2}
+
+    def test_contains_any_numeric(
+        self, spark: SparkSession, numeric_array_metric_db: MeasurementDB
+    ):
+        pred = MetricSelector("codes").contains_any([10, 30])
+        assert _survivors(numeric_array_metric_db, spark, pred) == {1, 3}
+
+    def test_contains_all_numeric(
+        self, spark: SparkSession, numeric_array_metric_db: MeasurementDB
+    ):
+        pred = MetricSelector("codes").contains_all([10, 20])
+        assert _survivors(numeric_array_metric_db, spark, pred) == {1}
+
+
+class TestValueListSnapshot:
+    """``contains_any``/``contains_all`` snapshot their candidate list at build
+    time (via ``list(values)``), so mutating the caller's list afterwards must not
+    change the predicate."""
+
+    def test_contains_any_snapshots_values(
+        self, spark: SparkSession, array_metric_db: MeasurementDB
+    ):
+        vals = ["A"]
+        pred = MetricSelector("poi_defect_values").contains_any(vals)
+        vals.append("C")  # must NOT leak into the already-built predicate
+        # Still A-only → {1, 2}; would be {1, 2, 3} if the append leaked in.
+        assert _survivors(array_metric_db, spark, pred) == {1, 2}
+
+    def test_contains_all_snapshots_values(
+        self, spark: SparkSession, array_metric_db: MeasurementDB
+    ):
+        vals = ["A"]
+        pred = MetricSelector("poi_defect_values").contains_all(vals)
+        vals.append("B")  # must NOT tighten the predicate to require B too
+        # Still A-only → {1, 2}; would be {1} if the append leaked in.
+        assert _survivors(array_metric_db, spark, pred) == {1, 2}

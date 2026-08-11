@@ -15,8 +15,8 @@ class EmptyTimeSeriesCache(SeriesCache):
 
         Parameters
         ----------
-        selection : Any
-            The selection object specifying tags or metrics.
+        selection : TimeSeriesSelector
+            The channel selector; ignored by this cache.
 
         Returns
         -------
