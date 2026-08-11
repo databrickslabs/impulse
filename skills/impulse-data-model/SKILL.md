@@ -156,8 +156,46 @@ per-`(container_id, channel_id)` channel rows). The full `SolverConfig` schema �
 
 ### Custom solver
 
-For layouts that don't match the relationships at all, subclass `QuerySolver` (from
-`impulse_query_engine.analyze.query.solvers`) and register it in config. You take on the solver
-pipeline stages (`filter_container_tags`, `filter_container_metrics`, `filter_channel_tags`,
-`filter_channel_metrics`, `solve`). This is a large investment — first check whether a one-time ETL
-into the standard shape is cheaper.
+For layouts that don't match the relationships at all, subclass `QuerySolver` — or, more commonly,
+`DefaultSolver` (both from `impulse_query_engine.analyze.query.solvers`) — override the pipeline
+stage(s) that differ, and register it so a report config can select it **by name**.
+
+**Register it.** Decorate the subclass with `@register_solver("Name", MyConfigCls)`. The report config
+then picks it via the existing `query_engine.solver` field (the same field that takes the built-in
+`"DefaultSolver"` and its deprecated `"DeltaSolver"` / `"KeyValueStoreSolver"` aliases). Selection is
+**by registered name only** — a config can never cause Impulse to import an arbitrary class; which
+solvers exist is governed entirely by what the driver imports.
+
+```python
+from impulse_query_engine.analyze.query.solvers import register_solver, SolverConfig
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+
+
+class MyConfig(SolverConfig):          # optional: extra fields, validated at config-parse time
+    raw_signal_table: str              # required — a missing/mistyped key raises up front
+
+@register_solver("MySolver", MyConfig)
+class MySolver(DefaultSolver):
+    def solve(self, query, channels_df, selections, dtypes):
+        df = super().solve(query, channels_df, selections, dtypes)   # reuse the pipeline
+        ...                                                          # then adjust the result
+        return df
+```
+
+```json
+{"query_engine": {"solver": "MySolver", "solver_config": {"raw_signal_table": "cat.sch.raw"}}}
+```
+
+- **What to override.** Override the specific stage that differs — one of `filter_container_tags`,
+  `filter_container_metrics`, `filter_channel_tags`, `filter_channel_metrics`, or `solve` — and
+  delegate the rest with `super()`. Subclassing `DefaultSolver` (not bare `QuerySolver`) means you
+  reimplement only what changes; a bare `QuerySolver` requires all stages.
+- **Extra config fields.** Passing `MyConfig` to `@register_solver` makes Impulse validate the
+  `solver_config` block through that subclass — extra/required fields are enforced at config-load
+  time. Read them via typed attribute access (`self.config.raw_signal_table`).
+- **Loading.** `@register_solver` runs only when its module is imported, so import the solver's
+  package once in the driver **before** building the report — that import is what registers the name.
+  An unregistered name fails config parse with an error listing the known names.
+
+This is a large investment — you own the overridden stages. First check whether a one-time ETL into
+the standard shape is cheaper.
