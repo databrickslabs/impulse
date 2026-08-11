@@ -162,7 +162,7 @@ stage(s) that differ, and register it so a report config can select it **by name
 
 **Register it.** Decorate the subclass with `@register_solver("Name", MyConfigCls)`. The report config
 then picks it via the existing `query_engine.solver` field (the same field that takes the built-in
-`"DefaultSolver"` and its deprecated `"DeltaSolver"` / `"KeyValueStoreSolver"` aliases). Selection is
+`"DefaultSolver"`. Selection is
 **by registered name only** — a config can never cause Impulse to import an arbitrary class; which
 solvers exist is governed entirely by what the driver imports.
 
