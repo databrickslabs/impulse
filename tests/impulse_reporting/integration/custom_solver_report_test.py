@@ -164,7 +164,9 @@ class TestCustomSolverReportFactory:
         The only difference between the two runs is the selected solver, so the
         changed output is attributable to the custom solver alone.
         """
-        default_rows = _run_query_through_configured_solver(_report(spark, _config("DefaultSolver")))
+        default_rows = _run_query_through_configured_solver(
+            _report(spark, _config("DefaultSolver"))
+        )
         custom_rows = _run_query_through_configured_solver(
             _report(
                 spark,
