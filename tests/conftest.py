@@ -10,7 +10,27 @@ from delta import configure_spark_with_delta_pip
 from pyspark.sql import SparkSession
 
 import impulse_query_engine.schema as S
+from impulse_query_engine.analyze.query.solvers import registry
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+
+
+@pytest.fixture
+def registry_isolation():
+    """Snapshot the process-global solver registry and restore it after the test.
+
+    The solver registry is process-global. Tests that register a solver must
+    request this fixture (or one that depends on it) so their registration is
+    undone afterwards and cannot leak into other tests. Registration must happen
+    at run time (inside a fixture), not via a module-level ``@register_solver``
+    decorator: a decorator runs at import/collection time, before any snapshot is
+    taken, so it would be captured in the snapshot and survive restore.
+    """
+    saved = dict(registry._REGISTRY)
+    try:
+        yield registry._REGISTRY
+    finally:
+        registry._REGISTRY.clear()
+        registry._REGISTRY.update(saved)
 
 
 @pytest.fixture(scope="session")

@@ -11,6 +11,7 @@ columns are masked in the result.
 """
 
 import pyspark.sql.functions as F
+import pytest
 from pyspark.sql import DataFrame, SparkSession
 
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
@@ -29,7 +30,6 @@ class RedactConfig(SolverConfig):
     redact_columns: list[str] = []
 
 
-@register_solver("RedactingSolver", RedactConfig)
 class RedactingSolver(DefaultSolver):
     """DefaultSolver that nulls out configured columns in the solve output."""
 
@@ -39,6 +39,18 @@ class RedactingSolver(DefaultSolver):
             if col in df.columns:
                 df = df.withColumn(col, F.lit(None).cast(df.schema[col].dataType))
         return df
+
+
+@pytest.fixture(autouse=True)
+def _register_redacting_solver(registry_isolation):
+    """Register ``RedactingSolver`` per test; the shared ``registry_isolation``
+    fixture (see ``conftest.py``) restores the registry afterwards.
+
+    Registering here rather than via a module-level ``@register_solver``
+    decorator keeps the process-global registry from leaking into other tests.
+    """
+    register_solver("RedactingSolver", RedactConfig)(RedactingSolver)
+    yield
 
 
 def _redact_cfg(redact_columns: list[str]) -> RedactConfig:

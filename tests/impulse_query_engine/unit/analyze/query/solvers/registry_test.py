@@ -6,14 +6,13 @@ Covers ``register_solver`` (name + aliases + config_cls + overwrite),
 ``is_registered`` and ``registered_names``.
 
 The registry is process-global, so each test registers under unique names
-and restores the registry via the ``clean_registry`` fixture to avoid
-cross-test contamination.
+and isolates the registry via the ``clean_registry`` fixture (which delegates
+to the shared ``registry_isolation`` fixture) to avoid cross-test contamination.
 """
 
 import pytest
 from pyspark.sql import DataFrame
 
-from impulse_query_engine.analyze.query.solvers import registry
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.analyze.query.solvers.registry import (
     SolverRegistration,
@@ -57,14 +56,13 @@ class _StubConfig(SolverConfig):
 
 
 @pytest.fixture
-def clean_registry():
-    """Snapshot and restore the process-global registry around each test."""
-    saved = dict(registry._REGISTRY)
-    try:
-        yield
-    finally:
-        registry._REGISTRY.clear()
-        registry._REGISTRY.update(saved)
+def clean_registry(registry_isolation):
+    """Isolate the process-global registry around each test.
+
+    Delegates to the shared ``registry_isolation`` fixture (see ``conftest.py``),
+    which snapshots and restores the registry.
+    """
+    yield
 
 
 class TestRegisterSolver:

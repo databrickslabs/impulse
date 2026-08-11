@@ -14,7 +14,6 @@ import pytest
 from pydantic import ValidationError
 from pyspark.sql import DataFrame
 
-from impulse_query_engine.analyze.query.solvers import registry
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.analyze.query.solvers.registry import register_solver
 from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
@@ -48,15 +47,14 @@ class _RegSolver(QuerySolver):
 
 
 @pytest.fixture
-def registered_custom_solver():
-    """Register a custom solver+config for the duration of a test."""
-    saved = dict(registry._REGISTRY)
+def registered_custom_solver(registry_isolation):
+    """Register a custom solver+config for the duration of a test.
+
+    Registration happens at run time here (not via a module-level decorator);
+    the shared ``registry_isolation`` fixture restores the registry afterwards.
+    """
     register_solver("RegSolver", _RegConfig)(_RegSolver)
-    try:
-        yield
-    finally:
-        registry._REGISTRY.clear()
-        registry._REGISTRY.update(saved)
+    yield
 
 
 class TestExtendedConfigValidation:
