@@ -84,10 +84,7 @@ class TimeSeriesCache(SeriesCache):
         ----------
         selection : TimeSeriesSelector
             The channel selector whose tag expression (``selection._expr``)
-            identifies the matching channel(s). Metric filters do not flow
-            through here — they are evaluated in Spark via ``get_selector_expr``
-            during ``filter_container_metrics``.
-
+            identifies the matching channel(s).
         Returns
         -------
         pd.DataFrame
