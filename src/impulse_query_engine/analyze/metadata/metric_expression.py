@@ -3,27 +3,8 @@ from __future__ import annotations
 import abc
 import operator
 
-import pandas as pd
 import pyspark.sql.functions as F
 from pyspark.sql import Column
-
-
-def array_contains(arr, value):
-    """``operator``-style callable: does array ``arr`` contain ``value``?
-
-    Analogous to ``operator.eq`` — a plain function usable in the
-    :class:`MetricOp` operation slot — but dual-backend so a ``MetricOp`` built
-    with it evaluates in **both** paths:
-
-    - Spark ``Column`` (``get_selector_expr``) → ``F.array_contains(arr, value)``
-    - pandas ``Series`` of lists (``build_pandas``) → per-row membership.
-
-    ``array_contains`` has no ``operator`` equivalent, so this fills that gap
-    while keeping ``.contains`` structurally identical to the comparison ops.
-    """
-    if isinstance(arr, Column):
-        return F.array_contains(arr, value) # todo double check if this is enforceable
-    return arr.apply(lambda a: value in (a if a is not None else []))
 
 
 class MetricExpression(abc.ABC):
@@ -190,9 +171,10 @@ class MetricExpression(abc.ABC):
     def contains(self, value) -> "MetricOp":
         """
         Membership test for an ``array`` metric: keep rows whose array contains
-        ``value``. Uses the dual-backend :func:`array_contains` operator, so it
-        works in both the Spark (``get_selector_expr``) and pandas
-        (``build_pandas``) paths — symmetric with the comparison ops.
+        ``value``. Uses ``F.array_contains`` as the op, evaluated through the Spark
+        ``get_selector_expr`` path — symmetric with the comparison ops (which use
+        ``operator.eq`` etc.); ``F.array_contains`` fills the array-membership case
+        that has no ``operator`` equivalent.
 
         Used for POI-backed metrics whose values are stored as a plain array,
         e.g. ``q.metric("poi_defect_values").contains("P108B-17")`` alongside a
@@ -207,7 +189,63 @@ class MetricExpression(abc.ABC):
         -------
         MetricOp
         """
-        return MetricOp(array_contains, self, value)
+        return MetricOp(F.array_contains, self, value)
+
+    def contains_any(self, values: list) -> "MetricOp":
+        """
+        Array-membership OR: keep rows whose array shares **any** element with
+        *values* (set intersection non-empty). This is the value-level OR that a
+        single ``.contains`` can't express, e.g.
+        ``q.metric("poi_defect_values").contains_any(["B1024-43", "U0046-13"])``
+        keeps containers that saw *either* code. An empty *values* matches nothing.
+
+        Parameters
+        ----------
+        values : list
+            Elements to test for membership; matches if at least one is present.
+
+        Returns
+        -------
+        MetricOp
+        """
+
+        def array_overlaps(arr: Column, vals: list) -> Column:
+            # Called at get_selector_expr time (Spark active), so the literal
+            # array is built lazily and the tree constructs without a
+            # SparkSession. Empty values overlap nothing → False.
+            if not vals:
+                return F.lit(False)
+            return F.arrays_overlap(arr, F.array(*[F.lit(v) for v in vals]))
+
+        return MetricOp(array_overlaps, self, list(values))
+
+    def contains_all(self, values: list) -> "MetricOp":
+        """
+        Array-membership AND: keep rows whose array contains **every** element of
+        *values*, e.g. ``q.metric("poi_defect_values").contains_all(["B1024-43",
+        "U0046-13"])`` keeps only containers that saw *both* codes. An empty
+        *values* matches everything (vacuously true).
+
+        Parameters
+        ----------
+        values : list
+            Elements that must all be present.
+
+        Returns
+        -------
+        MetricOp
+        """
+
+        def array_contains_all(arr: Column, vals: list) -> Column:
+            # Built lazily at get_selector_expr time. Row survives when the
+            # distinct intersection with arr covers all distinct target values.
+            # Empty values is vacuously True.
+            if not vals:
+                return F.lit(True)
+            target = F.array(*[F.lit(v) for v in vals])
+            return F.size(F.array_intersect(target, arr)) == F.size(F.array_distinct(target))
+
+        return MetricOp(array_contains_all, self, list(values))
 
     @abc.abstractmethod
     def get_selector_expr(self) -> Column:
@@ -218,23 +256,6 @@ class MetricExpression(abc.ABC):
         -------
         pyspark.sql.Column
             Spark SQL column expression for metric selection.
-        """
-        pass
-
-    @abc.abstractmethod
-    def build_pandas(self, df: pd.DataFrame) -> pd.Series:
-        """
-        Build a pandas Series based on the metric expression from the given DataFrame.
-
-        Parameters
-        ----------
-        df : pandas.DataFrame
-            DataFrame containing metric data.
-
-        Returns
-        -------
-        pandas.Series
-            Series representing the metric expression.
         """
         pass
 
@@ -273,22 +294,6 @@ class MetricSelector(MetricExpression):
             Spark SQL column corresponding to the metric key.
         """
         return F.col(self.key)
-
-    def build_pandas(self, df) -> pd.Series:
-        """
-        Return a pandas Series for the selected metric from the DataFrame.
-
-        Parameters
-        ----------
-        df : pandas.DataFrame
-            DataFrame containing metric data.
-
-        Returns
-        -------
-        pandas.Series
-            Series corresponding to the metric key.
-        """
-        return df[self.key]
 
     def __repr__(self):
         """
@@ -358,28 +363,6 @@ class MetricOp(MetricExpression):
             k: a.get_selector_expr() if isinstance(a, MetricExpression) else a
             for k, a in self.kwargs.items()
         }
-        return self.operation(*argsb, **kwargsb)
-
-    def build_pandas(self, df) -> pd.Series:
-        """
-        Build a pandas Series for the metric operation from the given DataFrame.
-
-        Parameters
-        ----------
-        df : pandas.DataFrame
-            DataFrame containing metric data.
-
-        Returns
-        -------
-        pandas.Series
-            Series representing the metric operation.
-        """
-        argsb = [a.build_pandas(df) if isinstance(a, MetricExpression) else a for a in self.args]
-        kwargsb = {
-            k: a.build_pandas(df) if isinstance(a, MetricExpression) else a
-            for k, a in self.kwargs.items()
-        }
-
         return self.operation(*argsb, **kwargsb)
 
     def __repr__(self):

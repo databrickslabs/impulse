@@ -7,6 +7,36 @@ from impulse_query_engine.analyze.metadata.metric_expression import MetricOp, Me
 # --- Comparison operator tests ---
 
 
+# --- Array-membership operator tests (structure only; evaluation in md/expressions) ---
+
+
+def test_contains_builds_metric_op():
+    expr = MetricSelector("poi_defect_values").contains("B1024-43")
+    assert isinstance(expr, MetricOp)
+    assert expr.required_metrics() == {"poi_defect_values"}
+
+
+def test_contains_any_builds_metric_op():
+    expr = MetricSelector("poi_defect_values").contains_any(["B1024-43", "U0046-13"])
+    assert isinstance(expr, MetricOp)
+    assert expr.required_metrics() == {"poi_defect_values"}
+
+
+def test_contains_all_builds_metric_op():
+    expr = MetricSelector("poi_defect_values").contains_all(["B1024-43", "U0046-13"])
+    assert isinstance(expr, MetricOp)
+    assert expr.required_metrics() == {"poi_defect_values"}
+
+
+def test_array_ops_compose_with_scalar_metrics():
+    """An array op ANDs/ORs with ordinary comparisons, unioning required metrics."""
+    expr = (MetricSelector("poi_defect_values").contains_any(["A", "B"])) & (
+        MetricSelector("duration_ms") > 30
+    )
+    assert isinstance(expr, MetricOp)
+    assert expr.required_metrics() == {"poi_defect_values", "duration_ms"}
+
+
 def test_eq():
     expr = MetricSelector("start_dt") == "2023-08-16T00:00:000Z"
     assert isinstance(expr, MetricOp)
