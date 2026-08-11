@@ -7,13 +7,9 @@ instantiate **and** the :class:`SolverConfig` subclass to build for its
 tables into the Impulse silver schema, plus a config subclass carrying extra
 fields, without editing Impulse core.
 
-Any concrete :class:`QuerySolver` subclass is **auto-registered under its class
-name** at definition time (via ``QuerySolver.__init_subclass__`` →
-:func:`auto_register_solver`), so a customer can select a solver by its class
-name without any decorator.  The explicit :func:`register_solver` decorator is
-still the way to add a *custom* name, deprecated *aliases*, or a
-:class:`SolverConfig` subclass — and it takes precedence over (upgrades) the
-auto-registered entry.
+A :class:`QuerySolver` subclass becomes selectable by decorating it with
+:func:`register_solver`, which sets the config name, any deprecated *aliases*,
+and the :class:`SolverConfig` subclass to build for its ``solver_config`` block.
 
 Built-in solvers self-register at import time (see the decorator on
 ``DefaultSolver``).  Customer solvers register themselves the same way from
@@ -27,7 +23,6 @@ what the driver imports.
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar
@@ -108,40 +103,6 @@ def register_solver(
         return solver_cls
 
     return decorator
-
-
-def auto_register_solver(solver_cls: type[QuerySolver]) -> None:
-    """Register *solver_cls* under its class name, if usable and not already named.
-
-    Called by :meth:`QuerySolver.__init_subclass__` so that **every** concrete
-    ``QuerySolver`` subclass is selectable by its class name without an explicit
-    :func:`register_solver` decorator. Intentionally permissive/idempotent — it
-    never raises and never overwrites, so it composes with the explicit decorator
-    rather than fighting it:
-
-    - **Abstract classes are skipped** — a subclass that hasn't implemented the
-      abstract pipeline methods can't be instantiated, so it isn't offered.
-    - **An existing registration for that name wins.** If the name is already
-      taken (e.g. the class also carries an explicit ``@register_solver`` with a
-      richer ``config_cls``/aliases, or a different class already claimed the
-      name), the auto entry is **not** written. Explicit registration therefore
-      always takes precedence, and a genuine name clash between two auto-only
-      solvers keeps the first-defined one (no surprise overwrite).
-
-    The auto entry always uses the base :class:`SolverConfig`; a solver needing a
-    config subclass must use the explicit decorator.
-
-    Parameters
-    ----------
-    solver_cls : type[QuerySolver]
-        The subclass being defined.
-    """
-    if inspect.isabstract(solver_cls):
-        return
-    name = solver_cls.__name__
-    if name in _REGISTRY:
-        return
-    _REGISTRY[name] = SolverRegistration(solver_cls, SolverConfig)
 
 
 def is_registered(name: str) -> bool:
