@@ -60,34 +60,6 @@ class QuerySolver(ABC):
         """
         return cls(config=ctx.solver_config)
 
-    def load_container_tags(self, db: "MeasurementDB", spark) -> DataFrame:
-        """Read the raw ``container_tags`` (narrow/EAV) table."""
-        return db.container_tags(spark)
-
-    def load_container_metrics(self, db: "MeasurementDB", spark) -> DataFrame:
-        """Read the raw ``container_metrics`` table."""
-        return db.container_metrics(spark)
-
-    def load_channel_tags(self, db: "MeasurementDB", spark) -> DataFrame:
-        """Read the raw ``channel_tags`` (narrow/EAV) table."""
-        return db.channel_tags(spark)
-
-    def load_channel_metrics(self, db: "MeasurementDB", spark) -> DataFrame:
-        """Read the raw ``channel_metrics`` table."""
-        return db.channel_metrics(spark)
-
-    def load_channel_mapping(self, db: "MeasurementDB", spark) -> DataFrame:
-        """Read the raw ``channel_mapping`` (alias) table."""
-        return db.channel_mapping(spark)
-
-    def load_unit_conversion(self, db: "MeasurementDB", spark) -> DataFrame:
-        """Read the raw ``unit_conversion`` table."""
-        return db.unit_conversion(spark)
-
-    def load_channels(self, db: "MeasurementDB", spark) -> DataFrame:
-        """Read the raw ``channels`` (time-series data) table."""
-        return db.channels(spark)
-
     @staticmethod
     def _apply_column_mapping(df: DataFrame, mapping: dict[str, str]) -> DataFrame:
         """Rename DataFrame columns according to a physical → internal mapping."""
