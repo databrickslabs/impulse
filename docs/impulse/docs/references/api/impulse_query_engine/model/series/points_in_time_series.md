@@ -37,9 +37,14 @@ def dtype()
 
 Returns the Spark data type for PointsInTimeSeries.
 
+For numeric values the element is a homogeneous ``[tstart, value]`` double
+pair (``ArrayType(ArrayType(DoubleType))``). String-valued series cannot use
+that homogeneous nested array, so their element is a ``(tstart, value)``
+struct with a double timestamp and a string value.
+
 **Returns**:
 
-`pyspark.sql.types.ArrayType`: Spark ArrayType for points in time series: [[tstart_1, value_1], ...].
+`pyspark.sql.types.ArrayType`: Spark ArrayType matching ``get_data``'s shape for this series' value type.
 
 #### get\_data
 
@@ -47,11 +52,16 @@ Returns the Spark data type for PointsInTimeSeries.
 def get_data() -> list
 ```
 
-Returns the series as a list of [tstart, value] lists.
+Returns the series as a list of ``[tstart, value]`` pairs.
+
+For numeric values this is a list of two-element double lists. For string
+values, ``column_stack`` would coerce the timestamps to strings, so the
+pairs are built explicitly as ``[float(tstart), str(value)]`` — matching the
+struct element type declared by :meth:`dtype`.
 
 **Returns**:
 
-`list`: List of [tstart, value] pairs.
+`list`: List of ``[tstart, value]`` pairs.
 
 #### \_\_len\_\_
 
