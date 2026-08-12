@@ -190,14 +190,16 @@ Only includes computation-affecting attributes:
 - input_expressions
 - statistics to be calculated
 - event expression if there is any
-- custom statistics (name, kind, declared input indices, and function
-  bytecode, so implementation or input-wiring changes invalidate cached
-  results; only appended when custom statistics are configured so
-  aggregators without them keep their previous hash)
+- channel_names, and each cross-channel descriptor's channel_name. These
+  are the fact table's ``channel_name`` merge key, so a rename must force
+  a recompute (a changed definition recomputes and prunes all containers);
+  otherwise, in incremental mode, already-processed containers would keep
+  rows under the old name.
+- custom statistics (labels, kind, declared input indices, params, and
+  function bytecode, so implementation or input-wiring changes invalidate
+  cached results; only appended when custom statistics are configured)
 
-Excludes: name, desc, signal_name, units, page_number, report_id, and the
-cross-channel descriptors' channel_name (presentation metadata, like
-channel_names).
+Excludes: name, desc, units, page_number, report_id.
 
 **Returns**:
 
