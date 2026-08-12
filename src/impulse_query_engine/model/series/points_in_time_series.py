@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sized
+import functools
+from collections.abc import Callable, Sized
 
 import numpy as np
 import numpy.typing as npt
@@ -13,6 +14,34 @@ from .points_in_time import PointsInTime
 from .sample_series import SampleSeries
 
 FloatOrNaN = float | np.float64
+
+
+def _numeric_only(method: Callable) -> Callable:
+    """Decorator that rejects the wrapped method on a string-valued series.
+
+    String-valued :class:`PointsInTimeSeries` support only sampling and equality
+    (``==`` / ``!=``); arithmetic, ordering and numeric reductions have no meaning
+    for them. Numpy would either raise (``-``, ``/``, ``mean``) or — worse —
+    silently succeed with a nonsensical result (``+`` concatenates, ``*`` repeats,
+    ``sum`` concatenates), so guard those methods explicitly and fail loudly.
+
+    Applied to arithmetic, ordering-comparison and reduction methods.
+
+    Raises
+    ------
+    TypeError
+        When the decorated method is called on a string-valued series.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: PointsInTimeSeries, *args, **kwargs):
+        if self._is_string:
+            raise TypeError(
+                f"{method.__name__} is not supported for string-valued PointsInTimeSeries"
+            )
+        return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class PointsInTimeSeries:
@@ -32,31 +61,62 @@ class PointsInTimeSeries:
             Array-like of values, one per time point.
         """
         assert len(tstarts) == len(values)
+        # Timestamps are always numeric. Values may be numeric or string:
+        # string-valued series support sampling (``synchronized`` / ``.where``)
+        # and equality comparisons (``==`` / ``!=``) only — arithmetic, ordering
+        # and numeric reductions are rejected (see the ``@_numeric_only`` methods).
+        # An empty series has no observed value type, so it defaults to numeric
+        # (the safe, backward-compatible case).
         self.tstarts = np.array(tstarts, dtype=np.float64)
-        self.values = np.array(values, dtype=np.float64)
+        self._is_string = np.asarray(values).dtype.kind in ("U", "S", "O")
+        if self._is_string:
+            self.values = np.asarray(values, dtype=object)
+        else:
+            self.values = np.array(values, dtype=np.float64)
 
     def dtype(self):
         """
         Returns the Spark data type for PointsInTimeSeries.
 
+        For numeric values the element is a homogeneous ``[tstart, value]`` double
+        pair (``ArrayType(ArrayType(DoubleType))``). String-valued series cannot use
+        that homogeneous nested array, so their element is a ``(tstart, value)``
+        struct with a double timestamp and a string value.
+
         Returns
         -------
         pyspark.sql.types.ArrayType
-            Spark ArrayType for points in time series: [[tstart_1, value_1], ...].
+            Spark ArrayType matching ``get_data``'s shape for this series' value type.
         """
+        if self._is_string:
+            return T.ArrayType(
+                T.StructType(
+                    [
+                        T.StructField("tstart", T.DoubleType()),
+                        T.StructField("value", T.StringType()),
+                    ]
+                )
+            )
         return T.ArrayType(T.ArrayType(T.DoubleType()))
 
     def get_data(self) -> list:
         """
-        Returns the series as a list of [tstart, value] lists.
+        Returns the series as a list of ``[tstart, value]`` pairs.
+
+        For numeric values this is a list of two-element double lists. For string
+        values, ``column_stack`` would coerce the timestamps to strings, so the
+        pairs are built explicitly as ``[float(tstart), str(value)]`` — matching the
+        struct element type declared by :meth:`dtype`.
 
         Returns
         -------
         list
-            List of [tstart, value] pairs.
+            List of ``[tstart, value]`` pairs.
         """
         if len(self) == 0:
             return []
+        if self._is_string:
+            return [[float(t), str(v)] for t, v in zip(self.tstarts, self.values, strict=True)]
         return np.column_stack([self.tstarts, self.values]).tolist()
 
     def __len__(self) -> int:
@@ -354,34 +414,42 @@ class PointsInTimeSeries:
             return PointsInTimeSeries(s0.tstarts, operation(s1.values, s0.values))
         return PointsInTimeSeries(self.tstarts, operation(other, self.values))
 
+    @_numeric_only
     def __add__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
         """Add another series or scalar to this series."""
         return self._apply_basic_op(np.add, other)
 
+    @_numeric_only
     def __radd__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
         """Add this series to another series or scalar (reversed operands)."""
         return self._apply_basic_rop(np.add, other)
 
+    @_numeric_only
     def __sub__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
         """Subtract another series or scalar from this series."""
         return self._apply_basic_op(np.subtract, other)
 
+    @_numeric_only
     def __rsub__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
         """Subtract this series from another series or scalar (reversed operands)."""
         return self._apply_basic_rop(np.subtract, other)
 
+    @_numeric_only
     def __mul__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
         """Multiply this series by another series or scalar."""
         return self._apply_basic_op(np.multiply, other)
 
+    @_numeric_only
     def __rmul__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
         """Multiply another series or scalar by this series (reversed operands)."""
         return self._apply_basic_rop(np.multiply, other)
 
+    @_numeric_only
     def __truediv__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
         """Divide this series by another series or scalar."""
         return self._apply_basic_op(np.true_divide, other)
 
+    @_numeric_only
     def __rtruediv__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
         """Divide another series or scalar by this series (reversed operands)."""
         return self._apply_basic_rop(np.true_divide, other)
@@ -411,18 +479,22 @@ class PointsInTimeSeries:
         idx = operation(self.values, other)
         return PointsInTime(self.tstarts[idx])
 
+    @_numeric_only
     def __gt__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTime:
         """Return points where this series is greater than another."""
         return self.__apply_op(np.greater, other)
 
+    @_numeric_only
     def __ge__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTime:
         """Return points where this series is greater than or equal to another."""
         return self.__apply_op(np.greater_equal, other)
 
+    @_numeric_only
     def __lt__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTime:
         """Return points where this series is less than another."""
         return self.__apply_op(np.less, other)
 
+    @_numeric_only
     def __le__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTime:
         """Return points where this series is less than or equal to another."""
         return self.__apply_op(np.less_equal, other)
@@ -448,6 +520,7 @@ class PointsInTimeSeries:
         """
         return len(self)
 
+    @_numeric_only
     def sum(self) -> FloatOrNaN:
         """
         Returns the sum of the values.
@@ -461,6 +534,7 @@ class PointsInTimeSeries:
             return np.nan
         return np.sum(self.values)
 
+    @_numeric_only
     def mean(self) -> FloatOrNaN:
         """
         Returns the mean of the values.
@@ -474,6 +548,7 @@ class PointsInTimeSeries:
             return np.nan
         return np.mean(self.values)
 
+    @_numeric_only
     def min(self) -> FloatOrNaN:
         """
         Returns the minimum value.
@@ -487,6 +562,7 @@ class PointsInTimeSeries:
             return np.nan
         return np.min(self.values)
 
+    @_numeric_only
     def max(self) -> FloatOrNaN:
         """
         Returns the maximum value.
