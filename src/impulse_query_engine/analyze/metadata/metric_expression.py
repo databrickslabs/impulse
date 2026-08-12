@@ -176,9 +176,9 @@ class MetricExpression(abc.ABC):
         ``operator.eq`` etc.); ``F.array_contains`` fills the array-membership case
         that has no ``operator`` equivalent.
 
-        Used for POI-backed metrics whose values are stored as a plain array,
-        e.g. ``q.metric("poi_defect_values").contains("P108B-17")`` alongside a
-        separate scalar ``q.metric("poi_defect_count") >= 3``.
+        Used for metrics whose values are stored as a plain array,
+        e.g. ``q.metric("values").contains("ABCD-17")``.
+        Can be used alongside the existing metric filters.
 
         Parameters
         ----------
