@@ -266,12 +266,16 @@ def test_incremental_modified_container_fewer_rows_deletes_stale(spark):
 
 
 def test_incremental_changed_definition_replaces(spark):
+    # Metrics enabled so this also covers a changed-definition refresh of the
+    # metrics table (no extra Report runs / no added suite time).
+    cc = CalculatedChannels(emit_channel_metrics=True)
+
     # Seed gold with factor 3.6.
     r1 = Report(
         name="calc_channel_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
-        config=dict(_config(is_enabled=False)),
+        config=dict(_config(is_enabled=False, calculated_channels=cc)),
     )
     ch1 = _add_channel(r1, factor=3.6)
     r1.determine_report()
@@ -282,6 +286,12 @@ def test_incremental_changed_definition_replaces(spark):
         .select("definition_hash")
         .first()[0]
     )
+    # Metric mean under the 3.6 definition (container 1), captured before the change.
+    mean_before = (
+        spark.read.table(_METRICS)
+        .filter((F.col("channel_id") == ch1.get_id()) & (F.col("container_id") == 1))
+        .first()["mean"]
+    )
 
     # Re-run incrementally with a changed factor → the changed-definition path
     # rewrites the rows in the unified MERGE (scoped by channel_id).
@@ -289,7 +299,7 @@ def test_incremental_changed_definition_replaces(spark):
         name="calc_channel_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
-        config=dict(_config(is_enabled=True)),
+        config=dict(_config(is_enabled=True, calculated_channels=cc)),
     )
     ch2 = _add_channel(r2, factor=3.7)
     assert ch2.get_id() == ch1.get_id()  # same identity → same entity id
@@ -303,6 +313,16 @@ def test_incremental_changed_definition_replaces(spark):
     assert hash_after != hash_before
     # A single dimension row per channel_id (upsert, not append).
     assert dim.filter(F.col("channel_id") == ch2.get_id()).count() == 1
+
+    # The metrics row was recomputed for the changed definition: the signal is
+    # `Vehicle Speed Sensor * factor`, so its duration-weighted mean scales
+    # linearly with the factor (3.6 → 3.7).
+    mean_after = (
+        spark.read.table(_METRICS)
+        .filter((F.col("channel_id") == ch2.get_id()) & (F.col("container_id") == 1))
+        .first()["mean"]
+    )
+    assert mean_after == pytest.approx(mean_before * 3.7 / 3.6)
 
 
 def test_incremental_identity_reorder_does_not_reprocess(spark):
@@ -459,6 +479,26 @@ def test_channel_metrics_emitted_and_usable_as_impulse_source(spark):
     fact = spark.read.table(_FACT)
     n_pairs = fact.select("container_id", "channel_id").distinct().count()
     assert metrics.count() == n_pairs
+
+    # Numeric KPIs match a hand-computed, duration-weighted aggregate of the gold
+    # fact rows (container 1). Independently reproduces the production semantics so
+    # a regression in the KPI math is caught end to end.
+    fact_rows = (
+        fact.filter((F.col("channel_id") == ch.get_id()) & (F.col("container_id") == 1))
+        .select("tstart", "tend", "value")
+        .collect()
+    )
+    durations = [r["tend"] - r["tstart"] for r in fact_rows]
+    values = [r["value"] for r in fact_rows]
+    exp_duration = max(r["tend"] for r in fact_rows) - min(r["tstart"] for r in fact_rows)
+    exp_mean = sum(v * d for v, d in zip(values, durations, strict=True)) / sum(durations)
+    m_row = metrics.filter(
+        (F.col("channel_id") == ch.get_id()) & (F.col("container_id") == 1)
+    ).first()
+    assert m_row["duration"] == exp_duration
+    assert m_row["min"] == pytest.approx(min(values))
+    assert m_row["max"] == pytest.approx(max(values))
+    assert m_row["mean"] == pytest.approx(exp_mean)
 
     # Round-trip: the fact + metrics pair is a valid Impulse silver source. Feed
     # them back as `channels` + `channel_metrics` (wide model: channel_name is a
