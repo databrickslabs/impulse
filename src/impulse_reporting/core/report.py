@@ -25,6 +25,7 @@ from impulse_reporting.core.report_utils import (
     cleanup_temp_tables,
     collect_solvable_expressions,
     dispatch_aggregations,
+    dispatch_calculated_channel_metrics,
     dispatch_calculated_channels,
     dispatch_events,
     group_selectables_by_type,
@@ -1107,32 +1108,26 @@ class Report:
         # schema (extra channels are ignored by the fact-driven left join).
         self.calculated_channel_metrics_dfs = {}
         if self.config.calculated_channels.emit_channel_metrics:
-            attribute_columns = self.config.calculated_channels.attribute_columns
-            kpis = self.config.calculated_channels.kpis
-            changed_metrics: dict = {}
-            unchanged_metrics: dict = {}
-            for type_name, full_channels in channels_by_type.items():
-                if not full_channels:
-                    continue
-                cls = ChannelType[type_name].value
-                changed_fact = changed_channel_dfs.get(type_name)
-                unchanged_fact = unchanged_channel_dfs.get(type_name)
-                if changed_fact is not None:
-                    changed_metrics[type_name] = cls.determine_channel_metrics(
-                        self.spark,
-                        full_channels,
-                        changed_fact,
-                        attribute_columns=attribute_columns,
-                        kpis=kpis,
-                    )
-                if unchanged_fact is not None:
-                    unchanged_metrics[type_name] = cls.determine_channel_metrics(
-                        self.spark,
-                        full_channels,
-                        unchanged_fact,
-                        attribute_columns=attribute_columns,
-                        kpis=kpis,
-                    )
+            cc = self.config.calculated_channels
+            # Pass the full per-type channel list to both buckets so changed and
+            # unchanged metrics share one schema (extra channels are dropped by the
+            # fact-driven left join in determine_channel_metrics).
+            changed_metrics = dispatch_calculated_channel_metrics(
+                self.spark,
+                channels_by_type,
+                changed_channel_dfs,
+                ChannelType,
+                attribute_columns=cc.attribute_columns,
+                kpis=cc.kpis,
+            )
+            unchanged_metrics = dispatch_calculated_channel_metrics(
+                self.spark,
+                channels_by_type,
+                unchanged_channel_dfs,
+                ChannelType,
+                attribute_columns=cc.attribute_columns,
+                kpis=cc.kpis,
+            )
             self.calculated_channel_metrics_dfs = merge_changed_unchanged(
                 changed_metrics, unchanged_metrics
             )

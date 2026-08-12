@@ -350,6 +350,66 @@ def dispatch_calculated_channels(
     return channel_dfs
 
 
+def dispatch_calculated_channel_metrics(
+    spark: SparkSession,
+    channels_by_type: dict[str, list],
+    fact_dfs_by_type: dict[str, DataFrame | None],
+    type_enum,
+    *,
+    attribute_columns: list[str],
+    kpis: list[str],
+) -> dict:
+    """Dispatch ``determine_channel_metrics`` calls per type.
+
+    Post-processing counterpart to :func:`dispatch_calculated_channels`: instead
+    of solving, it derives the silver-shaped ``channel_metrics`` DataFrame from the
+    already-solved fact df for each type (``fact_dfs_by_type`` as returned by
+    :func:`dispatch_calculated_channels`).
+
+    Pass the **full** per-type channel list (not a changed/unchanged split): the
+    metrics aggregation is fact-driven (a left join from the fact-derived
+    aggregate), so channels absent from ``fact_df`` are dropped, while the identity
+    columns are the union across all channels — keeping the changed and unchanged
+    metrics dfs on an identical schema for the downstream ``unionByName`` MERGE.
+
+    Parameters
+    ----------
+    spark : SparkSession
+    channels_by_type : dict[str, list]
+        Full per-type channel list.
+    fact_dfs_by_type : dict[str, DataFrame | None]
+        Per-type calculated-channel fact df for this bucket (changed or unchanged).
+    type_enum : ChannelType enum
+    attribute_columns : list[str]
+        Attribute keys to surface as columns.
+    kpis : list[str]
+        KPI names to compute.
+
+    Returns
+    -------
+    dict
+        ``metrics_dfs`` keyed by type name (only types with a fact df).
+    """
+    metrics_dfs: dict = {}
+
+    for type_name, channels in channels_by_type.items():
+        if not channels:
+            continue
+        fact_df = fact_dfs_by_type.get(type_name)
+        if fact_df is None:
+            continue
+        cls = type_enum[type_name].value
+        metrics_dfs[type_name] = cls.determine_channel_metrics(
+            spark,
+            channels,
+            fact_df,
+            attribute_columns=attribute_columns,
+            kpis=kpis,
+        )
+
+    return metrics_dfs
+
+
 def solve_expressions_batched(
     spark: SparkSession,
     expressions: list[TimeSeriesExpression],

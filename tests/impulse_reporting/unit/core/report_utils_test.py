@@ -12,6 +12,7 @@ from impulse_reporting.core.report import Report
 from impulse_reporting.core.report_utils import (
     build_batches,
     build_metadata_dfs,
+    dispatch_calculated_channel_metrics,
     dispatch_events,
     group_selectables_by_type,
     merge_changed_unchanged,
@@ -555,6 +556,88 @@ class TestDispatchEvents:
         )
 
         assert len(meta_calls) == 0
+
+
+class TestDispatchCalculatedChannelMetrics:
+    """Tests for dispatch_calculated_channel_metrics helper (routing only)."""
+
+    def _make_enum(self, cls):
+        mock_type_enum = MagicMock()
+        mock_type_enum.__getitem__.return_value.value = cls
+        return mock_type_enum
+
+    def test_empty_channels_by_type_returns_empty(self):
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={},
+            fact_dfs_by_type={},
+            type_enum=MagicMock(),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+        assert metrics == {}
+
+    def test_routes_fact_df_channels_and_config(self):
+        """Each type's fact df + channel list + config are forwarded verbatim."""
+        mock_result = MagicMock(spec=DataFrame)
+        mock_fact = MagicMock(spec=DataFrame)
+        channel = MagicMock()
+        received = {}
+
+        class FakeCls:
+            @classmethod
+            def determine_channel_metrics(cls, spark, channels, fact_df, **kwargs):
+                received["channels"] = channels
+                received["fact_df"] = fact_df
+                received["kwargs"] = kwargs
+                return mock_result
+
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": [channel]},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": mock_fact},
+            type_enum=self._make_enum(FakeCls),
+            attribute_columns=["unit"],
+            kpis=["duration", "mean"],
+        )
+
+        assert metrics["CALCULATED_CHANNEL"] is mock_result
+        assert received["channels"] == [channel]
+        assert received["fact_df"] is mock_fact
+        assert received["kwargs"] == {"attribute_columns": ["unit"], "kpis": ["duration", "mean"]}
+
+    def test_type_without_fact_df_is_skipped(self):
+        """A type present in channels but with no fact df (None) yields no entry."""
+        calls = []
+
+        class FakeCls:
+            @classmethod
+            def determine_channel_metrics(cls, spark, channels, fact_df, **kwargs):
+                calls.append(fact_df)
+                return MagicMock(spec=DataFrame)
+
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": [MagicMock()]},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": None},
+            type_enum=self._make_enum(FakeCls),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+
+        assert metrics == {}
+        assert calls == []  # determine_channel_metrics never invoked
+
+    def test_empty_channel_list_for_type_is_skipped(self):
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": []},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": MagicMock(spec=DataFrame)},
+            type_enum=MagicMock(),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+        assert metrics == {}
 
 
 # ============================================================================
