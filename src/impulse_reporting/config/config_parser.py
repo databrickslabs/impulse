@@ -156,7 +156,6 @@ class Source(BaseModel):
     channel_mapping_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
     unit_conversion_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
 
-    #todo probably add poi here as well so users can configure it
 
 class UnitySink(BaseModel):
     """
