@@ -116,7 +116,7 @@ calculated_channels = CalculatedChannels(
 )
 ```
 
-The schema is **dynamic**: fixed `container_id`, `channel_id`, `type` (`"CALC"`), `data_type` (`"double"`),
+The schema is **dynamic**: fixed `container_id`, `channel_id`, `data_type` (`"double"`),
 one column per configured KPI, one per identity key (union across the report's channels), and one per
 `attribute_columns` entry. `null` fills a key a channel omits; an identity key wins over an attribute key of
 the same name. KPIs are duration-weighted; an unknown KPI name is rejected at config validation. Adding a

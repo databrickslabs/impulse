@@ -200,9 +200,9 @@ narrow fact rows** (``container_id, channel_id, tstart, tend, value``),
 grouped by ``(container_id, channel_id)``.
 
 The output schema is **dynamic**: fixed columns ``container_id,
-channel_id, type, data_type`` plus one column per configured KPI (see
-``kpis``), one per identity key (the union across all ``channels``), and one
-per configured attribute key.  Identity/attribute values are pulled from
+channel_id, data_type`` plus one column per configured KPI (see ``kpis``),
+one per identity key (the union across all ``channels``), and one per
+configured attribute key.  Identity/attribute values are pulled from
 each channel's in-memory ``identity`` / ``attributes`` dicts (null where a
 channel omits a key).  On an identity/attribute key collision, identity wins
 and the attribute is skipped.

@@ -199,7 +199,6 @@ class TestDetermineChannelMetrics:
         r = rows[0]
         assert r["container_id"] == 1
         assert r["channel_id"] == cid
-        assert r["type"] == "CALC"
         assert r["data_type"] == "double"
         assert r["duration"] == 3  # max(tend) - min(tstart) = 3 - 0
         assert r["min"] == 10.0
@@ -294,7 +293,6 @@ class TestDetermineChannelMetrics:
             "container_id",
             "channel_id",
             "channel_name",
-            "type",
             "data_type",
             "duration",
             "min",
@@ -320,7 +318,7 @@ class TestDetermineChannelMetrics:
 
     def test_kpis_subset_only_emits_selected(self, spark):
         # Selecting a subset yields only those KPI columns (plus the fixed
-        # container/channel/identity/type/data_type columns).
+        # container/channel/identity/data_type columns).
         ch = CalculatedChannel("a", TimeSeriesSelector(None) * 1.0, {"channel_name": "s"})
         fact = spark.createDataFrame([(1, ch.get_id(), 0, 2, 10.0)], schema=_FACT_SCHEMA)
         out = CalculatedChannel.determine_channel_metrics(
@@ -330,7 +328,6 @@ class TestDetermineChannelMetrics:
             "container_id",
             "channel_id",
             "channel_name",
-            "type",
             "data_type",
             "mean",
         ]
