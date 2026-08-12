@@ -26,7 +26,11 @@ if TYPE_CHECKING:
     from impulse_reporting.incremental.definition_hash_comparator import (
         DefinitionHashComparator,
     )
-    from impulse_reporting.persist.report_storage import Sink, WriterFactory
+    from impulse_reporting.persist.report_storage import (
+        ReportEntityTransformer,
+        Sink,
+        WriterFactory,
+    )
 
 
 def build_batches(
@@ -859,3 +863,71 @@ def persist_dimensions_incremental(
         writer = factory.create_writer(entity_type)
         schema, uri = writer.extract_metadata_schema_and_output_uri(entity_type)
         sink.upsert(transform_fn(metadata_df, schema), uri, merge_keys)
+
+
+def persist_channel_metrics(
+    metrics_dfs_by_type: dict,
+    type_enum,
+    sink: Sink,
+    transformer: ReportEntityTransformer,
+    *,
+    incremental: bool,
+    updated_container_ids: list | None = None,
+) -> None:
+    """Persist the optional calculated-channel metrics table(s).
+
+    Unlike the fact/dimension writers, the metrics schema is **dynamic**
+    (identity/attribute/KPI columns vary per report), so this bypasses the
+    fixed-schema ``DefaultReportEntityWriter`` and writes the already-shaped
+    DataFrame directly (mirroring the ``container_dimension`` special-case). The
+    per-type dfs are grouped by output table via :func:`group_dfs_by_table` and
+    unioned with the same ``concat_dataframes`` the entity writer uses.
+
+    Full mode overwrites; incremental mode upserts on ``(container_id,
+    channel_id)`` and prunes stale rows from updated containers via
+    ``merge_incremental``.
+
+    Parameters
+    ----------
+    metrics_dfs_by_type : dict
+        ``{type_name: value}`` where value is a structured
+        ``{"changed", "unchanged"}`` dict or a bare DataFrame.
+    type_enum : Enum
+        The channel type-enum (resolves the metrics table name/uri).
+    sink : Sink
+        Target sink exposing ``store`` / ``merge_incremental``.
+    transformer : ReportEntityTransformer
+        Supplies ``concat_dataframes`` (union) and ``add_meta_information``.
+    incremental : bool
+        Whether to merge (True) or overwrite (False).
+    updated_container_ids : list, optional
+        Ids of updated containers, scoping the incremental delete-by-source.
+    """
+    if not metrics_dfs_by_type:
+        return
+
+    updated_container_ids = updated_container_ids or []
+
+    dfs_by_table = group_dfs_by_table(
+        metrics_dfs_by_type, lambda type_name: type_enum[type_name].get_metrics_table_name()
+    )
+
+    for table_name, dfs_list in dfs_by_table.items():
+        entity_type = type_enum.get_any_for_metrics_table(table_name)
+        # Resolve the metrics URI directly (no fixed-schema writer).
+        uri = sink.config.get_output_uri_channel_metrics_table(entity_type)
+        df_enriched = transformer.concat_dataframes(dfs_list).transform(
+            transformer.add_meta_information
+        )
+        if incremental:
+            delete_conditions = []
+            if updated_container_ids:
+                delete_conditions.append(F.col("target.container_id").isin(updated_container_ids))
+            sink.merge_incremental(
+                df_enriched,
+                uri,
+                ["container_id", "channel_id"],
+                delete_conditions=delete_conditions,
+            )
+        else:
+            sink.store(df_enriched, uri)

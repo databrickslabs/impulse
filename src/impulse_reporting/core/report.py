@@ -28,9 +28,9 @@ from impulse_reporting.core.report_utils import (
     dispatch_calculated_channel_metrics,
     dispatch_calculated_channels,
     dispatch_events,
-    group_dfs_by_table,
     group_selectables_by_type,
     merge_changed_unchanged,
+    persist_channel_metrics,
     persist_dimensions_full,
     persist_dimensions_incremental,
     persist_facts_full,
@@ -603,7 +603,13 @@ class Report:
 
         # optional calculated channel metrics table (dynamic schema — stored
         # directly without the fixed-schema projecting writer)
-        self._persist_channel_metrics(incremental=False)
+        persist_channel_metrics(
+            self.calculated_channel_metrics_dfs,
+            ChannelType,
+            self.sink,
+            ReportEntityTransformer(),
+            incremental=False,
+        )
 
         # persist measurement dimensions
         if self.container_dimension_df:
@@ -717,7 +723,11 @@ class Report:
 
         # Optional calculated channel metrics table (dynamic schema — merged
         # directly, scoping the delete-by-source to updated containers).
-        self._persist_channel_metrics(
+        persist_channel_metrics(
+            self.calculated_channel_metrics_dfs,
+            ChannelType,
+            self.sink,
+            transformer,
             incremental=True,
             updated_container_ids=updated_container_ids,
         )
@@ -752,65 +762,6 @@ class Report:
                     solver_cfg.channel_alias_col,
                 ],
             )
-
-    def _persist_channel_metrics(
-        self,
-        *,
-        incremental: bool,
-        updated_container_ids: list | None = None,
-    ):
-        """Persist the optional calculated-channel metrics table(s).
-
-        The metrics schema is dynamic (identity/attribute columns vary per
-        report), so this bypasses the fixed-schema ``DefaultReportEntityWriter``
-        and stores the already-shaped DataFrame directly — mirroring the
-        ``container_dimension`` special-case. Full mode overwrites; incremental
-        mode upserts on ``(container_id, channel_id)`` and prunes stale rows from
-        updated containers via ``merge_incremental``.
-
-        Parameters
-        ----------
-        incremental : bool
-            Whether to merge (True) or overwrite (False).
-        updated_container_ids : list, optional
-            Ids of updated containers, scoping the incremental delete-by-source.
-        """
-        import pyspark.sql.functions as F
-
-        if not self.calculated_channel_metrics_dfs:
-            return
-
-        transformer = ReportEntityTransformer()
-        updated_container_ids = updated_container_ids or []
-
-        # Group per-type metrics dfs by output table and union each group 
-        # via the same ``concat_dataframes`` the entity writer uses.
-        dfs_by_table = group_dfs_by_table(
-            self.calculated_channel_metrics_dfs,
-            lambda type_name: ChannelType[type_name].get_metrics_table_name(),
-        )
-
-        for table_name, dfs_list in dfs_by_table.items():
-            entity_type = ChannelType.get_any_for_metrics_table(table_name)
-            # Resolve the metrics URI directly (no fixed-schema writer).
-            uri = self.sink.config.get_output_uri_channel_metrics_table(entity_type)
-            df_enriched = transformer.concat_dataframes(dfs_list).transform(
-                transformer.add_meta_information
-            )
-            if incremental:
-                delete_conditions = []
-                if updated_container_ids:
-                    delete_conditions.append(
-                        F.col("target.container_id").isin(updated_container_ids)
-                    )
-                self.sink.merge_incremental(
-                    df_enriched,
-                    uri,
-                    ["container_id", "channel_id"],
-                    delete_conditions=delete_conditions,
-                )
-            else:
-                self.sink.store(df_enriched, uri)
 
     def _transform_for_persistence(
         self,

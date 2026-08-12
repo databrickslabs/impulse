@@ -16,6 +16,7 @@ from impulse_reporting.core.report_utils import (
     dispatch_events,
     group_dfs_by_table,
     group_selectables_by_type,
+    persist_channel_metrics,
     merge_changed_unchanged,
     persist_dimensions_full,
     persist_dimensions_incremental,
@@ -1327,3 +1328,68 @@ class TestPersistDimensionsIncremental:
             )
 
         sink.upsert.assert_called_once_with(foo_meta, "uri", ["channel_id"])
+
+
+class TestPersistChannelMetrics:
+    """Tests for the persist_channel_metrics free function (mock-based)."""
+
+    def _mocks(self):
+        combined = MagicMock(spec=DataFrame)
+        combined.transform.return_value = combined  # add_meta_information passthrough
+        transformer = MagicMock()
+        transformer.concat_dataframes.return_value = combined
+        type_enum = MagicMock()
+        type_enum.__getitem__.return_value.get_metrics_table_name.return_value = "metrics"
+        type_enum.get_any_for_metrics_table.return_value = "entity"
+        sink = MagicMock()
+        sink.config.get_output_uri_channel_metrics_table.return_value = "cat.sch.metrics"
+        return combined, transformer, type_enum, sink
+
+    def test_empty_is_noop(self):
+        sink = MagicMock()
+        persist_channel_metrics({}, MagicMock(), sink, MagicMock(), incremental=False)
+        sink.store.assert_not_called()
+        sink.merge_incremental.assert_not_called()
+
+    def test_full_mode_overwrites(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df}, type_enum, sink, transformer, incremental=False
+        )
+
+        sink.store.assert_called_once_with(combined, "cat.sch.metrics")
+        sink.merge_incremental.assert_not_called()
+
+    def test_incremental_merges_with_keys_and_delete_scope(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df},
+            type_enum,
+            sink,
+            transformer,
+            incremental=True,
+            updated_container_ids=[1, 2],
+        )
+
+        sink.store.assert_not_called()
+        args, kwargs = sink.merge_incremental.call_args
+        assert args[0] is combined
+        assert args[1] == "cat.sch.metrics"
+        assert args[2] == ["container_id", "channel_id"]
+        # updated containers → one delete-by-source predicate.
+        assert len(kwargs["delete_conditions"]) == 1
+
+    def test_incremental_without_updated_containers_has_no_delete_scope(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df}, type_enum, sink, transformer, incremental=True
+        )
+
+        _args, kwargs = sink.merge_incremental.call_args
+        assert kwargs["delete_conditions"] == []
