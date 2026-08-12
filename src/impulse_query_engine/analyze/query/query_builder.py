@@ -183,9 +183,10 @@ class QueryBuilder:
 
         Parameters
         ----------
-        dtype : PoiValueType, optional
+        dtype : PoiValueType or str, optional
             The POI channel's value data type: ``DOUBLE`` (default, numeric) or
-            ``STRING`` (e.g. DTC codes — only sampling and equality apply). This
+            ``STRING`` (e.g. DTC codes — only sampling and equality apply). Accepts
+            either the enum or its string value (``"double"`` / ``"string"``). This
             declared type drives plan-time result typing and string-op gating; it
             is validated against the silver ``poi_channels.dtype`` at solve time
             (an actual/declared mismatch raises).
@@ -197,13 +198,18 @@ class QueryBuilder:
         TimeSeriesSelector
             A selector stamped ``series_type=POINTS_IN_TIME`` with the given value type.
         """
+        # Accept a plain string ("string" / "double") as well as the enum, so
+        # poi_channel(..., dtype="string") behaves identically to the enum form.
+        value_type = PoiValueType(dtype)
         expr = None
         for k, arg in kwargs.items():
             if not expr:
                 expr = TagSelector(k) == str(arg)
             else:
                 expr = expr & (TagSelector(k) == str(arg))
-        return TimeSeriesSelector(expr, series_type=SeriesType.POINTS_IN_TIME, value_type=dtype)
+        return TimeSeriesSelector(
+            expr, series_type=SeriesType.POINTS_IN_TIME, value_type=value_type
+        )
 
     def select(self, *args) -> Self:
         """

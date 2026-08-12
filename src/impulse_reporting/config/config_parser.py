@@ -128,6 +128,10 @@ class Source(BaseModel):
         Full Unity Catalog path to the channel metrics table.
     channels_uri : str
         Full Unity Catalog path to the channels data table.
+    poi_channels_uri : str, optional
+        Full Unity Catalog path to the Points-in-Time (POI) channel data table.
+        Required only when the report selects POI channels via ``poi_channel()``;
+        omit it for sample-only data models.
     channel_mapping_table : str, optional
         Full Unity Catalog path to the channel mapping table. Required when using
         ``channel_with_alias()`` for logical alias resolution.
@@ -148,10 +152,10 @@ class Source(BaseModel):
     container_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channel_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channels_uri: Annotated[str, AfterValidator(is_valid_table_name)]
+    poi_channels_uri: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
     channel_mapping_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
     unit_conversion_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
 
-    #todo probably add poi here as well so users can configure it
 
 class UnitySink(BaseModel):
     """
