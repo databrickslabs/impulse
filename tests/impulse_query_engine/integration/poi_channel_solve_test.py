@@ -168,9 +168,9 @@ class TestMixAndMatch:
         amb = q.channel(channel_name="Ambient Air Temperature")
         dtc_count = q.poi_channel(channel_name="DTC_count")  # points at 3 POI instants
 
-        result = q.select(
-            amb.where(dtc_count.to_points_in_time()).alias("sampled")
-        ).solve(spark=spark, solver=solver)
+        result = q.select(amb.where(dtc_count.to_points_in_time()).alias("sampled")).solve(
+            spark=spark, solver=solver
+        )
 
         rows = {r.container_id: r.sampled for r in result.collect()}
         # The three POI instants (microsecond epochs) from basic_narrow_csv/poi_channels.csv.
