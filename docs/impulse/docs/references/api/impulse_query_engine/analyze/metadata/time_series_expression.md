@@ -3,6 +3,39 @@ sidebar_label: time_series_expression
 title: impulse_query_engine.analyze.metadata.time_series_expression
 ---
 
+## SeriesType
+
+```python
+class SeriesType(StrEnum)
+```
+
+How a channel's samples are interpreted (mirrors :class:`RawEncoder`).
+
+``SAMPLE`` — the default; ``[tstart, tend)`` intervals over which the value is
+*valid* (reconstructed by an interpolation method, zero-order hold today),
+backed by :class:`SampleSeries`.
+
+``POINTS_IN_TIME`` — ``(tᵢ, vᵢ)`` points valid *only at* their timestamps, no
+between-point validity, backed by :class:`PointsInTimeSeries`.
+
+
+## PoiValueType
+
+```python
+class PoiValueType(StrEnum)
+```
+
+The value data type of a POI channel — selects its ``poi_channels`` value
+
+column and which in-memory :class:`PointsInTimeSeries` variant is built.
+
+``DOUBLE`` — numeric points (``poi_channels.value_double``); the full
+arithmetic / ordering / reduction operator set applies.
+
+``STRING`` — string points (``poi_channels.value_string``, e.g. DTC codes);
+only sampling and equality apply (see :class:`PointsInTimeSeries`).
+
+
 ## TimeSeriesSelector
 
 ```python
@@ -12,7 +45,10 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization)
 #### \_\_init\_\_
 
 ```python
-def __init__(expr, uses_alias: bool = False)
+def __init__(expr,
+             uses_alias: bool = False,
+             series_type: SeriesType = SeriesType.SAMPLE,
+             value_type: PoiValueType = PoiValueType.DOUBLE)
 ```
 
 Initialize a TimeSeriesSelector.
@@ -20,6 +56,18 @@ Initialize a TimeSeriesSelector.
 **Arguments**:
 
 - `expr` (`TagExpression`): Tag expression to select.
+- `uses_alias` (`bool`): Whether the channel resolves via the channel-alias table.
+- `series_type` (`SeriesType`): How the selected channel's samples are interpreted.  ``SAMPLE``
+(default) builds a :class:`SampleSeries` — today's behavior,
+unchanged.  ``POINTS_IN_TIME`` builds a :class:`PointsInTimeSeries`
+(values valid only at their timestamps); identification / matching is
+identical, only the built object and its result dtype differ.  This is
+the plan-time source of truth for the series type (so ``dtype()`` is
+correct for a bare POI selection with no per-channel metadata lookup).
+- `value_type` (`PoiValueType`): For a ``POINTS_IN_TIME`` selection, the declared value data type
+(``DOUBLE`` / ``STRING``).  Ignored for ``SAMPLE``.  Drives plan-time
+typing and string-op gating; validated against the silver
+``poi_channels.dtype`` at solve time (assertion contract).
 
 #### dtype
 
@@ -31,7 +79,10 @@ Returns the Spark data type.
 
 **Returns**:
 
-`pyspark.sql.types.DataType`: Data type (BinaryType).
+`pyspark.sql.types.DataType`: ``BinaryType`` for a SAMPLE selection (serialized ``SampleSeries``),
+or the value-type-aware ``PointsInTimeSeries.dtype()`` for a
+POINTS_IN_TIME selection (``array<array<double>>`` for numeric,
+``array<struct<tstart,value>>`` for string).
 
 #### deserialize
 
@@ -39,7 +90,11 @@ Returns the Spark data type.
 def deserialize(d)
 ```
 
-Deserialize sample series after collection/toPandas.
+Deserialize a SAMPLE result after collection/toPandas.
+
+POINTS_IN_TIME results are serialized by ``get_data()`` (a plain
+``[[t, v], ...]`` list) and need no deserialization, so they are returned
+as-is; only a SAMPLE (binary) blob is decoded to a :class:`SampleSeries`.
 
 **Arguments**:
 
@@ -47,23 +102,21 @@ Deserialize sample series after collection/toPandas.
 
 **Returns**:
 
-`SampleSeries`: Deserialized sample series.
+`SampleSeries or Any`: Deserialized sample series (SAMPLE), else *d* unchanged.
 
 #### build
 
 ```python
-def build(cache: SeriesCache) -> SampleSeries
+def build(cache: SeriesCache)
 ```
 
-Instantiate a SampleSeries from given cache data.
+Instantiate the selected series from cache data.
 
-**Arguments**:
+Resolution is identical regardless of series type — resolve the matching
+candidates, take the first ``(container_id, channel_id)``, and let the
+cache build the right object.  The **data** is authoritative for the built
+type: :meth:`TimeSeriesCache.load_blob` returns a
 
-- `cache` (`SeriesCache`): Cache containing time series data.
-
-**Returns**:
-
-`SampleSeries`: Built sample series.
 
 #### get\_required\_tag\_exprs
 

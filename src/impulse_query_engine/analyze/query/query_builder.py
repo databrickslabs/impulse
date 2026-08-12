@@ -7,7 +7,9 @@ from pyspark.sql import DataFrame
 from impulse_query_engine.analyze.metadata.metric_expression import MetricSelector
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
+    PoiValueType,
     RequiresDeserialization,
+    SeriesType,
     TimeSeriesExpression,
     TimeSeriesSelector,
 )
@@ -160,6 +162,48 @@ class QueryBuilder:
             else:
                 expr = expr & (TagSelector(k) == str(arg))
         return TimeSeriesSelector(expr, uses_alias=True)
+
+    def poi_channel(
+        self, dtype: PoiValueType = PoiValueType.DOUBLE, **kwargs
+    ) -> TimeSeriesSelector:
+        """
+        Create a Points-in-Time (POI) channel selector.
+
+        Parallel to :meth:`channel` — it builds the **same** ``TimeSeriesSelector``
+        from a tag/column match on ``**kwargs`` (e.g.
+        ``poi_channel(channel_name="DTC")``), differing only in that it is stamped
+        ``series_type=POINTS_IN_TIME`` (so it solves to a
+        :class:`~impulse_query_engine.model.series.points_in_time_series.PointsInTimeSeries`
+        — a value valid only *at* each timestamp — rather than a ``SampleSeries``)
+        and carries the declared value ``dtype``.
+
+        Channel *identification* (tag/column match, ``get_selector_expr``,
+        ``required_tags``, ``selector_id``) is identical to :meth:`channel`; only
+        the built object and its result dtype differ.
+
+        Parameters
+        ----------
+        dtype : PoiValueType, optional
+            The POI channel's value data type: ``DOUBLE`` (default, numeric) or
+            ``STRING`` (e.g. DTC codes — only sampling and equality apply). This
+            declared type drives plan-time result typing and string-op gating; it
+            is validated against the silver ``poi_channels.dtype`` at solve time
+            (an actual/declared mismatch raises).
+        **kwargs : dict
+            Channel tag-value pairs, matched exactly like :meth:`channel`'s.
+
+        Returns
+        -------
+        TimeSeriesSelector
+            A selector stamped ``series_type=POINTS_IN_TIME`` with the given value type.
+        """
+        expr = None
+        for k, arg in kwargs.items():
+            if not expr:
+                expr = TagSelector(k) == str(arg)
+            else:
+                expr = expr & (TagSelector(k) == str(arg))
+        return TimeSeriesSelector(expr, series_type=SeriesType.POINTS_IN_TIME, value_type=dtype)
 
     def select(self, *args) -> Self:
         """

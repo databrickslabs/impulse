@@ -24,6 +24,11 @@ A PointsInTimeSeries associates a value to each timestamp. Unlike a SampleSeries
 a value is only defined *at* its timestamp and is not considered valid in between
 consecutive timestamps.
 
+The value type (numeric vs string) is inferred from *values*. An **empty**
+series has no values to infer from and therefore defaults to numeric; use
+:meth:`empty_string` when an explicitly string-typed empty series is needed
+(e.g. plan-time result typing of a bare string-POI selection).
+
 **Arguments**:
 
 - `tstarts` (`Sized`): Array-like of time points.
@@ -420,9 +425,27 @@ Returns a string representation for debugging.
 def empty() -> PointsInTimeSeries
 ```
 
-Returns an empty PointsInTimeSeries.
+Returns an empty (numeric) PointsInTimeSeries.
 
 **Returns**:
 
-`PointsInTimeSeries`: Empty PointsInTimeSeries object.
+`PointsInTimeSeries`: Empty numeric PointsInTimeSeries object.
+
+#### empty\_string
+
+```python
+def empty_string() -> PointsInTimeSeries
+```
+
+Returns an empty **string-valued** PointsInTimeSeries.
+
+An empty series has no values to infer a type from, so the constructor
+defaults to numeric; this factory forces the string value type. Used for
+plan-time result typing of a bare string-POI selection, where the empty
+series must report the string ``dtype()`` and reject numeric-only ops
+(e.g. ``mean()``) before any data is read.
+
+**Returns**:
+
+`PointsInTimeSeries`: Empty string-valued PointsInTimeSeries object.
 

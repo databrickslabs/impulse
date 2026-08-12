@@ -25,7 +25,7 @@ class EmptyTimeSeriesCache(SeriesCache):
         """
         return []
 
-    def load_blob(self, mid, cid, uses_alias: bool = False):
+    def load_blob(self, mid, cid, uses_alias: bool = False, series_type=None, value_type=None):
         """
         Return an empty SampleSeries for any container and channel ID.
 
@@ -38,6 +38,11 @@ class EmptyTimeSeriesCache(SeriesCache):
         uses_alias : bool, optional
             Unused by this cache; accepted for interface compatibility
             with :class:`SeriesCache`.
+        series_type, value_type : optional
+            Accepted for interface compatibility. The empty-series typing for a
+            POI selector is handled by ``TimeSeriesSelector.build`` (its length-0
+            branch), which returns the correctly typed empty series without
+            reaching this method.
 
         Returns
         -------

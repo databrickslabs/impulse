@@ -50,9 +50,14 @@ class TimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.df)
         return self.df[idx]
 
-    def load_blob(self, container_id, channel_id, uses_alias: bool = False):
+    def load_blob(
+        self, container_id, channel_id, uses_alias: bool = False, series_type=None, value_type=None
+    ):
         """
         Load a time series blob from disk.
+
+        ``series_type`` / ``value_type`` are accepted for interface compatibility
+        with :class:`SeriesCache`; this blob cache serves only SAMPLE series.
 
         Parameters
         ----------

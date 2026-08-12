@@ -11,6 +11,11 @@ from pyspark.sql import DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    PoiValueType,
+    SeriesType,
+)
+from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
@@ -43,7 +48,11 @@ class TimeSeriesCache(SeriesCache):
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
-            ``"conv"`` column is optional in *pdf*.
+            ``"conv"`` column is optional in *pdf*.  For a POI (``POINTS_IN_TIME``)
+            selector, :meth:`load_blob` builds a :class:`PointsInTimeSeries` — the
+            **selector** (not a per-row column) chooses the series type; the
+            ``"value_string"`` key names the string value column that a string POI
+            slice reads.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -52,6 +61,9 @@ class TimeSeriesCache(SeriesCache):
         self._val_col = col_map["val"]
         self._conv_col = col_map.get("conv")
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
+        # String POI slices read their value from this column; series-type dispatch
+        # is driven by the selector passed to load_blob, not a per-row marker.
+        self._value_string_col = col_map.get("value_string")
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
         meta_cols = [
@@ -98,13 +110,20 @@ class TimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
 
-    def load_blob(self, mid, cid, uses_alias: bool = False):
+    def load_blob(self, mid, cid, uses_alias: bool = False, series_type=None, value_type=None):
         """
         Load a time series blob from the DataFrame.
 
+        The **calling selector** chooses the series type (via *series_type* /
+        *value_type*), so no per-row discriminator column is needed: a
+        ``POINTS_IN_TIME`` selector yields a :class:`PointsInTimeSeries` (string-
+        valued when *value_type* is ``STRING``, else numeric), otherwise a
+        :class:`SampleSeries`. The declared type is validated against the silver
+        metadata in the solve prelude, so the data stays authoritative.
+
         When the underlying *pdf* carries a conversion-factor column (the
         column named by ``col_map["conv"]``) **and** the caller is an
-        aliased selector (``uses_alias=True``), the returned values are
+        aliased selector (``uses_alias=True``), the returned SAMPLE values are
         multiplied by that factor.  Direct selectors on the same physical
         channel always receive raw values — unit conversion is a property
         of the alias, not of the channel.
@@ -118,20 +137,80 @@ class TimeSeriesCache(SeriesCache):
         uses_alias : bool, optional
             ``True`` when the calling selector resolved via channel_mapping.
             Gates the per-channel conversion factor; defaults to ``False``.
+        series_type : SeriesType, optional
+            The calling selector's series type; ``POINTS_IN_TIME`` builds a
+            :class:`PointsInTimeSeries`. ``None`` (default) => SAMPLE.
+        value_type : PoiValueType, optional
+            For a POI selector, its declared value type; ``STRING`` reads the
+            string value column, otherwise the numeric one.
 
         Returns
         -------
-        SampleSeries
-            The loaded sample series object.
+        SampleSeries or PointsInTimeSeries
         """
         lo, hi = self._ranges.get((mid, cid), (0, 0))
         s = self.pdf.iloc[lo:hi]
+
+        if series_type == SeriesType.POINTS_IN_TIME:
+            self._assert_poi_data(s, value_type)
+            if value_type == PoiValueType.STRING:
+                # value_string is a populated string column, so the constructor
+                # infers the string value type from it.
+                return PointsInTimeSeries(s[self._ts_col], s[self._value_string_col])
+            return PointsInTimeSeries(s[self._ts_col], s[self._val_col])
+
         values = s[self._val_col]
         if self._has_conversion and len(s) > 0 and uses_alias:
             factor = s[self._conv_col].iloc[0]
             if pd.notna(factor):
                 values = values * factor
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
+
+    def _assert_poi_data(self, s, value_type) -> None:
+        """Validate a POI selector against the data it resolved to.
+
+        The selector drives series-type dispatch, but the silver data stays
+        authoritative: a ``poi_channel(...)`` selector must land on genuine POI
+        rows. POI rows carry a null ``tend`` (a point has no validity interval),
+        whereas SAMPLE rows always carry a real ``tend`` (non-nullable in
+        ``channels``); so a non-null ``tend`` on a POI-declared slice means the
+        selector was pointed at a SAMPLE channel. A ``STRING`` declaration
+        additionally requires a populated ``value_string``. Either mismatch raises
+        rather than silently reading the wrong column (mirrors the unit-conversion
+        conflict check).
+        """
+        if len(s) == 0:
+            return
+        if pd.notna(s[self._te_col].iloc[0]):
+            raise ValueError(
+                "POI channel series-type mismatch: poi_channel(...) resolved to a SAMPLE "
+                "channel (its rows carry a validity interval). Use channel(...) for SAMPLE "
+                "channels and poi_channel(...) for POINTS_IN_TIME channels."
+            )
+
+        has_string_col = self._value_string_col is not None and self._value_string_col in s.columns
+        string_all_null = has_string_col and s[self._value_string_col].isna().all()
+        double_all_null = s[self._val_col].isna().all()
+
+        if value_type == PoiValueType.STRING:
+            # A string POI channel must carry string values; all-null means the
+            # channel is actually numeric (declared the wrong dtype).
+            if not has_string_col or string_all_null:
+                raise ValueError(
+                    "POI channel dtype mismatch: poi_channel(dtype=string) resolved to a channel "
+                    "with no string values (it is a numeric POI channel). Pass dtype=double to "
+                    "poi_channel(...)."
+                )
+        else:
+            # A numeric POI channel must carry numeric values; all-null numeric
+            # with populated string values means the channel is actually a string
+            # channel (declared the wrong dtype).
+            if double_all_null and has_string_col and not string_all_null:
+                raise ValueError(
+                    "POI channel dtype mismatch: poi_channel(dtype=double) resolved to a channel "
+                    "whose numeric values are all null (it is a string POI channel). Pass "
+                    "dtype=string to poi_channel(...)."
+                )
 
 
 class DefaultSolver(QuerySolver):
@@ -1026,12 +1105,50 @@ class DefaultSolver(QuerySolver):
             self.config.value_col,
         )
 
+        # POI channel data is unioned in AFTER RLE encoding above, so its
+        # zero-duration points are never run-length merged. The inner join to
+        # channels_df below drops any POI rows whose channel was not selected, so
+        # unioning whenever a poi_channels table is configured is correct (a
+        # pure-SAMPLE query simply matches no POI channel_ids). Which object each
+        # channel builds is decided by the selector (passed to load_blob), not a
+        # per-row marker — SAMPLE rows just lack value_string.
+        q = self._union_poi_channel_data(query, q)
+
         joined_df = q.join(
             F.broadcast(channels_df),
             on=[self.config.container_id_col, self.config.channel_id_col],
         )
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         return q, joined_df, container_count
+
+    def _union_poi_channel_data(self, query, channels_q: DataFrame) -> DataFrame:
+        """Union POI channel-data rows into the (already-encoded) channel-data frame.
+
+        Reads ``poi_channels``, column-maps it, and projects it into the SAMPLE
+        channel-data superset — POI ``timestamp`` becomes ``tstart`` (``tend``
+        **null**, since a point has no validity interval, which is also the signal
+        the cache validates a POI selector against), ``value_double`` becomes the
+        numeric ``value`` column, and ``value_string`` rides alongside for a string
+        POI channel. No per-row ``series_type`` / ``dtype`` marker is shipped: the
+        selector drives series-type dispatch in :meth:`TimeSeriesCache.load_blob`.
+        Returns *channels_q* unchanged when no ``poi_channels`` table is configured.
+        """
+        db = query.db
+        if not (hasattr(db, "has_poi_channels") and db.has_poi_channels()):
+            return channels_q
+
+        cfg = self.config
+        poi = db.poi_channels(self.spark)
+        poi = self._apply_column_mapping(poi, cfg.poi_channels.column_name_mapping)
+        poi_proj = poi.select(
+            F.col(cfg.container_id_col),
+            F.col(cfg.channel_id_col),
+            F.col(cfg.poi_timestamp_col).alias(cfg.tstart_col),
+            F.lit(None).cast(T.LongType()).alias(cfg.tend_col),
+            F.col(cfg.poi_value_double_col).alias(cfg.value_col),
+            F.col(cfg.poi_value_string_col).alias(cfg.poi_value_string_col),
+        )
+        return channels_q.unionByName(poi_proj, allowMissingColumns=True)
 
     def _apply_grouped_map(self, joined_df, container_count, schema, solve_udf) -> DataFrame:
         """Run *solve_udf* per container, or return an empty frame when none match."""

@@ -143,6 +143,7 @@ class SolverConfig(BaseModel):
     channel_metrics: TableConfig = TableConfig()
     channel_mapping: ChannelMappingConfig = ChannelMappingConfig()
     channels: TableConfig = TableConfig()
+    poi_channels: TableConfig = TableConfig()
     unit_conversion: TableConfig = TableConfig()
 
     # ------------------------------------------------------------------
@@ -230,6 +231,26 @@ class SolverConfig(BaseModel):
     def value_col(self) -> str:
         """Internal column name for the signal value on the channels table."""
         return "value"
+
+    @property
+    def poi_timestamp_col(self) -> str:
+        """Internal column name for the point timestamp on the poi_channels table."""
+        return "timestamp"
+
+    @property
+    def poi_value_double_col(self) -> str:
+        """Internal column name for the numeric value on the poi_channels table."""
+        return "value_double"
+
+    @property
+    def poi_value_string_col(self) -> str:
+        """Internal column name for the string value on the poi_channels table."""
+        return "value_string"
+
+    @property
+    def poi_dtype_col(self) -> str:
+        """Internal column name for the per-row value-dtype discriminator on poi_channels."""
+        return "dtype"
 
     @property
     def tag_key_col(self) -> str:
@@ -379,4 +400,8 @@ class SolverConfig(BaseModel):
             "te": self.tend_col,
             "val": self.value_col,
             "conv": self.conversion_factor_col,
+            # String POI slices read their value from this column. Series-type
+            # dispatch is driven by the selector (passed to load_blob), so no
+            # per-row series_type / dtype marker column is needed in the frame.
+            "value_string": self.poi_value_string_col,
         }

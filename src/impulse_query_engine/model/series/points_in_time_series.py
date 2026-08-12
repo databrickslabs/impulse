@@ -53,6 +53,11 @@ class PointsInTimeSeries:
         a value is only defined *at* its timestamp and is not considered valid in between
         consecutive timestamps.
 
+        The value type (numeric vs string) is inferred from *values*. An **empty**
+        series has no values to infer from and therefore defaults to numeric; use
+        :meth:`empty_string` when an explicitly string-typed empty series is needed
+        (e.g. plan-time result typing of a bare string-POI selection).
+
         Parameters
         ----------
         tstarts : Sized
@@ -65,8 +70,6 @@ class PointsInTimeSeries:
         # string-valued series support sampling (``synchronized`` / ``.where``)
         # and equality comparisons (``==`` / ``!=``) only — arithmetic, ordering
         # and numeric reductions are rejected (see the ``@_numeric_only`` methods).
-        # An empty series has no observed value type, so it defaults to numeric
-        # (the safe, backward-compatible case).
         self.tstarts = np.array(tstarts, dtype=np.float64)
         self._is_string = np.asarray(values).dtype.kind in ("U", "S", "O")
         if self._is_string:
@@ -604,11 +607,34 @@ class PointsInTimeSeries:
     @staticmethod
     def empty() -> PointsInTimeSeries:
         """
-        Returns an empty PointsInTimeSeries.
+        Returns an empty (numeric) PointsInTimeSeries.
 
         Returns
         -------
         PointsInTimeSeries
-            Empty PointsInTimeSeries object.
+            Empty numeric PointsInTimeSeries object.
         """
         return PointsInTimeSeries([], [])
+
+    @staticmethod
+    def empty_string() -> PointsInTimeSeries:
+        """
+        Returns an empty **string-valued** PointsInTimeSeries.
+
+        An empty series has no values to infer a type from, so the constructor
+        defaults to numeric; this factory forces the string value type. Used for
+        plan-time result typing of a bare string-POI selection, where the empty
+        series must report the string ``dtype()`` and reject numeric-only ops
+        (e.g. ``mean()``) before any data is read.
+
+        Returns
+        -------
+        PointsInTimeSeries
+            Empty string-valued PointsInTimeSeries object.
+        """
+        # A single-element object array makes the constructor infer string, then
+        # slice back to empty so no value is retained.
+        series = PointsInTimeSeries([], [])
+        series._is_string = True
+        series.values = np.asarray([], dtype=object)
+        return series

@@ -14,6 +14,7 @@ class MeasurementDBConfig:
         channel_tags_table=None,
         channel_metrics_table=None,
         channels_uri=None,
+        poi_channels_uri=None,
         channel_mapping_table=None,
         unit_conversion_table=None,
         table_locations: str = "external_locations",
@@ -23,6 +24,9 @@ class MeasurementDBConfig:
         self.channel_tags_table = channel_tags_table
         self.channel_metrics_table = channel_metrics_table
         self.channels_uri = channels_uri
+        # Optional Points-in-Time (POI) channel-data table. ``None`` means no POI
+        # channels are configured, so POI-unaware deployments are unchanged.
+        self.poi_channels_uri = poi_channels_uri
         self.channel_mapping_table = channel_mapping_table
         self.unit_conversion_table = unit_conversion_table
         self.table_locations = table_locations
@@ -34,6 +38,7 @@ class MeasurementDBConfig:
         core_schema_name: str = "core",
         channel_mapping_table: str | None = None,
         unit_conversion_table: str | None = None,
+        poi_channels_uri: str | None = None,
     ):
         return MeasurementDBConfig(
             container_tags_table=f"{catalog_name}.{core_schema_name}.container_tags",
@@ -41,6 +46,7 @@ class MeasurementDBConfig:
             channel_tags_table=f"{catalog_name}.{core_schema_name}.channel_tags",
             channel_metrics_table=f"{catalog_name}.{core_schema_name}.channel_metrics",
             channels_uri=f"{catalog_name}.{core_schema_name}.channels",
+            poi_channels_uri=poi_channels_uri,
             channel_mapping_table=channel_mapping_table,
             unit_conversion_table=unit_conversion_table,
             table_locations="unity_catalog",
@@ -58,6 +64,7 @@ class MeasurementDBConfig:
                 "channel_metrics" if "channel_metrics" in debug_tables else None
             ),
             channels_uri="channels" if "channels" in debug_tables else None,
+            poi_channels_uri="poi_channels" if "poi_channels" in debug_tables else None,
             channel_mapping_table=(
                 "channel_mapping" if "channel_mapping" in debug_tables else None
             ),
@@ -102,6 +109,20 @@ class MeasurementDB:
 
     def channels(self, spark) -> DataFrame:
         return self._read_table(spark, self.config.channels_uri)
+
+    def has_poi_channels(self) -> bool:
+        """Whether a Points-in-Time (POI) channel-data table is configured."""
+        return getattr(self.config, "poi_channels_uri", None) is not None
+
+    def poi_channels(self, spark) -> DataFrame:
+        """Read the Points-in-Time (POI) channel-data table.
+
+        Parallel to :meth:`channels`. Raises if no ``poi_channels_uri`` is
+        configured — callers should gate on :meth:`has_poi_channels` first.
+        """
+        if not self.has_poi_channels():
+            raise ValueError("poi_channels_uri is not configured")
+        return self._read_table(spark, self.config.poi_channels_uri)
 
     def channel_mapping(self, spark) -> DataFrame:
         if self.config.channel_mapping_table is None:

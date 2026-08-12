@@ -52,6 +52,26 @@ CHANNEL_METRICS = T.StructType(
     ]
 )
 
+# Points-in-Time (POI) channel samples: a value defined only *at* its timestamp
+# (no derived tend / validity interval). Two typed value columns plus a per-row
+# dtype discriminator, since a POI value may be numeric or a string; exactly one of
+# value_double / value_string is populated per row, selected by dtype.
+#
+# A channel is a POI channel iff its data lives here rather than in ``channels`` —
+# table membership *is* the series-type discriminator, so no ``series_type`` column
+# is needed on ``channel_metrics``. A given (container_id, channel_id) lives in
+# exactly one of ``channels`` / ``poi_channels``.
+POI_CHANNELS_SCHEMA = T.StructType(
+    [
+        T.StructField("container_id", T.LongType(), nullable=False),
+        T.StructField("channel_id", T.IntegerType(), nullable=False),
+        T.StructField("timestamp", T.LongType(), nullable=False),
+        T.StructField("value_double", T.DoubleType()),
+        T.StructField("value_string", T.StringType()),
+        T.StructField("dtype", T.StringType(), nullable=False),
+    ]
+)
+
 CHANNELS_SCHEMA = T.StructType(
     [
         T.StructField("container_id", T.LongType(), nullable=False),
