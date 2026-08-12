@@ -152,6 +152,117 @@ def test_aggregations_empty():
     assert pts.count() == 0
 
 
+# --- string values ------------------------------------------------------------------------------
+# String-valued series support sampling and equality only; arithmetic, ordering
+# and numeric reductions are rejected. Timestamps stay numeric regardless.
+
+
+def test_string_values_stored_as_object_with_numeric_timestamps():
+    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"])
+    assert pts._is_string is True
+    assert pts.values.dtype == object
+    assert pts.tstarts.dtype == np.float64
+    nptest.assert_array_equal(pts.values, ["P108B", "U0046", "P108B"])
+
+
+def test_empty_series_defaults_to_numeric():
+    # No observed value type -> numeric (backward-compatible default).
+    assert PointsInTimeSeries.empty()._is_string is False
+
+
+def test_numeric_series_is_not_string():
+    assert PointsInTimeSeries([0, 1], [10, 20])._is_string is False
+
+
+def test_string_eq_scalar_returns_points_in_time():
+    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"])
+    result = pts == "P108B"
+    assert isinstance(result, PointsInTime)
+    nptest.assert_array_equal(result.tstarts, [1, 3])
+
+
+def test_string_ne_scalar_returns_points_in_time():
+    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"])
+    nptest.assert_array_equal((pts != "P108B").tstarts, [2])
+
+
+def test_string_eq_series_matches_on_value_and_timestamp():
+    p1 = PointsInTimeSeries([1, 2, 3], ["A", "B", "C"])
+    p2 = PointsInTimeSeries([2, 3, 4], ["X", "C", "C"])
+    # Common timestamps {2,3}; values equal only at t=3 ("C" == "C").
+    nptest.assert_array_equal((p1 == p2).tstarts, [3])
+
+
+def test_string_synchronized_with_sample_series_samples_values():
+    pts = PointsInTimeSeries([5, 15, 25], ["a", "b", "c"])
+    s = SampleSeries([0, 10, 20], [10, 20, 30], [1, 2, 3])
+    a, b = pts.synchronized(s)
+    nptest.assert_array_equal(a.tstarts, [5, 15, 25])
+    nptest.assert_array_equal(a.values, ["a", "b", "c"])
+    nptest.assert_array_equal(b.values, [1, 2, 3])
+
+
+def test_string_get_data_pairs_double_timestamp_with_string_value():
+    pts = PointsInTimeSeries([1, 2], ["P108B", "U0046"])
+    assert pts.get_data() == [[1.0, "P108B"], [2.0, "U0046"]]
+
+
+def test_string_dtype_is_struct_of_double_and_string():
+    pts = PointsInTimeSeries([1, 2], ["P108B", "U0046"])
+    assert pts.dtype() == T.ArrayType(
+        T.StructType(
+            [
+                T.StructField("tstart", T.DoubleType()),
+                T.StructField("value", T.StringType()),
+            ]
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        lambda p: p + "x",
+        lambda p: "x" + p,
+        lambda p: p - 1,
+        lambda p: 1 - p,
+        lambda p: p * 2,
+        lambda p: p / 2,
+    ],
+)
+def test_string_arithmetic_raises(op):
+    pts = PointsInTimeSeries([1, 2], ["A", "B"])
+    with pytest.raises(TypeError, match="string-valued"):
+        op(pts)
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        lambda p: p > "A",
+        lambda p: p >= "A",
+        lambda p: p < "Z",
+        lambda p: p <= "Z",
+    ],
+)
+def test_string_ordering_comparison_raises(op):
+    pts = PointsInTimeSeries([1, 2], ["A", "B"])
+    with pytest.raises(TypeError, match="string-valued"):
+        op(pts)
+
+
+@pytest.mark.parametrize("reduction", ["sum", "mean", "min", "max"])
+def test_string_reductions_raise(reduction):
+    pts = PointsInTimeSeries([1, 2], ["A", "B"])
+    with pytest.raises(TypeError, match="string-valued"):
+        getattr(pts, reduction)()
+
+
+def test_string_count_is_allowed():
+    # count is structural (not value-dependent), so it works for strings.
+    assert PointsInTimeSeries([1, 2, 3], ["A", "B", "C"]).count() == 3
+
+
 # --- plane_sweep --------------------------------------------------------------------------------
 
 
