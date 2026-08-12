@@ -28,6 +28,7 @@ from impulse_reporting.core.report_utils import (
     dispatch_calculated_channel_metrics,
     dispatch_calculated_channels,
     dispatch_events,
+    group_dfs_by_table,
     group_selectables_by_type,
     merge_changed_unchanged,
     persist_dimensions_full,
@@ -774,8 +775,6 @@ class Report:
         updated_container_ids : list, optional
             Ids of updated containers, scoping the incremental delete-by-source.
         """
-        from functools import reduce
-
         import pyspark.sql.functions as F
 
         if not self.calculated_channel_metrics_dfs:
@@ -784,25 +783,20 @@ class Report:
         transformer = ReportEntityTransformer()
         updated_container_ids = updated_container_ids or []
 
-        # Group per-type metrics dfs by output table (parallels persist_facts_*).
-        dfs_by_table: dict[str, list[DataFrame]] = {}
-        for type_name, dfs in self.calculated_channel_metrics_dfs.items():
-            if isinstance(dfs, dict):
-                candidates = [dfs.get(key) for key in ("changed", "unchanged")]
-            else:
-                candidates = [dfs]
-            table_dfs = [df for df in candidates if df is not None]
-            if not table_dfs:
-                continue
-            table_name = ChannelType[type_name].get_metrics_table_name()
-            dfs_by_table.setdefault(table_name, []).extend(table_dfs)
+        # Group per-type metrics dfs by output table and union each group 
+        # via the same ``concat_dataframes`` the entity writer uses.
+        dfs_by_table = group_dfs_by_table(
+            self.calculated_channel_metrics_dfs,
+            lambda type_name: ChannelType[type_name].get_metrics_table_name(),
+        )
 
         for table_name, dfs_list in dfs_by_table.items():
             entity_type = ChannelType.get_any_for_metrics_table(table_name)
             # Resolve the metrics URI directly (no fixed-schema writer).
             uri = self.sink.config.get_output_uri_channel_metrics_table(entity_type)
-            combined = reduce(lambda a, b: a.unionByName(b), dfs_list)
-            df_enriched = combined.transform(transformer.add_meta_information)
+            df_enriched = transformer.concat_dataframes(dfs_list).transform(
+                transformer.add_meta_information
+            )
             if incremental:
                 delete_conditions = []
                 if updated_container_ids:

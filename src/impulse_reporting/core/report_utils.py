@@ -619,6 +619,43 @@ def _fact_dfs_for_table(dfs) -> list[DataFrame]:
     return [dfs] if dfs is not None else []
 
 
+def group_dfs_by_table(
+    dfs_by_type: dict,
+    table_name_getter: Callable[[str], str],
+) -> dict[str, list[DataFrame]]:
+    """Group per-type DataFrames by output table name.
+
+    Shared shaping step for the "write one table per output" persistence paths:
+    flattens each per-type value (a ``{"changed", "unchanged"}`` dict or a bare
+    DataFrame, via :func:`_fact_dfs_for_table`) and buckets the DataFrames by the
+    table name that ``table_name_getter`` returns for the type (so types sharing a
+    table land together). Types that contribute no DataFrame are skipped, so every
+    returned list is non-empty. Callers union each list themselves (e.g. via
+    ``ReportEntityTransformer.concat_dataframes`` / the entity writer).
+
+    Parameters
+    ----------
+    dfs_by_type : dict
+        ``{type_name: value}`` where value is a structured
+        ``{"changed", "unchanged"}`` dict or a bare DataFrame.
+    table_name_getter : Callable[[str], str]
+        Maps a type name to its output table name (e.g.
+        ``lambda t: ChannelType[t].get_metrics_table_name()``).
+
+    Returns
+    -------
+    dict[str, list[DataFrame]]
+        ``{table_name: [dfs]}`` for each table with at least one DataFrame.
+    """
+    dfs_by_table: dict[str, list[DataFrame]] = {}
+    for type_name, dfs in dfs_by_type.items():
+        table_dfs = _fact_dfs_for_table(dfs)
+        if not table_dfs:
+            continue
+        dfs_by_table.setdefault(table_name_getter(type_name), []).extend(table_dfs)
+    return dfs_by_table
+
+
 def persist_facts_full(dfs_by_type: dict, type_enum, writer_factory: WriterFactory) -> None:
     """Full-overwrite persist of fact DataFrames, grouped by output table.
 
@@ -635,14 +672,11 @@ def persist_facts_full(dfs_by_type: dict, type_enum, writer_factory: WriterFacto
     writer_factory : WriterFactory
         Factory producing the entity writer.
     """
-    dfs_by_table: dict[str, list[DataFrame]] = {}
-    for type_name, dfs in dfs_by_type.items():
-        table_name = type_enum[type_name].get_fact_table_name()
-        dfs_by_table.setdefault(table_name, []).extend(_fact_dfs_for_table(dfs))
+    dfs_by_table = group_dfs_by_table(
+        dfs_by_type, lambda type_name: type_enum[type_name].get_fact_table_name()
+    )
 
     for table_name, dfs_list in dfs_by_table.items():
-        if not dfs_list:
-            continue
         entity_type = type_enum.get_any_for_fact_table(table_name)
         writer = writer_factory.create_writer(entity_type)
         schema, uri = writer.extract_fact_schema_and_output_uri(entity_type)

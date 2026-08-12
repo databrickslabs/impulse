@@ -14,6 +14,7 @@ from impulse_reporting.core.report_utils import (
     build_metadata_dfs,
     dispatch_calculated_channel_metrics,
     dispatch_events,
+    group_dfs_by_table,
     group_selectables_by_type,
     merge_changed_unchanged,
     persist_dimensions_full,
@@ -638,6 +639,41 @@ class TestDispatchCalculatedChannelMetrics:
             kpis=["mean"],
         )
         assert metrics == {}
+
+
+class TestGroupDfsByTable:
+    """Tests for the group-per-output-table shaping helper (returns lists)."""
+
+    def test_empty_returns_empty(self):
+        assert group_dfs_by_table({}, lambda _t: "tbl") == {}
+
+    def test_bare_df_grouped_into_list(self):
+        df = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table({"A": df}, lambda _t: "tbl_a")
+        assert out == {"tbl_a": [df]}
+
+    def test_changed_unchanged_dict_flattened_changed_then_unchanged(self):
+        changed = MagicMock(spec=DataFrame)
+        unchanged = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table(
+            {"A": {"changed": changed, "unchanged": unchanged}}, lambda _t: "tbl_a"
+        )
+        # Order is changed then unchanged (per _fact_dfs_for_table).
+        assert out == {"tbl_a": [changed, unchanged]}
+
+    def test_types_sharing_a_table_are_combined(self):
+        df_a = MagicMock(spec=DataFrame)
+        df_b = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table({"A": df_a, "B": df_b}, lambda _t: "shared")
+        assert out == {"shared": [df_a, df_b]}
+
+    def test_none_and_empty_values_skipped(self):
+        df = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table(
+            {"A": None, "B": {"changed": None, "unchanged": None}, "C": df},
+            lambda t: t,
+        )
+        assert out == {"C": [df]}
 
 
 # ============================================================================
