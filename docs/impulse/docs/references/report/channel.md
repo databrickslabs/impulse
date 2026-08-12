@@ -160,7 +160,7 @@ the report's channels), and one per configured attribute key.
 | `channel_id`   | `long`   | Calculated-channel identifier (matches the fact and dimension).                                 |
 | *identity cols*| `str`    | One column per identity key (e.g. `channel_name`, `data_key`); `null` where a channel omits it. |
 | *attribute cols*| `str`   | One column per `attribute_columns` entry (e.g. `unit`); `null` where a channel omits it.        |
-| `data_type`    | `str`    | `"double"`.                                                                                      |
+| `value_type`   | `str`    | `"double"`.                                                                                      |
 | *kpi cols*     | `double` | One column per configured KPI, in order (default `duration`, `min`, `max`, `mean`).             |
 
 The KPIs are duration-weighted (matching the silver ingestion semantics): `duration` is the span

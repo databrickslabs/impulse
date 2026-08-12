@@ -245,7 +245,7 @@ class CalculatedChannel:
         grouped by ``(container_id, channel_id)``.
 
         The output schema is **dynamic**: fixed columns ``container_id,
-        channel_id, data_type`` plus one column per configured KPI (see ``kpis``),
+        channel_id, value_type`` plus one column per configured KPI (see ``kpis``),
         one per identity key (the union across all ``channels``), and one per
         configured attribute key.  Identity/attribute values are pulled from
         each channel's in-memory ``identity`` / ``attributes`` dicts (null where a
@@ -310,14 +310,14 @@ class CalculatedChannel:
         meta_df = spark.createDataFrame(meta_rows, schema=meta_schema)
 
         result = agg_df.join(meta_df, on="channel_id", how="left").withColumn(
-            "data_type", F.lit("double")
+            "value_type", F.lit("double")
         )
 
         ordered_columns = (
             ["container_id", "channel_id"]
             + identity_keys
             + effective_attribute_keys
-            + ["data_type"]
+            + ["value_type"]
             + kpis
         )
         return result.select(*ordered_columns)

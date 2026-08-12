@@ -189,7 +189,7 @@ calculated_channel_fact {
 calculated_channel_metrics {
     int container_id
     long channel_id
-    string data_type
+    string value_type
     double duration
     double min
     double max

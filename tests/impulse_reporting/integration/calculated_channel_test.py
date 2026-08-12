@@ -442,7 +442,7 @@ def test_channel_metrics_emitted_and_usable_as_impulse_source(spark):
         "channel_name",
         "data_key",
         "unit",
-        "data_type",
+        "value_type",
         "duration",
         "min",
         "max",
@@ -451,7 +451,7 @@ def test_channel_metrics_emitted_and_usable_as_impulse_source(spark):
         assert col in metrics.columns, col
 
     row = metrics.filter(F.col("channel_id") == ch.get_id()).first()
-    assert row["data_type"] == "double"
+    assert row["value_type"] == "double"
     assert row["channel_name"] == "speed_kmh"
     assert row["data_key"] == "CALC"
     assert row["unit"] == "km/h"
