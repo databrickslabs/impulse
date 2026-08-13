@@ -18,10 +18,13 @@ is driven by :class:`Report` to compute the channel across containers, persist
 the narrow result to a gold fact table, and update it incrementally.
 
 Structurally parallels :class:`BasicEvent` (holds an aliased expression,
-name-derived id, SHA-256 definition hash) but — like ``ContainerEvent`` — it
-drives its own solve via ``QueryBuilder.solve_calculated_channels`` rather than
-riding the centralized wide ``solved_df``.  It is dispatched separately from
-the batch solve (never passed to ``collect_solvable_expressions``).
+name-derived id, SHA-256 definition hash). Like the other entity types, its
+narrow solve is batched from :class:`Report` (see
+``Report._solve_calculated_channels_batched``): the channels are partitioned by
+``batch_size``, each batch solved via ``QueryBuilder.solve_calculated_channels``
+and persisted as a temp table, then the batches are unioned into a narrow
+``solved_df``. :meth:`determine_calculated_channels` shapes that already-solved
+df, mirroring ``determine_aggregations`` / ``determine_events``.
 
 **Arguments**:
 
@@ -140,30 +143,30 @@ def determine_calculated_channels(
         spark: SparkSession,
         channels: list[CalculatedChannel],
         *,
-        query: QueryBuilder = None,
-        solver: QuerySolver = None,
-        pre_filtered_containers_df: DataFrame = None) -> DataFrame | None
+        solved_df: DataFrame = None) -> DataFrame | None
 ```
 
-Solve the given channels and shape the result into fact rows.
+Shape the already-solved narrow rows into this type's fact rows.
 
-Drives ``QueryBuilder.solve_calculated_channels`` (the narrow, many-rows-
-per-container endpoint) with the report's ``query`` + ``solver``, then
-projects to :data:`CALCULATED_CHANNEL_FACT_SCHEMA`.  Because each channel's
-``channel_id`` was fixed to its entity id at construction, no id-join is
-needed.
+Mirrors ``determine_aggregations`` / ``determine_events``: the batched
+narrow solve happens in the ``Report`` (see
+``Report._solve_calculated_channels_batched``), and this only *shapes* the
+resulting ``solved_df``: it selects the rows for these channels (by
+``channel_id``) and projects to :data:`CALCULATED_CHANNEL_FACT_SCHEMA`.
+Each channel's ``channel_id`` was fixed to its entity id at construction,
+so the filter needs no join.
 
 **Arguments**:
 
-- `spark` (`SparkSession`): Spark session, forwarded to ``QueryBuilder.solve_calculated_channels``.
-- `channels` (`list of CalculatedChannel`): Channels to solve; identity keys may differ across channels.
-- `query` (`QueryBuilder`): Query builder used to select and solve the channels.
-- `solver` (`QuerySolver`): Solver implementing ``solve_calculated_channels`` (a ``DefaultSolver``).
-- `pre_filtered_containers_df` (`DataFrame`): Incremental container subset; ``None`` processes all containers.
+- `spark` (`SparkSession`): Active Spark session (unused; kept for dispatcher symmetry).
+- `channels` (`list of CalculatedChannel`): The channels whose rows to select from ``solved_df``.
+- `solved_df` (`DataFrame`): Narrow batched solve output (``container_id, channel_id, tstart, tend,
+value, identity``). ``None`` (no channels solved) returns ``None``.
 
 **Returns**:
 
-`DataFrame or None`: Narrow fact DataFrame, or ``None`` when there are no channels.
+`DataFrame or None`: Narrow fact DataFrame, or ``None`` when there are no channels or no
+solved rows.
 
 #### determine\_metadata\_df
 

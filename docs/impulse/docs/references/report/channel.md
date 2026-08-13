@@ -65,7 +65,7 @@ speed_kmh = CalculatedChannel(
 ### How it works
 
 1. The `expr` is evaluated per measurement container by the solver, yielding a `SampleSeries` for each container.
-2. Calculated channels take their **own narrow solve path** (`QueryBuilder.solve_calculated_channels`), distinct from the wide batch solve used by events and aggregations. Multi-channel expressions (e.g. `rpm + speed`) are time-base synchronized automatically; emitted intervals are the intersection.
+2. The channels' narrow solve is **batched from the `Report`** (the same pattern events and aggregations use): the channels are partitioned by `query_engine.batch_size`, each batch is solved via `QueryBuilder.solve_calculated_channels` and persisted as a temporary table (`__impulse_temp_{run_id}_{batch_idx}`), and the batches are unioned into the final `calculated_channel_fact`. Multi-channel expressions (e.g. `rpm + speed`) are time-base synchronized automatically; emitted intervals are the intersection.
 3. Each series is exploded into one row per sample interval: `container_id, channel_id, tstart, tend, value`. The `identity` is **not** on the fact — it lives on the dimension, joined via `channel_id`.
 4. The `channel_id` is a deterministic hash of the sorted `identity` — the same value appears in both the fact and dimension tables, so they join directly.
 5. The sample rows are written to the `calculated_channel_fact` table; the channel definition (name, description, expression, identity) is written to the `calculated_channel_dimension` table.

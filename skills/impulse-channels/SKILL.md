@@ -87,6 +87,17 @@ df.show()  # [container_id, channel_id, tstart, tend, value, identity]
 All selections in one call must be `CalculatedChannel`s; identity keys are arbitrary and need not match
 across selections.
 
+## Batching (in a Report)
+
+Inside a `Report`, calculated channels are solved in **batches**, the same pattern events and
+aggregations use (see `impulse-reporting`). The channels are partitioned by `query_engine.batch_size`
+(max unique input selectors per batch), each batch is solved via `solve_calculated_channels` and
+persisted as a temp table (`__impulse_temp_{run_id}_{batch_idx}` in the sink schema, or a Spark temp
+view when sinkless), and the batches are unioned into the final `calculated_channel_fact`. The temp
+tables share the `__impulse_temp_*` prefix, so they are cleaned up like the aggregation/event batches
+(`unity_sink.cleanup_temp_tables`). This is internal orchestration; the `add_calculated_channel` API is
+unchanged.
+
 ## Output schema
 
 **calculated_channel_dimension** (one row per channel per report) — key columns: `channel_id`,

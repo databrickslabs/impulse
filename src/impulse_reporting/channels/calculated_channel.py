@@ -45,10 +45,13 @@ class CalculatedChannel:
     the narrow result to a gold fact table, and update it incrementally.
 
     Structurally parallels :class:`BasicEvent` (holds an aliased expression,
-    name-derived id, SHA-256 definition hash) but — like ``ContainerEvent`` — it
-    drives its own solve via ``QueryBuilder.solve_calculated_channels`` rather than
-    riding the centralized wide ``solved_df``.  It is dispatched separately from
-    the batch solve (never passed to ``collect_solvable_expressions``).
+    name-derived id, SHA-256 definition hash). Like the other entity types, its
+    narrow solve is batched from :class:`Report` (see
+    ``Report._solve_calculated_channels_batched``): the channels are partitioned by
+    ``batch_size``, each batch solved via ``QueryBuilder.solve_calculated_channels``
+    and persisted as a temp table, then the batches are unioned into a narrow
+    ``solved_df``. :meth:`determine_calculated_channels` shapes that already-solved
+    df, mirroring ``determine_aggregations`` / ``determine_events``.
 
     Parameters
     ----------
@@ -181,7 +184,7 @@ class CalculatedChannel:
         Mirrors ``determine_aggregations`` / ``determine_events``: the batched
         narrow solve happens in the ``Report`` (see
         ``Report._solve_calculated_channels_batched``), and this only *shapes* the
-        resulting ``solved_df`` — it selects the rows for these channels (by
+        resulting ``solved_df``: it selects the rows for these channels (by
         ``channel_id``) and projects to :data:`CALCULATED_CHANNEL_FACT_SCHEMA`.
         Each channel's ``channel_id`` was fixed to its entity id at construction,
         so the filter needs no join.
