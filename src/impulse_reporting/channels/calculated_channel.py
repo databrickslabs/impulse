@@ -13,8 +13,6 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.channels.calculated_channel import (
     CalculatedChannel as QeCalculatedChannel,
 )
-from impulse_query_engine.analyze.query.query_builder import QueryBuilder
-from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.channels.calculated_channel_kpis import (
     DEFAULT_KPIS,
@@ -176,44 +174,41 @@ class CalculatedChannel:
         spark: SparkSession,
         channels: list[CalculatedChannel],
         *,
-        query: QueryBuilder = None,
-        solver: QuerySolver = None,
-        pre_filtered_containers_df: DataFrame = None,
+        solved_df: DataFrame = None,
     ) -> DataFrame | None:
-        """Solve the given channels and shape the result into fact rows.
+        """Shape the already-solved narrow rows into this type's fact rows.
 
-        Drives ``QueryBuilder.solve_calculated_channels`` (the narrow, many-rows-
-        per-container endpoint) with the report's ``query`` + ``solver``, then
-        projects to :data:`CALCULATED_CHANNEL_FACT_SCHEMA`.  Because each channel's
-        ``channel_id`` was fixed to its entity id at construction, no id-join is
-        needed.
+        Mirrors ``determine_aggregations`` / ``determine_events``: the batched
+        narrow solve happens in the ``Report`` (see
+        ``Report._solve_calculated_channels_batched``), and this only *shapes* the
+        resulting ``solved_df`` — it selects the rows for these channels (by
+        ``channel_id``) and projects to :data:`CALCULATED_CHANNEL_FACT_SCHEMA`.
+        Each channel's ``channel_id`` was fixed to its entity id at construction,
+        so the filter needs no join.
 
         Parameters
         ----------
         spark : SparkSession
-            Spark session, forwarded to ``QueryBuilder.solve_calculated_channels``.
+            Active Spark session (unused; kept for dispatcher symmetry).
         channels : list of CalculatedChannel
-            Channels to solve; identity keys may differ across channels.
-        query : QueryBuilder
-            Query builder used to select and solve the channels.
-        solver : QuerySolver
-            Solver implementing ``solve_calculated_channels`` (a ``DefaultSolver``).
-        pre_filtered_containers_df : DataFrame, optional
-            Incremental container subset; ``None`` processes all containers.
+            The channels whose rows to select from ``solved_df``.
+        solved_df : DataFrame, optional
+            Narrow batched solve output (``container_id, channel_id, tstart, tend,
+            value, identity``). ``None`` (no channels solved) returns ``None``.
 
         Returns
         -------
         DataFrame or None
-            Narrow fact DataFrame, or ``None`` when there are no channels.
+            Narrow fact DataFrame, or ``None`` when there are no channels or no
+            solved rows.
         """
-        if not channels:
+        if not channels or solved_df is None:
             return None
 
-        qe_channels = [channel.expression for channel in channels]
-        df = query.select(*qe_channels).solve_calculated_channels(
-            spark, solver, pre_filtered_containers_df
+        channel_ids = [channel.get_id() for channel in channels]
+        return solved_df.filter(F.col("channel_id").isin(channel_ids)).select(
+            *CALCULATED_CHANNEL_FACT_SCHEMA.fieldNames()
         )
-        return df.select(*CALCULATED_CHANNEL_FACT_SCHEMA.fieldNames())
 
     @classmethod
     def determine_metadata_df(cls, spark: SparkSession, channels: list[CalculatedChannel]):

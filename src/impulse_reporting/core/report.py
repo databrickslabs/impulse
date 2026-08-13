@@ -35,6 +35,7 @@ from impulse_reporting.core.report_utils import (
     persist_dimensions_incremental,
     persist_facts_full,
     persist_facts_incremental,
+    solve_calculated_channels_batched,
     solve_expressions_batched,
     split_by_hash_change,
 )
@@ -888,6 +889,28 @@ class Report:
             pre_filtered_containers_df=pre_filtered_containers_df,
         )
 
+    def _solve_calculated_channels_batched(
+        self,
+        qe_channels: list,
+        pre_filtered_containers_df: DataFrame = None,
+    ) -> DataFrame | None:
+        """Solve calculated channels in configurable batches; return the unioned rows.
+
+        Narrow counterpart to :meth:`_solve_expressions_batched`; delegates to
+        :func:`solve_calculated_channels_batched` in ``report_utils``.
+        """
+        return solve_calculated_channels_batched(
+            spark=self.spark,
+            qe_channels=qe_channels,
+            query=self.query,
+            solver=self.solver,
+            batch_size=self.config.query_engine.batch_size,
+            has_sink=self._has_sink,
+            catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
+            schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
+            pre_filtered_containers_df=pre_filtered_containers_df,
+        )
+
     @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
         """
@@ -1031,9 +1054,10 @@ class Report:
             aggs_by_type, AggregationType, self.spark
         )
 
-        # Calculated channels: own narrow solve (not the wide solved_df).
-        # Changed definitions recompute over all containers; unchanged ones over
-        # the incrementally-detected subset.
+        # Calculated channels: own narrow batched solve driven here (mirrors the
+        # wide expression solve above), producing a narrow ``solved_df`` that each
+        # channel type then shapes. Changed definitions recompute over all
+        # containers; unchanged ones over the incrementally-detected subset.
         self._validate_unique_calculated_channels()
         channels_by_type = group_selectables_by_type(self.calculated_channels, ChannelType)
         changed_channels_by_type, unchanged_channels_by_type, self._changed_channel_ids = (
@@ -1046,21 +1070,31 @@ class Report:
                 kind="channel",
             )
         )
+        # Collect the query-engine channel expressions across types for the batched
+        # solve (mirrors collect_solvable_expressions for aggregations/events).
+        changed_channel_exprs = [
+            c.expression for cs in changed_channels_by_type.values() for c in cs
+        ]
+        unchanged_channel_exprs = [
+            c.expression for cs in unchanged_channels_by_type.values() for c in cs
+        ]
+        changed_channel_solved_df = self._solve_calculated_channels_batched(
+            changed_channel_exprs, pre_filtered_containers_df=None
+        )
+        unchanged_channel_solved_df = self._solve_calculated_channels_batched(
+            unchanged_channel_exprs, pre_filtered_containers_df=pre_filtered_containers_df
+        )
         changed_channel_dfs = dispatch_calculated_channels(
             self.spark,
             changed_channels_by_type,
             ChannelType,
-            self.query,
-            self.solver,
-            None,
+            changed_channel_solved_df,
         )
         unchanged_channel_dfs = dispatch_calculated_channels(
             self.spark,
             unchanged_channels_by_type,
             ChannelType,
-            self.query,
-            self.solver,
-            pre_filtered_containers_df,
+            unchanged_channel_solved_df,
         )
         self.calculated_channel_dfs = merge_changed_unchanged(
             changed_channel_dfs, unchanged_channel_dfs

@@ -312,25 +312,23 @@ def dispatch_calculated_channels(
     spark: SparkSession,
     channels_by_type: dict[str, list],
     type_enum,
-    query: QueryBuilder,
-    solver: QuerySolver,
-    pre_filtered_containers_df: DataFrame | None,
+    solved_df: DataFrame | None,
 ) -> dict:
     """Dispatch ``determine_calculated_channels`` calls per type.
 
-    Unlike events/aggregations, calculated channels never ride the wide
-    ``solved_df`` — each type drives its own narrow solve via
-    ``query.solve_calculated_channels`` (the ``ContainerEvent`` pattern), so this
-    always passes ``spark``/``query``/``solver``/``pre_filtered_containers_df``.
+    Mirrors :func:`dispatch_aggregations`: the batched narrow solve happens in the
+    ``Report`` (see ``Report._solve_calculated_channels_batched``), producing a
+    single ``solved_df`` of narrow calculated-channel rows; each type then shapes
+    its slice of that already-solved DataFrame.
 
     Parameters
     ----------
     spark : SparkSession
     channels_by_type : dict[str, list]
     type_enum : ChannelType enum
-    query : QueryBuilder
-    solver : QuerySolver
-    pre_filtered_containers_df : DataFrame | None
+    solved_df : DataFrame | None
+        The batched narrow solve output (``container_id, channel_id, tstart, tend,
+        value, identity``); ``None`` when there were no channels to solve.
 
     Returns
     -------
@@ -344,11 +342,7 @@ def dispatch_calculated_channels(
             continue
         cls = type_enum[type_name].value
         channel_dfs[type_name] = cls.determine_calculated_channels(
-            spark,
-            channels,
-            query=query,
-            solver=solver,
-            pre_filtered_containers_df=pre_filtered_containers_df,
+            spark, channels, solved_df=solved_df
         )
 
     return channel_dfs
@@ -492,6 +486,92 @@ def solve_expressions_batched(
     result = dfs[0]
     for i in range(1, len(dfs)):
         result = result.join(dfs[i], on=cid_col, how="full_outer")
+
+    return result
+
+
+def solve_calculated_channels_batched(
+    spark: SparkSession,
+    qe_channels: list,
+    query: QueryBuilder,
+    solver: QuerySolver,
+    batch_size: int,
+    *,
+    has_sink: bool = False,
+    catalog: str = None,
+    schema: str = None,
+    pre_filtered_containers_df: DataFrame = None,
+) -> DataFrame | None:
+    """Solve calculated channels in configurable batches; return the unioned rows.
+
+    The narrow, row-append counterpart to :func:`solve_expressions_batched`. Each
+    batch is solved independently via
+    ``query.select(*batch).solve_calculated_channels(...)`` and persisted as a
+    temporary Delta table (``__impulse_temp_<run_id>_<batch_idx>``) when a sink is
+    configured, or a Spark temp view otherwise — the same convention (and shared
+    ``__impulse_temp_*`` prefix, so :func:`cleanup_temp_tables` covers it).
+
+    Unlike ``solve_expressions_batched`` (wide, one row per container → batches
+    combined with a full-outer join on ``container_id``), calculated-channel output
+    is narrow (``container_id, channel_id, tstart, tend, value, identity``; many
+    rows per container, batches hold different ``channel_id``s), so batches are
+    combined with **``unionByName``** (row append).
+
+    Parameters
+    ----------
+    spark : SparkSession
+        Active Spark session.
+    qe_channels : list
+        Query-engine ``CalculatedChannel`` objects (each a ``TimeSeriesExpression``
+        exposing ``get_selectors()``), i.e. ``[c.expression for c in channels]``.
+    query : QueryBuilder
+        Query builder instance.
+    solver : QuerySolver
+        Query solver implementing ``solve_calculated_channels``.
+    batch_size : int
+        Maximum number of unique selectors per batch (passed to ``build_batches``).
+    has_sink : bool
+        Whether a Unity Catalog sink is configured.
+    catalog : str, optional
+        Unity Catalog catalog name (required when *has_sink* is ``True``).
+    schema : str, optional
+        Unity Catalog schema name (required when *has_sink* is ``True``).
+    pre_filtered_containers_df : DataFrame, optional
+        Pre-filtered containers for incremental processing.
+
+    Returns
+    -------
+    DataFrame | None
+        The unioned narrow DataFrame (``container_id, channel_id, tstart, tend,
+        value, identity``), or ``None`` if *qe_channels* is empty.
+    """
+    if not qe_channels:
+        return None
+
+    run_id = uuid.uuid4().hex[:8]
+    batches = build_batches(qe_channels, batch_size)
+
+    batch_names: list[str] = []
+    for batch_idx, batch_channels in enumerate(batches):
+        batch_df = query.select(*batch_channels).solve_calculated_channels(
+            spark, solver, pre_filtered_containers_df
+        )
+
+        if has_sink:
+            table_name = f"__impulse_temp_{run_id}_{batch_idx}"
+            fq_name = f"`{catalog}`.`{schema}`.`{table_name}`"
+            batch_df.write.format("delta").mode("overwrite").saveAsTable(fq_name)
+            batch_names.append(fq_name)
+        else:
+            view_name = f"__impulse_temp_{run_id}_{batch_idx}"
+            batch_df.createOrReplaceTempView(view_name)
+            batch_names.append(view_name)
+
+    dfs = [spark.table(name) for name in batch_names]
+
+    result = dfs[0]
+    for df in dfs[1:]:
+        result = result.unionByName(df)
 
     return result
 

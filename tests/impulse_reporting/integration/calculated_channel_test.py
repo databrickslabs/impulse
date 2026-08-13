@@ -36,7 +36,9 @@ _DIM = "spark_catalog.gold.evaluation_calculated_channel_dimension"
 _METRICS = "spark_catalog.gold.evaluation_calculated_channel_metrics"
 
 
-def _config(silver_table="container_metrics", is_enabled=False, calculated_channels=None):
+def _config(
+    silver_table="container_metrics", is_enabled=False, calculated_channels=None, batch_size=None
+):
     kwargs = dict(
         source=Source(
             container_metrics_table=f"spark_catalog.silver.{silver_table}",
@@ -56,6 +58,8 @@ def _config(silver_table="container_metrics", is_enabled=False, calculated_chann
     )
     if calculated_channels is not None:
         kwargs["calculated_channels"] = calculated_channels
+    if batch_size is not None:
+        kwargs["query_engine"] = QueryEngine(batch_size=batch_size)
     return ImpulseConfig(**kwargs)
 
 
@@ -147,6 +151,48 @@ def test_persist_calculated_channel_full(spark):
     assert dim_row[0]["cn"] == "speed_kmh"
     assert dim_row[0]["dk"] == "CALC"
     assert dim_row[0]["definition_hash"] is not None
+
+
+def test_batched_calculated_channels_union(spark):
+    """batch_size=1 with two channels on DISTINCT input selectors splits them into
+    separate batches (each persisted as a temp table); the final fact is the union.
+    """
+    report = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config(is_enabled=False, batch_size=1)),
+    )
+    q = report.get_db().query
+    ch_speed = CalculatedChannel(
+        name="speed_kmh",
+        expr=q.channel(channel_name="Vehicle Speed Sensor") * 3.6,
+        identity={"channel_name": "speed_kmh", "data_key": "CALC"},
+    )
+    ch_rpm = CalculatedChannel(
+        name="rpm_x2",
+        expr=q.channel(channel_name="Engine RPM") * 2,
+        identity={"channel_name": "rpm_x2", "data_key": "CALC"},
+    )
+    report.add_calculated_channel(ch_speed)
+    report.add_calculated_channel(ch_rpm)
+
+    report.determine_report()
+    report.persist_results()
+
+    # Union across batches is complete: both channels' rows land in the one fact.
+    fact = spark.read.table(_FACT)
+    ids = {r["channel_id"] for r in fact.select("channel_id").distinct().collect()}
+    assert ids == {ch_speed.get_id(), ch_rpm.get_id()}
+    assert fact.filter(F.col("channel_id") == ch_speed.get_id()).count() > 0
+    assert fact.filter(F.col("channel_id") == ch_rpm.get_id()).count() > 0
+
+    # Each distinct-selector channel was solved in its own batch → two temp tables
+    # persisted (cleanup_temp_tables defaults to False, so they remain after the run).
+    temp_tables = spark.sql(
+        "SHOW TABLES IN `spark_catalog`.`gold` LIKE '__impulse_temp_*'"
+    ).count()
+    assert temp_tables >= 2
 
 
 def test_incremental_unchanged_is_idempotent(spark):
@@ -397,10 +443,10 @@ def test_calculated_channel_raw_mode(spark, setup_raw_channels_db):
     )
     report.add_calculated_channel(ch)
 
-    # This is the branch that regressed: RAW-mode solve must not raise.
-    df = CalculatedChannel.determine_calculated_channels(
-        spark, [ch], query=q, solver=report.get_solver()
-    )
+    # This is the branch that regressed: RAW-mode batched solve must not raise.
+    # Exercise the new path: Report-driven batched solve → shaping.
+    solved_df = report._solve_calculated_channels_batched([ch.expression])
+    df = CalculatedChannel.determine_calculated_channels(spark, [ch], solved_df=solved_df)
     assert df.count() > 0
     # Identity is dimension-only; the fact projection carries just the silver columns.
     assert "identity" not in df.columns

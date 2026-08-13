@@ -5,9 +5,8 @@ import pytest
 import pyspark.sql.types as T
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
-from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
-from tests.conftest import basic_narrow_db, spark  # noqa: F401  (pytest fixtures)
+from tests.conftest import spark  # noqa: F401  (pytest fixtures)
 
 _IDENTITY = {"channel_name": "speed_kmh", "data_key": "CALC"}
 
@@ -138,32 +137,50 @@ class TestMetadata:
         assert a.determine_definition_hash() != b.determine_definition_hash()
 
 
-class TestDetermineCalculatedChannels:
-    def test_returns_none_when_empty(self, spark):
-        assert (
-            CalculatedChannel.determine_calculated_channels(spark, [], query=None, solver=None)
-            is None
-        )
+_SOLVED_SCHEMA = T.StructType(
+    [
+        T.StructField("container_id", T.LongType()),
+        T.StructField("channel_id", T.LongType()),
+        T.StructField("tstart", T.LongType()),
+        T.StructField("tend", T.LongType()),
+        T.StructField("value", T.DoubleType()),
+        T.StructField("identity", T.MapType(T.StringType(), T.StringType())),
+    ]
+)
 
-    def test_returns_fact_columns_with_matching_channel_id(self, spark, basic_narrow_db):
-        q = basic_narrow_db.query
+
+class TestDetermineCalculatedChannels:
+    """The solve now happens in Report; determine_calculated_channels only shapes
+    the already-solved narrow DataFrame (filter by channel_id + project)."""
+
+    def test_returns_none_when_no_channels(self, spark):
+        assert CalculatedChannel.determine_calculated_channels(spark, [], solved_df=None) is None
+
+    def test_returns_none_when_no_solved_df(self, spark):
+        ch = _channel()
+        assert CalculatedChannel.determine_calculated_channels(spark, [ch], solved_df=None) is None
+
+    def test_filters_by_channel_id_and_projects_to_fact_schema(self, spark):
         ch = CalculatedChannel(
             name="rpm_x2",
-            expr=q.channel(channel_name="Engine RPM") * 2,
+            expr=TimeSeriesSelector(None) * 2,
             identity={"channel_name": "rpm_x2", "data_key": "CALC"},
         )
-        df = CalculatedChannel.determine_calculated_channels(
-            spark, [ch], query=q, solver=DefaultSolver(spark)
+        other_id = (ch.get_id() + 1) & 0x7FFFFFFF
+        # solved_df carries this channel's rows AND an unrelated channel's, plus the
+        # identity map column that shaping must drop.
+        solved = spark.createDataFrame(
+            [
+                (1, ch.get_id(), 0, 1, 10.0, {"channel_name": "rpm_x2"}),
+                (1, other_id, 0, 1, 99.0, {"channel_name": "other"}),
+            ],
+            schema=_SOLVED_SCHEMA,
         )
-        # Identity lives on the dimension (joined via channel_id), not the fact.
-        assert df.columns == [
-            "container_id",
-            "channel_id",
-            "tstart",
-            "tend",
-            "value",
-        ]
-        ids = {r["channel_id"] for r in df.select("channel_id").distinct().collect()}
+        df = CalculatedChannel.determine_calculated_channels(spark, [ch], solved_df=solved)
+        # Identity dropped; only the fact columns remain.
+        assert df.columns == ["container_id", "channel_id", "tstart", "tend", "value"]
+        # Unrelated channel's rows are filtered out.
+        ids = {r["channel_id"] for r in df.collect()}
         assert ids == {ch.get_id()}
 
 
