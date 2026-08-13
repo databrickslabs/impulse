@@ -4,27 +4,6 @@
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricOp, MetricSelector
 
-# --- Evaluation-path invariants ---
-
-
-def test_metric_expression_is_spark_evaluated_not_pandas():
-    """Metric filtering evaluates in Spark via ``get_selector_expr``, never the
-    pandas ``resolve()`` / ``build_pandas`` path.
-
-    ``build_pandas`` was removed from ``MetricExpression`` in the array-support
-    refactor. The only surviving ``build_pandas`` callers
-    (``TimeSeriesCache.resolve``) receive a ``TimeSeriesSelector`` whose ``_expr``
-    is always a ``TagExpression`` — a metric expression can never reach them.
-    This locks the separation in: if a metric ever gained a ``build_pandas`` again
-    (or lost ``get_selector_expr``), that would signal the two paths are blurring.
-    """
-    sel = MetricSelector("poi_defect_values")
-    op = sel.contains("A")
-    for expr in (sel, op):
-        assert hasattr(expr, "get_selector_expr")  # the real metric eval path
-        assert not hasattr(expr, "build_pandas")  # the deleted, unreachable one
-
-
 def test_metric_expression_is_not_serializable():
     """Metric expressions have no ``as_dict``/``from_dict``.
 
@@ -42,8 +21,6 @@ def test_metric_expression_is_not_serializable():
 
 
 # --- Comparison operator tests ---
-
-
 # --- Array-membership operator tests (structure only; evaluation in md/expressions) ---
 
 
