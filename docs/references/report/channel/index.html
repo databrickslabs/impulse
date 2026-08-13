@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Channels | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/references/report/channel"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Channels | Impulse"><meta data-rh="true" name="description" content="A calculated channel is a derived time-series signal computed from existing channels and persisted"><meta data-rh="true" property="og:description" content="A calculated channel is a derived time-series signal computed from existing channels and persisted"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/references/report/channel"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/report/channel" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/report/channel" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Reference","item":"https://databrickslabs.github.io/impulse/docs/references/"},{"@type":"ListItem","position":2,"name":"Report","item":"https://databrickslabs.github.io/impulse/docs/references/report/"},{"@type":"ListItem","position":3,"name":"Channels","item":"https://databrickslabs.github.io/impulse/docs/references/report/channel"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.efe290e5.css">
-<script src="/impulse/assets/js/runtime~main.3ca222e6.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.2f67b56f.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.aa607062.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.51452d9a.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -83,7 +83,7 @@ events accept any TSAL expression directly (e.g. <code>StatsAggregator(input_exp
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="how-it-works">How it works<a href="#how-it-works" class="hash-link" aria-label="Direct link to How it works" title="Direct link to How it works" translate="no">​</a></h3>
 <ol>
 <li class="">The <code>expr</code> is evaluated per measurement container by the solver, yielding a <code>SampleSeries</code> for each container.</li>
-<li class="">Calculated channels take their <strong>own narrow solve path</strong> (<code>QueryBuilder.solve_calculated_channels</code>), distinct from the wide batch solve used by events and aggregations. Multi-channel expressions (e.g. <code>rpm + speed</code>) are time-base synchronized automatically; emitted intervals are the intersection.</li>
+<li class="">The channels&#x27; narrow solve is <strong>batched from the <code>Report</code></strong> (the same pattern events and aggregations use): the channels are partitioned by <code>query_engine.batch_size</code>, each batch is solved via <code>QueryBuilder.solve_calculated_channels</code> and persisted as a temporary table (<code>__impulse_temp_{run_id}_{batch_idx}</code>), and the batches are unioned into the final <code>calculated_channel_fact</code>. Multi-channel expressions (e.g. <code>rpm + speed</code>) are time-base synchronized automatically; emitted intervals are the intersection.</li>
 <li class="">Each series is exploded into one row per sample interval: <code>container_id, channel_id, tstart, tend, value</code>. The <code>identity</code> is <strong>not</strong> on the fact — it lives on the dimension, joined via <code>channel_id</code>.</li>
 <li class="">The <code>channel_id</code> is a deterministic hash of the sorted <code>identity</code> — the same value appears in both the fact and dimension tables, so they join directly.</li>
 <li class="">The sample rows are written to the <code>calculated_channel_fact</code> table; the channel definition (name, description, expression, identity) is written to the <code>calculated_channel_dimension</code> table.</li>
@@ -207,6 +207,61 @@ run-length-encoded shape as the silver <code>channels</code> table.</p>
 <table><thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>int</code></td><td>Container identifier. Type is inherited from the silver source.</td></tr><tr><td><code>channel_id</code></td><td><code>long</code></td><td>Foreign key to <code>calculated_channel_dimension</code>.</td></tr><tr><td><code>tstart</code></td><td><code>long</code></td><td>Sample interval start timestamp.</td></tr><tr><td><code>tend</code></td><td><code>long</code></td><td>Sample interval end timestamp.</td></tr><tr><td><code>value</code></td><td><code>double</code></td><td>Computed value over the interval.</td></tr><tr><td><code>channel_name</code></td><td><code>str</code></td><td>Identity column (from <code>identity</code>).</td></tr><tr><td><code>data_key</code></td><td><code>str</code></td><td>Identity column (from <code>identity</code>).</td></tr></tbody></table>
 <p>Both tables carry the configurable <code>table_prefix</code> (e.g. <code>{prefix}_calculated_channel_fact</code>). See the
 <a class="" href="/impulse/docs/data_model/gold_layer_event_normalized">gold layer schema</a> for how they fit the star schema, and
-<a class="" href="/impulse/docs/references/report/#incremental-processing">incremental processing</a> for how definition changes are reprocessed.</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/references/report/channel.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/references/report/aggregation"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Aggregations</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/references/query_engine/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Query Engine</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#calculatedchannel" class="table-of-contents__link toc-highlight">CalculatedChannel</a><ul><li><a href="#parameters" class="table-of-contents__link toc-highlight">Parameters</a></li><li><a href="#how-it-works" class="table-of-contents__link toc-highlight">How it works</a></li><li><a href="#examples" class="table-of-contents__link toc-highlight">Examples</a></li></ul></li><li><a href="#calculated-channel-output-schema" class="table-of-contents__link toc-highlight">Calculated channel output schema</a><ul><li><a href="#calculated_channel_dimension" class="table-of-contents__link toc-highlight">calculated_channel_dimension</a></li><li><a href="#calculated_channel_fact" class="table-of-contents__link toc-highlight">calculated_channel_fact</a></li></ul></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
+<a class="" href="/impulse/docs/references/report/#incremental-processing">incremental processing</a> for how definition changes are reprocessed.</p>
+<hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="optional-channel-metrics-table">Optional channel metrics table<a href="#optional-channel-metrics-table" class="hash-link" aria-label="Direct link to Optional channel metrics table" title="Direct link to Optional channel metrics table" translate="no">​</a></h2>
+<p>Because <code>calculated_channel_fact</code> already matches the silver <code>channels</code> shape, a calculated channel needs
+only a companion <code>channel_metrics</code> table to serve as an Impulse silver source in its own right. Set
+<a class="" href="/impulse/docs/config/configuration#calculated_channels-optional"><code>config.calculated_channels.emit_channel_metrics</code></a>
+to also write a <code>calculated_channel_metrics</code> table, shaped like the silver <code>channel_metrics</code> table.</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="calculated_channel_metrics">calculated_channel_metrics<a href="#calculated_channel_metrics" class="hash-link" aria-label="Direct link to calculated_channel_metrics" title="Direct link to calculated_channel_metrics" translate="no">​</a></h3>
+<p>One row per <code>(container_id, channel_id)</code>, derived directly from the fact rows. The schema is <strong>dynamic</strong>:
+fixed columns plus one column per configured KPI, one per identity key (the union of <code>identity</code> keys across
+the report&#x27;s channels), and one per configured attribute key.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>int</code></td><td>Container identifier. Type is inherited from the silver source.</td></tr><tr><td><code>channel_id</code></td><td><code>long</code></td><td>Calculated-channel identifier (matches the fact and dimension).</td></tr><tr><td><em>identity cols</em></td><td><code>str</code></td><td>One column per identity key (e.g. <code>channel_name</code>, <code>data_key</code>); <code>null</code> where a channel omits it.</td></tr><tr><td><em>attribute cols</em></td><td><code>str</code></td><td>One column per <code>attribute_columns</code> entry (e.g. <code>unit</code>); <code>null</code> where a channel omits it.</td></tr><tr><td><code>value_type</code></td><td><code>str</code></td><td><code>&quot;double&quot;</code>.</td></tr><tr><td><em>kpi cols</em></td><td><code>double</code></td><td>One column per configured KPI, in order (default <code>duration</code>, <code>min</code>, <code>max</code>, <code>mean</code>).</td></tr></tbody></table>
+<p>The KPIs are duration-weighted (matching the silver ingestion semantics): <code>duration</code> is the span
+<code>max(tend) - min(tstart)</code>, <code>min</code> / <code>max</code> ignore NaN values, and <code>mean</code> is the duration-weighted average.
+Select which KPIs to compute via <code>config.calculated_channels.kpis</code>; an identity key wins over an attribute
+key of the same name.</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/references/report/channel.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/references/report/aggregation"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Aggregations</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/references/query_engine/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Query Engine</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#calculatedchannel" class="table-of-contents__link toc-highlight">CalculatedChannel</a><ul><li><a href="#parameters" class="table-of-contents__link toc-highlight">Parameters</a></li><li><a href="#how-it-works" class="table-of-contents__link toc-highlight">How it works</a></li><li><a href="#examples" class="table-of-contents__link toc-highlight">Examples</a></li></ul></li><li><a href="#calculated-channel-output-schema" class="table-of-contents__link toc-highlight">Calculated channel output schema</a><ul><li><a href="#calculated_channel_dimension" class="table-of-contents__link toc-highlight">calculated_channel_dimension</a></li><li><a href="#calculated_channel_fact" class="table-of-contents__link toc-highlight">calculated_channel_fact</a></li></ul></li><li><a href="#optional-channel-metrics-table" class="table-of-contents__link toc-highlight">Optional channel metrics table</a><ul><li><a href="#calculated_channel_metrics" class="table-of-contents__link toc-highlight">calculated_channel_metrics</a></li></ul></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

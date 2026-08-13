@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">impulse_reporting.channels.channel_types | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/channels/channel_types"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="impulse_reporting.channels.channel_types | Impulse"><meta data-rh="true" name="description" content="ChannelType"><meta data-rh="true" property="og:description" content="ChannelType"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/channels/channel_types"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/channels/channel_types" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/channels/channel_types" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Reference","item":"https://databrickslabs.github.io/impulse/docs/references/"},{"@type":"ListItem","position":2,"name":"Api","item":"https://databrickslabs.github.io/impulse/docs/references/api"},{"@type":"ListItem","position":3,"name":"channel_types","item":"https://databrickslabs.github.io/impulse/docs/references/api/impulse_reporting/channels/channel_types"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.efe290e5.css">
-<script src="/impulse/assets/js/runtime~main.3ca222e6.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.2f67b56f.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.aa607062.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.51452d9a.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -48,6 +48,20 @@ schemas.</p>
 </ul>
 <p><strong>Returns</strong>:</p>
 <p><code>str</code>: The name of the dimension table associated with this channel type.</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="get_metrics_table_name">get_metrics_table_name<a href="#get_metrics_table_name" class="hash-link" aria-label="Direct link to get_metrics_table_name" title="Direct link to get_metrics_table_name" translate="no">​</a></h4>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">def</span><span class="token plain"> </span><span class="token function" style="color:hsl(207, 82%, 66%)">get_metrics_table_name</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><span class="token plain"> </span><span class="token operator" style="color:hsl(207, 82%, 66%)">-</span><span class="token operator" style="color:hsl(207, 82%, 66%)">&gt;</span><span class="token plain"> </span><span class="token builtin" style="color:hsl(95, 38%, 62%)">str</span><br></span></code></pre></div></div>
+<p>Get the (optional) channel-metrics table name for the channel type.</p>
+<p>This table mirrors the silver-layer <code>channel_metrics</code> table so the
+calculated-channel fact + metrics pair can serve as an Impulse silver
+source.  Unlike the fact/dimension tables it has <strong>no</strong> fixed schema
+constant: identity/attribute columns are derived dynamically per report
+(see :meth:<code>CalculatedChannel.determine_channel_metrics</code>).</p>
+<p><strong>Raises</strong>:</p>
+<ul>
+<li class=""><code>ValueError</code>: If the channel type is not supported.</li>
+</ul>
+<p><strong>Returns</strong>:</p>
+<p><code>str</code>: The name of the channel-metrics table associated with this channel type.</p>
 <h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="get_dimension_schema">get_dimension_schema<a href="#get_dimension_schema" class="hash-link" aria-label="Direct link to get_dimension_schema" title="Direct link to get_dimension_schema" translate="no">​</a></h4>
 <div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">def</span><span class="token plain"> </span><span class="token function" style="color:hsl(207, 82%, 66%)">get_dimension_schema</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><span class="token plain"> </span><span class="token operator" style="color:hsl(207, 82%, 66%)">-</span><span class="token operator" style="color:hsl(207, 82%, 66%)">&gt;</span><span class="token plain"> StructType</span><br></span></code></pre></div></div>
 <p>Get the dimension schema for the channel type.</p>
@@ -63,6 +77,19 @@ schemas.</p>
 <p><strong>Arguments</strong>:</p>
 <ul>
 <li class=""><code>table_name</code> (<code>str</code>): Fact table name to look up.</li>
+</ul>
+<p><strong>Raises</strong>:</p>
+<ul>
+<li class=""><code>ValueError</code>: If no ChannelType matches the given table name.</li>
+</ul>
+<p><strong>Returns</strong>:</p>
+<p><code>ChannelType</code>:</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="get_any_for_metrics_table">get_any_for_metrics_table<a href="#get_any_for_metrics_table" class="hash-link" aria-label="Direct link to get_any_for_metrics_table" title="Direct link to get_any_for_metrics_table" translate="no">​</a></h4>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token keyword" style="color:hsl(286, 60%, 67%)">def</span><span class="token plain"> </span><span class="token function" style="color:hsl(207, 82%, 66%)">get_any_for_metrics_table</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">(</span><span class="token plain">cls</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">,</span><span class="token plain"> table_name</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">:</span><span class="token plain"> </span><span class="token builtin" style="color:hsl(95, 38%, 62%)">str</span><span class="token punctuation" style="color:hsl(220, 14%, 71%)">)</span><span class="token plain"> </span><span class="token operator" style="color:hsl(207, 82%, 66%)">-</span><span class="token operator" style="color:hsl(207, 82%, 66%)">&gt;</span><span class="token plain"> </span><span class="token string" style="color:hsl(95, 38%, 62%)">&quot;ChannelType&quot;</span><br></span></code></pre></div></div>
+<p>Return the first ChannelType whose metrics table name matches.</p>
+<p><strong>Arguments</strong>:</p>
+<ul>
+<li class=""><code>table_name</code> (<code>str</code>): Metrics table name to look up.</li>
 </ul>
 <p><strong>Raises</strong>:</p>
 <ul>
