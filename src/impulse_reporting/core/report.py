@@ -25,10 +25,12 @@ from impulse_reporting.core.report_utils import (
     cleanup_temp_tables,
     collect_solvable_expressions,
     dispatch_aggregations,
+    dispatch_calculated_channel_metrics,
     dispatch_calculated_channels,
     dispatch_events,
     group_selectables_by_type,
     merge_changed_unchanged,
+    persist_channel_metrics,
     persist_dimensions_full,
     persist_dimensions_incremental,
     persist_facts_full,
@@ -106,6 +108,7 @@ class Report:
         self.aggregation_metadata_dfs = {}
         self.calculated_channel_dfs = {}
         self.calculated_channel_metadata_dfs = {}
+        self.calculated_channel_metrics_dfs = {}
         self.container_dimension_df = None
         self.channel_mapping_resolution_dimension_df = None
         self._is_incremental = None
@@ -621,6 +624,16 @@ class Report:
         persist_facts_full(self.calculated_channel_dfs, ChannelType, storage_factory)
         persist_dimensions_full(self.calculated_channel_metadata_dfs, ChannelType, storage_factory)
 
+        # optional calculated channel metrics table (dynamic schema — stored
+        # directly without the fixed-schema projecting writer)
+        persist_channel_metrics(
+            self.calculated_channel_metrics_dfs,
+            ChannelType,
+            self.sink,
+            ReportEntityTransformer(),
+            incremental=False,
+        )
+
         # persist measurement dimensions
         if self.container_dimension_df:
             writer = storage_factory.create_container_dimension_writer()
@@ -729,6 +742,17 @@ class Report:
             self.sink,
             _transform,
             merge_keys=["channel_id"],
+        )
+
+        # Optional calculated channel metrics table (dynamic schema — merged
+        # directly, scoping the delete-by-source to updated containers).
+        persist_channel_metrics(
+            self.calculated_channel_metrics_dfs,
+            ChannelType,
+            self.sink,
+            transformer,
+            incremental=True,
+            updated_container_ids=updated_container_ids,
         )
 
         # Persist the measurement dimension LAST (as ``_persist_full`` does). It
@@ -1044,6 +1068,37 @@ class Report:
         self.calculated_channel_metadata_dfs = build_metadata_dfs(
             channels_by_type, ChannelType, self.spark
         )
+
+        # Optionally derive a silver-shaped channel_metrics table from the fact
+        # rows so the fact + metrics pair can serve as an Impulse silver source.
+        # Identity/attribute columns are derived dynamically; the full per-type
+        # channel list is passed to both buckets so changed/unchanged share a
+        # schema (extra channels are ignored by the fact-driven left join).
+        self.calculated_channel_metrics_dfs = {}
+        if self.config.calculated_channels.emit_channel_metrics:
+            cc = self.config.calculated_channels
+            # Pass the full per-type channel list to both buckets so changed and
+            # unchanged metrics share one schema (extra channels are dropped by the
+            # fact-driven left join in determine_channel_metrics).
+            changed_metrics = dispatch_calculated_channel_metrics(
+                self.spark,
+                channels_by_type,
+                changed_channel_dfs,
+                ChannelType,
+                attribute_columns=cc.attribute_columns,
+                kpis=cc.kpis,
+            )
+            unchanged_metrics = dispatch_calculated_channel_metrics(
+                self.spark,
+                channels_by_type,
+                unchanged_channel_dfs,
+                ChannelType,
+                attribute_columns=cc.attribute_columns,
+                kpis=cc.kpis,
+            )
+            self.calculated_channel_metrics_dfs = merge_changed_unchanged(
+                changed_metrics, unchanged_metrics
+            )
 
         # Determine container dimension
         self.container_dimension_df = ContainerDimension.get_dimension(

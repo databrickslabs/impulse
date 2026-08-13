@@ -26,7 +26,11 @@ if TYPE_CHECKING:
     from impulse_reporting.incremental.definition_hash_comparator import (
         DefinitionHashComparator,
     )
-    from impulse_reporting.persist.report_storage import Sink, WriterFactory
+    from impulse_reporting.persist.report_storage import (
+        ReportEntityTransformer,
+        Sink,
+        WriterFactory,
+    )
 
 
 def build_batches(
@@ -350,6 +354,66 @@ def dispatch_calculated_channels(
     return channel_dfs
 
 
+def dispatch_calculated_channel_metrics(
+    spark: SparkSession,
+    channels_by_type: dict[str, list],
+    fact_dfs_by_type: dict[str, DataFrame | None],
+    type_enum,
+    *,
+    attribute_columns: list[str],
+    kpis: list[str],
+) -> dict:
+    """Dispatch ``determine_channel_metrics`` calls per type.
+
+    Post-processing counterpart to :func:`dispatch_calculated_channels`: instead
+    of solving, it derives the silver-shaped ``channel_metrics`` DataFrame from the
+    already-solved fact df for each type (``fact_dfs_by_type`` as returned by
+    :func:`dispatch_calculated_channels`).
+
+    Pass the **full** per-type channel list (not a changed/unchanged split): the
+    metrics aggregation is fact-driven (a left join from the fact-derived
+    aggregate), so channels absent from ``fact_df`` are dropped, while the identity
+    columns are the union across all channels — keeping the changed and unchanged
+    metrics dfs on an identical schema for the downstream ``unionByName`` MERGE.
+
+    Parameters
+    ----------
+    spark : SparkSession
+    channels_by_type : dict[str, list]
+        Full per-type channel list.
+    fact_dfs_by_type : dict[str, DataFrame | None]
+        Per-type calculated-channel fact df for this bucket (changed or unchanged).
+    type_enum : ChannelType enum
+    attribute_columns : list[str]
+        Attribute keys to surface as columns.
+    kpis : list[str]
+        KPI names to compute.
+
+    Returns
+    -------
+    dict
+        ``metrics_dfs`` keyed by type name (only types with a fact df).
+    """
+    metrics_dfs: dict = {}
+
+    for type_name, channels in channels_by_type.items():
+        if not channels:
+            continue
+        fact_df = fact_dfs_by_type.get(type_name)
+        if fact_df is None:
+            continue
+        cls = type_enum[type_name].value
+        metrics_dfs[type_name] = cls.determine_channel_metrics(
+            spark,
+            channels,
+            fact_df,
+            attribute_columns=attribute_columns,
+            kpis=kpis,
+        )
+
+    return metrics_dfs
+
+
 def solve_expressions_batched(
     spark: SparkSession,
     expressions: list[TimeSeriesExpression],
@@ -559,6 +623,43 @@ def _fact_dfs_for_table(dfs) -> list[DataFrame]:
     return [dfs] if dfs is not None else []
 
 
+def group_dfs_by_table(
+    dfs_by_type: dict,
+    table_name_getter: Callable[[str], str],
+) -> dict[str, list[DataFrame]]:
+    """Group per-type DataFrames by output table name.
+
+    Shared shaping step for the "write one table per output" persistence paths:
+    flattens each per-type value (a ``{"changed", "unchanged"}`` dict or a bare
+    DataFrame, via :func:`_fact_dfs_for_table`) and buckets the DataFrames by the
+    table name that ``table_name_getter`` returns for the type (so types sharing a
+    table land together). Types that contribute no DataFrame are skipped, so every
+    returned list is non-empty. Callers union each list themselves (e.g. via
+    ``ReportEntityTransformer.concat_dataframes`` / the entity writer).
+
+    Parameters
+    ----------
+    dfs_by_type : dict
+        ``{type_name: value}`` where value is a structured
+        ``{"changed", "unchanged"}`` dict or a bare DataFrame.
+    table_name_getter : Callable[[str], str]
+        Maps a type name to its output table name (e.g.
+        ``lambda t: ChannelType[t].get_metrics_table_name()``).
+
+    Returns
+    -------
+    dict[str, list[DataFrame]]
+        ``{table_name: [dfs]}`` for each table with at least one DataFrame.
+    """
+    dfs_by_table: dict[str, list[DataFrame]] = {}
+    for type_name, dfs in dfs_by_type.items():
+        table_dfs = _fact_dfs_for_table(dfs)
+        if not table_dfs:
+            continue
+        dfs_by_table.setdefault(table_name_getter(type_name), []).extend(table_dfs)
+    return dfs_by_table
+
+
 def persist_facts_full(dfs_by_type: dict, type_enum, writer_factory: WriterFactory) -> None:
     """Full-overwrite persist of fact DataFrames, grouped by output table.
 
@@ -575,14 +676,11 @@ def persist_facts_full(dfs_by_type: dict, type_enum, writer_factory: WriterFacto
     writer_factory : WriterFactory
         Factory producing the entity writer.
     """
-    dfs_by_table: dict[str, list[DataFrame]] = {}
-    for type_name, dfs in dfs_by_type.items():
-        table_name = type_enum[type_name].get_fact_table_name()
-        dfs_by_table.setdefault(table_name, []).extend(_fact_dfs_for_table(dfs))
+    dfs_by_table = group_dfs_by_table(
+        dfs_by_type, lambda type_name: type_enum[type_name].get_fact_table_name()
+    )
 
     for table_name, dfs_list in dfs_by_table.items():
-        if not dfs_list:
-            continue
         entity_type = type_enum.get_any_for_fact_table(table_name)
         writer = writer_factory.create_writer(entity_type)
         schema, uri = writer.extract_fact_schema_and_output_uri(entity_type)
@@ -765,3 +863,71 @@ def persist_dimensions_incremental(
         writer = factory.create_writer(entity_type)
         schema, uri = writer.extract_metadata_schema_and_output_uri(entity_type)
         sink.upsert(transform_fn(metadata_df, schema), uri, merge_keys)
+
+
+def persist_channel_metrics(
+    metrics_dfs_by_type: dict,
+    type_enum,
+    sink: Sink,
+    transformer: ReportEntityTransformer,
+    *,
+    incremental: bool,
+    updated_container_ids: list | None = None,
+) -> None:
+    """Persist the optional calculated-channel metrics table(s).
+
+    Unlike the fact/dimension writers, the metrics schema is **dynamic**
+    (identity/attribute/KPI columns vary per report), so this bypasses the
+    fixed-schema ``DefaultReportEntityWriter`` and writes the already-shaped
+    DataFrame directly (mirroring the ``container_dimension`` special-case). The
+    per-type dfs are grouped by output table via :func:`group_dfs_by_table` and
+    unioned with the same ``concat_dataframes`` the entity writer uses.
+
+    Full mode overwrites; incremental mode upserts on ``(container_id,
+    channel_id)`` and prunes stale rows from updated containers via
+    ``merge_incremental``.
+
+    Parameters
+    ----------
+    metrics_dfs_by_type : dict
+        ``{type_name: value}`` where value is a structured
+        ``{"changed", "unchanged"}`` dict or a bare DataFrame.
+    type_enum : Enum
+        The channel type-enum (resolves the metrics table name/uri).
+    sink : Sink
+        Target sink exposing ``store`` / ``merge_incremental``.
+    transformer : ReportEntityTransformer
+        Supplies ``concat_dataframes`` (union) and ``add_meta_information``.
+    incremental : bool
+        Whether to merge (True) or overwrite (False).
+    updated_container_ids : list, optional
+        Ids of updated containers, scoping the incremental delete-by-source.
+    """
+    if not metrics_dfs_by_type:
+        return
+
+    updated_container_ids = updated_container_ids or []
+
+    dfs_by_table = group_dfs_by_table(
+        metrics_dfs_by_type, lambda type_name: type_enum[type_name].get_metrics_table_name()
+    )
+
+    for table_name, dfs_list in dfs_by_table.items():
+        entity_type = type_enum.get_any_for_metrics_table(table_name)
+        # Resolve the metrics URI directly (no fixed-schema writer).
+        uri = sink.config.get_output_uri_channel_metrics_table(entity_type)
+        df_enriched = transformer.concat_dataframes(dfs_list).transform(
+            transformer.add_meta_information
+        )
+        if incremental:
+            delete_conditions = []
+            if updated_container_ids:
+                delete_conditions.append(F.col("target.container_id").isin(updated_container_ids))
+            sink.merge_incremental(
+                df_enriched,
+                uri,
+                ["container_id", "channel_id"],
+                delete_conditions=delete_conditions,
+            )
+        else:
+            sink.store(df_enriched, uri)

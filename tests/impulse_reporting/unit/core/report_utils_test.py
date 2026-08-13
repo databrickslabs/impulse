@@ -12,8 +12,11 @@ from impulse_reporting.core.report import Report
 from impulse_reporting.core.report_utils import (
     build_batches,
     build_metadata_dfs,
+    dispatch_calculated_channel_metrics,
     dispatch_events,
+    group_dfs_by_table,
     group_selectables_by_type,
+    persist_channel_metrics,
     merge_changed_unchanged,
     persist_dimensions_full,
     persist_dimensions_incremental,
@@ -555,6 +558,123 @@ class TestDispatchEvents:
         )
 
         assert len(meta_calls) == 0
+
+
+class TestDispatchCalculatedChannelMetrics:
+    """Tests for dispatch_calculated_channel_metrics helper (routing only)."""
+
+    def _make_enum(self, cls):
+        mock_type_enum = MagicMock()
+        mock_type_enum.__getitem__.return_value.value = cls
+        return mock_type_enum
+
+    def test_empty_channels_by_type_returns_empty(self):
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={},
+            fact_dfs_by_type={},
+            type_enum=MagicMock(),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+        assert metrics == {}
+
+    def test_routes_fact_df_channels_and_config(self):
+        """Each type's fact df + channel list + config are forwarded verbatim."""
+        mock_result = MagicMock(spec=DataFrame)
+        mock_fact = MagicMock(spec=DataFrame)
+        channel = MagicMock()
+        received = {}
+
+        class FakeCls:
+            @classmethod
+            def determine_channel_metrics(cls, spark, channels, fact_df, **kwargs):
+                received["channels"] = channels
+                received["fact_df"] = fact_df
+                received["kwargs"] = kwargs
+                return mock_result
+
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": [channel]},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": mock_fact},
+            type_enum=self._make_enum(FakeCls),
+            attribute_columns=["unit"],
+            kpis=["duration", "mean"],
+        )
+
+        assert metrics["CALCULATED_CHANNEL"] is mock_result
+        assert received["channels"] == [channel]
+        assert received["fact_df"] is mock_fact
+        assert received["kwargs"] == {"attribute_columns": ["unit"], "kpis": ["duration", "mean"]}
+
+    def test_type_without_fact_df_is_skipped(self):
+        """A type present in channels but with no fact df (None) yields no entry."""
+        calls = []
+
+        class FakeCls:
+            @classmethod
+            def determine_channel_metrics(cls, spark, channels, fact_df, **kwargs):
+                calls.append(fact_df)
+                return MagicMock(spec=DataFrame)
+
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": [MagicMock()]},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": None},
+            type_enum=self._make_enum(FakeCls),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+
+        assert metrics == {}
+        assert calls == []  # determine_channel_metrics never invoked
+
+    def test_empty_channel_list_for_type_is_skipped(self):
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": []},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": MagicMock(spec=DataFrame)},
+            type_enum=MagicMock(),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+        assert metrics == {}
+
+
+class TestGroupDfsByTable:
+    """Tests for the group-per-output-table shaping helper (returns lists)."""
+
+    def test_empty_returns_empty(self):
+        assert group_dfs_by_table({}, lambda _t: "tbl") == {}
+
+    def test_bare_df_grouped_into_list(self):
+        df = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table({"A": df}, lambda _t: "tbl_a")
+        assert out == {"tbl_a": [df]}
+
+    def test_changed_unchanged_dict_flattened_changed_then_unchanged(self):
+        changed = MagicMock(spec=DataFrame)
+        unchanged = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table(
+            {"A": {"changed": changed, "unchanged": unchanged}}, lambda _t: "tbl_a"
+        )
+        # Order is changed then unchanged (per _fact_dfs_for_table).
+        assert out == {"tbl_a": [changed, unchanged]}
+
+    def test_types_sharing_a_table_are_combined(self):
+        df_a = MagicMock(spec=DataFrame)
+        df_b = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table({"A": df_a, "B": df_b}, lambda _t: "shared")
+        assert out == {"shared": [df_a, df_b]}
+
+    def test_none_and_empty_values_skipped(self):
+        df = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table(
+            {"A": None, "B": {"changed": None, "unchanged": None}, "C": df},
+            lambda t: t,
+        )
+        assert out == {"C": [df]}
 
 
 # ============================================================================
@@ -1208,3 +1328,68 @@ class TestPersistDimensionsIncremental:
             )
 
         sink.upsert.assert_called_once_with(foo_meta, "uri", ["channel_id"])
+
+
+class TestPersistChannelMetrics:
+    """Tests for the persist_channel_metrics free function (mock-based)."""
+
+    def _mocks(self):
+        combined = MagicMock(spec=DataFrame)
+        combined.transform.return_value = combined  # add_meta_information passthrough
+        transformer = MagicMock()
+        transformer.concat_dataframes.return_value = combined
+        type_enum = MagicMock()
+        type_enum.__getitem__.return_value.get_metrics_table_name.return_value = "metrics"
+        type_enum.get_any_for_metrics_table.return_value = "entity"
+        sink = MagicMock()
+        sink.config.get_output_uri_channel_metrics_table.return_value = "cat.sch.metrics"
+        return combined, transformer, type_enum, sink
+
+    def test_empty_is_noop(self):
+        sink = MagicMock()
+        persist_channel_metrics({}, MagicMock(), sink, MagicMock(), incremental=False)
+        sink.store.assert_not_called()
+        sink.merge_incremental.assert_not_called()
+
+    def test_full_mode_overwrites(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df}, type_enum, sink, transformer, incremental=False
+        )
+
+        sink.store.assert_called_once_with(combined, "cat.sch.metrics")
+        sink.merge_incremental.assert_not_called()
+
+    def test_incremental_merges_with_keys_and_delete_scope(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df},
+            type_enum,
+            sink,
+            transformer,
+            incremental=True,
+            updated_container_ids=[1, 2],
+        )
+
+        sink.store.assert_not_called()
+        args, kwargs = sink.merge_incremental.call_args
+        assert args[0] is combined
+        assert args[1] == "cat.sch.metrics"
+        assert args[2] == ["container_id", "channel_id"]
+        # updated containers → one delete-by-source predicate.
+        assert len(kwargs["delete_conditions"]) == 1
+
+    def test_incremental_without_updated_containers_has_no_delete_scope(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df}, type_enum, sink, transformer, incremental=True
+        )
+
+        _args, kwargs = sink.merge_incremental.call_args
+        assert kwargs["delete_conditions"] == []

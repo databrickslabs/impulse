@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from impulse_reporting.config.config_parser import (
+    CalculatedChannels,
     CastType,
     Comparator,
     ContainerFilters,
@@ -974,3 +975,22 @@ def test_impulse_config_source_rejects_invalid_channel_mapping_table():
     config_json["source"]["channel_mapping_table"] = "invalid_table_name"
     with pytest.raises(ValidationError):
         ImpulseConfig.model_validate(config_json)
+
+
+def test_calculated_channels_default_kpis():
+    """CalculatedChannels defaults to the four built-in KPIs."""
+    config = CalculatedChannels()
+    assert config.emit_channel_metrics is False
+    assert config.kpis == ["duration", "min", "max", "mean"]
+
+
+def test_calculated_channels_kpis_dedupe_preserves_order():
+    """Duplicate KPI names are removed, insertion order preserved."""
+    config = CalculatedChannels(kpis=["mean", "mean", "min"])
+    assert config.kpis == ["mean", "min"]
+
+
+def test_calculated_channels_unknown_kpi_rejected():
+    """An unknown KPI name is rejected at validation with a helpful message."""
+    with pytest.raises(ValidationError, match="Unknown calculated-channel KPI"):
+        CalculatedChannels(kpis=["bogus"])

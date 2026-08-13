@@ -14,8 +14,10 @@ import pyspark.sql.types as T
 import pytest
 from databricks.sdk import WorkspaceClient
 
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
 from impulse_reporting.config.config_parser import (
+    CalculatedChannels,
     DataType,
     ImpulseConfig,
     IncrementalConfig,
@@ -31,10 +33,11 @@ from tests.impulse_reporting.integration.test_helpers import (
 
 _FACT = "spark_catalog.gold.evaluation_calculated_channel_fact"
 _DIM = "spark_catalog.gold.evaluation_calculated_channel_dimension"
+_METRICS = "spark_catalog.gold.evaluation_calculated_channel_metrics"
 
 
-def _config(silver_table="container_metrics", is_enabled=False):
-    return ImpulseConfig(
+def _config(silver_table="container_metrics", is_enabled=False, calculated_channels=None):
+    kwargs = dict(
         source=Source(
             container_metrics_table=f"spark_catalog.silver.{silver_table}",
             channel_metrics_table="spark_catalog.silver.channel_metrics",
@@ -51,6 +54,9 @@ def _config(silver_table="container_metrics", is_enabled=False):
             gold_last_modified_column="_created_at",
         ),
     )
+    if calculated_channels is not None:
+        kwargs["calculated_channels"] = calculated_channels
+    return ImpulseConfig(**kwargs)
 
 
 def _add_channel(report, factor=3.6, name="speed_kmh", identity=None):
@@ -260,12 +266,16 @@ def test_incremental_modified_container_fewer_rows_deletes_stale(spark):
 
 
 def test_incremental_changed_definition_replaces(spark):
+    # Metrics enabled so this also covers a changed-definition refresh of the
+    # metrics table (no extra Report runs / no added suite time).
+    cc = CalculatedChannels(emit_channel_metrics=True)
+
     # Seed gold with factor 3.6.
     r1 = Report(
         name="calc_channel_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
-        config=dict(_config(is_enabled=False)),
+        config=dict(_config(is_enabled=False, calculated_channels=cc)),
     )
     ch1 = _add_channel(r1, factor=3.6)
     r1.determine_report()
@@ -276,6 +286,12 @@ def test_incremental_changed_definition_replaces(spark):
         .select("definition_hash")
         .first()[0]
     )
+    # Metric mean under the 3.6 definition (container 1), captured before the change.
+    mean_before = (
+        spark.read.table(_METRICS)
+        .filter((F.col("channel_id") == ch1.get_id()) & (F.col("container_id") == 1))
+        .first()["mean"]
+    )
 
     # Re-run incrementally with a changed factor → the changed-definition path
     # rewrites the rows in the unified MERGE (scoped by channel_id).
@@ -283,7 +299,7 @@ def test_incremental_changed_definition_replaces(spark):
         name="calc_channel_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
-        config=dict(_config(is_enabled=True)),
+        config=dict(_config(is_enabled=True, calculated_channels=cc)),
     )
     ch2 = _add_channel(r2, factor=3.7)
     assert ch2.get_id() == ch1.get_id()  # same identity → same entity id
@@ -297,6 +313,16 @@ def test_incremental_changed_definition_replaces(spark):
     assert hash_after != hash_before
     # A single dimension row per channel_id (upsert, not append).
     assert dim.filter(F.col("channel_id") == ch2.get_id()).count() == 1
+
+    # The metrics row was recomputed for the changed definition: the signal is
+    # `Vehicle Speed Sensor * factor`, so its duration-weighted mean scales
+    # linearly with the factor (3.6 → 3.7).
+    mean_after = (
+        spark.read.table(_METRICS)
+        .filter((F.col("channel_id") == ch2.get_id()) & (F.col("container_id") == 1))
+        .first()["mean"]
+    )
+    assert mean_after == pytest.approx(mean_before * 3.7 / 3.6)
 
 
 def test_incremental_identity_reorder_does_not_reprocess(spark):
@@ -380,3 +406,177 @@ def test_calculated_channel_raw_mode(spark, setup_raw_channels_db):
     assert "identity" not in df.columns
     ids = {r["channel_id"] for r in df.select("channel_id").distinct().collect()}
     assert ids == {ch.get_id()}
+
+
+def test_channel_metrics_not_emitted_by_default(spark):
+    # Flag off (default) → no calculated_channel_metrics table is written even
+    # when channels carry attributes.
+    report = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config(is_enabled=False)),
+    )
+    _add_channel(report, factor=3.6)
+    report.determine_report()
+    report.persist_results()
+
+    assert spark.catalog.tableExists(_FACT)
+    assert not spark.catalog.tableExists(_METRICS)
+
+
+def test_channel_metrics_emitted_and_usable_as_impulse_source(spark):
+    # Opt in to the metrics table, with `unit` surfaced as an attribute column.
+    report = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(
+            _config(
+                is_enabled=False,
+                calculated_channels=CalculatedChannels(
+                    emit_channel_metrics=True, attribute_columns=["unit"]
+                ),
+            )
+        ),
+    )
+    q = report.get_db().query
+    ch = CalculatedChannel(
+        name="speed_kmh",
+        expr=q.channel(channel_name="Vehicle Speed Sensor") * 3.6,
+        identity={"channel_name": "speed_kmh", "data_key": "CALC"},
+        attributes={"unit": "km/h"},
+    )
+    report.add_calculated_channel(ch)
+
+    report.determine_report()
+    report.persist_results()
+
+    assert spark.catalog.tableExists(_METRICS)
+    metrics = spark.read.table(_METRICS)
+    # Dynamic identity columns (channel_name, data_key) + configured attribute (unit)
+    # + fixed metric columns; identity keys always present, attribute opt-in.
+    for col in [
+        "container_id",
+        "channel_id",
+        "channel_name",
+        "data_key",
+        "unit",
+        "value_type",
+        "duration",
+        "min",
+        "max",
+        "mean",
+    ]:
+        assert col in metrics.columns, col
+
+    row = metrics.filter(F.col("channel_id") == ch.get_id()).first()
+    assert row["value_type"] == "double"
+    assert row["channel_name"] == "speed_kmh"
+    assert row["data_key"] == "CALC"
+    assert row["unit"] == "km/h"
+    # One metrics row per (container, channel).
+    fact = spark.read.table(_FACT)
+    n_pairs = fact.select("container_id", "channel_id").distinct().count()
+    assert metrics.count() == n_pairs
+
+    # Numeric KPIs match a hand-computed, duration-weighted aggregate of the gold
+    # fact rows (container 1). Independently reproduces the production semantics so
+    # a regression in the KPI math is caught end to end.
+    fact_rows = (
+        fact.filter((F.col("channel_id") == ch.get_id()) & (F.col("container_id") == 1))
+        .select("tstart", "tend", "value")
+        .collect()
+    )
+    durations = [r["tend"] - r["tstart"] for r in fact_rows]
+    values = [r["value"] for r in fact_rows]
+    exp_duration = max(r["tend"] for r in fact_rows) - min(r["tstart"] for r in fact_rows)
+    exp_mean = sum(v * d for v, d in zip(values, durations, strict=True)) / sum(durations)
+    m_row = metrics.filter(
+        (F.col("channel_id") == ch.get_id()) & (F.col("container_id") == 1)
+    ).first()
+    assert m_row["duration"] == exp_duration
+    assert m_row["min"] == pytest.approx(min(values))
+    assert m_row["max"] == pytest.approx(max(values))
+    assert m_row["mean"] == pytest.approx(exp_mean)
+
+    # Round-trip: the fact + metrics pair is a valid Impulse silver source. Feed
+    # them back as `channels` + `channel_metrics` (wide model: channel_name is a
+    # column on channel_metrics) and resolve the channel by name. A minimal
+    # `container_metrics` (one row per container) satisfies the filter pipeline.
+    fact_as_channels = spark.read.table(_FACT).select(
+        "container_id", "channel_id", "tstart", "tend", "value"
+    )
+    container_metrics = fact_as_channels.select("container_id").distinct()
+    db = MeasurementDB(
+        MeasurementDBConfig.for_debug(
+            {
+                "channels": fact_as_channels,
+                "channel_metrics": metrics,
+                "container_metrics": container_metrics,
+            }
+        ),
+        ws=report.ws,
+    )
+    solved = (
+        db.query.channel(channel_name="speed_kmh").alias("v").solve(spark, report.get_solver())
+    )
+    assert solved.count() > 0
+
+
+def test_channel_metrics_incremental_is_idempotent(spark):
+    # Seed gold (full) with the metrics table, then re-run incrementally with the
+    # same definition/data: the metrics upsert on (container_id, channel_id) must
+    # keep the row count stable (one row per container/channel).
+    cc = CalculatedChannels(emit_channel_metrics=True)
+
+    r1 = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config(is_enabled=False, calculated_channels=cc)),
+    )
+    _add_channel(r1, factor=3.6)
+    r1.determine_report()
+    r1.persist_results()
+    count_before = spark.read.table(_METRICS).count()
+    assert count_before > 0
+
+    r2 = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config(is_enabled=True, calculated_channels=cc)),
+    )
+    _add_channel(r2, factor=3.6)
+    r2.determine_report()
+    r2.persist_results()
+
+    assert spark.read.table(_METRICS).count() == count_before
+
+
+def test_channel_metrics_custom_kpis(spark):
+    # A non-default KPI selection controls which KPI columns are emitted.
+    report = Report(
+        name="calc_channel_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(
+            _config(
+                is_enabled=False,
+                calculated_channels=CalculatedChannels(
+                    emit_channel_metrics=True, kpis=["min", "max"]
+                ),
+            )
+        ),
+    )
+    _add_channel(report, factor=3.6)
+    report.determine_report()
+    report.persist_results()
+
+    metrics = spark.read.table(_METRICS)
+    # Only the selected KPIs are present; the dropped defaults are absent.
+    assert "min" in metrics.columns
+    assert "max" in metrics.columns
+    assert "mean" not in metrics.columns
+    assert "duration" not in metrics.columns

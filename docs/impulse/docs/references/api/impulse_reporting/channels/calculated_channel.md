@@ -178,3 +178,50 @@ Create the dimension DataFrame for the given channels.
 which ``createDataFrame`` builds directly from the plain dict returned by
 
 
+#### determine\_channel\_metrics
+
+```python
+def determine_channel_metrics(
+        cls,
+        spark: SparkSession,
+        channels: list[CalculatedChannel],
+        fact_df: DataFrame | None,
+        *,
+        attribute_columns: list[str] | None = None,
+        kpis: list[str] | None = None) -> DataFrame | None
+```
+
+Derive a silver-shaped ``channel_metrics`` DataFrame from the fact rows.
+
+The calculated-channel fact table already matches the silver ``channels``
+table; this builds its companion ``channel_metrics`` so the pair can serve
+as an Impulse silver source.  Metrics are aggregated **directly from the
+narrow fact rows** (``container_id, channel_id, tstart, tend, value``),
+grouped by ``(container_id, channel_id)``.
+
+The output schema is **dynamic**: fixed columns ``container_id,
+channel_id, value_type`` plus one column per configured KPI (see ``kpis``),
+one per identity key (the union across all ``channels``), and one per
+configured attribute key.  Identity/attribute values are pulled from
+each channel's in-memory ``identity`` / ``attributes`` dicts (null where a
+channel omits a key).  On an identity/attribute key collision, identity wins
+and the attribute is skipped.
+
+**Arguments**:
+
+- `spark` (`SparkSession`): Session used to build the per-channel metadata frame.
+- `channels` (`list of CalculatedChannel`): The channels whose fact rows are in ``fact_df``; supply identity and
+attributes.
+- `fact_df` (`DataFrame or None`): Narrow fact DataFrame (output of :meth:`determine_calculated_channels`).
+``None`` returns ``None``.
+- `attribute_columns` (`list of str`): Attribute keys to surface as columns.  Default/empty → no attribute
+columns.  A key no channel defines yields an all-null column.
+- `kpis` (`list of str`): KPI names to compute (see ``calculated_channel_kpis.KPI_BUILDERS``); the
+output carries one column per name, in order.  ``None`` → the default
+KPIs (``duration, min, max, mean``).
+
+**Returns**:
+
+`DataFrame or None`: The dynamic-schema metrics DataFrame, or ``None`` when ``fact_df`` is
+``None``.
+

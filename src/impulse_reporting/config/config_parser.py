@@ -6,6 +6,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
+from impulse_reporting.channels.calculated_channel_kpis import DEFAULT_KPIS, KPI_BUILDERS
 
 
 def is_valid_table_name(table_name: str) -> str:
@@ -442,6 +443,58 @@ class IncrementalConfig(BaseModel):
     gold_last_modified_column: str = "_created_at"
 
 
+class CalculatedChannels(BaseModel):
+    """
+    Configuration for calculated-channel outputs.
+
+    Attributes
+    ----------
+    emit_channel_metrics : bool, default=False
+        When True, also emit a ``calculated_channel_metrics`` gold table (silver
+        ``channel_metrics`` shape) alongside the calculated-channel fact table, so
+        the fact + metrics pair can serve as an Impulse silver source.
+    attribute_columns : list of str, default=[]
+        Calculated-channel attribute keys to surface as columns on the metrics
+        table (e.g. ``["unit"]``). Empty (the default) → no attribute columns.
+        Identity keys are always surfaced dynamically and win over an
+        attribute key of the same name.
+    kpis : list of str, default=["duration", "min", "max", "mean"]
+        KPIs computed on the metrics table, one column per name. Each must be a
+        registered KPI (see ``calculated_channel_kpis.KPI_BUILDERS``); an unknown
+        name is rejected at validation. Duplicates are removed (order preserved).
+    """
+
+    emit_channel_metrics: bool = False
+    attribute_columns: list[str] = []
+    kpis: list[str] = list(DEFAULT_KPIS)
+
+    @field_validator("attribute_columns", mode="after")
+    @classmethod
+    def _normalize_attribute_columns(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for name in value:
+            is_valid_unity_entity_name(name)
+            if name not in seen:
+                seen.add(name)
+                normalized.append(name)
+        return normalized
+
+    @field_validator("kpis", mode="after")
+    @classmethod
+    def _normalize_kpis(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for name in value:
+            if name not in KPI_BUILDERS:
+                valid = ", ".join(sorted(KPI_BUILDERS))
+                raise ValueError(f"Unknown calculated-channel KPI: {name}. Valid KPIs: {valid}.")
+            if name not in seen:
+                seen.add(name)
+                normalized.append(name)
+        return normalized
+
+
 class ImpulseConfig(BaseModel):
     """
      Main configuration model.
@@ -458,6 +511,9 @@ class ImpulseConfig(BaseModel):
          Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
      incremental : IncrementalConfig, optional
          Optional incremental processing configuration. Defaults to IncrementalConfig().
+     calculated_channels : CalculatedChannels, optional
+         Optional calculated-channel output configuration (e.g. opting in to the
+         ``calculated_channel_metrics`` table). Defaults to CalculatedChannels().
      measurement_dimensions : list of str, optional
          Column names to surface from ``container_metrics`` into the
          gold-layer ``measurement_dimension`` table. Names are matched
@@ -532,6 +588,7 @@ class ImpulseConfig(BaseModel):
     container_filters: ContainerFilters | None = None
     query_engine: QueryEngine = QueryEngine(solver=Solvers.DEFAULT_SOLVER)
     incremental: IncrementalConfig | None = None
+    calculated_channels: CalculatedChannels = CalculatedChannels()
 
     measurement_dimensions: list[str] = list(DEFAULT_MEASUREMENT_DIMENSIONS)
 
