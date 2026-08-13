@@ -98,7 +98,7 @@ Omit entirely for `DefaultSolver` + `data_type="RLE"`.
 | `data_type`             | `"RLE"`            | `"RLE"` for interval-encoded `[tstart, tend)` samples; `"RAW"` for `(timestamp, value)` samples.  |
 | `raw_encoder`           | `null` (→ `"RLE"`) | How RAW point data becomes intervals. `"RLE"` collapses equal-valued runs (default); `"INTERVAL"` keeps every sample, only deriving `tend` + dropping exact duplicates. Only used when `data_type="RAW"`. |
 | `drop_implausible_data` | `false`            | Drop `channels` rows where `is_plausible = false`. **Requires `data_type="RAW"`** (RLE raises).   |
-| `batch_size`            | `500`              | Max selectors solved per batch.                                                                   |
+| `batch_size`            | `500`              | Max selectors solved per batch. Applies to events, aggregations, and calculated channels.         |
 | `solver_config`         | `null`             | Per-table column mappings, per-table filters, and project scoping (below).                        |
 
 ## solver_config (optional) — adapt to an existing layout

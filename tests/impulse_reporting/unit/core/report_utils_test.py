@@ -859,6 +859,113 @@ class TestSolveExpressionsBatched:
         report.query.select.return_value.solve.assert_called_once()
 
 
+class TestSolveCalculatedChannelsBatched:
+    """Tests for Report._solve_calculated_channels_batched() (narrow / append)."""
+
+    def test_empty_channels_returns_none(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+        assert report._solve_calculated_channels_batched([]) is None
+
+    def test_single_batch_sinkless_creates_temp_view(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        result = report._solve_calculated_channels_batched([ch])
+
+        mock_batch_df.createOrReplaceTempView.assert_called_once()
+        view_name = mock_batch_df.createOrReplaceTempView.call_args[0][0]
+        assert view_name.startswith("__impulse_temp_")
+        report.spark.table.assert_called_once_with(view_name)
+        assert result is mock_table_df
+
+    def test_single_batch_with_sink_writes_delta_table(self, spark):
+        report = _build_report_for_solve(spark, _SINK_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        result = report._solve_calculated_channels_batched([ch])
+
+        write_chain = mock_batch_df.write.format.return_value.mode.return_value
+        write_chain.saveAsTable.assert_called_once()
+        fq_name = write_chain.saveAsTable.call_args[0][0]
+        assert "__impulse_temp_" in fq_name
+        assert "spark_catalog" in fq_name
+        assert "gold" in fq_name
+        report.spark.table.assert_called_once_with(fq_name)
+        assert result is mock_table_df
+
+    def test_multiple_batches_combined_with_union_by_name(self, spark):
+        """Narrow batches are row-appended with unionByName, NOT joined."""
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_df1 = MagicMock(spec=DataFrame)
+        mock_df2 = MagicMock(spec=DataFrame)
+        mock_unioned = MagicMock(spec=DataFrame)
+        mock_df1.unionByName.return_value = mock_unioned
+
+        table_returns = [mock_df1, mock_df2]
+        call_idx = [0]
+
+        def fake_table(name):
+            df = table_returns[call_idx[0]]
+            call_idx[0] += 1
+            return df
+
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = MagicMock(
+            spec=DataFrame
+        )
+        report.spark = MagicMock()
+        report.spark.table.side_effect = fake_table
+
+        ch1, ch2 = MagicMock(), MagicMock()
+        ch1.get_selectors.return_value = [MagicMock()]
+        ch2.get_selectors.return_value = [MagicMock()]
+
+        with patch(
+            "impulse_reporting.core.report_utils.build_batches", return_value=[[ch1], [ch2]]
+        ):
+            result = report._solve_calculated_channels_batched([ch1, ch2])
+
+        mock_df1.unionByName.assert_called_once_with(mock_df2)
+        mock_df1.join.assert_not_called()
+        assert result is mock_unioned
+
+    def test_query_select_called_with_batch_channels(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = MagicMock(spec=DataFrame)
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        report._solve_calculated_channels_batched([ch])
+
+        report.query.select.assert_called_once_with(ch)
+        report.query.select.return_value.solve_calculated_channels.assert_called_once()
+
+
 # ============================================================================
 # Fixtures for the generic entity orchestration/persistence helpers
 # ============================================================================
