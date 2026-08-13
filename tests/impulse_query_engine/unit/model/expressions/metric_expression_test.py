@@ -4,6 +4,7 @@
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricOp, MetricSelector
 
+
 def test_metric_expression_is_not_serializable():
     """Metric expressions have no ``as_dict``/``from_dict``.
 
