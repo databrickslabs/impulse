@@ -1,6 +1,6 @@
 """
 Build PyArrow RecordBatches from MDF4 partition specs — the executor-side decode
-core shared by both the mapInArrow converter and the custom data sources.
+core used by the custom data sources.
 
 Three entry points emit the public output schemas:
   - convert_spec_to_arrow_batches        -> signals (per channel group)
@@ -361,9 +361,8 @@ def convert_spec_to_arrow_batches(
     Convert ONE partition spec into an iterator of pyarrow.RecordBatch with the
     signals schema (file_uri, channel_id, time, value).
 
-    This is the single shared Arrow conversion core used by BOTH the mapInArrow
-    UDF (converter._convert_partition_arrow) and the 'mdf_signals' custom data
-    source (datasources.MdfSignalsReader.read), so both inherit the same
+    This is the shared Arrow conversion core used by the 'mdf_signals' custom
+    data source (datasources.MdfSignalsReader.read); it applies the same
     optimizations: stream uncompressed DT blocks in record-aligned chunks to
     bound memory, fall back to whole-block reads for DL/DZ/HL, reuse a cached
     file_uri constant column, and cap output batches at _MAX_BATCH_ROWS rows.

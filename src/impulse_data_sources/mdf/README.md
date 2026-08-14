@@ -35,8 +35,7 @@ signals = spark.read.format("mdf_signals").option("path", "/Volumes/.../mdf").lo
 # discovers every *.mf4 under /Volumes/.../mdf, including subdirectories
 ```
 
-Three read formats — `mdf_signals`, `mdf_metadata`, `mdf_masters` — plus a
-high-level `MDFToDeltaConverter` that writes Delta tables directly. See the
+Three read formats — `mdf_signals`, `mdf_metadata`, `mdf_masters`. See the
 [documentation](https://databrickslabs.github.io/impulse/docs/data_sources/mdf4)
 for options, schemas, run-length encoding, and the silver-layer example.
 
@@ -59,7 +58,6 @@ Package path: `src/impulse_data_sources/mdf/`
 | `arrow_emit.py`  | build Arrow batches (per-group, stripe, master) + run-length encoding                     |
 | `udf_helpers.py` | re-export shim over the three modules above (stable import surface)                       |
 | `bin_packer.py`  | partition planning (`plan_partitions`, `plan_stripes_for_file`, `plan_master_partitions`) |
-| `converter.py`   | `MDFToDeltaConverter` orchestration + Delta writes                                        |
 | `datasources.py` | the three Spark data sources                                                              |
 | `schemas.py`     | shared Spark schemas (`SIGNALS_SCHEMA`, `METADATA_SCHEMA`)                                |
 

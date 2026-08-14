@@ -15,8 +15,7 @@ Every output row is identified by `file_uri`, the source file path.
 The data source is provided by the `impulse_data_sources.mdf` package and exposes
 three formats — [`mdf_signals`](#mdf_signals--time-series-samples),
 [`mdf_metadata`](#mdf_metadata--channel-catalog), and
-[`mdf_masters`](#mdf_masters--per-group-time-base) — plus a high-level
-[`MDFToDeltaConverter`](#writing-delta-tables-with-mdftodeltaconverter).
+[`mdf_masters`](#mdf_masters--per-group-time-base).
 
 :::warning Experimental
 
@@ -220,33 +219,6 @@ expanded = (
     .select("file_uri", "channel_id", "timestamp", "value")
 )
 ```
-
-## Writing Delta tables with `MDFToDeltaConverter`
-
-For a one-call conversion to Delta — without wiring up the read/write yourself — use
-`MDFToDeltaConverter`. It also works over **Databricks Connect** (no cluster install
-needed; it uses the `mapInArrow` path with shipped artifacts).
-
-```python
-from impulse_data_sources.mdf import MDFToDeltaConverter
-
-conv = MDFToDeltaConverter(
-    spark,
-    signals_table="cat.sch.signals",     # cluster on (file_uri, channel_id)
-    metadata_table="cat.sch.metadata",   # cluster on file_uri
-    target_partition_mb=64,
-    time_dtype="float32",
-    value_dtype="float32",
-    run_length_encoding=False,
-)
-
-result = conv.convert("/Volumes/.../drive.mf4")          # one file
-results = conv.convert_batch(["/Volumes/.../a.mf4", ...]) # many files, sequential
-```
-
-Each conversion returns a `ConversionResult` (`file_uri`, `num_channels`,
-`total_samples`, `num_partitions`, `duration_seconds`, `signals_table`,
-`metadata_table`).
 
 ## Writing to the Impulse silver layer
 

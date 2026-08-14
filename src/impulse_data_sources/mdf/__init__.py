@@ -1,14 +1,13 @@
 """
-MDF4 → Delta Lake converter for PySpark / Databricks.
+MDF4 data sources for PySpark / Databricks.
 
 Reads ASAM MDF4 measurement files directly from their binary blocks (no
-asammdf dependency at runtime) and converts them to long-format Delta tables,
+asammdf dependency at runtime) and exposes them as Spark data sources,
 parallelised across Spark workers.
 
 Public API (lazy-loaded to avoid importing PySpark unless needed)::
 
     from impulse_data_sources.mdf import (
-        MDFToDeltaConverter,
         MDF4Reader,
         register_mdf_datasources,
         MdfSignalsDataSource,
@@ -18,7 +17,6 @@ Public API (lazy-loaded to avoid importing PySpark unless needed)::
 """
 
 __all__ = [
-    "MDFToDeltaConverter",
     "MDF4Reader",
     "register_mdf_datasources",
     "MdfSignalsDataSource",
@@ -28,10 +26,6 @@ __all__ = [
 
 
 def __getattr__(name):
-    if name == "MDFToDeltaConverter":
-        from .converter import MDFToDeltaConverter
-
-        return MDFToDeltaConverter
     if name == "MDF4Reader":
         from .mdf4_reader import MDF4Reader
 

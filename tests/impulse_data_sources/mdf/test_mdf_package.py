@@ -9,4 +9,3 @@ def test_lazy_imports():
     assert mdf.MdfMetadataDataSource is not None
     assert mdf.MdfMastersDataSource is not None
     assert mdf.register_mdf_datasources is not None
-    assert mdf.MDFToDeltaConverter is not None
