@@ -157,17 +157,15 @@ container's samples land in `channels` together.
 
 ### MDF4 (ASAM)
 
-A Databricks solutions accelerator for ingesting raw MDF4 data into the
-silver-layer model is in preparation. The pattern below describes the
-underlying approach.
-
-Decode each file with [asammdf](https://github.com/danielhrisca/asammdf) in
-a Spark UDF. For each numeric channel, emit
-`(container_id, channel_id, timestamp, value)` rows into a bronze Delta
-table, then run a Spark job that derives `channels` (raw or RLE) and the
-metadata tables. Honor MDF4's per-sample invalidation bits — drop or mark
-invalid samples before RLE encoding (the `is_plausible` column on `channels`
-is the natural place to record them).
+Impulse ships an [MDF4 data source](../data_sources/mdf4.md) that reads raw
+`.mf4` files directly into Spark DataFrames — parsing MDF4 binary blocks
+across workers, no `asammdf` at runtime. It exposes `mdf_signals`,
+`mdf_metadata`, and `mdf_masters` formats and a high-level
+`MDFToDeltaConverter`. The MDF4 page includes a
+[worked example that lands one file into the five silver tables](../data_sources/mdf4.md#writing-to-the-impulse-silver-layer)
+(assign one `container_id` per file, read RLE signals with `absolute_time`,
+and derive the metadata tables). Honor MDF4's per-sample invalidation bits —
+the `is_plausible` column on `channels` is the natural place to record them.
 
 ### Already in Delta but in a different shape
 
