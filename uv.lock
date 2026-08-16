@@ -258,7 +258,6 @@ wheels = [
 name = "databricks-impulse"
 source = { editable = "." }
 dependencies = [
-    { name = "delta-spark" },
     { name = "lz4" },
     { name = "nptyping" },
 ]
@@ -266,6 +265,7 @@ dependencies = [
 [package.optional-dependencies]
 local-dev = [
     { name = "databricks-sdk" },
+    { name = "delta-spark" },
     { name = "matplotlib" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -289,8 +289,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "databricks-sdk", marker = "extra == 'local-dev'", specifier = "==0.106.0" },
-    { name = "delta-spark", specifier = "==4.0.1" },
+    { name = "databricks-sdk", marker = "extra == 'local-dev'", specifier = "==0.110.0" },
+    { name = "delta-spark", marker = "extra == 'local-dev'", specifier = "==4.0.1" },
     { name = "lz4", specifier = "==4.4.5" },
     { name = "matplotlib", marker = "extra == 'local-dev'", specifier = "==3.10.0" },
     { name = "nptyping", specifier = "==2.5.0" },
@@ -317,16 +317,16 @@ dev = [
 
 [[package]]
 name = "databricks-sdk"
-version = "0.106.0"
+version = "0.110.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-auth" },
     { name = "protobuf" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/b7/ef86e7b8c3d135c844f972e06efb628e147eed0a7b9a0ecbf9511437a3c2/databricks_sdk-0.106.0.tar.gz", hash = "sha256:6bbd492cb8593747aced037b9186f8632e9d553fc358e6f3d83b7e959851d9d3", size = 930953, upload-time = "2026-04-30T12:33:19.601Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/0f/488d61ece084f70a6d4d0ab8b5e38b0902e0b9029d0b72cde99e3f2c6b4a/databricks_sdk-0.110.0.tar.gz", hash = "sha256:b62d806982b37f8160f700d657c37b3bd586c649eb5c8c4c1216090d888c5820", size = 945261, upload-time = "2026-05-19T09:18:46.23Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/a9/63b4f6ef3078e4d060faaad85c4e43667189c3429edd68d5cbddc45187ca/databricks_sdk-0.106.0-py3-none-any.whl", hash = "sha256:db9de5566279ae80dfea0ecd37231e8968523ef984e83cbe4bd77e50c59aa6a5", size = 879452, upload-time = "2026-04-30T12:33:18.116Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/23/7c2a827890ab120ac349847ec17ab5a37eb4e3bf8f1d0989fd9eec0c1e6a/databricks_sdk-0.110.0-py3-none-any.whl", hash = "sha256:8a23db05be7a304bea43b4fa78b437051ed0f3755b19594429c649ee4159b546", size = 892096, upload-time = "2026-05-19T09:18:44.313Z" },
 ]
 
 [[package]]
