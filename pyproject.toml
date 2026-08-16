@@ -46,7 +46,7 @@ Issues = "https://github.com/databrickslabs/impulse/issues"
 dev = [
     "pre-commit==4.1.0",
     "pydoc-markdown==4.8.2",
-    "pytest==8.3.5",
+    "pytest==9.0.3",
     "pytest-benchmark==5.1.0",
     "pytest-cov==6.0.0",
     "pytest-mock==3.15.1",
