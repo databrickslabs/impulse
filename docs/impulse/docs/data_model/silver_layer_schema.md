@@ -410,6 +410,44 @@ during raw→interval conversion (see `query_engine.raw_encoder`).
 
 ---
 
+## poi_channels (optional)
+
+**Optional** — only needed for [Points-in-Time (POI) channels](../references/query_engine/tsal/core_data_model.md#pointsintimeseries)
+selected via `QueryBuilder.poi_channel()`. Omit it for sample-only data models.
+
+Unlike `channels`, a POI channel's value is defined **only at its timestamp** — there is no
+`[tstart, tend)` validity interval. **Table membership is the discriminator**: a
+`(container_id, channel_id)` whose data lives in `poi_channels` is a POI channel; one in `channels`
+is a sample channel.
+
+A POI value may be numeric or a string (e.g. an ECU Diagnostic Trouble Code). The two typed value
+columns cover both, and **exactly one is populated per row** — chosen by the channel's declared
+`dtype` at query time (`poi_channel(dtype='double'|'string')`).
+
+| Column         | Type     | Nullable | Description                                            |
+|----------------|----------|----------|--------------------------------------------------------|
+| `container_id` | `long`   | No       | Parent container identifier.                           |
+| `channel_id`   | `int`    | No       | Channel identifier.                                    |
+| `timestamp`    | `long`   | No       | Point timestamp (microseconds).                        |
+| `value_double` | `double` | Yes      | Numeric value (populated for a `double` POI channel).  |
+| `value_string` | `string` | Yes      | String value (populated for a `string` POI channel).   |
+
+#### Internal columns referenced by the framework
+
+Map any silver column to these via
+[`solver_config.poi_channels.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name.
+
+| Internal name  | Referenced by                                                                |
+|----------------|------------------------------------------------------------------------------|
+| `container_id` | Composite key joining points back to their container                         |
+| `channel_id`   | Composite key joining points back to their channel                           |
+| `timestamp`    | Point timestamp — becomes the point's `tstart` (with a null `tend`) at solve |
+| `value_double` | Numeric point value — consumed by the solve UDF                              |
+| `value_string` | String point value — consumed by the solve UDF for a `string` POI channel    |
+
+---
+
 ## channel_mapping (optional)
 
 Alias-resolution table used by `DefaultSolver` when selectors are

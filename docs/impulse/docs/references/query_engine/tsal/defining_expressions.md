@@ -31,6 +31,30 @@ Each tag passed to `channel(...)` must be resolvable by the solver — either as
 table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolver-adapts).
 :::
 
+### Points-in-Time (POI) channels
+
+Some channels record values meaningful only **at an instant** — an ECU Diagnostic Trouble Code
+(DTC), a discrete event code — with no validity in between. Select these with
+`QueryBuilder.poi_channel()` instead of `channel()`. It resolves channels exactly like `channel()`
+(same tag filters), but builds a [`PointsInTimeSeries`](core_data_model.md#pointsintimeseries) from
+the [`poi_channels`](../../../data_model/silver_layer_schema.md#poi_channels-optional) table rather
+than a `SampleSeries` from `channels`.
+
+```python
+# numeric POI channel (default dtype='double')
+dtc_count = db.query.poi_channel(channel_name='DTC_count')
+
+# string POI channel — e.g. fault codes like "P0301"
+dtc = db.query.poi_channel(channel_name='DTC', dtype='string')
+faults = dtc == 'P0301'                 # PointsInTime: the instants the code was P0301
+rpm_at_faults = eng_rpm.where(faults)   # freeze-frame: RPM at each fault instant
+```
+
+`dtype` accepts the `SeriesValueType.DOUBLE` / `SeriesValueType.STRING` enum or the plain string
+`'double'` / `'string'` (default `'double'`). A **string** POI channel supports only equality
+(`==` / `!=`) and sampling (`.where(...)`) — arithmetic, ordering, and numeric reductions raise, as
+they are meaningless for string values.
+
 ### Logical aliases via channel mapping
 
 For workflows where a stable logical name should resolve to one of many physical channels through a separately

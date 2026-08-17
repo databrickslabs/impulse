@@ -248,11 +248,6 @@ class SolverConfig(BaseModel):
         return "value_string"
 
     @property
-    def poi_dtype_col(self) -> str:
-        """Internal column name for the per-row value-dtype discriminator on poi_channels."""
-        return "dtype"
-
-    @property
     def tag_key_col(self) -> str:
         """Internal column name for the attribute key on the container_tags (EAV) table."""
         return "key"

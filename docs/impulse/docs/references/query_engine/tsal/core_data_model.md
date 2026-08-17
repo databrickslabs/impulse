@@ -138,6 +138,9 @@ Because there is no validity between points, the operators differ from `SampleSe
   `SampleSeries`' duration-weighted reducers.
 - **`synchronized()` / `synchronized_all()`** align this series with a `SampleSeries` or another
   `PointsInTimeSeries` onto their shared instants, returning value-carrying point series.
+- **String-valued POI series** — produced by `poi_channel(dtype='string')` (e.g. DTC fault codes) —
+  support only equality (`==` / `!=`) and sampling (`synchronized` / `.where`); arithmetic, ordering,
+  and numeric reductions raise, since they are meaningless for strings.
 
 → API: [`PointsInTimeSeries`](../../api/impulse_query_engine/model/series/points_in_time_series.md)
 

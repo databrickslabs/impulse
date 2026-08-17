@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyspark.sql.functions as F
@@ -11,7 +11,10 @@ from pyspark.sql import DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
-from impulse_query_engine.analyze.metadata.time_series_expression import SeriesType
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    SeriesType,
+    TimeSeriesExpression,
+)
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
@@ -1065,13 +1068,9 @@ class DefaultSolver(QuerySolver):
         )
 
         # POI channel data is unioned in AFTER RLE encoding above, so its
-        # zero-duration points are never run-length merged. The inner join to
-        # channels_df below drops any POI rows whose channel was not selected, so
-        # unioning whenever a poi_channels table is configured is correct (a
-        # pure-SAMPLE query simply matches no POI channel_ids). Which object each
-        # channel builds is decided by the selector (passed to load_blob), not a
-        # per-row marker — SAMPLE rows just lack value_string.
-        q = self._union_poi_channel_data(query, q)
+        # zero-duration points are never run-length merged.
+        if DefaultSolver._query_contains_poi_selections(query.selections):
+            q = self._union_poi_channel_data(query, q)
 
         joined_df = q.join(
             F.broadcast(channels_df),
@@ -1079,6 +1078,18 @@ class DefaultSolver(QuerySolver):
         )
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         return q, joined_df, container_count
+
+    @staticmethod
+    def _query_contains_poi_selections(selections: Iterable[Any]) -> bool:
+        """True when any *leaf* selector resolved by the query is a POINTS_IN_TIME channel.
+
+        Walks the full expression tree via ``collect_selectors``,
+        used to skip the POI-table union for pure-SAMPLE queries.
+        """
+        return any(
+            selector.series_type is SeriesType.POINTS_IN_TIME
+            for selector in TimeSeriesExpression.collect_selectors(selections)
+        )
 
     def _union_poi_channel_data(self, query, channels_q: DataFrame) -> DataFrame:
         """Union POI channel-data rows into the (already-encoded) channel-data frame.
@@ -1099,11 +1110,16 @@ class DefaultSolver(QuerySolver):
         cfg = self.config
         poi = db.poi_channels(self.spark)
         poi = self._apply_column_mapping(poi, cfg.poi_channels.column_name_mapping)
+
+        # ensures poi and channel have the same dtype for start and end timestamp
+        channels_q_t_start_dtype: T.DataType = channels_q.schema[cfg.tstart_col].dataType
+        channels_q_t_end_dtype: T.DataType = channels_q.schema[cfg.tend_col].dataType
+
         poi_proj = poi.select(
             F.col(cfg.container_id_col),
             F.col(cfg.channel_id_col),
-            F.col(cfg.poi_timestamp_col).alias(cfg.tstart_col),
-            F.lit(None).cast(T.LongType()).alias(cfg.tend_col),
+            F.col(cfg.poi_timestamp_col).cast(channels_q_t_start_dtype).alias(cfg.tstart_col),
+            F.lit(None).cast(channels_q_t_end_dtype).alias(cfg.tend_col),
             F.col(cfg.poi_value_double_col).alias(cfg.value_col),
             F.col(cfg.poi_value_string_col),
         )

@@ -250,3 +250,17 @@ class TestPoiChannelDtypeArg:
         dtc = narrow_db.query.poi_channel(channel_name="DTC", dtype="string")
         with pytest.raises(TypeError, match="string-valued"):
             dtc.mean().evaluation_type()
+
+    def test_poi_selector_id_distinguishes_value_type(self):
+        # A double- vs string-typed POI selection of the *same* expression must resolve
+        # as distinct channels, so their selector_id must differ.
+        expr = TagSelector("channel_name") == "DTC"
+        dbl = TimeSeriesSelector(
+            expr, series_type=SeriesType.POINTS_IN_TIME, value_type=SeriesValueType.DOUBLE
+        )
+        strg = TimeSeriesSelector(
+            expr, series_type=SeriesType.POINTS_IN_TIME, value_type=SeriesValueType.STRING
+        )
+        assert dbl.selector_id != strg.selector_id
+        # SAMPLE keeps the historical id (independent of value_type), distinct from POI.
+        assert TimeSeriesSelector(expr).selector_id != dbl.selector_id

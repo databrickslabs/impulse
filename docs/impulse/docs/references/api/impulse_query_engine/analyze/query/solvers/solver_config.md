@@ -260,15 +260,6 @@ def poi_value_string_col() -> str
 Internal column name for the string value on the poi_channels table.
 
 
-#### poi\_dtype\_col
-
-```python
-def poi_dtype_col() -> str
-```
-
-Internal column name for the per-row value-dtype discriminator on poi_channels.
-
-
 #### tag\_key\_col
 
 ```python

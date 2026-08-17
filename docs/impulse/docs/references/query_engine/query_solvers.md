@@ -126,8 +126,8 @@ from impulse_query_engine.analyze.query.channels.calculated_channel import Calcu
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 
 cc = CalculatedChannel(
-    db.query.channel(channel_name="Vehicle Speed Sensor") * 3.6,
-    {"channel_name": "speed_kmh", "data_key": "CALC"},
+  db.query.channel(channel_name="Vehicle Speed Sensor") * 3.6,
+  {"channel_name": "speed_kmh", "data_key": "CALC"},
 )
 df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
 # df: [container_id, channel_id, tstart, tend, value, channel_name, data_key]

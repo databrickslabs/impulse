@@ -24,6 +24,7 @@ config = {
         "container_metrics_table": "my_catalog.silver.container_metrics",
         "channel_metrics_table": "my_catalog.silver.channel_metrics",
         "channels_uri": "my_catalog.silver.channels",
+        "poi_channels_uri": "my_catalog.silver.poi_channels",         # optional
         "container_tags_table": "my_catalog.silver.container_tags",   # optional
         "channel_tags_table": "my_catalog.silver.channel_tags",       # optional
     },
@@ -54,6 +55,7 @@ Maps the silver-layer input tables. Values are full Unity Catalog paths (`catalo
 | `container_metrics_table` | Yes      | Container metadata (timestamps, duration).                          |
 | `channel_metrics_table`   | Yes      | Per-channel statistics; channel-selection columns in the wide model. |
 | `channels_uri`            | Yes      | Time-series sample data.                                            |
+| `poi_channels_uri`        | No       | Points-in-Time (POI) channel data. Required only when selecting POI channels via `poi_channel()`; omit for sample-only models. |
 | `container_tags_table`    | No       | Container EAV tags. Required to use `tag_filters`.                   |
 | `channel_tags_table`      | No       | Channel EAV tags. Required to select channels by tag.               |
 | `channel_mapping_table`   | No       | Logical→physical alias table. Required for `channel_with_alias()`.  |

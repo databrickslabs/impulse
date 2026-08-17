@@ -701,12 +701,13 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
     @property
     def selector_id(self) -> int:
-        # Include series_type so a SAMPLE and a POINTS_IN_TIME selection of the
-        # same tag expression resolve as distinct channels.  SAMPLE keeps the
-        # historical id (bare ``str(expr)`` hash) for backward compatibility.
+        # Include series_type (and, for POI, value_type) so a SAMPLE vs a
+        # POINTS_IN_TIME selection — or a double- vs string-typed POI selection —
+        # of the same tag expression resolve as distinct channels.  SAMPLE keeps
+        # the historical id (bare ``str(expr)`` hash) for backward compatibility.
         if self._series_type is SeriesType.SAMPLE:
             return zlib.crc32(str(self._expr).encode())
-        return zlib.crc32(f"{self._series_type}|{self._expr}".encode())
+        return zlib.crc32(f"{self._series_type}|{self._expr}|{self._value_type}".encode())
 
     def dtype(self):
         """
