@@ -84,7 +84,6 @@ class PointsInTimeSeries:
         else:
             self.values = np.array(values, dtype=np.float64)
 
-
     @classmethod
     def from_silver(
         cls,
@@ -179,7 +178,6 @@ class PointsInTimeSeries:
             # for a non-empty slice), so the constructor infers the string type from it.
             return cls(tstarts, values_string if values_string is not None else [])
         return cls(tstarts, values_double)
-
 
     def dtype(self):
         """

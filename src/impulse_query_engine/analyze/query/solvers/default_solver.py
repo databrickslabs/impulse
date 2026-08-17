@@ -171,6 +171,7 @@ class TimeSeriesCache(SeriesCache):
                 values = values * factor
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
+
 class DefaultSolver(QuerySolver):
     """
     The default query-engine solver.  Adapts to the shape of the silver layer.
@@ -1104,7 +1105,7 @@ class DefaultSolver(QuerySolver):
             F.col(cfg.poi_timestamp_col).alias(cfg.tstart_col),
             F.lit(None).cast(T.LongType()).alias(cfg.tend_col),
             F.col(cfg.poi_value_double_col).alias(cfg.value_col),
-            F.col(cfg.poi_value_string_col)
+            F.col(cfg.poi_value_string_col),
         )
         return channels_q.unionByName(poi_proj, allowMissingColumns=True)
 

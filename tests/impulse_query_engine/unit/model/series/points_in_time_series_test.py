@@ -26,8 +26,11 @@ def _str(vals):
 
 def test_from_silver_numeric():
     pts = PointsInTimeSeries.from_silver(
-        _dbl([10, 20, 30]), _dbl([1, 2, 3]), _str([None, None, None]),
-        SeriesValueType.DOUBLE, tend=_dbl([None, None, None]),
+        _dbl([10, 20, 30]),
+        _dbl([1, 2, 3]),
+        _str([None, None, None]),
+        SeriesValueType.DOUBLE,
+        tend=_dbl([None, None, None]),
     )
     assert pts.dtype() == T.ArrayType(T.ArrayType(T.DoubleType()))
     nptest.assert_array_equal(pts.values, [1.0, 2.0, 3.0])
@@ -35,8 +38,11 @@ def test_from_silver_numeric():
 
 def test_from_silver_string():
     pts = PointsInTimeSeries.from_silver(
-        _dbl([10, 20]), _dbl([None, None]), _str(["P0301", "P0420"]),
-        SeriesValueType.STRING, tend=_dbl([None, None]),
+        _dbl([10, 20]),
+        _dbl([None, None]),
+        _str(["P0301", "P0420"]),
+        SeriesValueType.STRING,
+        tend=_dbl([None, None]),
     )
     assert list(pts.values) == ["P0301", "P0420"]
 
@@ -45,8 +51,11 @@ def test_from_silver_declared_string_on_numeric_channel_raises():
     # value_string all-null => the channel is really numeric.
     with pytest.raises(ValueError, match="dtype mismatch"):
         PointsInTimeSeries.from_silver(
-            _dbl([10, 20]), _dbl([1, 2]), _str([None, None]),
-            SeriesValueType.STRING, tend=_dbl([None, None]),
+            _dbl([10, 20]),
+            _dbl([1, 2]),
+            _str([None, None]),
+            SeriesValueType.STRING,
+            tend=_dbl([None, None]),
         )
 
 
@@ -54,8 +63,11 @@ def test_from_silver_declared_double_on_string_channel_raises():
     # value_double all-null while value_string is populated => really a string channel.
     with pytest.raises(ValueError, match="dtype mismatch"):
         PointsInTimeSeries.from_silver(
-            _dbl([10, 20]), _dbl([None, None]), _str(["P0301", "P0420"]),
-            SeriesValueType.DOUBLE, tend=_dbl([None, None]),
+            _dbl([10, 20]),
+            _dbl([None, None]),
+            _str(["P0301", "P0420"]),
+            SeriesValueType.DOUBLE,
+            tend=_dbl([None, None]),
         )
 
 
@@ -63,8 +75,11 @@ def test_from_silver_sample_channel_raises_series_type_mismatch():
     # A real validity interval (tend != tstart) => selector resolved to a SAMPLE channel.
     with pytest.raises(ValueError, match="series-type mismatch"):
         PointsInTimeSeries.from_silver(
-            _dbl([10, 20]), _dbl([1, 2]), None,
-            SeriesValueType.DOUBLE, tend=_dbl([15, 25]),
+            _dbl([10, 20]),
+            _dbl([1, 2]),
+            None,
+            SeriesValueType.DOUBLE,
+            tend=_dbl([15, 25]),
         )
 
 
@@ -72,16 +87,22 @@ def test_from_silver_zero_duration_interval_is_allowed():
     # tstart == tend is a zero-duration point (POI stored in the SAMPLE table);
     # the relaxed check must NOT treat it as a series-type mismatch.
     pts = PointsInTimeSeries.from_silver(
-        _dbl([10, 20]), _dbl([1, 2]), None,
-        SeriesValueType.DOUBLE, tend=_dbl([10, 20]),
+        _dbl([10, 20]),
+        _dbl([1, 2]),
+        None,
+        SeriesValueType.DOUBLE,
+        tend=_dbl([10, 20]),
     )
     nptest.assert_array_equal(pts.values, [1.0, 2.0])
 
 
 def test_from_silver_null_tend_is_allowed():
     pts = PointsInTimeSeries.from_silver(
-        _dbl([10, 20]), _dbl([1, 2]), None,
-        SeriesValueType.DOUBLE, tend=_dbl([None, None]),
+        _dbl([10, 20]),
+        _dbl([1, 2]),
+        None,
+        SeriesValueType.DOUBLE,
+        tend=_dbl([None, None]),
     )
     assert len(pts) == 2
 
@@ -89,7 +110,11 @@ def test_from_silver_null_tend_is_allowed():
 def test_from_silver_empty_skips_validation():
     # Nothing resolved => no mismatch can be asserted; builds an empty series.
     pts = PointsInTimeSeries.from_silver(
-        _dbl([]), _dbl([]), None, SeriesValueType.DOUBLE, tend=_dbl([]),
+        _dbl([]),
+        _dbl([]),
+        None,
+        SeriesValueType.DOUBLE,
+        tend=_dbl([]),
     )
     assert len(pts) == 0
 
