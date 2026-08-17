@@ -19,10 +19,10 @@ backed by :class:`SampleSeries`.
 between-point validity, backed by :class:`PointsInTimeSeries`.
 
 
-## PoiValueType
+## SeriesValueType
 
 ```python
-class PoiValueType(StrEnum)
+class SeriesValueType(StrEnum)
 ```
 
 The value data type of a POI channel — selects its ``poi_channels`` value
@@ -48,7 +48,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization)
 def __init__(expr,
              uses_alias: bool = False,
              series_type: SeriesType = SeriesType.SAMPLE,
-             value_type: PoiValueType = PoiValueType.DOUBLE)
+             value_type: SeriesValueType = SeriesValueType.DOUBLE)
 ```
 
 Initialize a TimeSeriesSelector.
@@ -64,7 +64,7 @@ unchanged.  ``POINTS_IN_TIME`` builds a :class:`PointsInTimeSeries`
 identical, only the built object and its result dtype differ.  This is
 the plan-time source of truth for the series type (so ``dtype()`` is
 correct for a bare POI selection with no per-channel metadata lookup).
-- `value_type` (`PoiValueType`): For a ``POINTS_IN_TIME`` selection, the declared value data type
+- `value_type` (`SeriesValueType`): For a ``POINTS_IN_TIME`` selection, the declared value data type
 (``DOUBLE`` / ``STRING``).  Ignored for ``SAMPLE``.  Drives plan-time
 typing and string-op gating; validated against the silver
 ``poi_channels.dtype`` at solve time (assertion contract).

@@ -33,7 +33,7 @@ class SeriesType(StrEnum):
     POINTS_IN_TIME = "POINTS_IN_TIME"
 
 
-class PoiValueType(StrEnum):
+class SeriesValueType(StrEnum):
     """The value data type of a POI channel — selects its ``poi_channels`` value
     column and which in-memory :class:`PointsInTimeSeries` variant is built.
 
@@ -656,7 +656,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         expr,
         uses_alias: bool = False,
         series_type: SeriesType = SeriesType.SAMPLE,
-        value_type: PoiValueType = PoiValueType.DOUBLE,
+        value_type: SeriesValueType = SeriesValueType.DOUBLE,
     ):
         """
         Initialize a TimeSeriesSelector.
@@ -675,7 +675,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             identical, only the built object and its result dtype differ.  This is
             the plan-time source of truth for the series type (so ``dtype()`` is
             correct for a bare POI selection with no per-channel metadata lookup).
-        value_type : PoiValueType, optional
+        value_type : SeriesValueType, optional
             For a ``POINTS_IN_TIME`` selection, the declared value data type
             (``DOUBLE`` / ``STRING``).  Ignored for ``SAMPLE``.  Drives plan-time
             typing and string-op gating; validated against the silver
@@ -696,7 +696,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         return self._series_type
 
     @property
-    def value_type(self) -> PoiValueType:
+    def value_type(self) -> SeriesValueType:
         return self._value_type
 
     @property
@@ -731,7 +731,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         and the string-op gating (e.g. ``.mean()`` raising) reflect the declared
         type before any data is read.
         """
-        if self._value_type is PoiValueType.STRING:
+        if self._value_type is SeriesValueType.STRING:
             return PointsInTimeSeries.empty_string()
         return PointsInTimeSeries.empty()
 
@@ -900,7 +900,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             expr,
             uses_alias=obj.get("uses_alias", False),
             series_type=SeriesType(obj.get("series_type", SeriesType.SAMPLE)),
-            value_type=PoiValueType(obj.get("value_type", PoiValueType.DOUBLE)),
+            value_type=SeriesValueType(obj.get("value_type", SeriesValueType.DOUBLE)),
         )
         if "alias" in obj and obj["alias"] is not None:
             m.alias(obj["alias"])

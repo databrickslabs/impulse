@@ -19,7 +19,7 @@ import pytest
 import pyspark.sql.types as T
 from pyspark.sql import SparkSession
 
-from impulse_query_engine.analyze.metadata.time_series_expression import PoiValueType
+from impulse_query_engine.analyze.metadata.time_series_expression import SeriesValueType
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.measurement_db import MeasurementDB
 
@@ -79,7 +79,7 @@ class TestStringPoi:
         """
         solver = DefaultSolver(spark)
         q = basic_narrow_db.query
-        dtc = q.poi_channel(channel_name="DTC", dtype=PoiValueType.STRING)
+        dtc = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
 
         # DTC == "P0301" is a PointsInTime; serialize it directly.
         result = q.select((dtc == "P0301").alias("hits")).solve(spark=spark, solver=solver)
@@ -91,7 +91,7 @@ class TestStringPoi:
     def test_string_poi_count_and_sampling_allowed(self, spark: SparkSession, basic_narrow_db):
         solver = DefaultSolver(spark)
         q = basic_narrow_db.query
-        dtc = q.poi_channel(channel_name="DTC", dtype=PoiValueType.STRING)
+        dtc = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
 
         result = q.select(dtc.count().alias("c")).solve(spark=spark, solver=solver)
 
@@ -104,7 +104,7 @@ class TestStringPoi:
         """A numeric reduction on a string POI selection is rejected at plan/build time
         (before Spark runs), not as a silent NaN."""
         q = basic_narrow_db.query
-        dtc = q.poi_channel(channel_name="DTC", dtype=PoiValueType.STRING)
+        dtc = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
         selection = getattr(dtc, reduction)().alias("bad")
         with pytest.raises(TypeError, match="string-valued"):
             q.select(selection)._determine_result_objects_dtypes()
@@ -142,7 +142,7 @@ class TestMixAndMatch:
         solver = DefaultSolver(spark)
         q = narrow_db.query
         seed = q.channel(seed="0")
-        dtc = q.poi_channel(channel_name="DTC", dtype=PoiValueType.STRING)
+        dtc = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
 
         result = q.select(seed.where(dtc == "P0301").alias("frozen")).solve(
             spark=spark, solver=solver
@@ -190,7 +190,7 @@ class TestMixAndMatch:
         solver = DefaultSolver(spark)
         q = basic_narrow_db.query
         amb = q.channel(channel_name="Ambient Air Temperature")
-        dtc = q.poi_channel(channel_name="DTC", dtype=PoiValueType.STRING)
+        dtc = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
 
         result = q.select(amb.where(dtc == "P0301").alias("frozen")).solve(
             spark=spark, solver=solver
@@ -213,15 +213,16 @@ class TestDeclaredVsActual:
         q = basic_narrow_db.query
         # DTC is a numeric-less (string) channel; declaring double resolves rows
         # whose value_double is all null → dtype mismatch raised in the solve UDF.
-        bad = q.poi_channel(channel_name="DTC", dtype=PoiValueType.DOUBLE)
+        bad = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.DOUBLE)
         with pytest.raises(Exception, match="dtype mismatch"):
             q.select(bad.count().alias("c")).solve(spark=spark, solver=solver).collect()
 
     def test_poi_channel_on_sample_channel_raises(self, spark: SparkSession, basic_narrow_db):
         """``poi_channel`` on a SAMPLE channel raises the series-type mismatch.
 
-        The SAMPLE channel's rows carry a real (non-null) validity interval, which
-        is the signal load_blob validates a POI-declared selector against.
+        The SAMPLE channel's rows carry a real validity interval (``tend != tstart``),
+        which is the signal ``PointsInTimeSeries.from_silver`` validates a POI-declared
+        selector against. (A zero-duration ``tstart == tend`` row would be accepted.)
         """
         solver = DefaultSolver(spark)
         q = basic_narrow_db.query

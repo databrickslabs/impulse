@@ -7,7 +7,7 @@ from pyspark.sql import DataFrame
 from impulse_query_engine.analyze.metadata.metric_expression import MetricSelector
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
-    PoiValueType,
+    SeriesValueType,
     RequiresDeserialization,
     SeriesType,
     TimeSeriesExpression,
@@ -164,7 +164,7 @@ class QueryBuilder:
         return TimeSeriesSelector(expr, uses_alias=True)
 
     def poi_channel(
-        self, dtype: PoiValueType = PoiValueType.DOUBLE, **kwargs
+        self, dtype: SeriesValueType = SeriesValueType.DOUBLE, **kwargs
     ) -> TimeSeriesSelector:
         """
         Create a Points-in-Time (POI) channel selector.
@@ -183,7 +183,7 @@ class QueryBuilder:
 
         Parameters
         ----------
-        dtype : PoiValueType or str, optional
+        dtype : SeriesValueType or str, optional
             The POI channel's value data type: ``DOUBLE`` (default, numeric) or
             ``STRING`` (e.g. DTC codes — only sampling and equality apply). Accepts
             either the enum or its string value (``"double"`` / ``"string"``). This
@@ -200,7 +200,7 @@ class QueryBuilder:
         """
         # Accept a plain string ("string" / "double") as well as the enum, so
         # poi_channel(..., dtype="string") behaves identically to the enum form.
-        value_type = PoiValueType(dtype)
+        value_type = SeriesValueType(dtype)
         expr = None
         for k, arg in kwargs.items():
             if not expr:

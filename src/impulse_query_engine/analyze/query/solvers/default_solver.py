@@ -11,10 +11,7 @@ from pyspark.sql import DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
-from impulse_query_engine.analyze.metadata.time_series_expression import (
-    PoiValueType,
-    SeriesType,
-)
+from impulse_query_engine.analyze.metadata.time_series_expression import SeriesType
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
@@ -140,7 +137,7 @@ class TimeSeriesCache(SeriesCache):
         series_type : SeriesType, optional
             The calling selector's series type; ``POINTS_IN_TIME`` builds a
             :class:`PointsInTimeSeries`. ``None`` (default) => SAMPLE.
-        value_type : PoiValueType, optional
+        value_type : SeriesValueType, optional
             For a POI selector, its declared value type; ``STRING`` reads the
             string value column, otherwise the numeric one.
 
@@ -152,12 +149,20 @@ class TimeSeriesCache(SeriesCache):
         s = self.pdf.iloc[lo:hi]
 
         if series_type == SeriesType.POINTS_IN_TIME:
-            self._assert_poi_data(s, value_type)
-            if value_type == PoiValueType.STRING:
-                # value_string is a populated string column, so the constructor
-                # infers the string value type from it.
-                return PointsInTimeSeries(s[self._ts_col], s[self._value_string_col])
-            return PointsInTimeSeries(s[self._ts_col], s[self._val_col])
+            value_string = (
+                s[self._value_string_col]
+                if self._value_string_col is not None and self._value_string_col in s.columns
+                else None
+            )
+            # from_silver owns the declared-vs-actual reconciliation: it needs both
+            # value columns and tend, which a bare PointsInTimeSeries does not carry.
+            return PointsInTimeSeries.from_silver(
+                s[self._ts_col],
+                s[self._val_col],
+                value_string,
+                value_type,
+                tend=s[self._te_col],
+            )
 
         values = s[self._val_col]
         if self._has_conversion and len(s) > 0 and uses_alias:
@@ -165,53 +170,6 @@ class TimeSeriesCache(SeriesCache):
             if pd.notna(factor):
                 values = values * factor
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
-
-    def _assert_poi_data(self, s, value_type) -> None:
-        """Validate a POI selector against the data it resolved to.
-
-        The selector drives series-type dispatch, but the silver data stays
-        authoritative: a ``poi_channel(...)`` selector must land on genuine POI
-        rows. POI rows carry a null ``tend`` (a point has no validity interval),
-        whereas SAMPLE rows always carry a real ``tend`` (non-nullable in
-        ``channels``); so a non-null ``tend`` on a POI-declared slice means the
-        selector was pointed at a SAMPLE channel. A ``STRING`` declaration
-        additionally requires a populated ``value_string``. Either mismatch raises
-        rather than silently reading the wrong column (mirrors the unit-conversion
-        conflict check).
-        """
-        if len(s) == 0:
-            return
-        if pd.notna(s[self._te_col].iloc[0]):
-            raise ValueError(
-                "POI channel series-type mismatch: poi_channel(...) resolved to a SAMPLE "
-                "channel (its rows carry a validity interval). Use channel(...) for SAMPLE "
-                "channels and poi_channel(...) for POINTS_IN_TIME channels."
-            )
-
-        has_string_col = self._value_string_col is not None and self._value_string_col in s.columns
-        string_all_null = has_string_col and s[self._value_string_col].isna().all()
-        double_all_null = s[self._val_col].isna().all()
-
-        if value_type == PoiValueType.STRING:
-            # A string POI channel must carry string values; all-null means the
-            # channel is actually numeric (declared the wrong dtype).
-            if not has_string_col or string_all_null:
-                raise ValueError(
-                    "POI channel dtype mismatch: poi_channel(dtype=string) resolved to a channel "
-                    "with no string values (it is a numeric POI channel). Pass dtype=double to "
-                    "poi_channel(...)."
-                )
-        else:
-            # A numeric POI channel must carry numeric values; all-null numeric
-            # with populated string values means the channel is actually a string
-            # channel (declared the wrong dtype).
-            if double_all_null and has_string_col and not string_all_null:
-                raise ValueError(
-                    "POI channel dtype mismatch: poi_channel(dtype=double) resolved to a channel "
-                    "whose numeric values are all null (it is a string POI channel). Pass "
-                    "dtype=string to poi_channel(...)."
-                )
-
 
 class DefaultSolver(QuerySolver):
     """
@@ -1146,7 +1104,7 @@ class DefaultSolver(QuerySolver):
             F.col(cfg.poi_timestamp_col).alias(cfg.tstart_col),
             F.lit(None).cast(T.LongType()).alias(cfg.tend_col),
             F.col(cfg.poi_value_double_col).alias(cfg.value_col),
-            F.col(cfg.poi_value_string_col).alias(cfg.poi_value_string_col),
+            F.col(cfg.poi_value_string_col)
         )
         return channels_q.unionByName(poi_proj, allowMissingColumns=True)
 

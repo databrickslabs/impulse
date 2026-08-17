@@ -57,7 +57,7 @@ class SeriesCache(ABC):
             ``POINTS_IN_TIME`` builds a :class:`PointsInTimeSeries`, otherwise a
             :class:`SampleSeries`. ``None`` (default) means SAMPLE, so callers
             that predate POI are unchanged.
-        value_type : PoiValueType, optional
+        value_type : SeriesValueType, optional
             For a ``POINTS_IN_TIME`` selector, its declared value type
             (``DOUBLE`` / ``STRING``) — selects the numeric vs string value
             column. Ignored for SAMPLE. The declared type is validated against

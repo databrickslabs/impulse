@@ -122,7 +122,7 @@ Create a time series selector for the given channel tags.
 #### poi\_channel
 
 ```python
-def poi_channel(dtype: PoiValueType = PoiValueType.DOUBLE,
+def poi_channel(dtype: SeriesValueType = SeriesValueType.DOUBLE,
                 **kwargs) -> TimeSeriesSelector
 ```
 
@@ -142,8 +142,9 @@ the built object and its result dtype differ.
 
 **Arguments**:
 
-- `dtype` (`PoiValueType`): The POI channel's value data type: ``DOUBLE`` (default, numeric) or
-``STRING`` (e.g. DTC codes — only sampling and equality apply). This
+- `dtype` (`SeriesValueType or str`): The POI channel's value data type: ``DOUBLE`` (default, numeric) or
+``STRING`` (e.g. DTC codes — only sampling and equality apply). Accepts
+either the enum or its string value (``"double"`` / ``"string"``). This
 declared type drives plan-time result typing and string-op gating; it
 is validated against the silver ``poi_channels.dtype`` at solve time
 (an actual/declared mismatch raises).

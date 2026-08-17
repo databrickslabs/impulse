@@ -34,6 +34,53 @@ series has no values to infer from and therefore defaults to numeric; use
 - `tstarts` (`Sized`): Array-like of time points.
 - `values` (`Sized`): Array-like of values, one per time point.
 
+#### from\_silver
+
+```python
+def from_silver(cls,
+                tstarts: pd.Series,
+                values_double: pd.Series,
+                values_string: pd.Series | None,
+                value_type: SeriesValueType,
+                tend: pd.Series | None = None) -> PointsInTimeSeries
+```
+
+Build a POI series from a resolved silver-layer slice, validating the
+
+declared ``value_type`` (and, when *tend* is given, the row shape) against
+the data the selector actually landed on.
+
+The selector drives series-type dispatch, but the silver data stays
+authoritative: a ``poi_channel(...)`` selector must resolve to genuine POI
+rows. This reconciliation lives here — rather than in ``__init__`` — because
+it needs information a constructed point series does not carry: **both**
+value columns (to tell a mis-declared dtype from a legitimately empty one)
+and the ``tend`` column (to detect a SAMPLE channel). ``__init__`` stays a
+thin value constructor used throughout the series algebra.
+
+**Arguments**:
+
+- `tstarts` (`pandas.Series`): POI timestamps for the resolved rows.
+- `values_double` (`pandas.Series`): The numeric value column for the resolved rows.
+- `values_string` (`pandas.Series or None`): The string value column, when the frame carries one; ``None`` otherwise.
+- `value_type` (`SeriesValueType`): The declared value type. ``STRING`` builds from *values_string*, any
+other value builds from *values_double*.
+- `tend` (`pandas.Series or None`): The validity-interval end column. A genuine POI row has a null ``tend``
+or a zero-duration interval (``tstart == tend``, should POI ever live in
+the SAMPLE ``channels`` table); a real interval (``tend != tstart``)
+means the selector resolved to a SAMPLE channel. ``None`` skips the
+series-type check.
+
+**Raises**:
+
+- `ValueError`: On a series-type mismatch (resolved to a SAMPLE channel) or a
+declared-vs-actual dtype mismatch. Fails loudly rather than silently
+reading the wrong column (mirrors the unit-conversion conflict check).
+
+**Returns**:
+
+`PointsInTimeSeries`: A string-valued series when *value_type* is ``STRING``, else numeric.
+
 #### dtype
 
 ```python

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Sized
+from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
@@ -12,6 +13,12 @@ import pyspark.sql.types as T
 from .intervals import Intervals
 from .points_in_time import PointsInTime
 from .sample_series import SampleSeries
+import pandas as pd
+
+if TYPE_CHECKING:
+    # For annotations only; the runtime use lives inside from_silver as a local
+    # import to avoid a circular import (time_series_expression imports this module).
+    from ...analyze.metadata.time_series_expression import SeriesValueType
 
 FloatOrNaN = float | np.float64
 
@@ -76,6 +83,103 @@ class PointsInTimeSeries:
             self.values = np.asarray(values, dtype=object)
         else:
             self.values = np.array(values, dtype=np.float64)
+
+
+    @classmethod
+    def from_silver(
+        cls,
+        tstarts: pd.Series,
+        values_double: pd.Series,
+        values_string: pd.Series | None,
+        value_type: SeriesValueType,
+        tend: pd.Series | None = None,
+    ) -> PointsInTimeSeries:
+        """Build a POI series from a resolved silver-layer slice, validating the
+        declared ``value_type`` (and, when *tend* is given, the row shape) against
+        the data the selector actually landed on.
+
+        The selector drives series-type dispatch, but the silver data stays
+        authoritative: a ``poi_channel(...)`` selector must resolve to genuine POI
+        rows. This reconciliation lives here — rather than in ``__init__`` — because
+        it needs information a constructed point series does not carry: **both**
+        value columns (to tell a mis-declared dtype from a legitimately empty one)
+        and the ``tend`` column (to detect a SAMPLE channel). ``__init__`` stays a
+        thin value constructor used throughout the series algebra.
+
+        Parameters
+        ----------
+        tstarts : pandas.Series
+            POI timestamps for the resolved rows.
+        values_double : pandas.Series
+            The numeric value column for the resolved rows.
+        values_string : pandas.Series or None
+            The string value column, when the frame carries one; ``None`` otherwise.
+        value_type : SeriesValueType
+            The declared value type. ``STRING`` builds from *values_string*, any
+            other value builds from *values_double*.
+        tend : pandas.Series or None, optional
+            The validity-interval end column. A genuine POI row has a null ``tend``
+            or a zero-duration interval (``tstart == tend``, should POI ever live in
+            the SAMPLE ``channels`` table); a real interval (``tend != tstart``)
+            means the selector resolved to a SAMPLE channel. ``None`` skips the
+            series-type check.
+
+        Returns
+        -------
+        PointsInTimeSeries
+            A string-valued series when *value_type* is ``STRING``, else numeric.
+
+        Raises
+        ------
+        ValueError
+            On a series-type mismatch (resolved to a SAMPLE channel) or a
+            declared-vs-actual dtype mismatch. Fails loudly rather than silently
+            reading the wrong column (mirrors the unit-conversion conflict check).
+        """
+        # Local runtime import (see the TYPE_CHECKING block above): a module-scope
+        # import would be circular, as time_series_expression imports this module.
+        from ...analyze.metadata.time_series_expression import SeriesValueType
+
+        if len(tstarts) > 0:
+            # Series-type: a genuine POI row has a null tend or a zero-duration
+            # interval (tstart == tend). Only a real interval (tend != tstart)
+            # means the selector resolved to a SAMPLE channel.
+            if tend is not None:
+                te = tend.iloc[0]
+                if pd.notna(te) and te != tstarts.iloc[0]:
+                    raise ValueError(
+                        "POI channel series-type mismatch: poi_channel(...) resolved to a "
+                        "SAMPLE channel (its rows carry a validity interval). Use channel(...) "
+                        "for SAMPLE channels and poi_channel(...) for POINTS_IN_TIME channels."
+                    )
+
+            string_all_null = values_string is not None and values_string.isna().all()
+            double_all_null = values_double.isna().all()
+
+            if value_type == SeriesValueType.STRING:
+                # A string POI channel must carry string values; all-null means the
+                # channel is actually numeric (declared the wrong dtype).
+                if values_string is None or string_all_null:
+                    raise ValueError(
+                        "POI channel dtype mismatch: poi_channel(dtype=string) resolved to a "
+                        "channel with no string values (it is a numeric POI channel). Pass "
+                        "dtype=double to poi_channel(...)."
+                    )
+            elif double_all_null and values_string is not None and not string_all_null:
+                # A numeric POI channel must carry numeric values; all-null numeric
+                # with populated string values means the channel is actually string.
+                raise ValueError(
+                    "POI channel dtype mismatch: poi_channel(dtype=double) resolved to a "
+                    "channel whose numeric values are all null (it is a string POI channel). "
+                    "Pass dtype=string to poi_channel(...)."
+                )
+
+        if value_type == SeriesValueType.STRING:
+            # values_string is the populated string column (validated non-null above
+            # for a non-empty slice), so the constructor infers the string type from it.
+            return cls(tstarts, values_string if values_string is not None else [])
+        return cls(tstarts, values_double)
+
 
     def dtype(self):
         """
