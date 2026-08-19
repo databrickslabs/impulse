@@ -29,12 +29,13 @@ class TimeSeriesCache(SeriesCache):
 
     def resolve(self, selection):
         """
-        Resolve selected tags/metrics to a list of candidates.
+        Resolve a channel (time-series) selector to its candidate rows.
 
         Parameters
         ----------
-        selection : Any
-            The selection object specifying tags or metrics.
+        selection : TimeSeriesSelector
+            The channel selector whose tag expression (``selection._expr``)
+            identifies the matching channel(s).
 
         Returns
         -------
