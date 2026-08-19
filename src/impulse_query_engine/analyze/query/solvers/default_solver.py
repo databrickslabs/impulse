@@ -1009,14 +1009,12 @@ class DefaultSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
-
-        # Container-metadata columns the selected expressions asked for.  They are
-        # joined onto the channel-match frame in _prepare_channels_join (and hence
-        # ride into the pandas frame); here we tell the cache which columns are
-        # container tags vs. container metrics.
-        container_tag_cols = TimeSeriesExpression.collect_container_tags(selections)
-        container_metric_cols = TimeSeriesExpression.collect_container_metrics(selections)
+        # _prepare_channels_join joins the requested container-metadata columns
+        # onto the frame and returns their names so we can tell the cache which
+        # columns are container tags vs. container metrics.
+        q, joined_df, container_count, container_tag_cols, container_metric_cols = (
+            self._prepare_channels_join(query, channels_df)
+        )
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
@@ -1032,13 +1030,16 @@ class DefaultSolver(QuerySolver):
         )
         return self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
 
-    def _prepare_channels_join(self, query, channels_df) -> tuple[DataFrame, DataFrame, int]:
+    def _prepare_channels_join(
+        self, query, channels_df
+    ) -> tuple[DataFrame, DataFrame, int, list[str], list[str]]:
         """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
 
         Applies optional per-channel unit conversion, reads and column-maps the
-        channel-data table (raw-encoding it when in raw mode), broadcast-joins it
-        to the channel-match frame on ``[container_id, channel_id]``, and counts
-        the distinct containers.
+        channel-data table (raw-encoding it when in raw mode), attaches any
+        container-level tags/metrics the selected expressions asked for,
+        broadcast-joins it to the channel-match frame on
+        ``[container_id, channel_id]``, and counts the distinct containers.
 
         Parameters
         ----------
@@ -1049,11 +1050,14 @@ class DefaultSolver(QuerySolver):
 
         Returns
         -------
-        tuple[DataFrame, DataFrame, int]
-            ``(channels_q, joined_df, container_count)`` — the column-mapped
-            channel-data DataFrame (authoritative for output ``container_id`` /
-            ``channel_id`` types), the join fed to the grouped-map UDF, and the
-            number of distinct containers.
+        tuple[DataFrame, DataFrame, int, list[str], list[str]]
+            ``(channels_q, joined_df, container_count, container_tag_cols,
+            container_metric_cols)`` — the column-mapped channel-data DataFrame
+            (authoritative for output ``container_id`` / ``channel_id`` types),
+            the join fed to the grouped-map UDF, the number of distinct
+            containers, and the requested container-tag / container-metric
+            column names (already joined onto ``joined_df``) so callers can wire
+            the cache without re-deriving them.
         """
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
@@ -1105,7 +1109,7 @@ class DefaultSolver(QuerySolver):
             on=[self.config.container_id_col, self.config.channel_id_col],
         )
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
-        return q, joined_df, container_count
+        return q, joined_df, container_count, tag_keys, metric_cols
 
     def _build_container_metadata_df(self, query, tag_keys, metric_cols) -> DataFrame:
         """Build a one-row-per-container frame of the requested tags/metrics.
@@ -1310,12 +1314,11 @@ class DefaultSolver(QuerySolver):
             Narrow DataFrame of calculated-channel samples.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
-
-        # Same container-metadata wiring as solve(): the columns are joined onto
-        # the frame in _prepare_channels_join; tell the cache which are which.
-        container_tag_cols = TimeSeriesExpression.collect_container_tags(selections)
-        container_metric_cols = TimeSeriesExpression.collect_container_metrics(selections)
+        # Same container-metadata wiring as solve(): _prepare_channels_join joins
+        # the columns on and returns their names for the cache.
+        q, joined_df, container_count, container_tag_cols, container_metric_cols = (
+            self._prepare_channels_join(query, channels_df)
+        )
 
         schema = self._build_calculated_channels_udf_schema(q)
         solve_udf = F.pandas_udf(
