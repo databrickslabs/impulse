@@ -20,60 +20,6 @@ class RequiresDeserialization:
     pass
 
 
-class ContainerMetadataExpression:
-    """Mixin: declare container tag/metric needs, propagate them, resolve in ``build()``.
-
-    Gives composite :class:`TimeSeriesExpression` subclasses (aggregations, event
-    expressions, calculated channels) the same container-metadata capability as
-    :class:`TimeSeriesUDF`: a subclass stores its declared keys via
-    :meth:`_set_container_metadata` and lists its child expressions via
-    :meth:`_container_metadata_children`.  ``required_container_tags`` /
-    ``required_container_metrics`` return the declared keys unioned with the
-    children's needs (so a wrapped metadata-declaring UDF also propagates), and
-    :meth:`resolve_container_metadata` reads the per-container values off a cache.
-
-    Mix in *before* :class:`TimeSeriesExpression` so these overrides win in MRO.
-    The class-level defaults make the ``required_*`` methods safe even for
-    subclasses whose ``__init__`` never calls :meth:`_set_container_metadata`.
-    """
-
-    _container_tags: tuple[str, ...] = ()
-    _container_metrics: tuple[str, ...] = ()
-
-    def _set_container_metadata(self, container_tags=None, container_metrics=None) -> None:
-        """Store this expression's declared container-tag / metric keys."""
-        self._container_tags = tuple(container_tags or ())
-        self._container_metrics = tuple(container_metrics or ())
-
-    def _container_metadata_children(self):
-        """Child expressions whose requirements are unioned in. Override per class."""
-        return ()
-
-    def required_container_tags(self) -> set[str]:
-        tags = set(self._container_tags)
-        for child in self._container_metadata_children():
-            if hasattr(child, "required_container_tags"):
-                tags |= child.required_container_tags()
-        return tags
-
-    def required_container_metrics(self) -> set[str]:
-        metrics = set(self._container_metrics)
-        for child in self._container_metadata_children():
-            if hasattr(child, "required_container_metrics"):
-                metrics |= child.required_container_metrics()
-        return metrics
-
-    def resolve_container_metadata(self, cache) -> tuple[dict, dict]:
-        """Return ``(tags, metrics)`` dicts for this expression's declared keys.
-
-        Values are read from *cache* (``container_tags`` / ``container_metrics``);
-        keys absent from the cache resolve to ``None``.
-        """
-        tags = {k: cache.container_tags.get(k) for k in self._container_tags}
-        metrics = {k: cache.container_metrics.get(k) for k in self._container_metrics}
-        return tags, metrics
-
-
 class TimeSeriesExpression(abc.ABC):
     def __init__(self, alias: str = "", is_single_signal: bool = True, requires_udf: bool = False):
         """
@@ -518,7 +464,7 @@ class TimeSeriesExpression(abc.ABC):
         self._alias = alias_name
         return self
 
-    def histogram(self, bins: list[float], container_tags=None, container_metrics=None):
+    def histogram(self, bins: list[float]):
         """
         Create a histogram with given bins.
 
@@ -526,10 +472,6 @@ class TimeSeriesExpression(abc.ABC):
         ----------
         bins : list of float
             Bin edges for the histogram.
-        container_tags : list of str, optional
-            Container-tag keys to make available in the aggregation's ``build()``.
-        container_metrics : list of str, optional
-            Container-metric columns to make available in the aggregation's ``build()``.
 
         Returns
         -------
@@ -540,9 +482,7 @@ class TimeSeriesExpression(abc.ABC):
             HistogramDuration,
         )
 
-        return HistogramDuration(
-            self, bins, container_tags=container_tags, container_metrics=container_metrics
-        )
+        return HistogramDuration(self, bins)
 
     def histogram_custom_weights(
         self,
@@ -553,8 +493,6 @@ class TimeSeriesExpression(abc.ABC):
         math_fct_for_weights=None,
         math_fct_kwargs=None,
         weight_type=None,
-        container_tags=None,
-        container_metrics=None,
     ):
         """
         Create a histogram with custom weights applied to bins.
@@ -596,18 +534,9 @@ class TimeSeriesExpression(abc.ABC):
             math_fct_for_weights=math_fct_for_weights,
             math_fct_kwargs=math_fct_kwargs,
             weight_type=weight_type,
-            container_tags=container_tags,
-            container_metrics=container_metrics,
         )
 
-    def histogram2d(
-        self,
-        y_selection,
-        x_bins: list[float],
-        y_bins: list[float],
-        container_tags=None,
-        container_metrics=None,
-    ):
+    def histogram2d(self, y_selection, x_bins: list[float], y_bins: list[float]):
         """
         Create a bi-dimensional histogram with given bins.
 
@@ -619,10 +548,6 @@ class TimeSeriesExpression(abc.ABC):
             Bin edges for the x-axis.
         y_bins : list of float
             Bin edges for the y-axis.
-        container_tags : list of str, optional
-            Container-tag keys to make available in the aggregation's ``build()``.
-        container_metrics : list of str, optional
-            Container-metric columns to make available in the aggregation's ``build()``.
 
         Returns
         -------
@@ -633,14 +558,7 @@ class TimeSeriesExpression(abc.ABC):
             Histogram2DDuration,
         )
 
-        return Histogram2DDuration(
-            self,
-            y_selection,
-            x_bins,
-            y_bins,
-            container_tags=container_tags,
-            container_metrics=container_metrics,
-        )
+        return Histogram2DDuration(self, y_selection, x_bins, y_bins)
 
     def histogram2d_custom_weights(
         self,
@@ -653,8 +571,6 @@ class TimeSeriesExpression(abc.ABC):
         math_fct_for_weights=None,
         math_fct_kwargs=None,
         weight_type=None,
-        container_tags=None,
-        container_metrics=None,
     ):
         """
         Create a bi-dimensional histogram with given bins and custom weights.
@@ -702,8 +618,6 @@ class TimeSeriesExpression(abc.ABC):
             math_fct_for_weights=math_fct_for_weights,
             math_fct_kwargs=math_fct_kwargs,
             weight_type=weight_type,
-            container_tags=container_tags,
-            container_metrics=container_metrics,
         )
 
     def apply(self, func, container_tags=None, container_metrics=None) -> TimeSeriesUDF:

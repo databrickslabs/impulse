@@ -345,26 +345,26 @@ class TestContainerMetadataDeclaration:
 
 
 class TestContainerMetadataCompositeExpressions:
-    """Aggregations, event expressions, and calculated channels declare/propagate."""
+    """Composite expressions propagate container needs from wrapped children.
+
+    They carry no container metadata of their own; ``required_container_*`` unions
+    the children exactly like ``required_tags`` does (a metadata-declaring
+    ``TimeSeriesUDF`` wrapped inside them propagates up).
+    """
 
     def _sel(self, name="x"):
         return TimeSeriesSelector(TagSelector("name") == name)
 
-    def test_histogram_own_declaration(self):
-        h = HistogramDuration(self._sel(), [0.0, 1.0], container_metrics=["m"])
-        assert h.required_container_metrics() == {"m"}
-        assert h.required_container_tags() == set()
-
-    def test_histogram_factory_forwards_declaration(self):
-        h = self._sel().histogram([0.0, 1.0], container_tags=["t"], container_metrics=["m"])
-        assert h.required_container_tags() == {"t"}
-        assert h.required_container_metrics() == {"m"}
-
     def test_histogram_propagates_wrapped_udf(self):
-        # A metadata-declaring UDF wrapped in a histogram must still propagate.
         wrapped = self._sel().apply(_noop, container_metrics=["m"])
         h = HistogramDuration(wrapped, [0.0, 1.0])
         assert h.required_container_metrics() == {"m"}
+        assert h.required_container_tags() == set()
+
+    def test_plain_histogram_has_no_requirements(self):
+        h = HistogramDuration(self._sel(), [0.0, 1.0])
+        assert h.required_container_metrics() == set()
+        assert h.required_container_tags() == set()
 
     def test_custom_weights_unions_children(self):
         h = HistogramCustomWeights(
@@ -375,34 +375,24 @@ class TestContainerMetadataCompositeExpressions:
         assert h.required_container_metrics() == {"m1"}
         assert h.required_container_tags() == {"t1"}
 
-    def test_sequence_of_events_declaration_and_propagation(self):
-        propagated = SequenceOfEventsExpression(
-            [self._sel().apply(_noop, container_tags=["child"])]
-        )
-        assert propagated.required_container_tags() == {"child"}
+    def test_sequence_of_events_propagates(self):
+        expr = SequenceOfEventsExpression([self._sel().apply(_noop, container_tags=["child"])])
+        assert expr.required_container_tags() == {"child"}
+        assert expr.required_container_metrics() == set()
 
-        declared = SequenceOfEventsExpression([self._sel()], container_metrics=["m"])
-        assert declared.required_container_metrics() == {"m"}
-
-    def test_calculated_channel_declaration_and_propagation(self):
-        propagated = CalculatedChannel(
+    def test_calculated_channel_propagates(self):
+        cc = CalculatedChannel(
             self._sel().apply(_noop, container_metrics=["m"]), {"channel_name": "x"}
         )
-        assert propagated.required_container_metrics() == {"m"}
-
-        declared = CalculatedChannel(self._sel(), {"channel_name": "y"}, container_tags=["t"])
-        assert declared.required_container_tags() == {"t"}
+        assert cc.required_container_metrics() == {"m"}
+        assert cc.required_container_tags() == set()
 
     def test_collect_across_composites(self):
         selections = [
-            HistogramDuration(self._sel(), [0.0, 1.0], container_metrics=["b"]),
-            CalculatedChannel(self._sel(), {"channel_name": "z"}, container_metrics=["a"]),
+            HistogramDuration(self._sel().apply(_noop, container_metrics=["b"]), [0.0, 1.0]),
+            CalculatedChannel(
+                self._sel().apply(_noop, container_metrics=["a"]), {"channel_name": "z"}
+            ),
         ]
-        # Deduplicated union across the selections (discovery order across items).
+        # Deduplicated union across the selections' wrapped UDFs.
         assert set(TimeSeriesExpression.collect_container_metrics(selections)) == {"a", "b"}
-
-    def test_resolve_against_empty_cache(self):
-        h = HistogramDuration(self._sel(), [0.0, 1.0], container_metrics=["m"])
-        tags, metrics = h.resolve_container_metadata(EmptyTimeSeriesCache())
-        assert tags == {}
-        assert metrics == {"m": None}

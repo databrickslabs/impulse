@@ -14,10 +14,8 @@ Covers both silver-layer shapes:
 """
 
 import pytest
-import pyspark.sql.types as T
 from pyspark.sql import SparkSession
 
-from impulse_query_engine.analyze.query.aggregations.aggregation import Aggregation
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
@@ -32,46 +30,6 @@ from tests.conftest import (
     narrow_db,
     spark,
 )
-
-
-class _MetricProbe(Aggregation):
-    """Test-local aggregation that returns a declared container metric from build().
-
-    Proves an ``Aggregation`` subclass can declare container metrics and read
-    them via :meth:`resolve_container_metadata` inside ``build()``.
-    """
-
-    def __init__(self, selection, metric):
-        self.selection = selection
-        self._metric = metric
-        self._set_container_metadata(container_metrics=[metric])
-
-    def _container_metadata_children(self):
-        return (self.selection,)
-
-    def dtype(self):
-        return T.DoubleType()
-
-    def build(self, cache):
-        self.selection.build(cache)  # ensure the channel is selected/threaded
-        _, metrics = self.resolve_container_metadata(cache)
-        value = metrics.get(self._metric)
-        return float(value) if value is not None else -1.0
-
-    def required_tags(self):
-        return self.selection.required_tags()
-
-    def get_required_tag_exprs(self):
-        return self.selection.get_required_tag_exprs()
-
-    def get_selector_expr(self):
-        return self.selection.get_selector_expr()
-
-    def get_selectors(self):
-        return self.selection.get_selectors()
-
-    def __str__(self):
-        return f"<_MetricProbe metric={self._metric}>"
 
 
 def _alias_config() -> SolverConfig:
@@ -181,15 +139,35 @@ def test_aliased_path_threads_container_metric(
     assert all(value == 11.0 for value in rows.values()), rows
 
 
-def test_aggregation_reads_container_metric(spark: SparkSession, basic_narrow_db: MeasurementDB):
-    """An Aggregation subclass declares a metric and reads it in build()."""
-    query = basic_narrow_db.query
-    probe = _MetricProbe(query.channel(channel_name="Engine RPM"), "num_channels").alias("nc")
-    result = query.select(probe).solve(spark, solver=DefaultSolver(spark))
+def test_aggregation_propagates_container_metric(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """A metadata UDF wrapped in an aggregation propagates + is fed the metric.
 
-    rows = {row.container_id: row.nc for row in result.collect()}
+    The UDF maps the series to a constant equal to ``num_channels`` (== 11); the
+    surrounding histogram then bins that constant.  All mass must land in the
+    ``[10, 20]`` bin, proving the metric reached the UDF inside the aggregation.
+    """
+
+    def const_from_metric(ts, container_metrics):
+        factor = container_metrics["num_channels"]
+        return ts * 0 + (factor if factor is not None else 0)
+
+    query = basic_narrow_db.query
+    hist = (
+        query.channel(channel_name="Engine RPM")
+        .apply(const_from_metric, container_metrics=["num_channels"])
+        .histogram([0.0, 10.0, 20.0])
+        .alias("h")
+    )
+    result = query.select(hist).solve(spark, solver=DefaultSolver(spark))
+
+    rows = [row.h for row in result.collect()]
     assert rows, "expected at least one matched container"
-    assert all(value == 11.0 for value in rows.values()), rows
+    for hist_value in rows:
+        counts = hist_value["H"]  # duration per bin: [ [0,10), [10,20) ]
+        assert counts[0] == 0.0, counts  # nothing below 10
+        assert counts[1] > 0.0, counts  # constant 11 lands in [10, 20)
 
 
 def test_calculated_channel_threads_container_metric(

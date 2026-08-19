@@ -27,8 +27,6 @@ class PointValueAggregator(Aggregation):
         self,
         input_expressions: list[TimeSeriesExpression],
         event_expression: TimeSeriesExpression,
-        container_tags=None,
-        container_metrics=None,
     ):
         """
         Initialize a PointValueAggregator.
@@ -40,20 +38,9 @@ class PointValueAggregator(Aggregation):
         event_expression : TimeSeriesExpression
             Expression defining the points in time at which to sample. When evaluated,
             it yields an instance of PointsInTime.
-        container_tags : list of str, optional
-            Container-tag keys to make available in :meth:`build`.
-        container_metrics : list of str, optional
-            Container-metric columns to make available in :meth:`build`.
         """
         self.input_expressions = input_expressions
         self.event_expression = event_expression
-        self._set_container_metadata(container_tags, container_metrics)
-
-    def _container_metadata_children(self):
-        children = list(self.input_expressions)
-        if self.event_expression is not None:
-            children.append(self.event_expression)
-        return children
 
     def __str__(self) -> str:
         """
@@ -145,6 +132,22 @@ class PointValueAggregator(Aggregation):
             tags = tags.union(expr.required_tags())
         tags = tags.union(self.event_expression.required_tags()) if self.event_expression else tags
         return tags
+
+    def required_container_tags(self) -> set[str]:
+        tags = set()
+        for expr in self.input_expressions:
+            tags = tags.union(expr.required_container_tags())
+        if self.event_expression is not None:
+            tags = tags.union(self.event_expression.required_container_tags())
+        return tags
+
+    def required_container_metrics(self) -> set[str]:
+        metrics = set()
+        for expr in self.input_expressions:
+            metrics = metrics.union(expr.required_container_metrics())
+        if self.event_expression is not None:
+            metrics = metrics.union(self.event_expression.required_container_metrics())
+        return metrics
 
     def get_selector_expr(self):
         """

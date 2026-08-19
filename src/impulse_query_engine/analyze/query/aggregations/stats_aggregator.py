@@ -55,8 +55,6 @@ class StatsAggregator(Aggregation):
         cross_channel_custom_statistics: list[CrossChannelStatistic] | None = None,
         per_channel_custom_statistics: list[PerChannelStatistic] | None = None,
         input_names: list[str] | None = None,
-        container_tags=None,
-        container_metrics=None,
     ):
         """
         Initialize a StatsAggregator.
@@ -109,17 +107,10 @@ class StatsAggregator(Aggregation):
         self._validate_custom_statistic_labels()
         self._validate_input_names()
         self._cross_channel_input_indices = self._resolve_cross_channel_inputs()
-        self._set_container_metadata(container_tags, container_metrics)
 
         # Separate numeric and string statistics for processing
         self._numeric_stats = [s for s in self.statistics if s in NUMERIC_STATISTICS]
         self._string_stats = [s for s in self.statistics if s in STRING_STATISTICS]
-
-    def _container_metadata_children(self):
-        children = list(self.input_expressions)
-        if self.event_expression is not None:
-            children.append(self.event_expression)
-        return children
 
     def _validate_custom_statistic_labels(self) -> None:
         """
@@ -543,6 +534,22 @@ class StatsAggregator(Aggregation):
             tags = tags.union(expr.required_tags())
         tags = tags.union(self.event_expression.required_tags()) if self.event_expression else tags
         return tags
+
+    def required_container_tags(self) -> set[str]:
+        tags = set()
+        for expr in self.input_expressions:
+            tags = tags.union(expr.required_container_tags())
+        if self.event_expression is not None:
+            tags = tags.union(self.event_expression.required_container_tags())
+        return tags
+
+    def required_container_metrics(self) -> set[str]:
+        metrics = set()
+        for expr in self.input_expressions:
+            metrics = metrics.union(expr.required_container_metrics())
+        if self.event_expression is not None:
+            metrics = metrics.union(self.event_expression.required_container_metrics())
+        return metrics
 
     def get_selector_expr(self):
         """
