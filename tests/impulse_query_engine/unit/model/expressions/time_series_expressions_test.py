@@ -11,6 +11,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesOp,
     TimeSeriesSelector,
 )
+from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
 
 
 def test_where():
@@ -256,3 +257,80 @@ class TestGetSelectors:
         result = op.get_selectors()
         assert len(result) == 2
         assert all(s is sel for s in result)
+
+
+def _noop(*args, **kwargs):
+    """Stand-in UDF body; the declaration tests never invoke it."""
+    return 0.0
+
+
+class TestContainerMetadataDeclaration:
+    """UDFs declaring container tags/metrics and their propagation."""
+
+    def test_defaults_are_empty(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        assert sel.required_container_tags() == set()
+        assert sel.required_container_metrics() == set()
+
+    def test_apply_declares_container_metadata(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        udf_expr = sel.apply(
+            _noop,
+            container_tags=["vehicle_type"],
+            container_metrics=["nominal_power"],
+        )
+        assert udf_expr.required_container_tags() == {"vehicle_type"}
+        assert udf_expr.required_container_metrics() == {"nominal_power"}
+
+    def test_udf_decorator_declares_container_metadata(self):
+        @TimeSeriesExpression.udf(container_tags=["t"], container_metrics=["m"])
+        def scaled(ts, container_tags, container_metrics):
+            return 0.0
+
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        expr = scaled(sel)
+        assert expr.required_container_tags() == {"t"}
+        assert expr.required_container_metrics() == {"m"}
+
+    def test_bare_udf_still_works(self):
+        prepped = TimeSeriesExpression.udf(lambda ts, scalar: ts * scalar)
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        expr = prepped(sel, 1.5)
+        assert expr.required_container_tags() == set()
+        assert expr.required_container_metrics() == set()
+
+    def test_requirements_union_through_nesting(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        u1 = sel.apply(_noop, container_metrics=["m1"])
+        u2 = sel.apply(_noop, container_tags=["t1"])
+        combo = u1 + u2  # TimeSeriesOp with both UDFs as args
+        assert combo.required_container_metrics() == {"m1"}
+        assert combo.required_container_tags() == {"t1"}
+
+    def test_collect_container_meta_ordered_dedup(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        u1 = sel.apply(_noop, container_metrics=["b", "a"])
+        u2 = sel.apply(_noop, container_metrics=["a", "c"])
+        # Sorted within each expression, deduped preserving discovery order.
+        assert TimeSeriesExpression.collect_container_metrics([u1, u2]) == ["a", "b", "c"]
+        assert TimeSeriesExpression.collect_container_metrics([sel]) == []
+
+    def test_empty_cache_defaults(self):
+        cache = EmptyTimeSeriesCache()
+        assert cache.container_tags == {}
+        assert cache.container_metrics == {}
+
+    def test_build_injects_dicts_against_empty_cache(self):
+        captured = {}
+
+        def grab(ts, container_tags, container_metrics):
+            captured["tags"] = container_tags
+            captured["metrics"] = container_metrics
+            return 0.0
+
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        expr = sel.apply(grab, container_tags=["a"], container_metrics=["b"])
+        # Builds against the empty cache without KeyError; values default to None.
+        assert expr.build(EmptyTimeSeriesCache()) == 0.0
+        assert captured["tags"] == {"a": None}
+        assert captured["metrics"] == {"b": None}

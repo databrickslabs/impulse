@@ -11,6 +11,7 @@ from pyspark.sql import DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
+from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
@@ -24,7 +25,13 @@ if TYPE_CHECKING:
 
 
 class TimeSeriesCache(SeriesCache):
-    def __init__(self, pdf, col_map: dict[str, str]):
+    def __init__(
+        self,
+        pdf,
+        col_map: dict[str, str],
+        container_tag_cols=None,
+        container_metric_cols=None,
+    ):
         """
         Initialize the TimeSeriesCache.
 
@@ -44,6 +51,12 @@ class TimeSeriesCache(SeriesCache):
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
             ``"conv"`` column is optional in *pdf*.
+        container_tag_cols : list of str, optional
+            Columns on *pdf* holding container-level tag values, exposed via
+            :attr:`container_tags`.  These are constant per container.
+        container_metric_cols : list of str, optional
+            Columns on *pdf* holding container-level metric values, exposed
+            via :attr:`container_metrics`.  These are constant per container.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -52,6 +65,8 @@ class TimeSeriesCache(SeriesCache):
         self._val_col = col_map["val"]
         self._conv_col = col_map.get("conv")
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
+        self._container_tag_cols = list(container_tag_cols or [])
+        self._container_metric_cols = list(container_metric_cols or [])
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
         meta_cols = [
@@ -132,6 +147,23 @@ class TimeSeriesCache(SeriesCache):
             if pd.notna(factor):
                 values = values * factor
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
+
+    @property
+    def container_tags(self) -> dict:
+        """Requested container-tag values for this container (constant per container)."""
+        return self._container_meta(self._container_tag_cols)
+
+    @property
+    def container_metrics(self) -> dict:
+        """Requested container-metric values for this container (constant per container)."""
+        return self._container_meta(self._container_metric_cols)
+
+    def _container_meta(self, cols) -> dict:
+        """Read *cols* off the first metadata row (values are container-constant)."""
+        if not cols or len(self.mdf) == 0:
+            return {}
+        row = self.mdf.iloc[0]
+        return {c: row[c] for c in cols if c in self.mdf.columns}
 
 
 class DefaultSolver(QuerySolver):
@@ -248,7 +280,16 @@ class DefaultSolver(QuerySolver):
             If no tag filters are present, returns distinct container_ids.
             Otherwise, returns pivoted data with filter expressions applied.
         """
+        # Container-tag keys a selected UDF asked to have injected at solve time.
+        required_container_tags = TimeSeriesExpression.collect_container_tags(query.selections)
+
         if query.db.config.container_tags_table is None:
+            if required_container_tags:
+                raise ValueError(
+                    "Container tags requested by a UDF "
+                    f"({required_container_tags}) require a container_tags_table, "
+                    "but none is configured on the database."
+                )
             return spark.createDataFrame([], schema=T.StructType([]))
 
         container_id_col = self.config.container_id_col
@@ -259,7 +300,10 @@ class DefaultSolver(QuerySolver):
             if isinstance(filt, TagExpression):
                 filters.append(filt)
                 required_elements.extend(filt.required_tags())
-        required_elements = set(required_elements)
+
+        # Pivot the union of filter-required keys and UDF-required tag keys, so the
+        # pivot runs even when there are no TagExpression filters to apply.
+        pivot_keys = list(dict.fromkeys([*required_elements, *required_container_tags]))
 
         tags = query.db.container_tags(self.spark)
         tags = self._apply_column_mapping(tags, self.config.container_tags.column_name_mapping)
@@ -270,21 +314,26 @@ class DefaultSolver(QuerySolver):
         for col_name, value in self.config.container_tags.filters.items():
             tags = tags.where(F.col(col_name) == value)
 
-        if len(filters) == 0:
+        if not pivot_keys:
             return tags.select(container_id_col).distinct()
 
         tag_key_col = self.config.tag_key_col
-        tags = tags.where(F.col(tag_key_col).isin(required_elements))
+        tags = tags.where(F.col(tag_key_col).isin(pivot_keys))
 
-        tags = tags.groupBy(container_id_col)
-        tags = tags.pivot(tag_key_col, list(required_elements)).agg(
-            F.first(self.config.tag_value_col)
+        tags = (
+            tags.groupBy(container_id_col)
+            .pivot(tag_key_col, pivot_keys)
+            .agg(F.first(self.config.tag_value_col))
         )
 
-        expr = self._build_expr(filters)
-        tags = tags.where(expr)
+        if filters:
+            tags = tags.where(self._build_expr(filters))
 
-        return tags.select(container_id_col).distinct()
+        # Retain the UDF-required tag columns so they thread downstream; filter-only
+        # keys were used for filtering and are dropped.  One row per container.
+        return tags.select(container_id_col, *required_container_tags).dropDuplicates(
+            [container_id_col]
+        )
 
     def filter_container_metrics(
         self, spark, query, container_df, pre_filtered_containers_df=None
@@ -335,6 +384,18 @@ class DefaultSolver(QuerySolver):
             metrics, self.config.container_metrics.column_name_mapping
         )
 
+        # Validate that every container-metric column a selected UDF asked for
+        # actually exists (post column-mapping), with a clear error otherwise.
+        required_container_metrics = TimeSeriesExpression.collect_container_metrics(
+            query.selections
+        )
+        missing = [c for c in required_container_metrics if c not in metrics.columns]
+        if missing:
+            raise ValueError(
+                f"Container metric column(s) {missing} requested by a UDF are not "
+                f"present on container_metrics. Available columns: {metrics.columns}"
+            )
+
         if self.config.project_id is not None:
             metrics = metrics.where(F.col(self.config.project_id_col) == self.config.project_id)
 
@@ -347,13 +408,25 @@ class DefaultSolver(QuerySolver):
         if query.db.config.container_tags_table is None:
             return metrics.dropDuplicates([container_id_col])
 
+        # container_df carries container_id plus any UDF-required container-tag
+        # columns (retained by filter_container_tags); keep them through the join.
+        tag_cols = [c for c in container_df.columns if c != container_id_col]
+        collision = [c for c in tag_cols if c in metrics.columns]
+        if collision:
+            raise ValueError(
+                f"Container-tag column(s) {collision} collide with existing "
+                "container_metrics columns; rename the tag key(s) or metric column(s)."
+            )
+
         return metrics.join(
-            F.broadcast(container_df.select(container_id_col)),
+            F.broadcast(container_df.select(container_id_col, *tag_cols)),
             on=container_id_col,
             how="inner",
         ).dropDuplicates([container_id_col])
 
-    def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
+    def filter_channel_tags(
+        self, spark, db, container_df, selectors, container_meta_cols=None
+    ) -> DataFrame:
         """
         Stage 3: resolve channel selectors against the EAV ``channel_tags``
         table, or pass through when no such table is configured.
@@ -383,10 +456,17 @@ class DefaultSolver(QuerySolver):
         Returns
         -------
         pyspark.sql.DataFrame
-            ``(container_id, channel_id, selector_id)`` in EAV mode, or the
-            input container DataFrame unchanged in wide mode.
+            ``(container_id, channel_id, selector_id [, <container meta cols>])``
+            in EAV mode, or the input container DataFrame unchanged in wide mode.
+            Any container-level metadata columns present on *container_df* are
+            threaded through.
         """
+        # Container-level columns to thread down onto each matched channel row.
+        passthrough = list(container_meta_cols or [])
+
         if db.config.channel_tags_table is None:
+            # Wide mode: container_df already carries the requested container
+            # metadata columns; pass it through unchanged.
             return container_df
 
         container_id_col = self.config.container_id_col
@@ -395,7 +475,9 @@ class DefaultSolver(QuerySolver):
         tag_value_col = self.config.tag_value_col
 
         if len(selectors) == 0:
-            return self._empty_channel_match_df(spark, db)
+            return self._empty_channel_match_df(
+                spark, db, template=container_df, container_meta_cols=passthrough
+            )
 
         mids = container_df.select(container_id_col).distinct()
 
@@ -416,9 +498,18 @@ class DefaultSolver(QuerySolver):
             .where(expr)
         )
         tags = tags.withColumn("selector_id", self._build_selector_id_expr(selectors))
-        return tags.select(container_id_col, channel_id_col, "selector_id")
 
-    def filter_channel_metrics(self, spark, db, channel_df, selectors) -> DataFrame:
+        if passthrough:
+            tags = tags.join(
+                F.broadcast(container_df.select(container_id_col, *passthrough)),
+                on=container_id_col,
+                how="inner",
+            )
+        return tags.select(container_id_col, channel_id_col, "selector_id", *passthrough)
+
+    def filter_channel_metrics(
+        self, spark, db, channel_df, selectors, container_meta_cols=None
+    ) -> DataFrame:
         """
         Stage 4: produce ``(container_id, channel_id, selector_ids)``.
 
@@ -448,13 +539,20 @@ class DefaultSolver(QuerySolver):
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame with ``(container_id, channel_id, selector_ids)``.
+            DataFrame with ``(container_id, channel_id, selector_ids
+            [, <container meta cols>])``.  Any container-level metadata columns
+            present on *channel_df* are threaded through.
         """
         container_id_col = self.config.container_id_col
         channel_id_col = self.config.channel_id_col
 
+        # Container-level columns to thread onto each matched channel row.
+        passthrough = list(container_meta_cols or [])
+
         if len(selectors) == 0:
-            return self._empty_channel_match_df(spark, db)
+            return self._empty_channel_match_df(
+                spark, db, template=channel_df, container_meta_cols=passthrough
+            )
 
         channel_metrics_df = db.channel_metrics(spark)
         channel_metrics_df = self._apply_column_mapping(
@@ -462,8 +560,9 @@ class DefaultSolver(QuerySolver):
         )
 
         if db.config.channel_tags_table is not None:
-            # EAV mode: channel_df = (container_id, channel_id, selector_id).
-            # Inner-join channel_metrics to drop channels without metric entries.
+            # EAV mode: channel_df = (container_id, channel_id, selector_id
+            # [, <container meta cols>]).  Inner-join channel_metrics to drop
+            # channels without metric entries; the join preserves passthrough.
             metrics = channel_metrics_df.select(container_id_col, channel_id_col).join(
                 F.broadcast(channel_df),
                 on=[container_id_col, channel_id_col],
@@ -472,22 +571,30 @@ class DefaultSolver(QuerySolver):
             metrics = metrics.withColumn("selector_ids", F.array(F.col("selector_id"))).drop(
                 "selector_id"
             )
-            return metrics.select(container_id_col, channel_id_col, "selector_ids")
+            return metrics.select(container_id_col, channel_id_col, "selector_ids", *passthrough)
 
         # Wide mode: selectors apply directly to channel_metrics columns.
+        if passthrough:
+            collision = [c for c in passthrough if c in channel_metrics_df.columns]
+            if collision:
+                raise ValueError(
+                    f"Container metadata column(s) {collision} collide with "
+                    "channel_metrics columns; rename the requested container "
+                    "tag/metric column(s)."
+                )
         channel_metrics_df = channel_metrics_df.where(self._build_expr(selectors))
         result = channel_metrics_df.join(
-            F.broadcast(channel_df.select(container_id_col)),
+            F.broadcast(channel_df.select(container_id_col, *passthrough)),
             on=[container_id_col],
             how="inner",
         )
         result = result.withColumn(
             "selector_ids", F.array(self._build_selector_id_expr(selectors))
         )
-        return result.select(container_id_col, channel_id_col, "selector_ids")
+        return result.select(container_id_col, channel_id_col, "selector_ids", *passthrough)
 
     def filter_aliased_channel_metrics(
-        self, spark, db: MeasurementDB, container_df, selectors
+        self, spark, db: MeasurementDB, container_df, selectors, container_meta_cols=None
     ) -> DataFrame:
         """
         Resolve aliased channel selections via the channel_mapping table.
@@ -534,8 +641,13 @@ class DefaultSolver(QuerySolver):
         container_id_col = self.config.container_id_col
         channel_id_col = self.config.channel_id_col
 
+        # Container-level columns to thread onto each resolved alias row.
+        passthrough = list(container_meta_cols or [])
+
         if len(selectors) == 0:
-            return self._empty_channel_match_df(spark, db)
+            return self._empty_channel_match_df(
+                spark, db, template=container_df, container_meta_cols=passthrough
+            )
 
         channel_mapping = db.channel_mapping(spark)
         channel_mapping = self._apply_column_mapping(
@@ -636,6 +748,23 @@ class DefaultSolver(QuerySolver):
         ]
         if has_unit_cols:
             out_cols.extend([source_unit_col, target_unit_col])
+
+        # Thread container-level metadata columns (constant per container) so the
+        # aliased side matches the direct side's schema through the union.
+        if passthrough:
+            collision = [c for c in passthrough if c in resolved.columns]
+            if collision:
+                raise ValueError(
+                    f"Container metadata column(s) {collision} collide with aliased "
+                    "channel-resolution columns; rename the requested tag/metric "
+                    "column(s)."
+                )
+            resolved = resolved.join(
+                F.broadcast(container_df.select(container_id_col, *passthrough)),
+                on=container_id_col,
+                how="left",
+            )
+            out_cols.extend(passthrough)
         return resolved.select(*out_cols)
 
     def resolve_channel_selections(
@@ -688,11 +817,24 @@ class DefaultSolver(QuerySolver):
             and target_unit_col in aliased_channel_metrics_df.columns
         )
 
+        # Container-level metadata columns threaded onto the direct side; both
+        # sides carry them (they are constant per container), so a single
+        # F.first(ignorenulls) over the group recovers the value.
+        reserved = {
+            self.config.container_id_col,
+            self.config.channel_id_col,
+            "selector_ids",
+            source_unit_col,
+            target_unit_col,
+        }
+        passthrough = [c for c in channel_metrics_df.columns if c not in reserved]
+
         # ``filter_aliased_channel_metrics`` emits extra columns
         # (metrics-side join keys, channel_alias, alias_priority) for the
         # channel mapping resolution dimension; the solve pipeline only
         # consumes (container_id, channel_id, selector_ids[, source_unit,
-        # target_unit]) and unionByName requires matching schemas.
+        # target_unit][, <container meta cols>]) and unionByName requires
+        # matching schemas.
         aliased_solve_cols = [
             self.config.container_id_col,
             self.config.channel_id_col,
@@ -700,6 +842,7 @@ class DefaultSolver(QuerySolver):
         ]
         if has_unit_cols:
             aliased_solve_cols.extend([source_unit_col, target_unit_col])
+        aliased_solve_cols.extend(passthrough)
         aliased_for_union = aliased_channel_metrics_df.select(*aliased_solve_cols)
 
         merged = channel_metrics_df.unionByName(
@@ -707,6 +850,7 @@ class DefaultSolver(QuerySolver):
         )
 
         agg_exprs = [F.flatten(F.collect_list("selector_ids")).alias("selector_ids")]
+        agg_exprs.extend(F.first(F.col(c), ignorenulls=True).alias(c) for c in passthrough)
         if has_unit_cols:
             # collect_set serves a dual purpose: (a) it deduplicates so we
             # can detect a conflict by size > 1, and (b) the single
@@ -903,7 +1047,13 @@ class DefaultSolver(QuerySolver):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _solve_udf(pdf, selections: Iterable, col_map: dict[str, str]) -> pd.DataFrame:
+    def _solve_udf(
+        pdf,
+        selections: Iterable,
+        col_map: dict[str, str],
+        container_tag_cols=None,
+        container_metric_cols=None,
+    ) -> pd.DataFrame:
         """
         UDF to solve for a single container by applying selections.
 
@@ -914,6 +1064,12 @@ class DefaultSolver(QuerySolver):
             List of selection expressions to apply.
         col_map : dict[str, str]
             Column name mapping for the cache.
+        container_tag_cols : list of str, optional
+            Columns on *pdf* holding container-level tag values, exposed to
+            UDFs via ``cache.container_tags``.
+        container_metric_cols : list of str, optional
+            Columns on *pdf* holding container-level metric values, exposed to
+            UDFs via ``cache.container_metrics``.
 
         Returns
         -------
@@ -922,7 +1078,12 @@ class DefaultSolver(QuerySolver):
         """
         cid_col = col_map["cid"]
         result = {cid_col: [pdf[cid_col].iloc[0]]}
-        cache = TimeSeriesCache(pdf, col_map=col_map)
+        cache = TimeSeriesCache(
+            pdf,
+            col_map=col_map,
+            container_tag_cols=container_tag_cols,
+            container_metric_cols=container_metric_cols,
+        )
         for s in selections:
             res = s.build(cache)
             if hasattr(res, "serialize") and callable(res.serialize):
@@ -962,9 +1123,22 @@ class DefaultSolver(QuerySolver):
         col_map = self.config.col_map
         q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
 
+        # Container-metadata columns the selected UDFs asked for.  They already
+        # ride on *channels_df* (threaded through the filter cascade) and hence
+        # into the per-group pandas frame; here we only tell the cache which
+        # columns are container tags vs. container metrics.
+        container_tag_cols = TimeSeriesExpression.collect_container_tags(selections)
+        container_metric_cols = TimeSeriesExpression.collect_container_metrics(selections)
+
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
-            partial(DefaultSolver._solve_udf, selections=selections, col_map=col_map),
+            partial(
+                DefaultSolver._solve_udf,
+                selections=selections,
+                col_map=col_map,
+                container_tag_cols=container_tag_cols,
+                container_metric_cols=container_metric_cols,
+            ),
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )

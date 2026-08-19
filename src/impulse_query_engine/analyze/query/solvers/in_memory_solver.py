@@ -17,10 +17,14 @@ class InMemorySolver(QuerySolver):
     ) -> DataFrame:
         raise NotImplementedError
 
-    def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
+    def filter_channel_tags(
+        self, spark, db, container_df, selectors, container_meta_cols=None
+    ) -> DataFrame:
         raise NotImplementedError
 
-    def filter_channel_metrics(self, spark, db, channel_df, selectors) -> DataFrame:
+    def filter_channel_metrics(
+        self, spark, db, channel_df, selectors, container_meta_cols=None
+    ) -> DataFrame:
         raise NotImplementedError
 
     def solve(self, query, channels_df, selections, dtypes=None):

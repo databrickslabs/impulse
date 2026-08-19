@@ -258,21 +258,41 @@ class QueryBuilder:
             self.selections, uses_alias=True
         )
 
+        # Container-level columns a selected UDF asked to have injected at solve
+        # time.  These are threaded through the channel-filter stages so they ride
+        # on the returned channel-match frame (and hence into the solve UDF's
+        # pandas frame).  The list is empty unless the query declares container
+        # metadata, so other solvers' flow is unchanged.
+        container_meta_cols = [
+            *TimeSeriesExpression.collect_container_tags(self.selections),
+            *TimeSeriesExpression.collect_container_metrics(self.selections),
+        ]
+
         # create Query
         tags_df = solver.filter_container_tags(spark, self)
         metrics_df = solver.filter_container_metrics(
             spark, self, tags_df, pre_filtered_containers_df
         )
-        channel_tags_df = solver.filter_channel_tags(spark, self.db, metrics_df, direct_selectors)
+        channel_tags_df = solver.filter_channel_tags(
+            spark, self.db, metrics_df, direct_selectors, container_meta_cols=container_meta_cols
+        )
         channel_metrics_df = solver.filter_channel_metrics(
-            spark, self.db, channel_tags_df, direct_selectors
+            spark,
+            self.db,
+            channel_tags_df,
+            direct_selectors,
+            container_meta_cols=container_meta_cols,
         )
 
         if len(aliased_selectors) > 0:
             # Aliased resolution must run against the full tag-filtered container
             # set (metrics_df).
             aliased_channel_metrics_df = solver.filter_aliased_channel_metrics(
-                spark, self.db, metrics_df, aliased_selectors
+                spark,
+                self.db,
+                metrics_df,
+                aliased_selectors,
+                container_meta_cols=container_meta_cols,
             )
             channel_metrics_df = solver.resolve_channel_selections(
                 spark, channel_metrics_df, aliased_channel_metrics_df
