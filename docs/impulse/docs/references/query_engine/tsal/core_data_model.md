@@ -15,7 +15,7 @@ edge detection produces `PointsInTime`, and sampling at instants produces a `Poi
 | `SampleSeries`       | yes             | yes           | channel selection, arithmetic, resampling       |
 | `Intervals`          | no              | yes           | comparison / logical operators, edge windows    |
 | `PointsInTime`       | no              | no            | `rising_edges()` / `falling_edges()`            |
-| `PointsInTimeSeries` | yes             | no            | sampling a signal at instants via `where(...)`  |
+| `PointsInTimeSeries` | yes             | no            | a `poi_channel()` selection, or sampling a signal via `where(...)` |
 
 :::note Not the storage schema
 This page describes the **in-memory result classes** a query evaluates to. It is unrelated to the
@@ -119,12 +119,19 @@ from `SampleSeries`: **a value pertains only *to* its own timestamp** and makes 
 signal in between consecutive timestamps. There are no durations and no most-recent-value carried
 forward — each value stands alone at its instant.
 
-The natural way to obtain one is to **sample a signal at specific instants** — e.g. read engine RPM
-exactly at the moments the vehicle starts moving:
+There are two ways to obtain one: **select a POI channel directly** with
+[`poi_channel()`](defining_expressions.md#points-in-time-poi-channels) — when the source data *is* a
+stream of discrete events (DTC codes, fault events) — or **sample a continuous signal at specific
+instants**, e.g. read engine RPM exactly at the moments the vehicle starts moving:
 
 ```python
-rpm_at_starts = eng_rpm.where(veh_spd.rising_edges())  # PointsInTimeSeries
+dtc_count = db.query.poi_channel(channel_name='DTC_count')  # straight from a POI channel
+rpm_at_starts = eng_rpm.where(veh_spd.rising_edges())       # sampled from a signal
 ```
+
+Prefer a `PointsInTimeSeries` over a `SampleSeries` whenever a value belongs to a single instant and
+carrying it forward until the next reading would be wrong — see the [`channel()` vs `poi_channel()`
+decision guide](defining_expressions.md#points-in-time-poi-channels).
 
 Because there is no validity between points, the operators differ from `SampleSeries`:
 
@@ -140,7 +147,7 @@ Because there is no validity between points, the operators differ from `SampleSe
   `PointsInTimeSeries` onto their shared instants, returning value-carrying point series.
 - **String-valued POI series** — produced by `poi_channel(dtype='string')` (e.g. DTC fault codes) —
   support only equality (`==` / `!=`) and sampling (`synchronized` / `.where`); arithmetic, ordering,
-  and numeric reductions raise, since they are meaningless for strings.
+  and numeric reductions raise, since they are not implemented for strings.
 
 → API: [`PointsInTimeSeries`](../../api/impulse_query_engine/model/series/points_in_time_series.md)
 

@@ -15,7 +15,9 @@ class PointsInTimeSeries()
 #### \_\_init\_\_
 
 ```python
-def __init__(tstarts: Sized, values: Sized)
+def __init__(tstarts: Sized,
+             values: Sized,
+             value_type: SeriesValueType = SeriesValueType.DOUBLE)
 ```
 
 Initialize the PointsInTimeSeries object.
@@ -24,67 +26,37 @@ A PointsInTimeSeries associates a value to each timestamp. Unlike a SampleSeries
 a value is only defined *at* its timestamp and is not considered valid in between
 consecutive timestamps.
 
-The value type (numeric vs string) is inferred from *values*. An **empty**
-series has no values to infer from and therefore defaults to numeric; use
-:meth:`empty_string` when an explicitly string-typed empty series is needed
-(e.g. plan-time result typing of a bare string-POI selection).
-
 **Arguments**:
 
 - `tstarts` (`Sized`): Array-like of time points.
 - `values` (`Sized`): Array-like of values, one per time point.
+- `value_type` (`SeriesValueType`): The value data type (default ``DOUBLE``). Validated against *values* for a
+non-empty series; carried explicitly so an **empty** series stays typed
+correctly (there are no values to infer from). ``STRING`` series support
+only sampling and equality — see the ``@_numeric_only`` methods.
 
-#### from\_silver
+#### value\_type
 
 ```python
-def from_silver(cls,
-                tstarts: pd.Series,
-                values_double: pd.Series,
-                values_string: pd.Series | None,
-                value_type: SeriesValueType,
-                tend: pd.Series | None = None) -> PointsInTimeSeries
+def value_type() -> SeriesValueType
 ```
 
-Build a POI series from a resolved silver-layer slice, validating the
+This series' value data type (numeric ``DOUBLE`` or ``STRING``).
 
-declared ``value_type`` (and, when *tend* is given, the row shape) against
-the data the selector actually landed on.
 
-The selector drives series-type dispatch, but the silver data stays
-authoritative: a ``poi_channel(...)`` selector must resolve to genuine POI
-rows. This reconciliation lives here — rather than in ``__init__`` — because
-it needs information a constructed point series does not carry: **both**
-value columns (to tell a mis-declared dtype from a legitimately empty one)
-and the ``tend`` column (to detect a SAMPLE channel). ``__init__`` stays a
-thin value constructor used throughout the series algebra.
+#### is\_string
 
-**Arguments**:
+```python
+def is_string() -> bool
+```
 
-- `tstarts` (`pandas.Series`): POI timestamps for the resolved rows.
-- `values_double` (`pandas.Series`): The numeric value column for the resolved rows.
-- `values_string` (`pandas.Series or None`): The string value column, when the frame carries one; ``None`` otherwise.
-- `value_type` (`SeriesValueType`): The declared value type. ``STRING`` builds from *values_string*, any
-other value builds from *values_double*.
-- `tend` (`pandas.Series or None`): The validity-interval end column. A genuine POI row has a null ``tend``
-or a zero-duration interval (``tstart == tend``, should POI ever live in
-the SAMPLE ``channels`` table); a real interval (``tend != tstart``)
-means the selector resolved to a SAMPLE channel. ``None`` skips the
-series-type check.
+Whether this series carries string (rather than numeric) values.
 
-**Raises**:
-
-- `ValueError`: On a series-type mismatch (resolved to a SAMPLE channel) or a
-declared-vs-actual dtype mismatch. Fails loudly rather than silently
-reading the wrong column (mirrors the unit-conversion conflict check).
-
-**Returns**:
-
-`PointsInTimeSeries`: A string-valued series when *value_type* is ``STRING``, else numeric.
 
 #### dtype
 
 ```python
-def dtype()
+def dtype() -> T.DataType
 ```
 
 Returns the Spark data type for PointsInTimeSeries.
@@ -469,30 +441,20 @@ Returns a string representation for debugging.
 #### empty
 
 ```python
-def empty() -> PointsInTimeSeries
+def empty(
+    value_type: SeriesValueType = SeriesValueType.DOUBLE
+) -> PointsInTimeSeries
 ```
 
-Returns an empty (numeric) PointsInTimeSeries.
+Returns an empty PointsInTimeSeries of the given value type.
+
+**Arguments**:
+
+- `value_type` (`SeriesValueType`): The value data type of the empty series (default ``DOUBLE``). Pass the
+parent series' value type so an empty result stays correctly typed for
+plan-time result-type determination.
 
 **Returns**:
 
-`PointsInTimeSeries`: Empty numeric PointsInTimeSeries object.
-
-#### empty\_string
-
-```python
-def empty_string() -> PointsInTimeSeries
-```
-
-Returns an empty **string-valued** PointsInTimeSeries.
-
-An empty series has no values to infer a type from, so the constructor
-defaults to numeric; this factory forces the string value type. Used for
-plan-time result typing of a bare string-POI selection, where the empty
-series must report the string ``dtype()`` and reject numeric-only ops
-(e.g. ``mean()``) before any data is read.
-
-**Returns**:
-
-`PointsInTimeSeries`: Empty string-valued PointsInTimeSeries object.
+`PointsInTimeSeries`: Empty PointsInTimeSeries of *value_type*.
 

@@ -111,7 +111,14 @@ class TimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
 
-    def load_blob(self, mid, cid, uses_alias: bool = False, series_type=None, value_type=None):
+    def load_blob(
+        self,
+        mid,
+        cid,
+        uses_alias: bool = False,
+        series_type=None,
+        value_type=SeriesValueType.DOUBLE,
+    ):
         """
         Load a time series blob from the DataFrame.
 
@@ -156,13 +163,14 @@ class TimeSeriesCache(SeriesCache):
             # The selector's declared value type picks the column; the constructor
             # reconciles values-vs-type. A channel may carry both value columns —
             # we simply read the declared one.
-            vt = value_type if value_type is not None else SeriesValueType.DOUBLE
-            value_col = self._value_string_col if vt is SeriesValueType.STRING else self._val_col # todo extend so we have this in config what the col is
+            value_col = (
+                self._value_string_col if value_type is SeriesValueType.STRING else self._val_col
+            )
             if value_col is None or value_col not in s.columns:
                 raise ValueError(
-                    f"POI channel declared {vt} but its value column is not available"
+                    f"POI channel declared {value_type} but its value column is not available"
                 )
-            return PointsInTimeSeries(s[self._ts_col], s[value_col], value_type=vt)
+            return PointsInTimeSeries(s[self._ts_col], s[value_col], value_type=value_type)
 
         values = s[self._val_col]
         if self._has_conversion and len(s) > 0 and uses_alias:

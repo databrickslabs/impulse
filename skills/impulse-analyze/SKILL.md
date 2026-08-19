@@ -93,6 +93,13 @@ A POI channel carries values defined *only at* their timestamp (no interval). Se
 `poi_channel(...)` instead of `channel(...)` — identification (tags / `channel_metrics` columns) is
 identical; only the built series type differs:
 
+**Which to use** — pick by the nature of the data, not the query. Use `channel()` (→ `SampleSeries`)
+for a continuously-valid signal whose value holds until the next sample (RPM, speed, temperature:
+carry-forward, duration-weighted aggregations). Use `poi_channel()` (→ `PointsInTimeSeries`) for
+discrete events valid only at their instant (DTC / fault codes, event logs: no carry-forward,
+unweighted aggregations). Litmus test: *does the value still hold a moment later, until the next
+reading?* Yes → `channel()`; a momentary event → `poi_channel()`.
+
 ```python
 # numeric POI channel (default dtype="double")
 dtc_count = db.query.poi_channel(channel_name="DTC_count")

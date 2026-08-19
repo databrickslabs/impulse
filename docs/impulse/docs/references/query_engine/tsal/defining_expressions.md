@@ -33,12 +33,29 @@ table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolve
 
 ### Points-in-Time (POI) channels
 
-Some channels record values meaningful only **at an instant** — an ECU Diagnostic Trouble Code
-(DTC), a discrete event code — with no validity in between. Select these with
-`QueryBuilder.poi_channel()` instead of `channel()`. It resolves channels exactly like `channel()`
-(same tag filters), but builds a [`PointsInTimeSeries`](core_data_model.md#pointsintimeseries) from
-the [`poi_channels`](../../../data_model/silver_layer_schema.md#poi_channels-optional) table rather
-than a `SampleSeries` from `channels`.
+Not every channel is a continuously-valid signal. Some record values meaningful only **at an
+instant** — an ECU Diagnostic Trouble Code (DTC), a discrete event code — with no validity in
+between. Which selector you reach for follows the **nature of the data**, not the query you want to
+write:
+
+:::tip `channel()` vs `poi_channel()`
+- **`channel()` → [`SampleSeries`](core_data_model.md#sampleseries)** — a measured signal whose value
+  stays valid until the next sample (engine RPM, vehicle speed, coolant temperature). The last value
+  holds forward between samples, aggregations are duration-weighted, and the signal can be resampled
+  and interpolated.
+- **`poi_channel()` → [`PointsInTimeSeries`](core_data_model.md#pointsintimeseries)** — discrete
+  events whose value exists *only at* its own instant and says nothing about the time in between (DTC
+  / fault codes, event logs, a count stamped at a moment). No carry-forward, no durations, unweighted
+  aggregations.
+
+**Litmus test:** *does the value still hold a moment later, until the next reading?* If yes, it's a
+sample → `channel()`. If it is a momentary event, it's a POI channel → `poi_channel()`.
+:::
+
+`poi_channel()` resolves channels exactly like `channel()` (same tag filters), but builds a
+`PointsInTimeSeries` from the
+[`poi_channels`](../../../data_model/silver_layer_schema.md#poi_channels-optional) table rather than a
+`SampleSeries` from `channels`.
 
 ```python
 # numeric POI channel (default dtype='double')
@@ -53,7 +70,7 @@ rpm_at_faults = eng_rpm.where(faults)   # freeze-frame: RPM at each fault instan
 `dtype` accepts the `SeriesValueType.DOUBLE` / `SeriesValueType.STRING` enum or the plain string
 `'double'` / `'string'` (default `'double'`). A **string** POI channel supports only equality
 (`==` / `!=`) and sampling (`.where(...)`) — arithmetic, ordering, and numeric reductions raise, as
-they are meaningless for string values.
+they are not implemented for string values.
 
 ### Logical aliases via channel mapping
 
