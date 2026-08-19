@@ -9,8 +9,8 @@ on ``container_id = 1`` alongside the existing sample channels (see conftest /
 - ``channel_id = 91`` — a **numeric** DTC-count channel (values ``1, 2, 3``)
 
 Covers: numeric POI unweighted reductions, string POI equality + op gating, the
-mix-and-match case (a SAMPLE and a POI channel in one expression), the declared-vs-actual
-dtype/series-type assertion, and SAMPLE backward-compatibility.
+mix-and-match case (a SAMPLE and a POI channel in one expression), and SAMPLE
+backward-compatibility.
 """
 
 import math
@@ -106,7 +106,7 @@ class TestStringPoi:
         q = basic_narrow_db.query
         dtc = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
         selection = getattr(dtc, reduction)().alias("bad")
-        with pytest.raises(TypeError, match="string-valued"):
+        with pytest.raises(TypeError, match="non-numeric"):
             q.select(selection)._determine_result_objects_dtypes()
 
 
@@ -201,34 +201,6 @@ class TestMixAndMatch:
         assert [pt[0] for pt in rows[1]] == [1499929300000000.0, 1499933000000000.0]
         for pt in rows[1]:
             assert not math.isnan(pt[1])
-
-
-class TestDeclaredVsActual:
-    def test_poi_channel_declared_double_on_string_channel_raises(
-        self, spark: SparkSession, basic_narrow_db
-    ):
-        """Declaring ``dtype=double`` on a channel whose silver dtype is ``string`` raises
-        at solve time — the data stays authoritative."""
-        solver = DefaultSolver(spark)
-        q = basic_narrow_db.query
-        # DTC is a numeric-less (string) channel; declaring double resolves rows
-        # whose value_double is all null → dtype mismatch raised in the solve UDF.
-        bad = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.DOUBLE)
-        with pytest.raises(Exception, match="dtype mismatch"):
-            q.select(bad.count().alias("c")).solve(spark=spark, solver=solver).collect()
-
-    def test_poi_channel_on_sample_channel_raises(self, spark: SparkSession, basic_narrow_db):
-        """``poi_channel`` on a SAMPLE channel raises the series-type mismatch.
-
-        The SAMPLE channel's rows carry a real validity interval (``tend != tstart``),
-        which is the signal ``PointsInTimeSeries.from_silver`` validates a POI-declared
-        selector against. (A zero-duration ``tstart == tend`` row would be accepted.)
-        """
-        solver = DefaultSolver(spark)
-        q = basic_narrow_db.query
-        bad = q.poi_channel(channel_name="Engine RPM")
-        with pytest.raises(Exception, match="series-type mismatch"):
-            q.select(bad.count().alias("c")).solve(spark=spark, solver=solver).collect()
 
 
 class TestBackwardCompat:

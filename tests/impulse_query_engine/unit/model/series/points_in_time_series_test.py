@@ -3,7 +3,6 @@
 # pylint: disable=missing-function-docstring, redefined-outer-name
 import numpy as np
 import numpy.testing as nptest
-import pandas as pd
 import pyspark.sql.types as T
 import pytest
 
@@ -13,110 +12,43 @@ from impulse_query_engine.model.series.points_in_time import PointsInTime
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
-# --- from_silver (silver-slice factory + declared-vs-actual validation) -------------------------
+# --- constructor: value_type -------------------------------------------------------------------
 
 
-def _dbl(vals):
-    return pd.Series(vals, dtype="float64")
-
-
-def _str(vals):
-    return pd.Series(vals, dtype="object")
-
-
-def test_from_silver_numeric():
-    pts = PointsInTimeSeries.from_silver(
-        _dbl([10, 20, 30]),
-        _dbl([1, 2, 3]),
-        _str([None, None, None]),
-        SeriesValueType.DOUBLE,
-        tend=_dbl([None, None, None]),
-    )
+def test_default_value_type_is_numeric():
+    pts = PointsInTimeSeries([0, 1], [10, 20])
+    assert pts.is_string is False
     assert pts.dtype() == T.ArrayType(T.ArrayType(T.DoubleType()))
-    nptest.assert_array_equal(pts.values, [1.0, 2.0, 3.0])
+    nptest.assert_array_equal(pts.values, [10.0, 20.0])
 
 
-def test_from_silver_string():
-    pts = PointsInTimeSeries.from_silver(
-        _dbl([10, 20]),
-        _dbl([None, None]),
-        _str(["P0301", "P0420"]),
-        SeriesValueType.STRING,
-        tend=_dbl([None, None]),
-    )
+def test_explicit_string_value_type():
+    pts = PointsInTimeSeries([0, 1], ["P0301", "P0420"], SeriesValueType.STRING)
+    assert pts.is_string is True
     assert list(pts.values) == ["P0301", "P0420"]
 
 
-def test_from_silver_declared_string_on_numeric_channel_raises():
-    # value_string all-null => the channel is really numeric.
-    with pytest.raises(ValueError, match="dtype mismatch"):
-        PointsInTimeSeries.from_silver(
-            _dbl([10, 20]),
-            _dbl([1, 2]),
-            _str([None, None]),
-            SeriesValueType.STRING,
-            tend=_dbl([None, None]),
-        )
+def test_string_value_type_with_numeric_values_raises():
+    with pytest.raises(AssertionError):
+        PointsInTimeSeries([0, 1], [10, 20], SeriesValueType.STRING)
 
 
-def test_from_silver_declared_double_on_string_channel_raises():
-    # value_double all-null while value_string is populated => really a string channel.
-    with pytest.raises(ValueError, match="dtype mismatch"):
-        PointsInTimeSeries.from_silver(
-            _dbl([10, 20]),
-            _dbl([None, None]),
-            _str(["P0301", "P0420"]),
-            SeriesValueType.DOUBLE,
-            tend=_dbl([None, None]),
-        )
+def test_double_value_type_with_string_values_raises():
+    with pytest.raises(AssertionError):
+        PointsInTimeSeries([0, 1], ["P0301", "P0420"], SeriesValueType.DOUBLE)
 
 
-def test_from_silver_sample_channel_raises_series_type_mismatch():
-    # A real validity interval (tend != tstart) => selector resolved to a SAMPLE channel.
-    with pytest.raises(ValueError, match="series-type mismatch"):
-        PointsInTimeSeries.from_silver(
-            _dbl([10, 20]),
-            _dbl([1, 2]),
-            None,
-            SeriesValueType.DOUBLE,
-            tend=_dbl([15, 25]),
-        )
+def test_empty_defaults_numeric():
+    assert PointsInTimeSeries.empty().is_string is False
 
 
-def test_from_silver_zero_duration_interval_is_allowed():
-    # tstart == tend is a zero-duration point (POI stored in the SAMPLE table);
-    # the relaxed check must NOT treat it as a series-type mismatch.
-    pts = PointsInTimeSeries.from_silver(
-        _dbl([10, 20]),
-        _dbl([1, 2]),
-        None,
-        SeriesValueType.DOUBLE,
-        tend=_dbl([10, 20]),
+def test_empty_string_typed_even_though_empty():
+    empty = PointsInTimeSeries.empty(SeriesValueType.STRING)
+    assert empty.is_string is True
+    assert len(empty) == 0
+    assert empty.dtype().elementType == T.StructType(
+        [T.StructField("tstart", T.DoubleType()), T.StructField("value", T.StringType())]
     )
-    nptest.assert_array_equal(pts.values, [1.0, 2.0])
-
-
-def test_from_silver_null_tend_is_allowed():
-    pts = PointsInTimeSeries.from_silver(
-        _dbl([10, 20]),
-        _dbl([1, 2]),
-        None,
-        SeriesValueType.DOUBLE,
-        tend=_dbl([None, None]),
-    )
-    assert len(pts) == 2
-
-
-def test_from_silver_empty_skips_validation():
-    # Nothing resolved => no mismatch can be asserted; builds an empty series.
-    pts = PointsInTimeSeries.from_silver(
-        _dbl([]),
-        _dbl([]),
-        None,
-        SeriesValueType.DOUBLE,
-        tend=_dbl([]),
-    )
-    assert len(pts) == 0
 
 
 # --- core ---------------------------------------------------------------------------------------
@@ -266,43 +198,43 @@ def test_aggregations_empty():
 
 
 def test_string_values_stored_as_object_with_numeric_timestamps():
-    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"])
-    assert pts._is_string is True
+    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"], SeriesValueType.STRING)
+    assert pts.is_string is True
     assert pts.values.dtype == object
     assert pts.tstarts.dtype == np.float64
     nptest.assert_array_equal(pts.values, ["P108B", "U0046", "P108B"])
 
 
 def test_empty_series_defaults_to_numeric():
-    # No observed value type -> numeric (backward-compatible default).
-    assert PointsInTimeSeries.empty()._is_string is False
+    # No declared value type -> numeric (backward-compatible default).
+    assert PointsInTimeSeries.empty().is_string is False
 
 
 def test_numeric_series_is_not_string():
-    assert PointsInTimeSeries([0, 1], [10, 20])._is_string is False
+    assert PointsInTimeSeries([0, 1], [10, 20]).is_string is False
 
 
 def test_string_eq_scalar_returns_points_in_time():
-    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"])
+    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"], SeriesValueType.STRING)
     result = pts == "P108B"
     assert isinstance(result, PointsInTime)
     nptest.assert_array_equal(result.tstarts, [1, 3])
 
 
 def test_string_ne_scalar_returns_points_in_time():
-    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"])
+    pts = PointsInTimeSeries([1, 2, 3], ["P108B", "U0046", "P108B"], SeriesValueType.STRING)
     nptest.assert_array_equal((pts != "P108B").tstarts, [2])
 
 
 def test_string_eq_series_matches_on_value_and_timestamp():
-    p1 = PointsInTimeSeries([1, 2, 3], ["A", "B", "C"])
-    p2 = PointsInTimeSeries([2, 3, 4], ["X", "C", "C"])
+    p1 = PointsInTimeSeries([1, 2, 3], ["A", "B", "C"], SeriesValueType.STRING)
+    p2 = PointsInTimeSeries([2, 3, 4], ["X", "C", "C"], SeriesValueType.STRING)
     # Common timestamps {2,3}; values equal only at t=3 ("C" == "C").
     nptest.assert_array_equal((p1 == p2).tstarts, [3])
 
 
 def test_string_synchronized_with_sample_series_samples_values():
-    pts = PointsInTimeSeries([5, 15, 25], ["a", "b", "c"])
+    pts = PointsInTimeSeries([5, 15, 25], ["a", "b", "c"], SeriesValueType.STRING)
     s = SampleSeries([0, 10, 20], [10, 20, 30], [1, 2, 3])
     a, b = pts.synchronized(s)
     nptest.assert_array_equal(a.tstarts, [5, 15, 25])
@@ -311,12 +243,12 @@ def test_string_synchronized_with_sample_series_samples_values():
 
 
 def test_string_get_data_pairs_double_timestamp_with_string_value():
-    pts = PointsInTimeSeries([1, 2], ["P108B", "U0046"])
+    pts = PointsInTimeSeries([1, 2], ["P108B", "U0046"], SeriesValueType.STRING)
     assert pts.get_data() == [[1.0, "P108B"], [2.0, "U0046"]]
 
 
 def test_string_dtype_is_struct_of_double_and_string():
-    pts = PointsInTimeSeries([1, 2], ["P108B", "U0046"])
+    pts = PointsInTimeSeries([1, 2], ["P108B", "U0046"], SeriesValueType.STRING)
     assert pts.dtype() == T.ArrayType(
         T.StructType(
             [
@@ -339,8 +271,8 @@ def test_string_dtype_is_struct_of_double_and_string():
     ],
 )
 def test_string_arithmetic_raises(op):
-    pts = PointsInTimeSeries([1, 2], ["A", "B"])
-    with pytest.raises(TypeError, match="string-valued"):
+    pts = PointsInTimeSeries([1, 2], ["A", "B"], SeriesValueType.STRING)
+    with pytest.raises(TypeError, match="non-numeric"):
         op(pts)
 
 
@@ -354,21 +286,21 @@ def test_string_arithmetic_raises(op):
     ],
 )
 def test_string_ordering_comparison_raises(op):
-    pts = PointsInTimeSeries([1, 2], ["A", "B"])
-    with pytest.raises(TypeError, match="string-valued"):
+    pts = PointsInTimeSeries([1, 2], ["A", "B"], SeriesValueType.STRING)
+    with pytest.raises(TypeError, match="non-numeric"):
         op(pts)
 
 
 @pytest.mark.parametrize("reduction", ["sum", "mean", "min", "max"])
 def test_string_reductions_raise(reduction):
-    pts = PointsInTimeSeries([1, 2], ["A", "B"])
-    with pytest.raises(TypeError, match="string-valued"):
+    pts = PointsInTimeSeries([1, 2], ["A", "B"], SeriesValueType.STRING)
+    with pytest.raises(TypeError, match="non-numeric"):
         getattr(pts, reduction)()
 
 
 def test_string_count_is_allowed():
     # count is structural (not value-dependent), so it works for strings.
-    assert PointsInTimeSeries([1, 2, 3], ["A", "B", "C"]).count() == 3
+    assert PointsInTimeSeries([1, 2, 3], ["A", "B", "C"], SeriesValueType.STRING).count() == 3
 
 
 # --- plane_sweep --------------------------------------------------------------------------------

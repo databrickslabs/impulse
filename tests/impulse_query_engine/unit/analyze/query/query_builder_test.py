@@ -248,7 +248,7 @@ class TestPoiChannelDtypeArg:
 
     def test_string_poi_mean_rejected_at_build_time(self, narrow_db):
         dtc = narrow_db.query.poi_channel(channel_name="DTC", dtype="string")
-        with pytest.raises(TypeError, match="string-valued"):
+        with pytest.raises(TypeError, match="non-numeric"):
             dtc.mean().evaluation_type()
 
     def test_poi_selector_id_distinguishes_value_type(self):

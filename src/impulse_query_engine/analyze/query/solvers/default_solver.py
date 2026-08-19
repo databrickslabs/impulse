@@ -13,6 +13,7 @@ from impulse_query_engine.analyze.metadata.metric_expression import MetricExpres
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     SeriesType,
+    SeriesValueType,
     TimeSeriesExpression,
 )
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
@@ -152,20 +153,16 @@ class TimeSeriesCache(SeriesCache):
         s = self.pdf.iloc[lo:hi]
 
         if series_type == SeriesType.POINTS_IN_TIME:
-            value_string = (
-                s[self._value_string_col]
-                if self._value_string_col is not None and self._value_string_col in s.columns
-                else None
-            )
-            # from_silver owns the declared-vs-actual reconciliation: it needs both
-            # value columns and tend, which a bare PointsInTimeSeries does not carry.
-            return PointsInTimeSeries.from_silver(
-                s[self._ts_col],
-                s[self._val_col],
-                value_string,
-                value_type,
-                tend=s[self._te_col],
-            )
+            # The selector's declared value type picks the column; the constructor
+            # reconciles values-vs-type. A channel may carry both value columns —
+            # we simply read the declared one.
+            vt = value_type if value_type is not None else SeriesValueType.DOUBLE
+            value_col = self._value_string_col if vt is SeriesValueType.STRING else self._val_col # todo extend so we have this in config what the col is
+            if value_col is None or value_col not in s.columns:
+                raise ValueError(
+                    f"POI channel declared {vt} but its value column is not available"
+                )
+            return PointsInTimeSeries(s[self._ts_col], s[value_col], value_type=vt)
 
         values = s[self._val_col]
         if self._has_conversion and len(s) > 0 and uses_alias:

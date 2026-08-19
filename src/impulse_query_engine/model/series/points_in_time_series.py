@@ -13,12 +13,7 @@ import pyspark.sql.types as T
 from .intervals import Intervals
 from .points_in_time import PointsInTime
 from .sample_series import SampleSeries
-import pandas as pd
-
-if TYPE_CHECKING:
-    # For annotations only; the runtime use lives inside from_silver as a local
-    # import to avoid a circular import (time_series_expression imports this module).
-    from ...analyze.metadata.time_series_expression import SeriesValueType
+from .value_type import SeriesValueType
 
 FloatOrNaN = float | np.float64
 
@@ -27,10 +22,10 @@ def _numeric_only(method: Callable) -> Callable:
     """Decorator that rejects the wrapped method on a string-valued series.
 
     String-valued :class:`PointsInTimeSeries` support only sampling and equality
-    (``==`` / ``!=``); arithmetic, ordering and numeric reductions have no meaning
-    for them. Numpy would either raise (``-``, ``/``, ``mean``) or — worse —
-    silently succeed with a nonsensical result (``+`` concatenates, ``*`` repeats,
-    ``sum`` concatenates), so guard those methods explicitly and fail loudly.
+    (``==`` / ``!=``); arithmetic, ordering and numeric reductions are **not
+    implemented** for them. Numpy would either raise (``-``, ``/``, ``mean``) or —
+    worse — silently succeed with a nonsensical result (``+`` concatenates, ``*``
+    repeats, ``sum`` concatenates), so guard those methods explicitly and fail loudly.
 
     Applied to arithmetic, ordering-comparison and reduction methods.
 
@@ -42,9 +37,9 @@ def _numeric_only(method: Callable) -> Callable:
 
     @functools.wraps(method)
     def wrapper(self: PointsInTimeSeries, *args, **kwargs):
-        if self._is_string:
+        if not self._value_type.is_numeric:
             raise TypeError(
-                f"{method.__name__} is not supported for string-valued PointsInTimeSeries"
+                f"{method.__name__} is not supported for non-numeric PointsInTimeSeries"
             )
         return method(self, *args, **kwargs)
 
@@ -52,7 +47,9 @@ def _numeric_only(method: Callable) -> Callable:
 
 
 class PointsInTimeSeries:
-    def __init__(self, tstarts: Sized, values: Sized):
+    def __init__(
+        self, tstarts: Sized, values: Sized, value_type: SeriesValueType = SeriesValueType.DOUBLE
+    ):
         """
         Initialize the PointsInTimeSeries object.
 
@@ -60,126 +57,57 @@ class PointsInTimeSeries:
         a value is only defined *at* its timestamp and is not considered valid in between
         consecutive timestamps.
 
-        The value type (numeric vs string) is inferred from *values*. An **empty**
-        series has no values to infer from and therefore defaults to numeric; use
-        :meth:`empty_string` when an explicitly string-typed empty series is needed
-        (e.g. plan-time result typing of a bare string-POI selection).
-
         Parameters
         ----------
         tstarts : Sized
             Array-like of time points.
         values : Sized
             Array-like of values, one per time point.
+        value_type : SeriesValueType, optional
+            The value data type (default ``DOUBLE``). Validated against *values* for a
+            non-empty series; carried explicitly so an **empty** series stays typed
+            correctly (there are no values to infer from). ``STRING`` series support
+            only sampling and equality — see the ``@_numeric_only`` methods.
         """
-        assert len(tstarts) == len(values)
-        # Timestamps are always numeric. Values may be numeric or string:
-        # string-valued series support sampling (``synchronized`` / ``.where``)
-        # and equality comparisons (``==`` / ``!=``) only — arithmetic, ordering
-        # and numeric reductions are rejected (see the ``@_numeric_only`` methods).
+        self._validate_provided_values(tstarts, values, value_type)
         self.tstarts = np.array(tstarts, dtype=np.float64)
-        self._is_string = np.asarray(values).dtype.kind in ("U", "S", "O")
-        if self._is_string:
-            self.values = np.asarray(values, dtype=object)
-        else:
-            self.values = np.array(values, dtype=np.float64)
+        self._value_type = value_type
+        self._set_values(value_type, values)
 
-    @classmethod
-    def from_silver(
-        cls,
-        tstarts: pd.Series,
-        values_double: pd.Series,
-        values_string: pd.Series | None,
-        value_type: SeriesValueType,
-        tend: pd.Series | None = None,
-    ) -> PointsInTimeSeries:
-        """Build a POI series from a resolved silver-layer slice, validating the
-        declared ``value_type`` (and, when *tend* is given, the row shape) against
-        the data the selector actually landed on.
+    def _set_values(self, value_type: SeriesValueType, values: Sized) -> None:
+        # Initializes instance value attribute with the correct dtype
+        match value_type:
+            case SeriesValueType.STRING:
+                self.values = np.asarray(values, dtype=object)
+            case SeriesValueType.DOUBLE:
+                self.values = np.array(values, dtype=np.float64)
+            case _:
+                raise ValueError(f"Unsupported value_type: {value_type}")
 
-        The selector drives series-type dispatch, but the silver data stays
-        authoritative: a ``poi_channel(...)`` selector must resolve to genuine POI
-        rows. This reconciliation lives here — rather than in ``__init__`` — because
-        it needs information a constructed point series does not carry: **both**
-        value columns (to tell a mis-declared dtype from a legitimately empty one)
-        and the ``tend`` column (to detect a SAMPLE channel). ``__init__`` stays a
-        thin value constructor used throughout the series algebra.
+    @staticmethod
+    def _validate_provided_values(
+        tstarts: Sized, values: Sized, value_type: SeriesValueType
+    ) -> None:
+        # Quick validity checks against the provided args
+        assert len(tstarts) == len(values)
+        if len(values) > 0:
+            # if the provided values are of type string the value_type needs to be SeriesValueType.STRING
+            is_str = np.asarray(values).dtype.kind in ("U", "S", "O")
+            assert (
+                value_type is SeriesValueType.STRING
+            ) == is_str, f"Values do not match declared value_type {value_type}"
 
-        Parameters
-        ----------
-        tstarts : pandas.Series
-            POI timestamps for the resolved rows.
-        values_double : pandas.Series
-            The numeric value column for the resolved rows.
-        values_string : pandas.Series or None
-            The string value column, when the frame carries one; ``None`` otherwise.
-        value_type : SeriesValueType
-            The declared value type. ``STRING`` builds from *values_string*, any
-            other value builds from *values_double*.
-        tend : pandas.Series or None, optional
-            The validity-interval end column. A genuine POI row has a null ``tend``
-            or a zero-duration interval (``tstart == tend``, should POI ever live in
-            the SAMPLE ``channels`` table); a real interval (``tend != tstart``)
-            means the selector resolved to a SAMPLE channel. ``None`` skips the
-            series-type check.
+    @property
+    def value_type(self) -> SeriesValueType:
+        """This series' value data type (numeric ``DOUBLE`` or ``STRING``)."""
+        return self._value_type
 
-        Returns
-        -------
-        PointsInTimeSeries
-            A string-valued series when *value_type* is ``STRING``, else numeric.
+    @property
+    def is_string(self) -> bool:
+        """Whether this series carries string (rather than numeric) values."""
+        return self._value_type is SeriesValueType.STRING
 
-        Raises
-        ------
-        ValueError
-            On a series-type mismatch (resolved to a SAMPLE channel) or a
-            declared-vs-actual dtype mismatch. Fails loudly rather than silently
-            reading the wrong column (mirrors the unit-conversion conflict check).
-        """
-        # Local runtime import (see the TYPE_CHECKING block above): a module-scope
-        # import would be circular, as time_series_expression imports this module.
-        from ...analyze.metadata.time_series_expression import SeriesValueType
-
-        if len(tstarts) > 0:
-            # Series-type: a genuine POI row has a null tend or a zero-duration
-            # interval (tstart == tend). Only a real interval (tend != tstart)
-            # means the selector resolved to a SAMPLE channel.
-            if tend is not None:
-                te = tend.iloc[0]
-                if pd.notna(te) and te != tstarts.iloc[0]:
-                    raise ValueError(
-                        "POI channel series-type mismatch: poi_channel(...) resolved to a "
-                        "SAMPLE channel (its rows carry a validity interval). Use channel(...) "
-                        "for SAMPLE channels and poi_channel(...) for POINTS_IN_TIME channels."
-                    )
-
-            string_all_null = values_string is not None and values_string.isna().all()
-            double_all_null = values_double.isna().all()
-
-            if value_type == SeriesValueType.STRING:
-                # A string POI channel must carry string values; all-null means the
-                # channel is actually numeric (declared the wrong dtype).
-                if values_string is None or string_all_null:
-                    raise ValueError(
-                        "POI channel dtype mismatch: poi_channel(dtype=string) resolved to a "
-                        "channel with no string values (it is a numeric POI channel). Pass "
-                        "dtype=double to poi_channel(...)."
-                    )
-            elif double_all_null and values_string is not None and not string_all_null:
-                # A numeric POI channel must carry numeric values; all-null numeric
-                # with populated string values means the channel is actually string.
-                raise ValueError(
-                    "POI channel dtype mismatch: poi_channel(dtype=double) resolved to a "
-                    "channel whose numeric values are all null (it is a string POI channel). "
-                    "Pass dtype=string to poi_channel(...)."
-                )
-
-        if value_type == SeriesValueType.STRING:
-            # values_string is the populated string column (validated non-null above
-            # for a non-empty slice), so the constructor infers the string type from it.
-            return cls(tstarts, values_string if values_string is not None else [])
-        return cls(tstarts, values_double)
-
-    def dtype(self):
+    def dtype(self) -> T.DataType:
         """
         Returns the Spark data type for PointsInTimeSeries.
 
@@ -193,16 +121,20 @@ class PointsInTimeSeries:
         pyspark.sql.types.ArrayType
             Spark ArrayType matching ``get_data``'s shape for this series' value type.
         """
-        if self._is_string:
-            return T.ArrayType(
-                T.StructType(
-                    [
-                        T.StructField("tstart", T.DoubleType()),
-                        T.StructField("value", T.StringType()),
-                    ]
+        match self._value_type:
+            case SeriesValueType.DOUBLE:
+                return T.ArrayType(T.ArrayType(T.DoubleType()))
+            case SeriesValueType.STRING:
+                return T.ArrayType(
+                    T.StructType(
+                        [
+                            T.StructField("tstart", T.DoubleType()),
+                            T.StructField("value", T.StringType()),
+                        ]
+                    )
                 )
-            )
-        return T.ArrayType(T.ArrayType(T.DoubleType()))
+            case _:
+                raise ValueError(f"Unsupported value_type: {self._value_type}")
 
     def get_data(self) -> list:
         """
@@ -220,7 +152,7 @@ class PointsInTimeSeries:
         """
         if len(self) == 0:
             return []
-        if self._is_string:
+        if self.is_string:
             return [[float(t), str(v)] for t, v in zip(self.tstarts, self.values, strict=True)]
         return np.column_stack([self.tstarts, self.values]).tolist()
 
@@ -430,8 +362,12 @@ class PointsInTimeSeries:
         pairs = PointsInTimeSeries.plane_sweep(self, other)
         tstarts = PointsInTimeSeries.__gather(self.tstarts, pairs, 0)
         return (
-            PointsInTimeSeries(tstarts, PointsInTimeSeries.__gather(self.values, pairs, 0)),
-            PointsInTimeSeries(tstarts, PointsInTimeSeries.__gather(other.values, pairs, 1)),
+            PointsInTimeSeries(
+                tstarts, PointsInTimeSeries.__gather(self.values, pairs, 0), self.value_type
+            ),
+            PointsInTimeSeries(
+                tstarts, PointsInTimeSeries.__gather(other.values, pairs, 1), other.value_type
+            ),
         )
 
     def synchronized_all(
@@ -468,16 +404,39 @@ class PointsInTimeSeries:
             pairs = PointsInTimeSeries.plane_sweep(grid, other)
             tstarts = PointsInTimeSeries.__gather(grid.tstarts, pairs, 0)
             new_synced = [
-                PointsInTimeSeries(tstarts, PointsInTimeSeries.__gather(s.values, pairs, 0))
+                PointsInTimeSeries(
+                    tstarts, PointsInTimeSeries.__gather(s.values, pairs, 0), s.value_type
+                )
                 for s in synced_list
             ]
             new_synced.append(
-                PointsInTimeSeries(tstarts, PointsInTimeSeries.__gather(other.values, pairs, 1))
+                PointsInTimeSeries(
+                    tstarts,
+                    PointsInTimeSeries.__gather(other.values, pairs, 1),
+                    other.value_type,
+                )
             )
             synced_list = new_synced
         return tuple(synced_list)
 
-    def _apply_basic_op(self, operation, other: float | SampleSeries | PointsInTimeSeries):
+    @staticmethod
+    def _derive_child_value_type(
+        operation,  # noqa: ARG004
+        a: SeriesValueType,  # noqa: ARG004
+        b: SeriesValueType,  # noqa: ARG004
+    ) -> SeriesValueType:
+        """Value type of the child series produced by applying *operation* to operands
+        whose value types are *a* and *b*.
+        Currently only op's targeting numeric values are supported, so all resulting types are SeriesValueType.DOUBLE
+        """
+        match operation:
+            # extend in the future if more SeriesValueType are supported
+            case _:
+                return SeriesValueType.DOUBLE
+
+    def _apply_basic_op(
+        self, operation, other: float | SampleSeries | PointsInTimeSeries
+    ) -> PointsInTimeSeries:
         """
         Apply a basic arithmetic operation to this series and another operand.
 
@@ -495,10 +454,15 @@ class PointsInTimeSeries:
         """
         if isinstance(other, (SampleSeries, PointsInTimeSeries)):
             s0, s1 = self.synchronized(other)
-            return PointsInTimeSeries(s0.tstarts, operation(s0.values, s1.values))
-        return PointsInTimeSeries(self.tstarts, operation(self.values, other))
+            value_type = self._derive_child_value_type(
+                operation, self.value_type, other.value_type
+            )
+            return PointsInTimeSeries(s0.tstarts, operation(s0.values, s1.values), value_type)
+        return PointsInTimeSeries(self.tstarts, operation(self.values, other), self.value_type)
 
-    def _apply_basic_rop(self, operation, other: float | SampleSeries | PointsInTimeSeries):
+    def _apply_basic_rop(
+        self, operation, other: float | SampleSeries | PointsInTimeSeries
+    ) -> PointsInTimeSeries:
         """
         Apply a basic arithmetic operation with operands reversed.
 
@@ -516,8 +480,11 @@ class PointsInTimeSeries:
         """
         if isinstance(other, (SampleSeries, PointsInTimeSeries)):
             s0, s1 = self.synchronized(other)
-            return PointsInTimeSeries(s0.tstarts, operation(s1.values, s0.values))
-        return PointsInTimeSeries(self.tstarts, operation(other, self.values))
+            value_type = self._derive_child_value_type(
+                operation, self.value_type, other.value_type
+            )
+            return PointsInTimeSeries(s0.tstarts, operation(s1.values, s0.values), value_type)
+        return PointsInTimeSeries(self.tstarts, operation(other, self.values), self.value_type)
 
     @_numeric_only
     def __add__(self, other: float | SampleSeries | PointsInTimeSeries) -> PointsInTimeSeries:
@@ -707,36 +674,20 @@ class PointsInTimeSeries:
         return self.__str__()
 
     @staticmethod
-    def empty() -> PointsInTimeSeries:
+    def empty(value_type: SeriesValueType = SeriesValueType.DOUBLE) -> PointsInTimeSeries:
         """
-        Returns an empty (numeric) PointsInTimeSeries.
+        Returns an empty PointsInTimeSeries of the given value type.
+
+        Parameters
+        ----------
+        value_type : SeriesValueType, optional
+            The value data type of the empty series (default ``DOUBLE``). Pass the
+            parent series' value type so an empty result stays correctly typed for
+            plan-time result-type determination.
 
         Returns
         -------
         PointsInTimeSeries
-            Empty numeric PointsInTimeSeries object.
+            Empty PointsInTimeSeries of *value_type*.
         """
-        return PointsInTimeSeries([], [])
-
-    @staticmethod
-    def empty_string() -> PointsInTimeSeries:
-        """
-        Returns an empty **string-valued** PointsInTimeSeries.
-
-        An empty series has no values to infer a type from, so the constructor
-        defaults to numeric; this factory forces the string value type. Used for
-        plan-time result typing of a bare string-POI selection, where the empty
-        series must report the string ``dtype()`` and reject numeric-only ops
-        (e.g. ``mean()``) before any data is read.
-
-        Returns
-        -------
-        PointsInTimeSeries
-            Empty string-valued PointsInTimeSeries object.
-        """
-        # A single-element object array makes the constructor infer string, then
-        # slice back to empty so no value is retained.
-        series = PointsInTimeSeries([], [])
-        series._is_string = True
-        series.values = np.asarray([], dtype=object)
-        return series
+        return PointsInTimeSeries([], [], value_type)

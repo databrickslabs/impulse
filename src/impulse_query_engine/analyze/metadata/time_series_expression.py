@@ -13,6 +13,7 @@ import impulse_query_engine.util as U
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
+from impulse_query_engine.model.series.value_type import SeriesValueType
 
 if TYPE_CHECKING:
     from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
@@ -21,31 +22,18 @@ if TYPE_CHECKING:
 class SeriesType(StrEnum):
     """How a channel's samples are interpreted (mirrors :class:`RawEncoder`).
 
-    ``SAMPLE`` — the default; ``[tstart, tend)`` intervals over which the value is
-    *valid* (reconstructed by an interpolation method, zero-order hold today),
-    backed by :class:`SampleSeries`.
+    ``SAMPLE`` — the default; the time series is considered *valid* within each
+    ``[tstart_i, tend_i)`` interval: value ``v_i`` was measured at ``tstart_i`` and no
+    other value was measured until ``tend_i`` (reconstructed by an interpolation method,
+    zero-order hold today), backed by :class:`SampleSeries`.
 
-    ``POINTS_IN_TIME`` — ``(tᵢ, vᵢ)`` points valid *only at* their timestamps, no
-    between-point validity, backed by :class:`PointsInTimeSeries`.
+    ``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their
+    timestamps ``(tᵢ, vᵢ)`` with no between-point validity, backed by
+    :class:`PointsInTimeSeries`.
     """
 
     SAMPLE = "SAMPLE"
     POINTS_IN_TIME = "POINTS_IN_TIME"
-
-
-class SeriesValueType(StrEnum):
-    """The value data type of a POI channel — selects its ``poi_channels`` value
-    column and which in-memory :class:`PointsInTimeSeries` variant is built.
-
-    ``DOUBLE`` — numeric points (``poi_channels.value_double``); the full
-    arithmetic / ordering / reduction operator set applies.
-
-    ``STRING`` — string points (``poi_channels.value_string``, e.g. DTC codes);
-    only sampling and equality apply (see :class:`PointsInTimeSeries`).
-    """
-
-    DOUBLE = "double"
-    STRING = "string"
 
 
 class RequiresDeserialization:
@@ -82,7 +70,7 @@ class TimeSeriesExpression(abc.ABC):
         """
         return not self.is_single_signal
 
-    def dtype(self):
+    def dtype(self) -> T.DataType:
         """
         Get the default Spark data type.
 
@@ -709,7 +697,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             return zlib.crc32(str(self._expr).encode())
         return zlib.crc32(f"{self._series_type}|{self._expr}|{self._value_type}".encode())
 
-    def dtype(self):
+    def dtype(self) -> T.DataType:
         """
         Returns the Spark data type.
 
@@ -722,19 +710,8 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             ``array<struct<tstart,value>>`` for string).
         """
         if self._series_type is SeriesType.POINTS_IN_TIME:
-            return self._empty_points_in_time().dtype()
+            return PointsInTimeSeries.empty(value_type=self._value_type).dtype()
         return T.BinaryType()
-
-    def _empty_points_in_time(self) -> PointsInTimeSeries:
-        """Empty POI series carrying this selector's declared value type.
-
-        A string selector must build a string-typed empty series so ``dtype()``
-        and the string-op gating (e.g. ``.mean()`` raising) reflect the declared
-        type before any data is read.
-        """
-        if self._value_type is SeriesValueType.STRING:
-            return PointsInTimeSeries.empty_string()
-        return PointsInTimeSeries.empty()
 
     def deserialize(self, d):
         """
@@ -758,7 +735,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             return d
         return SampleSeries.deserialize(d)
 
-    def build(self, cache: SeriesCache):
+    def build(self, cache: SeriesCache) -> SampleSeries | PointsInTimeSeries:
         """
         Instantiate the selected series from cache data.
 
@@ -784,7 +761,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         candidates = cache.resolve(self)
         if len(candidates) == 0:
             if self._series_type is SeriesType.POINTS_IN_TIME:
-                return self._empty_points_in_time()
+                return PointsInTimeSeries.empty(value_type=self._value_type)
             return SampleSeries.empty()
         # TODO: select candidate
         mid = candidates.container_id.iloc[0]
@@ -921,7 +898,7 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         self._aliases = aliases
         TimeSeriesExpression.__init__(self, is_single_signal=True)
 
-    def dtype(self):
+    def dtype(self) -> T.DataType:
         """
         Returns the Spark data type.
 
@@ -932,7 +909,7 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         """
         return T.BinaryType()
 
-    def build(self, cache: SeriesCache) -> SampleSeries:
+    def build(self, cache: SeriesCache) -> SampleSeries | PointsInTimeSeries:
         """
         Build the time series from cache.
 
@@ -943,8 +920,8 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
 
         Returns
         -------
-        SampleSeries
-            Built sample series.
+        SampleSeries or PointsInTimeSeries
+            Built series (a ``SampleSeries`` for the SAMPLE-only aliases used today).
         """
         candidates = [alias.build(cache) for alias in self._aliases]
         # TODO: propery select best candidate
