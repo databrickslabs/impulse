@@ -4,6 +4,7 @@ import numpy as np
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.analyze.metadata.time_series_expression import (
+    ContainerMetadataExpression,
     TimeSeriesExpression,
     TimeSeriesSelector,
 )
@@ -11,7 +12,7 @@ from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
 from impulse_query_engine.model.series.intervals import Intervals
 
 
-class SequenceOfEventsExpression(TimeSeriesExpression):
+class SequenceOfEventsExpression(ContainerMetadataExpression, TimeSeriesExpression):
     """Determines sequences of events from an ordered list of Intervals-producing expressions.
 
     Visual timeline (overlapping consecutive events):
@@ -28,7 +29,13 @@ class SequenceOfEventsExpression(TimeSeriesExpression):
       next event end.
     """
 
-    def __init__(self, expressions: list[TimeSeriesExpression], max_overlap: float = None):
+    def __init__(
+        self,
+        expressions: list[TimeSeriesExpression],
+        max_overlap: float = None,
+        container_tags=None,
+        container_metrics=None,
+    ):
         """
         Initialize a SequenceOfEventsExpression.
 
@@ -42,12 +49,20 @@ class SequenceOfEventsExpression(TimeSeriesExpression):
             Expressed in the same time units as the underlying data
             (e.g. milliseconds-since-epoch timestamps), not seconds or
             any other derived unit.
+        container_tags : list of str, optional
+            Container-tag keys to make available in :meth:`build`.
+        container_metrics : list of str, optional
+            Container-metric columns to make available in :meth:`build`.
         """
         if not expressions:
             raise ValueError("SequenceOfEventsExpression requires at least one expression.")
         self.expressions = expressions
         self.max_overlap = max_overlap
         TimeSeriesExpression.__init__(self, is_single_signal=False)
+        self._set_container_metadata(container_tags, container_metrics)
+
+    def _container_metadata_children(self):
+        return tuple(self.expressions)
 
     def __str__(self) -> str:
         """

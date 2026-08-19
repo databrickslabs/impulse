@@ -15,7 +15,14 @@ from .aggregation import Aggregation
 
 
 class HistogramDuration(Aggregation):
-    def __init__(self, selection, bins: list[float], aggregation_level: str = "container"):
+    def __init__(
+        self,
+        selection,
+        bins: list[float],
+        aggregation_level: str = "container",
+        container_tags=None,
+        container_metrics=None,
+    ):
         """
         Initialize a HistogramDuration aggregation.
 
@@ -27,10 +34,19 @@ class HistogramDuration(Aggregation):
             Bin edges for the histogram.
         aggregation_level : str, optional
             Level of aggregation ('container' by default).
+        container_tags : list of str, optional
+            Container-tag keys to make available in :meth:`build` via
+            :meth:`resolve_container_metadata`.
+        container_metrics : list of str, optional
+            Container-metric columns to make available in :meth:`build`.
         """
         self.selection = selection
         self.bins = bins
         self.aggregation_level = aggregation_level
+        self._set_container_metadata(container_tags, container_metrics)
+
+    def _container_metadata_children(self):
+        return (self.selection,)
 
     def __str__(self):
         """
@@ -157,6 +173,8 @@ class HistogramCustomWeights(Aggregation):
         math_fct_for_weights: str = None,
         math_fct_kwargs: dict[str, Any] = None,
         weight_type: str = None,
+        container_tags=None,
+        container_metrics=None,
     ):
         self.selection = selection
         self.weights = weights
@@ -167,6 +185,10 @@ class HistogramCustomWeights(Aggregation):
         self.math_fct_for_weights = math_fct_for_weights
         self.math_fct_kwargs = math_fct_kwargs
         self.weight_type = weight_type
+        self._set_container_metadata(container_tags, container_metrics)
+
+    def _container_metadata_children(self):
+        return (self.selection, self.weights)
 
     def __str__(self):
         """

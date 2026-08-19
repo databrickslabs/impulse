@@ -19,6 +19,8 @@ class Histogram2DDuration(Aggregation):
         y_selection: TimeSeriesExpression,
         x_bins: list[float],
         y_bins: list[float],
+        container_tags=None,
+        container_metrics=None,
     ):
         """
         Initialize a Histogram2D aggregation.
@@ -33,12 +35,20 @@ class Histogram2DDuration(Aggregation):
             Bin edges for the x-axis.
         y_bins : list of float
             Bin edges for the y-axis.
+        container_tags : list of str, optional
+            Container-tag keys to make available in :meth:`build`.
+        container_metrics : list of str, optional
+            Container-metric columns to make available in :meth:`build`.
         """
 
         self.x_selection = x_selection
         self.y_selection = y_selection
         self.x_bins = x_bins
         self.y_bins = y_bins
+        self._set_container_metadata(container_tags, container_metrics)
+
+    def _container_metadata_children(self):
+        return (self.x_selection, self.y_selection)
 
     def __str__(self):
         """
@@ -149,6 +159,8 @@ class Histogram2DCustomWeights(Aggregation):
         math_fct_for_weights: str = None,
         math_fct_kwargs: dict[str, Any] = None,
         weight_type: str = None,
+        container_tags=None,
+        container_metrics=None,
     ):
         """
         Initialize a Histogram2DCustomWeights aggregation.
@@ -188,6 +200,10 @@ class Histogram2DCustomWeights(Aggregation):
         self.math_fct_for_weights = math_fct_for_weights
         self.math_fct_kwargs = math_fct_kwargs
         self.weight_type = weight_type
+        self._set_container_metadata(container_tags, container_metrics)
+
+    def _container_metadata_children(self):
+        return (self.x_selection, self.y_selection, self.weights_expr)
 
     def __str__(self):
         """

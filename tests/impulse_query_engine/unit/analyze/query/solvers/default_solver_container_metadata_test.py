@@ -14,8 +14,11 @@ Covers both silver-layer shapes:
 """
 
 import pytest
+import pyspark.sql.types as T
 from pyspark.sql import SparkSession
 
+from impulse_query_engine.analyze.query.aggregations.aggregation import Aggregation
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     ChannelMappingConfig,
@@ -29,6 +32,46 @@ from tests.conftest import (
     narrow_db,
     spark,
 )
+
+
+class _MetricProbe(Aggregation):
+    """Test-local aggregation that returns a declared container metric from build().
+
+    Proves an ``Aggregation`` subclass can declare container metrics and read
+    them via :meth:`resolve_container_metadata` inside ``build()``.
+    """
+
+    def __init__(self, selection, metric):
+        self.selection = selection
+        self._metric = metric
+        self._set_container_metadata(container_metrics=[metric])
+
+    def _container_metadata_children(self):
+        return (self.selection,)
+
+    def dtype(self):
+        return T.DoubleType()
+
+    def build(self, cache):
+        self.selection.build(cache)  # ensure the channel is selected/threaded
+        _, metrics = self.resolve_container_metadata(cache)
+        value = metrics.get(self._metric)
+        return float(value) if value is not None else -1.0
+
+    def required_tags(self):
+        return self.selection.required_tags()
+
+    def get_required_tag_exprs(self):
+        return self.selection.get_required_tag_exprs()
+
+    def get_selector_expr(self):
+        return self.selection.get_selector_expr()
+
+    def get_selectors(self):
+        return self.selection.get_selectors()
+
+    def __str__(self):
+        return f"<_MetricProbe metric={self._metric}>"
 
 
 def _alias_config() -> SolverConfig:
@@ -136,3 +179,54 @@ def test_aliased_path_threads_container_metric(
     assert set(rows.keys()) == {1, 2, 3}, rows
     # Every container in basic_narrow_csv has num_channels == 11.
     assert all(value == 11.0 for value in rows.values()), rows
+
+
+def test_aggregation_reads_container_metric(spark: SparkSession, basic_narrow_db: MeasurementDB):
+    """An Aggregation subclass declares a metric and reads it in build()."""
+    query = basic_narrow_db.query
+    probe = _MetricProbe(query.channel(channel_name="Engine RPM"), "num_channels").alias("nc")
+    result = query.select(probe).solve(spark, solver=DefaultSolver(spark))
+
+    rows = {row.container_id: row.nc for row in result.collect()}
+    assert rows, "expected at least one matched container"
+    assert all(value == 11.0 for value in rows.values()), rows
+
+
+def test_calculated_channel_threads_container_metric(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """A CalculatedChannel wrapping a metadata UDF gets the metric via the calc path.
+
+    The scaled channel multiplies each sample by ``num_channels`` (== 11); the raw
+    channel does not.  Proves the calculated-channels UDF cache is wired with the
+    container metadata (it previously was not).
+    """
+
+    def scale_by_metric(ts, container_metrics):
+        factor = container_metrics["num_channels"]
+        return ts if factor is None else ts * factor
+
+    query = basic_narrow_db.query
+    raw = CalculatedChannel(
+        query.channel(channel_name="Engine RPM"),
+        {"channel_name": "raw_rpm", "data_key": "CALC"},
+    )
+    scaled = CalculatedChannel(
+        query.channel(channel_name="Engine RPM").apply(
+            scale_by_metric, container_metrics=["num_channels"]
+        ),
+        {"channel_name": "scaled_rpm", "data_key": "CALC"},
+    )
+    result = query.select(raw, scaled).solve_calculated_channels(
+        spark, solver=DefaultSolver(spark)
+    )
+
+    totals = {
+        row.channel_id: row["sum(value)"]
+        for row in result.groupBy("channel_id").agg({"value": "sum"}).collect()
+    }
+    raw_total = totals.get(raw.channel_id)
+    scaled_total = totals.get(scaled.channel_id)
+    assert raw_total not in (None, 0), totals
+    # Every sample scaled by num_channels == 11.
+    assert scaled_total == pytest.approx(11.0 * raw_total), totals

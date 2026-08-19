@@ -6,13 +6,14 @@ import pyspark.sql.types as T
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.analyze.metadata.time_series_expression import (
+    ContainerMetadataExpression,
     TimeSeriesExpression,
     TimeSeriesSelector,
 )
 from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
 
 
-class CalculatedChannel(TimeSeriesExpression):
+class CalculatedChannel(ContainerMetadataExpression, TimeSeriesExpression):
     """A derived channel: a wrapped ``TimeSeriesExpression`` plus output identity.
 
     Wraps an expression built from the operator DSL (e.g. ``rpm * 3.6``) that must
@@ -43,6 +44,8 @@ class CalculatedChannel(TimeSeriesExpression):
         self,
         expr: TimeSeriesExpression,
         identity: dict[str, str],
+        container_tags=None,
+        container_metrics=None,
     ):
         if not identity:
             raise ValueError(
@@ -61,6 +64,10 @@ class CalculatedChannel(TimeSeriesExpression):
         )
         self.expr = expr
         self.identity = dict(identity)
+        self._set_container_metadata(container_tags, container_metrics)
+
+    def _container_metadata_children(self):
+        return (self.expr,)
 
     def __str__(self) -> str:
         return f"<CalculatedChannel identity={self.identity}, expr={self.expr}>"

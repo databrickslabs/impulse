@@ -146,37 +146,33 @@ class QuerySolver(ABC):
             ]
         )
 
-    def _empty_channel_match_df(
-        self, spark, db: MeasurementDB, template: DataFrame = None, container_meta_cols=None
-    ) -> DataFrame:
+    def _empty_channel_match_df(self, spark, db: MeasurementDB) -> DataFrame:
         """Return an empty ``(container_id, channel_id, selector_ids)`` DataFrame.
 
         The ``container_id`` and ``channel_id`` types are derived from the
         column-mapped ``channel_metrics`` table (the source of the real
         channel-match rows this empty frame is union'd/joined with) so the
         schemas stay compatible regardless of the physical id types.
-
-        When *container_meta_cols* are given, those columns' fields are appended
-        (typed from *template*, nullable) so the empty frame unions cleanly with
-        threaded frames that carry the container-level metadata columns.
         """
         ref = self._apply_column_mapping(
             db.channel_metrics(spark), self.config.channel_metrics.column_name_mapping
         )
-        fields = [
-            T.StructField(
-                self.config.container_id_col,
-                ref.schema[self.config.container_id_col].dataType,
+        return spark.createDataFrame(
+            [],
+            schema=T.StructType(
+                [
+                    T.StructField(
+                        self.config.container_id_col,
+                        ref.schema[self.config.container_id_col].dataType,
+                    ),
+                    T.StructField(
+                        self.config.channel_id_col,
+                        ref.schema[self.config.channel_id_col].dataType,
+                    ),
+                    T.StructField("selector_ids", T.ArrayType(T.IntegerType())),
+                ]
             ),
-            T.StructField(
-                self.config.channel_id_col,
-                ref.schema[self.config.channel_id_col].dataType,
-            ),
-            T.StructField("selector_ids", T.ArrayType(T.IntegerType())),
-        ]
-        for name in container_meta_cols or []:
-            fields.append(T.StructField(name, template.schema[name].dataType, True))
-        return spark.createDataFrame([], schema=T.StructType(fields))
+        )
 
     def _build_selector_id_expr(self, filters) -> Column:
         """Build a Spark ``Column`` that maps rows to their ``selector_id``.
@@ -264,9 +260,7 @@ class QuerySolver(ABC):
         )
 
     @abc.abstractmethod
-    def filter_channel_tags(
-        self, spark, db: MeasurementDB, container_df, selectors, container_meta_cols=None
-    ) -> DataFrame:
+    def filter_channel_tags(self, spark, db: MeasurementDB, container_df, selectors) -> DataFrame:
         """
         Stage 3: Filter channels by measurements and tags.
 
@@ -294,9 +288,7 @@ class QuerySolver(ABC):
         raise NotImplementedError("Each solver must implement the filter_channel_tags method.")
 
     @abc.abstractmethod
-    def filter_channel_metrics(
-        self, spark, db: MeasurementDB, channel_df, selectors, container_meta_cols=None
-    ) -> DataFrame:
+    def filter_channel_metrics(self, spark, db: MeasurementDB, channel_df, selectors) -> DataFrame:
         """
         Stage 4: Filter channels by metrics.
 
@@ -324,7 +316,7 @@ class QuerySolver(ABC):
         raise NotImplementedError("Each solver must implement the filter_channel_metrics method.")
 
     def filter_aliased_channel_metrics(
-        self, spark, db: MeasurementDB, container_df, selectors, container_meta_cols=None
+        self, spark, db: MeasurementDB, container_df, selectors
     ) -> DataFrame:
         """
         Resolve aliased channel selections via the channel_mapping table.

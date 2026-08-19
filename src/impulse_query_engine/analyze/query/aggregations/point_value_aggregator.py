@@ -27,6 +27,8 @@ class PointValueAggregator(Aggregation):
         self,
         input_expressions: list[TimeSeriesExpression],
         event_expression: TimeSeriesExpression,
+        container_tags=None,
+        container_metrics=None,
     ):
         """
         Initialize a PointValueAggregator.
@@ -38,9 +40,20 @@ class PointValueAggregator(Aggregation):
         event_expression : TimeSeriesExpression
             Expression defining the points in time at which to sample. When evaluated,
             it yields an instance of PointsInTime.
+        container_tags : list of str, optional
+            Container-tag keys to make available in :meth:`build`.
+        container_metrics : list of str, optional
+            Container-metric columns to make available in :meth:`build`.
         """
         self.input_expressions = input_expressions
         self.event_expression = event_expression
+        self._set_container_metadata(container_tags, container_metrics)
+
+    def _container_metadata_children(self):
+        children = list(self.input_expressions)
+        if self.event_expression is not None:
+            children.append(self.event_expression)
+        return children
 
     def __str__(self) -> str:
         """

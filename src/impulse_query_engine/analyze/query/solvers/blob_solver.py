@@ -91,15 +91,11 @@ class BlobSolver(QuerySolver):
         """Passthrough — returns container_df unchanged."""
         return container_df
 
-    def filter_channel_tags(
-        self, spark, db, container_df, selectors, container_meta_cols=None
-    ) -> DataFrame:
+    def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
         """Passthrough — returns container_df unchanged."""
         return container_df
 
-    def filter_channel_metrics(
-        self, spark, db, channel_df, selectors, container_meta_cols=None
-    ) -> DataFrame:
+    def filter_channel_metrics(self, spark, db, channel_df, selectors) -> DataFrame:
         """Passthrough — returns channel_df unchanged."""
         return channel_df
 

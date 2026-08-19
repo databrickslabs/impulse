@@ -55,6 +55,8 @@ class StatsAggregator(Aggregation):
         cross_channel_custom_statistics: list[CrossChannelStatistic] | None = None,
         per_channel_custom_statistics: list[PerChannelStatistic] | None = None,
         input_names: list[str] | None = None,
+        container_tags=None,
+        container_metrics=None,
     ):
         """
         Initialize a StatsAggregator.
@@ -107,10 +109,17 @@ class StatsAggregator(Aggregation):
         self._validate_custom_statistic_labels()
         self._validate_input_names()
         self._cross_channel_input_indices = self._resolve_cross_channel_inputs()
+        self._set_container_metadata(container_tags, container_metrics)
 
         # Separate numeric and string statistics for processing
         self._numeric_stats = [s for s in self.statistics if s in NUMERIC_STATISTICS]
         self._string_stats = [s for s in self.statistics if s in STRING_STATISTICS]
+
+    def _container_metadata_children(self):
+        children = list(self.input_expressions)
+        if self.event_expression is not None:
+            children.append(self.event_expression)
+        return children
 
     def _validate_custom_statistic_labels(self) -> None:
         """

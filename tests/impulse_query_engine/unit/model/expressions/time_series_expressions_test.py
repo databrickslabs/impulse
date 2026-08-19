@@ -11,6 +11,14 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesOp,
     TimeSeriesSelector,
 )
+from impulse_query_engine.analyze.query.aggregations.histogram import (
+    HistogramCustomWeights,
+    HistogramDuration,
+)
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+from impulse_query_engine.analyze.query.events.sequence_of_events_expression import (
+    SequenceOfEventsExpression,
+)
 from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
 
 
@@ -334,3 +342,67 @@ class TestContainerMetadataDeclaration:
         assert expr.build(EmptyTimeSeriesCache()) == 0.0
         assert captured["tags"] == {"a": None}
         assert captured["metrics"] == {"b": None}
+
+
+class TestContainerMetadataCompositeExpressions:
+    """Aggregations, event expressions, and calculated channels declare/propagate."""
+
+    def _sel(self, name="x"):
+        return TimeSeriesSelector(TagSelector("name") == name)
+
+    def test_histogram_own_declaration(self):
+        h = HistogramDuration(self._sel(), [0.0, 1.0], container_metrics=["m"])
+        assert h.required_container_metrics() == {"m"}
+        assert h.required_container_tags() == set()
+
+    def test_histogram_factory_forwards_declaration(self):
+        h = self._sel().histogram([0.0, 1.0], container_tags=["t"], container_metrics=["m"])
+        assert h.required_container_tags() == {"t"}
+        assert h.required_container_metrics() == {"m"}
+
+    def test_histogram_propagates_wrapped_udf(self):
+        # A metadata-declaring UDF wrapped in a histogram must still propagate.
+        wrapped = self._sel().apply(_noop, container_metrics=["m"])
+        h = HistogramDuration(wrapped, [0.0, 1.0])
+        assert h.required_container_metrics() == {"m"}
+
+    def test_custom_weights_unions_children(self):
+        h = HistogramCustomWeights(
+            self._sel("a").apply(_noop, container_metrics=["m1"]),
+            weights=self._sel("b").apply(_noop, container_tags=["t1"]),
+            bins=[0.0, 1.0],
+        )
+        assert h.required_container_metrics() == {"m1"}
+        assert h.required_container_tags() == {"t1"}
+
+    def test_sequence_of_events_declaration_and_propagation(self):
+        propagated = SequenceOfEventsExpression(
+            [self._sel().apply(_noop, container_tags=["child"])]
+        )
+        assert propagated.required_container_tags() == {"child"}
+
+        declared = SequenceOfEventsExpression([self._sel()], container_metrics=["m"])
+        assert declared.required_container_metrics() == {"m"}
+
+    def test_calculated_channel_declaration_and_propagation(self):
+        propagated = CalculatedChannel(
+            self._sel().apply(_noop, container_metrics=["m"]), {"channel_name": "x"}
+        )
+        assert propagated.required_container_metrics() == {"m"}
+
+        declared = CalculatedChannel(self._sel(), {"channel_name": "y"}, container_tags=["t"])
+        assert declared.required_container_tags() == {"t"}
+
+    def test_collect_across_composites(self):
+        selections = [
+            HistogramDuration(self._sel(), [0.0, 1.0], container_metrics=["b"]),
+            CalculatedChannel(self._sel(), {"channel_name": "z"}, container_metrics=["a"]),
+        ]
+        # Deduplicated union across the selections (discovery order across items).
+        assert set(TimeSeriesExpression.collect_container_metrics(selections)) == {"a", "b"}
+
+    def test_resolve_against_empty_cache(self):
+        h = HistogramDuration(self._sel(), [0.0, 1.0], container_metrics=["m"])
+        tags, metrics = h.resolve_container_metadata(EmptyTimeSeriesCache())
+        assert tags == {}
+        assert metrics == {"m": None}
