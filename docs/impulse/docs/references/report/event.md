@@ -15,6 +15,12 @@ is called.
 my_report.add_event(my_event)
 ```
 
+:::note
+If an event expression contains a UDF that declares
+[container tags/metrics](../query_engine/tsal/defining_expressions.md#reading-container-level-metadata-inside-a-udf),
+those values are injected as usual — the requirement propagates through the event.
+:::
+
 ---
 
 ## BasicEvent

@@ -18,6 +18,12 @@ the aggregation is constructed; passing an expression that evaluates to somethin
 comparison or a `PointsInTime`) raises a `ValueError`.
 :::
 
+:::note
+If an input contains a UDF that declares
+[container tags/metrics](../query_engine/tsal/defining_expressions.md#reading-container-level-metadata-inside-a-udf),
+those values are injected as usual — the requirement propagates through the aggregation.
+:::
+
 ---
 
 ## Page
