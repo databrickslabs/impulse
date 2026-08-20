@@ -4,6 +4,7 @@ This module contains unit tests for the StatsAggregator class from impulse_repor
 Tests follow the same pattern as histogram_test.py.
 """
 
+import pyspark.sql.functions as f
 import pyspark.sql.types as T
 import pytest
 
@@ -15,6 +16,7 @@ from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
 
@@ -462,6 +464,70 @@ def test_determine_aggregations_multiple_stats(spark, basic_narrow_db):
 
     assert "Engine RPM" in channel_names_list
     assert "Vehicle Speed" in channel_names_list
+
+
+def test_determine_aggregations_container_event_instance_id(spark, basic_narrow_db):
+    """Container-event stats rows must use crc32(container_id) as event_instance_id.
+
+    This is the value ``ContainerEvent.determine_events`` writes to
+    ``event_instance_fact`` (see ``generate_event_instance_id_column``'s
+    ``ContainerEvent`` branch), so the two gold tables stay consistent. Basic-event
+    stats in the same frame must keep the timestamp-based id instead.
+    """
+    eng_rpm = basic_narrow_db.query.channel(channel_name="Engine RPM")
+
+    container_event = ContainerEvent(name="full_container")
+    basic_event = BasicEvent(name="rpm_event", expr=eng_rpm > 500)
+
+    container_stats = StatsAggregator(
+        name="container_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max", "mean"],
+        event=container_event,
+    )
+    basic_stats = StatsAggregator(
+        name="basic_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max", "mean"],
+        event=basic_event,
+    )
+
+    solver = DefaultSolver(spark)
+    solved_df = basic_narrow_db.query.select(
+        container_stats.get_expression(), basic_stats.get_expression()
+    ).solve(spark, solver)
+    df = StatsAggregator.determine_aggregations(
+        spark=spark,
+        aggregations=[container_stats, basic_stats],
+        solved_df=solved_df,
+    ).withColumn("expected_container_id", f.crc32(f.col("container_id").cast("string")))
+
+    # Every container-event row uses crc32(container_id) — matching event_instance_fact.
+    container_rows = df.filter(f.col("visual_id") == container_stats.get_id()).collect()
+    assert len(container_rows) > 0
+    for row in container_rows:
+        assert row.event_instance_id == row.expected_container_id, (
+            f"container_id={row.container_id}: event_instance_id="
+            f"{row.event_instance_id} != crc32(container_id)={row.expected_container_id}"
+        )
+
+    # ... and exactly one distinct event_instance_id per container (no fragmentation).
+    per_container = (
+        df.filter(f.col("visual_id") == container_stats.get_id())
+        .groupBy("container_id")
+        .agg(f.countDistinct("event_instance_id").alias("n"))
+        .collect()
+    )
+    for row in per_container:
+        assert row.n == 1, f"container {row.container_id} fragmented into {row.n} ids"
+
+    # Basic-event rows must NOT collapse to crc32(container_id); they use the
+    # timestamp-based hash (container_id::event_name::start_ts::end_ts).
+    basic_rows = df.filter(f.col("visual_id") == basic_stats.get_id()).collect()
+    assert len(basic_rows) > 0
+    assert all(row.event_instance_id != row.expected_container_id for row in basic_rows)
 
 
 def test_determine_metadata_df(spark, basic_narrow_db):
