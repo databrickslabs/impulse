@@ -47,13 +47,8 @@ in `source` (see `impulse-config`).
     `drop_implausible_data=True` (requires RAW).
   - Extra columns on `channels` are ignored — the engine projects down to the columns above before
     solving, so it is safe to keep additional bookkeeping columns on the table.
-- **`poi_channels` holds Points-in-Time (POI) data** — a value defined *only at* its timestamp, with no
-  validity interval (`tend`), unlike sample `channels`. Schema: `(container_id long, channel_id int,
-  timestamp long [epoch µs], value_double double nullable, value_string string nullable)`. A channel is
-  a POI channel **iff** its data lives in `poi_channels` rather than `channels` — table membership *is*
-  the series-type discriminator; there is no `series_type`/`dtype` column. Exactly one of `value_double`
-  / `value_string` is populated per row (numeric vs string POI). Select with `query.poi_channel(...)`
-  (see `impulse-analyze`).
+- **`poi_channels` holds Points-in-Time (POI) data** — a value defined *only at* its timestamp. Schema: `(container_id long, channel_id int,
+  timestamp long [epoch µs], value_double double nullable, value_string string nullable)`.
 - **Tag tables are strict EAV.** `query.channel(channel_name="Engine RPM")` looks up
   `channel_tags.value` where `key = 'channel_name'`. Without `channel_tags`, channel selectors match
   columns on `channel_metrics` instead.

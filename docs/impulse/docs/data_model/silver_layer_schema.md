@@ -412,15 +412,14 @@ during raw→interval conversion (see `query_engine.raw_encoder`).
 
 ## poi_channels (optional)
 
-**Optional** — only needed for [Points-in-Time (POI) channels](../references/query_engine/tsal/core_data_model.md#pointsintimeseries)
-selected via `QueryBuilder.poi_channel()`. Omit it for sample-only data models.
+**Optional** — only needed for [Points-in-Time (POI) channels](../references/query_engine/tsal/core_data_model.md#pointsintimeseries) 
+selected via `QueryBuilder.poi_channel()`. Omit it for sample-only data models. 
+Unlike `channels`, a POI channel's value is defined **only at its timestamp**.
 
-Unlike `channels`, a POI channel's value is defined **only at its timestamp** — there is no
-`[tstart, tend)` validity interval. **Table membership is the discriminator**: a
-`(container_id, channel_id)` whose data lives in `poi_channels` is a POI channel; one in `channels`
-is a sample channel.
+**`QueryBuilder.poi_channel(...)` is the discriminator**: the user tells the engine to build a 
+`PointsInTimeSeries` for a specific channel by providing its name and the corresponding `dtype`.
 
-A POI value may be numeric or a string (e.g. an ECU Diagnostic Trouble Code). The two typed value
+A POI value may be numeric or a string (e.g. an ECU Diagnostic Trouble Code). The two typed value 
 columns cover both, and **exactly one is populated per row** — chosen by the channel's declared
 `dtype` at query time (`poi_channel(dtype='double'|'string')`).
 

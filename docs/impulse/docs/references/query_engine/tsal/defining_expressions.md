@@ -33,20 +33,22 @@ table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolve
 
 ### Points-in-Time (POI) channels
 
-Not every channel is a continuously-valid signal. Some record values meaningful only **at an
+Not every channel can be interpreted as a continuous signal within its `[tstart, tend)` intervals.
+Some record values meaningful only **at an
 instant** — an ECU Diagnostic Trouble Code (DTC), a discrete event code — with no validity in
 between. Which selector you reach for follows the **nature of the data**, not the query you want to
 write:
 
 :::tip `channel()` vs `poi_channel()`
-- **`channel()` → [`SampleSeries`](core_data_model.md#sampleseries)** — a measured signal whose value
-  stays valid until the next sample (engine RPM, vehicle speed, coolant temperature). The last value
-  holds forward between samples, aggregations are duration-weighted, and the signal can be resampled
-  and interpolated.
+- **`channel()` → [`SampleSeries`](core_data_model.md#sampleseries)** — a measured signal, **valid
+  within its `[tstart, tend)` intervals**: a value is measured at each `tstart` and reconstructed
+  between measurements by interpolation (zero-order hold today), so it has a value at *every* instant
+  of a valid interval. Aggregations are duration-weighted; it can be resampled. Examples: engine RPM,
+  vehicle speed, coolant temperature.
 - **`poi_channel()` → [`PointsInTimeSeries`](core_data_model.md#pointsintimeseries)** — discrete
   events whose value exists *only at* its own instant and says nothing about the time in between (DTC
-  / fault codes, event logs, a count stamped at a moment). No carry-forward, no durations, unweighted
-  aggregations.
+  / fault codes, event logs, a count stamped at a moment). No interpolation between points, no
+  durations, unweighted aggregations.
 
 **Litmus test:** *does the value still hold a moment later, until the next reading?* If yes, it's a
 sample → `channel()`. If it is a momentary event, it's a POI channel → `poi_channel()`.

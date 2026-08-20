@@ -89,16 +89,17 @@ pdf = db.query.select(eng_rpm.mean().alias("rpm_mean")).toPandas(spark, solver=D
 
 ## Selecting Points-in-Time (POI) channels
 
-POI channels represent time series of discrete events and are only valid at the given timestamps. 
+POI channels represent time series of discrete events and are only valid at the given timestamps.
 Select one with `poi_channel(...)` instead of `channel(...)` — identification (tags / `channel_metrics` columns) is
 identical; only the built series type differs:
 
 **Which to use** — pick by the nature of the data, not the query. Use `channel()` (→ `SampleSeries`)
-for a continuously-valid signal whose value holds until the next sample (RPM, speed, temperature:
-carry-forward, duration-weighted aggregations). Use `poi_channel()` (→ `PointsInTimeSeries`) for
-discrete events valid only at their instant (DTC / fault codes, event logs: no carry-forward,
-unweighted aggregations). Litmus test: *does the value still hold a moment later, until the next
-reading?* Yes → `channel()`; a momentary event → `poi_channel()`.
+for a measured signal that is valid within its `[tstart, tend)` intervals — a value measured at each
+`tstart`, reconstructed between measurements by interpolation (zero-order hold today);
+duration-weighted aggregations (RPM, speed, temperature). Use `poi_channel()` (→ `PointsInTimeSeries`)
+for discrete events valid only at their instant, with no value in between (DTC / fault codes, event
+logs; unweighted aggregations). Litmus test: *is the reading still meaningful a moment later, until
+the next one?* Yes → `channel()`; a momentary event → `poi_channel()`.
 
 ```python
 # numeric POI channel (default dtype="double")
