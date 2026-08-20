@@ -408,5 +408,10 @@ def test_persist_statistics_with_events(spark):
         row.event_instance_id
         for row in event_instance_fact.select("event_instance_id").distinct().collect()
     )
-    # Stats event IDs should be a subset of (or equal to) event instance IDs
-    assert stats_event_ids.issubset(event_ids) or len(stats_event_ids) > 0
+    # Every event_instance_id in the stats fact must correspond to a real event
+    # instance in event_instance_fact — the two gold tables must stay consistent.
+    assert len(stats_event_ids) > 0
+    assert stats_event_ids.issubset(event_ids), (
+        f"stats_aggregator_fact event_instance_ids not in event_instance_fact: "
+        f"{stats_event_ids - event_ids}"
+    )
