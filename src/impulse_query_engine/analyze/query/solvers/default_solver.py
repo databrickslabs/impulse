@@ -251,6 +251,89 @@ class DefaultSolver(QuerySolver):
     # Solver stages
     # ------------------------------------------------------------------
 
+    def _scoped_container_metrics(self, query, pre_filtered_containers_df=None) -> DataFrame:
+        """Read ``container_metrics`` scoped to the solver config.
+
+        Source is *pre_filtered_containers_df* when provided (the incremental
+        container subset), otherwise the full ``container_metrics`` table.
+        Applies the per-table ``column_name_mapping``, the top-level
+        ``project_id`` filter, and the per-table ``container_metrics.filters``.
+        Query-level ``MetricExpression`` filters are **not** applied here —
+        callers add those on top when needed.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (database + config).
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental subset to read instead of the full table.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            The scoped, column-mapped ``container_metrics`` frame.
+        """
+        if pre_filtered_containers_df is not None:
+            metrics = pre_filtered_containers_df
+        else:
+            metrics = query.db.container_metrics(self.spark)
+        metrics = self._apply_column_mapping(
+            metrics, self.config.container_metrics.column_name_mapping
+        )
+        if self.config.project_id is not None:
+            metrics = metrics.where(F.col(self.config.project_id_col) == self.config.project_id)
+        for col_name, value in self.config.container_metrics.filters.items():
+            metrics = metrics.where(F.col(col_name) == value)
+        return metrics
+
+    def _scoped_container_tags(self, query) -> DataFrame:
+        """Read the EAV ``container_tags`` table scoped to the solver config.
+
+        Applies the per-table ``column_name_mapping``, the top-level
+        ``project_id`` filter, and the per-table ``container_tags.filters``.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (database + config).
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            The scoped, column-mapped ``container_tags`` (EAV) frame.
+        """
+        tags = query.db.container_tags(self.spark)
+        tags = self._apply_column_mapping(tags, self.config.container_tags.column_name_mapping)
+        if self.config.project_id is not None:
+            tags = tags.where(F.col(self.config.project_id_col) == self.config.project_id)
+        for col_name, value in self.config.container_tags.filters.items():
+            tags = tags.where(F.col(col_name) == value)
+        return tags
+
+    def _pivot_container_tags(self, tags_df, keys) -> DataFrame:
+        """Pivot scoped ``container_tags`` rows to one column per key in *keys*.
+
+        Parameters
+        ----------
+        tags_df : pyspark.sql.DataFrame
+            Scoped EAV frame from :meth:`_scoped_container_tags`.
+        keys : Iterable[str]
+            Tag keys to pivot into columns.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            ``container_id`` plus one column per requested key (first value per
+            ``(container_id, key)``).
+        """
+        tag_key_col = self.config.tag_key_col
+        return (
+            tags_df.where(F.col(tag_key_col).isin(list(keys)))
+            .groupBy(self.config.container_id_col)
+            .pivot(tag_key_col, list(keys))
+            .agg(F.first(self.config.tag_value_col))
+        )
+
     def filter_container_tags(self, spark, query) -> DataFrame:
         """
         Filter container tags from the key-value-store table (narrow/EAV format).
@@ -293,29 +376,13 @@ class DefaultSolver(QuerySolver):
                 required_elements.extend(filt.required_tags())
         required_elements = set(required_elements)
 
-        tags = query.db.container_tags(self.spark)
-        tags = self._apply_column_mapping(tags, self.config.container_tags.column_name_mapping)
-
-        if self.config.project_id is not None:
-            tags = tags.where(F.col(self.config.project_id_col) == self.config.project_id)
-
-        for col_name, value in self.config.container_tags.filters.items():
-            tags = tags.where(F.col(col_name) == value)
+        tags = self._scoped_container_tags(query)
 
         if len(filters) == 0:
             return tags.select(container_id_col).distinct()
 
-        tag_key_col = self.config.tag_key_col
-        tags = tags.where(F.col(tag_key_col).isin(required_elements))
-
-        tags = tags.groupBy(container_id_col)
-        tags = tags.pivot(tag_key_col, list(required_elements)).agg(
-            F.first(self.config.tag_value_col)
-        )
-
-        expr = self._build_expr(filters)
-        tags = tags.where(expr)
-
+        tags = self._pivot_container_tags(tags, required_elements)
+        tags = tags.where(self._build_expr(filters))
         return tags.select(container_id_col).distinct()
 
     def filter_container_metrics(
@@ -358,20 +425,7 @@ class DefaultSolver(QuerySolver):
 
         metric_filters = [filt for filt in query.filters if isinstance(filt, MetricExpression)]
 
-        if pre_filtered_containers_df is not None:
-            metrics = pre_filtered_containers_df
-        else:
-            metrics = query.db.container_metrics(self.spark)
-
-        metrics = self._apply_column_mapping(
-            metrics, self.config.container_metrics.column_name_mapping
-        )
-
-        if self.config.project_id is not None:
-            metrics = metrics.where(F.col(self.config.project_id_col) == self.config.project_id)
-
-        for col_name, value in self.config.container_metrics.filters.items():
-            metrics = metrics.where(F.col(col_name) == value)
+        metrics = self._scoped_container_metrics(query, pre_filtered_containers_df)
 
         if len(metric_filters) > 0:
             metrics = metrics.where(self._build_expr(metric_filters))
@@ -1110,9 +1164,9 @@ class DefaultSolver(QuerySolver):
 
         Reads ``container_metrics`` (for metric columns) and, when tag keys are
         requested, the EAV ``container_tags`` table (pivoted to one column per
-        key).  The two sides are outer-joined on ``container_id``.  The result is
-        broadcast-left-joined onto the channel-match frame in
-        :meth:`_prepare_channels_join`.
+        key), reusing the shared scoping/pivot helpers.  The two sides are
+        outer-joined on ``container_id``.  The result is broadcast-left-joined
+        onto the channel-match frame in :meth:`_prepare_channels_join`.
 
         Parameters
         ----------
@@ -1138,22 +1192,13 @@ class DefaultSolver(QuerySolver):
         meta_df = None
 
         if metric_cols:
-            metrics = query.db.container_metrics(self.spark)
-            metrics = self._apply_column_mapping(
-                metrics, self.config.container_metrics.column_name_mapping
-            )
+            metrics = self._scoped_container_metrics(query)
             missing = [c for c in metric_cols if c not in metrics.columns]
             if missing:
                 raise ValueError(
                     f"Container metric column(s) {missing} requested by an expression are "
                     f"not present on container_metrics. Available columns: {metrics.columns}"
                 )
-            if self.config.project_id is not None:
-                metrics = metrics.where(
-                    F.col(self.config.project_id_col) == self.config.project_id
-                )
-            for col_name, value in self.config.container_metrics.filters.items():
-                metrics = metrics.where(F.col(col_name) == value)
             meta_df = metrics.select(container_id_col, *metric_cols).dropDuplicates(
                 [container_id_col]
             )
@@ -1165,19 +1210,7 @@ class DefaultSolver(QuerySolver):
                     f"({tag_keys}) require a container_tags_table, but none is "
                     "configured on the database."
                 )
-            tags = query.db.container_tags(self.spark)
-            tags = self._apply_column_mapping(tags, self.config.container_tags.column_name_mapping)
-            if self.config.project_id is not None:
-                tags = tags.where(F.col(self.config.project_id_col) == self.config.project_id)
-            for col_name, value in self.config.container_tags.filters.items():
-                tags = tags.where(F.col(col_name) == value)
-            tag_key_col = self.config.tag_key_col
-            tags = (
-                tags.where(F.col(tag_key_col).isin(list(tag_keys)))
-                .groupBy(container_id_col)
-                .pivot(tag_key_col, list(tag_keys))
-                .agg(F.first(self.config.tag_value_col))
-            )
+            tags = self._pivot_container_tags(self._scoped_container_tags(query), tag_keys)
             meta_df = (
                 tags if meta_df is None else meta_df.join(tags, on=container_id_col, how="outer")
             )
