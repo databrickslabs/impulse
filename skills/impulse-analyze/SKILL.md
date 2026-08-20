@@ -89,8 +89,8 @@ pdf = db.query.select(eng_rpm.mean().alias("rpm_mean")).toPandas(spark, solver=D
 
 ## Selecting Points-in-Time (POI) channels
 
-A POI channel carries values defined *only at* their timestamp (no interval). Select one with
-`poi_channel(...)` instead of `channel(...)` — identification (tags / `channel_metrics` columns) is
+POI channels represent time series of discrete events and are only valid at the given timestamps. 
+Select one with `poi_channel(...)` instead of `channel(...)` — identification (tags / `channel_metrics` columns) is
 identical; only the built series type differs:
 
 **Which to use** — pick by the nature of the data, not the query. Use `channel()` (→ `SampleSeries`)

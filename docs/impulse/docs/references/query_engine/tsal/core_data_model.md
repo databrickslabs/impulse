@@ -147,7 +147,7 @@ Because there is no validity between points, the operators differ from `SampleSe
   `PointsInTimeSeries` onto their shared instants, returning value-carrying point series.
 - **String-valued POI series** — produced by `poi_channel(dtype='string')` (e.g. DTC fault codes) —
   support only equality (`==` / `!=`) and sampling (`synchronized` / `.where`); arithmetic, ordering,
-  and numeric reductions raise, since they are not implemented for strings.
+  and numeric reductions raise a TypeError, since they are not implemented for strings.
 
 → API: [`PointsInTimeSeries`](../../api/impulse_query_engine/model/series/points_in_time_series.md)
 

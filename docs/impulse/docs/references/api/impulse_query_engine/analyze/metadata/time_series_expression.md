@@ -9,15 +9,12 @@ title: impulse_query_engine.analyze.metadata.time_series_expression
 class SeriesType(StrEnum)
 ```
 
-How a channel's samples are interpreted (mirrors :class:`RawEncoder`).
+Determines how a channel's values are interpreted:
 
-``SAMPLE`` — the default; the time series is considered *valid* within each
-``[tstart_i, tend_i)`` interval: value ``v_i`` was measured at ``tstart_i`` and no
-other value was measured until ``tend_i`` (reconstructed by an interpolation method,
-zero-order hold today), backed by :class:`SampleSeries`.
+``SAMPLE`` — the default; the time series is considered *valid* within the given intervals.
+Value v_i was measured at tstart_i and no other value was measured until tend_i.
 
-``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their
-timestamps ``(tᵢ, vᵢ)`` with no between-point validity, backed by
+``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their timestamps.
 
 
 ## TimeSeriesSelector

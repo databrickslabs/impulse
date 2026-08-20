@@ -450,9 +450,7 @@ Returns an empty PointsInTimeSeries of the given value type.
 
 **Arguments**:
 
-- `value_type` (`SeriesValueType`): The value data type of the empty series (default ``DOUBLE``). Pass the
-parent series' value type so an empty result stays correctly typed for
-plan-time result-type determination.
+- `value_type` (`SeriesValueType`): The value data type of the empty series (default ``DOUBLE``).
 
 **Returns**:
 

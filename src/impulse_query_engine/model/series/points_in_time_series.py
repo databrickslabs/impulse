@@ -681,10 +681,7 @@ class PointsInTimeSeries:
         Parameters
         ----------
         value_type : SeriesValueType, optional
-            The value data type of the empty series (default ``DOUBLE``). Pass the
-            parent series' value type so an empty result stays correctly typed for
-            plan-time result-type determination.
-
+            The value data type of the empty series (default ``DOUBLE``).
         Returns
         -------
         PointsInTimeSeries
