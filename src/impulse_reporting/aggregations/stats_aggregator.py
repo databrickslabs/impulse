@@ -662,10 +662,10 @@ class StatsAggregator(Aggregation):
         """
         Add an event_instance_id column, matching ``event_instance_fact``.
 
-        A ``ContainerEvent`` gets ``crc32(container_id)`` (one id per container);
-        all other event types get the timestamp-based hash from
-        ``generate_event_instance_id_column``. The container-event case is applied
-        per row (keyed on ``stats_name``) since a frame may mix event types.
+        The id comes from ``generate_event_instance_id_column``: a ``ContainerEvent``
+        gets ``crc32(container_id)`` (one id per container), all other event types get
+        the timestamp-based hash. The container-event case is applied per row (keyed on
+        ``stats_name``) since a frame may mix event types.
 
         Parameters
         ----------
