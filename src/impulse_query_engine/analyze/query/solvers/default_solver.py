@@ -1009,9 +1009,6 @@ class DefaultSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
-        # _prepare_channels_join joins the requested container-metadata columns
-        # onto the frame and returns their names so we can tell the cache which
-        # columns are container tags vs. container metrics.
         q, joined_df, container_count, container_tag_cols, container_metric_cols = (
             self._prepare_channels_join(query, channels_df)
         )
@@ -1314,8 +1311,6 @@ class DefaultSolver(QuerySolver):
             Narrow DataFrame of calculated-channel samples.
         """
         col_map = self.config.col_map
-        # Same container-metadata wiring as solve(): _prepare_channels_join joins
-        # the columns on and returns their names for the cache.
         q, joined_df, container_count, container_tag_cols, container_metric_cols = (
             self._prepare_channels_join(query, channels_df)
         )
