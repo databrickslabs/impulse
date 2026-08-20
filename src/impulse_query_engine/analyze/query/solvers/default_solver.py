@@ -1089,11 +1089,8 @@ class DefaultSolver(QuerySolver):
             self.config.value_col,
         )
 
-        # Attach the container-level tags/metrics the selected expressions asked
-        # for (constant per container): read them once from the silver layer and
-        # broadcast-left-join on container_id so they ride through the join below
-        # into each group's pandas frame.  Left join keeps every channel row, so
-        # the container set (and container_count) is unchanged.
+        # Attach requested container-level tags/metrics via a broadcast left join,
+        # so they ride into each group's pandas frame without dropping channel rows.
         container_id_col = self.config.container_id_col
         tag_keys = TimeSeriesExpression.collect_container_tags(query.selections)
         metric_cols = TimeSeriesExpression.collect_container_metrics(query.selections)
