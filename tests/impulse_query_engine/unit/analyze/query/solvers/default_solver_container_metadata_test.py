@@ -96,6 +96,32 @@ def test_eav_model_injects_container_tag(spark: SparkSession, narrow_db: Measure
     assert rows.get(1) == 1.0, rows
 
 
+def test_eav_model_injects_tag_and_metric_together(spark: SparkSession, narrow_db: MeasurementDB):
+    """A UDF requesting both a container tag and a metric gets both.
+
+    Exercises the outer-join branch in ``_build_container_metadata_df`` that
+    combines the EAV ``container_tags`` pivot with the ``container_metrics``
+    columns (narrow_db carries both the ``name`` tag and ``num_channels``).
+    """
+
+    def grab_both(ts, container_tags, container_metrics):
+        tag_ok = container_tags["name"] == "test"
+        metric = container_metrics["num_channels"]
+        return float(metric) if tag_ok and metric is not None else -1.0
+
+    query = narrow_db.query
+    result = query.select(
+        query.channel(seed="0")
+        .apply(grab_both, container_tags=["name"], container_metrics=["num_channels"])
+        .alias("both")
+    ).solve(spark, solver=DefaultSolver(spark))
+
+    rows = {row.container_id: row.both for row in result.collect()}
+    assert rows, "expected at least one matched container"
+    # container 1 carries name=test and num_channels=1 -> both arrived.
+    assert rows.get(1) == 1.0, rows
+
+
 def test_eav_model_missing_metric_raises(spark: SparkSession, narrow_db: MeasurementDB):
     """Requesting a nonexistent container metric column raises a clear error."""
 
