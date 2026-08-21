@@ -2,9 +2,9 @@
 """End-to-end tests for container-level tags/metrics injected into solve UDFs.
 
 A ``TimeSeriesUDF`` declares the container tag keys / metric columns it needs;
-the engine threads exactly those columns through the filter cascade so they
-reach the per-container solve UDF, where they are injected as ``container_tags``
-/ ``container_metrics`` keyword arguments.
+the engine reads exactly those columns and attaches them to the channel-match
+frame so they reach the per-container solve UDF, where they are injected as
+``container_tags`` / ``container_metrics`` keyword arguments.
 
 Covers both silver-layer shapes:
 - wide model (``basic_narrow_db``, no ``container_tags_table``) -> metrics work,
@@ -16,6 +16,7 @@ Covers both silver-layer shapes:
 import pytest
 from pyspark.sql import SparkSession
 
+import impulse_query_engine.schema as S
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
@@ -23,7 +24,7 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
     SolverConfig,
     TableConfig,
 )
-from impulse_query_engine.measurement_db import MeasurementDB
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from tests.conftest import (
     basic_narrow_db,
     key_value_store_alias_with_channel_tags_db,
@@ -234,3 +235,54 @@ def test_calculated_channel_threads_container_metric(
     assert raw_total not in (None, 0), totals
     # Every sample scaled by num_channels == 11.
     assert scaled_total == pytest.approx(11.0 * raw_total), totals
+
+
+def test_pre_filtered_containers_scopes_metric_injection(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """The metric read for injection honors ``pre_filtered_containers_df``.
+
+    ``attach_container_metadata`` builds the metadata from
+    ``_scoped_container_metrics(pre_filtered_containers_df)``, so a subset
+    restricted to a single container (a) processes only that container and
+    (b) still injects its metric value correctly.
+    """
+
+    def grab_metric(ts, container_metrics):
+        value = container_metrics["num_channels"]
+        return float(value) if value is not None else -1.0
+
+    query = basic_narrow_db.query
+    # Incremental subset: container 1 only.  Default config has no column mapping,
+    # so the physical container_metrics frame is a valid pre-filtered input.
+    subset = basic_narrow_db.container_metrics(spark).where("container_id = 1")
+    result = query.select(
+        query.channel(channel_name="Engine RPM")
+        .apply(grab_metric, container_metrics=["num_channels"])
+        .alias("nc")
+    ).solve(spark, solver=DefaultSolver(spark), pre_filtered_containers_df=subset)
+
+    rows = {row.container_id: row.nc for row in result.collect()}
+    assert set(rows.keys()) == {1}, rows  # only the pre-filtered subset is processed
+    assert rows[1] == 11.0, rows  # injected metric value is correct
+
+
+def test_pre_filtered_containers_scopes_tag_pivot(spark: SparkSession, narrow_db: MeasurementDB):
+    """The tag pivot for injection honors ``pre_filtered_containers_df``.
+
+    Clone narrow_db (container 1, name=test) and add a container 2 tag row.  A
+    metadata build scoped to container 1 pivots only that container — container
+    2's tag is scoped out before the pivot, so it is absent from the result.
+    """
+    tables = dict(narrow_db.config.debug_tables)
+    extra = spark.createDataFrame([(2, "name", "other")], schema=S.CONTAINER_TAGS)
+    tables["container_tags"] = tables["container_tags"].unionByName(extra)
+    db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=narrow_db.ws)
+
+    # Incremental subset: container 1 only (its container_metrics rows).
+    subset = db.container_metrics(spark).where("container_id = 1")
+    meta = DefaultSolver(spark)._build_container_metadata_df(
+        db.query, tag_keys=["name"], metric_cols=[], pre_filtered_containers_df=subset
+    )
+    rows = {row.container_id: row["name"] for row in meta.collect()}
+    assert rows == {1: "test"}, rows  # container 2 (name=other) is scoped out

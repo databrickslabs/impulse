@@ -1063,9 +1063,8 @@ class DefaultSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count, container_tag_cols, container_metric_cols = (
-            self._prepare_channels_join(query, channels_df)
-        )
+        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
+        container_tag_cols, container_metric_cols = self._container_meta_cols(query)
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
         solve_udf = F.pandas_udf(
@@ -1081,16 +1080,15 @@ class DefaultSolver(QuerySolver):
         )
         return self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
 
-    def _prepare_channels_join(
-        self, query, channels_df
-    ) -> tuple[DataFrame, DataFrame, int, list[str], list[str]]:
+    def _prepare_channels_join(self, query, channels_df) -> tuple[DataFrame, DataFrame, int]:
         """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
 
         Applies optional per-channel unit conversion, reads and column-maps the
-        channel-data table (raw-encoding it when in raw mode), attaches any
-        container-level tags/metrics the selected expressions asked for,
-        broadcast-joins it to the channel-match frame on
-        ``[container_id, channel_id]``, and counts the distinct containers.
+        channel-data table (raw-encoding it when in raw mode), broadcast-joins it
+        to the channel-match frame on ``[container_id, channel_id]``, and counts
+        the distinct containers.  Any container-metadata columns already on
+        *channels_df* (attached by :meth:`attach_container_metadata`) ride
+        through the broadcast join into ``joined_df``.
 
         Parameters
         ----------
@@ -1101,14 +1099,11 @@ class DefaultSolver(QuerySolver):
 
         Returns
         -------
-        tuple[DataFrame, DataFrame, int, list[str], list[str]]
-            ``(channels_q, joined_df, container_count, container_tag_cols,
-            container_metric_cols)`` — the column-mapped channel-data DataFrame
-            (authoritative for output ``container_id`` / ``channel_id`` types),
-            the join fed to the grouped-map UDF, the number of distinct
-            containers, and the requested container-tag / container-metric
-            column names (already joined onto ``joined_df``) so callers can wire
-            the cache without re-deriving them.
+        tuple[DataFrame, DataFrame, int]
+            ``(channels_q, joined_df, container_count)`` — the column-mapped
+            channel-data DataFrame (authoritative for output ``container_id`` /
+            ``channel_id`` types), the join fed to the grouped-map UDF, and the
+            number of distinct containers.
         """
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
@@ -1143,30 +1138,63 @@ class DefaultSolver(QuerySolver):
             self.config.value_col,
         )
 
-        # Attach requested container-level tags/metrics via a broadcast left join,
-        # so they ride into each group's pandas frame without dropping channel rows.
-        container_id_col = self.config.container_id_col
-        tag_keys = TimeSeriesExpression.collect_container_tags(query.selections)
-        metric_cols = TimeSeriesExpression.collect_container_metrics(query.selections)
-        if tag_keys or metric_cols:
-            meta_df = self._build_container_metadata_df(query, tag_keys, metric_cols)
-            channels_df = channels_df.join(F.broadcast(meta_df), on=container_id_col, how="left")
-
         joined_df = q.join(
             F.broadcast(channels_df),
             on=[self.config.container_id_col, self.config.channel_id_col],
         )
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
-        return q, joined_df, container_count, tag_keys, metric_cols
+        return q, joined_df, container_count
 
-    def _build_container_metadata_df(self, query, tag_keys, metric_cols) -> DataFrame:
+    def _container_meta_cols(self, query) -> tuple[list[str], list[str]]:
+        """Container-tag / container-metric column names the selections request."""
+        return (
+            TimeSeriesExpression.collect_container_tags(query.selections),
+            TimeSeriesExpression.collect_container_metrics(query.selections),
+        )
+
+    def attach_container_metadata(
+        self, query, channels_df, pre_filtered_containers_df=None
+    ) -> DataFrame:
+        """Left-join the container tags/metrics the selections request onto *channels_df*.
+
+        The columns ride into each group's pandas frame via the broadcast join in
+        :meth:`_prepare_channels_join`, without dropping channel rows.  When
+        *pre_filtered_containers_df* is given, the metadata read is scoped to
+        those containers.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (selections + db info).
+        channels_df : pyspark.sql.DataFrame
+            Channel-match frame from the filter pipeline.
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental container subset to scope the metadata read to.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            *channels_df* with one column per requested tag/metric left-joined on
+            (unchanged when nothing is requested).
+        """
+        tag_keys, metric_cols = self._container_meta_cols(query)
+        if not (tag_keys or metric_cols):
+            return channels_df
+        meta_df = self._build_container_metadata_df(
+            query, tag_keys, metric_cols, pre_filtered_containers_df
+        )
+        return channels_df.join(F.broadcast(meta_df), on=self.config.container_id_col, how="left")
+
+    def _build_container_metadata_df(
+        self, query, tag_keys, metric_cols, pre_filtered_containers_df=None
+    ) -> DataFrame:
         """Build a one-row-per-container frame of the requested tags/metrics.
 
         Reads ``container_metrics`` (for metric columns) and, when tag keys are
         requested, the EAV ``container_tags`` table (pivoted to one column per
         key), reusing the shared scoping/pivot helpers.  The two sides are
         outer-joined on ``container_id``.  The result is broadcast-left-joined
-        onto the channel-match frame in :meth:`_prepare_channels_join`.
+        onto the channel-match frame in :meth:`attach_container_metadata`.
 
         Parameters
         ----------
@@ -1176,6 +1204,9 @@ class DefaultSolver(QuerySolver):
             Requested container-tag keys (EAV).  Requires a ``container_tags_table``.
         metric_cols : list of str
             Requested container-metric column names (on ``container_metrics``).
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental container subset.  When provided, both the metrics read
+            and the tags pivot are scoped to these containers.
 
         Returns
         -------
@@ -1192,7 +1223,7 @@ class DefaultSolver(QuerySolver):
         meta_df = None
 
         if metric_cols:
-            metrics = self._scoped_container_metrics(query)
+            metrics = self._scoped_container_metrics(query, pre_filtered_containers_df)
             missing = [c for c in metric_cols if c not in metrics.columns]
             if missing:
                 raise ValueError(
@@ -1210,7 +1241,17 @@ class DefaultSolver(QuerySolver):
                     f"({tag_keys}) require a container_tags_table, but none is "
                     "configured on the database."
                 )
-            tags = self._pivot_container_tags(self._scoped_container_tags(query), tag_keys)
+            tags = self._scoped_container_tags(query)
+            if pre_filtered_containers_df is not None:
+                # Scope the EAV rows to the incremental container subset before
+                # the pivot so only relevant containers are read and grouped.
+                scoped_ids = (
+                    self._scoped_container_metrics(query, pre_filtered_containers_df)
+                    .select(container_id_col)
+                    .distinct()
+                )
+                tags = tags.join(F.broadcast(scoped_ids), on=container_id_col, how="inner")
+            tags = self._pivot_container_tags(tags, tag_keys)
             meta_df = (
                 tags if meta_df is None else meta_df.join(tags, on=container_id_col, how="outer")
             )
@@ -1341,9 +1382,8 @@ class DefaultSolver(QuerySolver):
             Narrow DataFrame of calculated-channel samples.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count, container_tag_cols, container_metric_cols = (
-            self._prepare_channels_join(query, channels_df)
-        )
+        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
+        container_tag_cols, container_metric_cols = self._container_meta_cols(query)
 
         schema = self._build_calculated_channels_udf_schema(q)
         solve_udf = F.pandas_udf(

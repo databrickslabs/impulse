@@ -374,6 +374,32 @@ class QuerySolver(ABC):
             f"{self.__class__.__name__} does not support aliased channel resolution"
         )
 
+    def attach_container_metadata(
+        self, query, channels_df, pre_filtered_containers_df=None
+    ) -> DataFrame:
+        """Attach requested container-level tags/metrics onto the channel-match frame.
+
+        No-op by default; solvers that inject container metadata (e.g.
+        ``DefaultSolver``) override this to left-join the columns.  When
+        *pre_filtered_containers_df* is given, the metadata read is scoped to
+        those containers.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (selections + db info).
+        channels_df : pyspark.sql.DataFrame
+            Channel-match frame from the filter pipeline.
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental container subset to scope the metadata read to.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            *channels_df*, unchanged by default.
+        """
+        return channels_df
+
     def filter_candidates(self, query, channel_df) -> DataFrame:
         """
         Stage 5: Select best channel candidate.

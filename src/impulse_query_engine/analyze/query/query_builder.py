@@ -244,11 +244,13 @@ class QueryBuilder:
         """Run the shared metadata filter pipeline and return the channel-match frame.
 
         Extracts the selector split, the four filter stages
-        (container tags → container metrics → channel tags → channel metrics) and
-        the optional channel-alias resolution that both :meth:`solve` and
-        :meth:`solve_calculated_channels` drive before their differing final
-        ``solver`` call.  Returns the ``(container_id, channel_id, selector_ids …)``
-        DataFrame identifying the channels selected by the current selections.
+        (container tags → container metrics → channel tags → channel metrics),
+        the optional channel-alias resolution, and a final
+        ``attach_container_metadata`` step (both :meth:`solve` and
+        :meth:`solve_calculated_channels` drive this before their differing final
+        ``solver`` call).  Returns the ``(container_id, channel_id, selector_ids …)``
+        DataFrame identifying the channels selected by the current selections,
+        carrying any container tags/metrics the selections requested.
         """
         # extract selectors upfront
         direct_selectors = TimeSeriesExpression.collect_selectors(
@@ -277,6 +279,12 @@ class QueryBuilder:
             channel_metrics_df = solver.resolve_channel_selections(
                 spark, channel_metrics_df, aliased_channel_metrics_df
             )
+
+        # Attach any container tags/metrics the selections requested, scoped to
+        # the pre-filtered container subset when one was provided.
+        channel_metrics_df = solver.attach_container_metadata(
+            self, channel_metrics_df, pre_filtered_containers_df
+        )
 
         return channel_metrics_df
 
