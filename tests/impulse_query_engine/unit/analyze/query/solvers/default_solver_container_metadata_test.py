@@ -13,12 +13,16 @@ Covers both silver-layer shapes:
   metric column raises.
 """
 
+import pandas as pd
 import pytest
 from pyspark.sql import SparkSession
 
 import impulse_query_engine.schema as S
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
-from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+from impulse_query_engine.analyze.query.solvers.default_solver import (
+    DefaultSolver,
+    TimeSeriesCache,
+)
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     ChannelMappingConfig,
     SolverConfig,
@@ -286,3 +290,42 @@ def test_pre_filtered_containers_scopes_tag_pivot(spark: SparkSession, narrow_db
     )
     rows = {row.container_id: row["name"] for row in meta.collect()}
     assert rows == {1: "test"}, rows  # container 2 (name=other) is scoped out
+
+
+def test_cache_reads_container_meta_from_surviving_row_only():
+    """Container tags/metrics populated only on the ``selector_ids``-notna row suffice.
+
+    Mirrors ``_apply_grouped_map`` nulling the container-meta columns on all but
+    one row per (container_id, channel_id): the cache builds its metadata frame
+    from the ``selector_ids``-notna rows, so a value present only there is still
+    read back.  Pure-pandas, no Spark.
+    """
+    pdf = pd.DataFrame(
+        {
+            "container_id": [1, 1, 1, 1],
+            "channel_id": [10, 10, 11, 11],
+            "tstart": [0, 1, 0, 1],
+            "tend": [1, 2, 1, 2],
+            "value": [1.0, 2.0, 3.0, 4.0],
+            # selector_ids kept on one row per channel (rows 0 and 2), null elsewhere.
+            "selector_ids": [[0], None, [0], None],
+            # container-meta columns masked to the same surviving rows.
+            "brand": ["BMW", None, "BMW", None],
+            "num_channels": [11, None, 11, None],
+        }
+    )
+    col_map = {
+        "cid": "container_id",
+        "ch": "channel_id",
+        "ts": "tstart",
+        "te": "tend",
+        "val": "value",
+    }
+    cache = TimeSeriesCache(
+        pdf,
+        col_map=col_map,
+        container_tag_cols=["brand"],
+        container_metric_cols=["num_channels"],
+    )
+    assert cache.container_tags == {"brand": "BMW"}
+    assert cache.container_metrics["num_channels"] == 11

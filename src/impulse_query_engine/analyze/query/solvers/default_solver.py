@@ -1078,7 +1078,13 @@ class DefaultSolver(QuerySolver):
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )
-        return self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
+        return self._apply_grouped_map(
+            joined_df,
+            container_count,
+            schema,
+            solve_udf,
+            container_meta_cols=[*container_tag_cols, *container_metric_cols],
+        )
 
     def _prepare_channels_join(self, query, channels_df) -> tuple[DataFrame, DataFrame, int]:
         """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
@@ -1258,27 +1264,29 @@ class DefaultSolver(QuerySolver):
 
         return meta_df
 
-    def _apply_grouped_map(self, joined_df, container_count, schema, solve_udf) -> DataFrame:
+    def _apply_grouped_map(
+        self, joined_df, container_count, schema, solve_udf, container_meta_cols=None
+    ) -> DataFrame:
         """Run *solve_udf* per container, or return an empty frame when none match."""
         if container_count == 0:
             return self.spark.createDataFrame([], schema=schema)
 
-        # selector_ids is per-channel metadata; keep it on a single row per
-        # (container_id, channel_id) so the per-row array objects don't inflate
-        # every group's pandas frame.  ``selector_ids`` is identical across a
-        # channel's rows and the cache selects the surviving row by notna (not
-        # by position), so the order is arbitrary — order by a constant to
-        # avoid an unnecessary per-channel sort (row_number just requires
-        # *some* ordering).
+        # selector_ids is per-channel metadata and the container tags/metrics are
+        # per-container — both are identical across a channel's rows.  Keep them
+        # on a single row per (container_id, channel_id) so the repeated values
+        # don't inflate every group's pandas frame; the cache reads them off the
+        # surviving ``selector_ids``-notna row (by notna, not by position), so the
+        # order is arbitrary — order by a constant to avoid an unnecessary
+        # per-channel sort (row_number just requires *some* ordering).
         df = joined_df.repartition(container_count, self.config.container_id_col)
         w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
             F.lit(1)
         )
-        df = (
-            df.withColumn("_rn", F.row_number().over(w))
-            .withColumn("selector_ids", F.when(F.col("_rn") == 1, F.col("selector_ids")))
-            .drop("_rn")
-        )
+        df = df.withColumn("_rn", F.row_number().over(w))
+        for col_name in ["selector_ids", *(container_meta_cols or [])]:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, F.when(F.col("_rn") == 1, F.col(col_name)))
+        df = df.drop("_rn")
         return df.groupBy(self.config.container_id_col).apply(solve_udf)
 
     # ------------------------------------------------------------------
@@ -1397,7 +1405,13 @@ class DefaultSolver(QuerySolver):
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )
-        res = self._apply_grouped_map(joined_df, container_count, schema, solve_udf)
+        res = self._apply_grouped_map(
+            joined_df,
+            container_count,
+            schema,
+            solve_udf,
+            container_meta_cols=[*container_tag_cols, *container_metric_cols],
+        )
 
         # Identity is constant per channel_id, so attach it here via a
         # channel_id-keyed CASE instead of the UDF shipping a copy per row.
