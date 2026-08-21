@@ -146,33 +146,38 @@ class QuerySolver(ABC):
             ]
         )
 
-    def _empty_channel_match_df(self, spark, db: MeasurementDB) -> DataFrame:
+    def _empty_channel_match_df(
+        self, spark, db: MeasurementDB, container_meta_cols=None, template=None
+    ) -> DataFrame:
         """Return an empty ``(container_id, channel_id, selector_ids)`` DataFrame.
 
         The ``container_id`` and ``channel_id`` types are derived from the
         column-mapped ``channel_metrics`` table (the source of the real
         channel-match rows this empty frame is union'd/joined with) so the
         schemas stay compatible regardless of the physical id types.
+
+        When *container_meta_cols* are given, those columns are appended as
+        nullable fields (dataType taken from *template*'s schema) so the empty
+        frame unions/joins cleanly with threaded frames that carry container
+        metadata (see ``filter_channel_tags`` / ``resolve_channel_selections``).
         """
         ref = self._apply_column_mapping(
             db.channel_metrics(spark), self.config.channel_metrics.column_name_mapping
         )
-        return spark.createDataFrame(
-            [],
-            schema=T.StructType(
-                [
-                    T.StructField(
-                        self.config.container_id_col,
-                        ref.schema[self.config.container_id_col].dataType,
-                    ),
-                    T.StructField(
-                        self.config.channel_id_col,
-                        ref.schema[self.config.channel_id_col].dataType,
-                    ),
-                    T.StructField("selector_ids", T.ArrayType(T.IntegerType())),
-                ]
+        fields = [
+            T.StructField(
+                self.config.container_id_col,
+                ref.schema[self.config.container_id_col].dataType,
             ),
-        )
+            T.StructField(
+                self.config.channel_id_col,
+                ref.schema[self.config.channel_id_col].dataType,
+            ),
+            T.StructField("selector_ids", T.ArrayType(T.IntegerType())),
+        ]
+        for name in container_meta_cols or []:
+            fields.append(T.StructField(name, template.schema[name].dataType, True))
+        return spark.createDataFrame([], schema=T.StructType(fields))
 
     def _build_selector_id_expr(self, filters) -> Column:
         """Build a Spark ``Column`` that maps rows to their ``selector_id``.
@@ -203,7 +208,7 @@ class QuerySolver(ABC):
         return selector_expr
 
     @abc.abstractmethod
-    def filter_container_tags(self, spark, query) -> DataFrame:
+    def filter_container_tags(self, spark, query, required_container_tags=None) -> DataFrame:
         """
         Abstract method to filter containers by tags.
 
@@ -213,6 +218,10 @@ class QuerySolver(ABC):
             Spark session used for query execution.
         query : QueryBuilder
             Query object containing filters and db info.
+        required_container_tags : list of str, optional
+            Container-tag keys that must be pivoted out and retained as columns
+            on the result (in addition to any tag-based filtering), so they
+            thread downstream to the solve cache.
 
         Returns
         -------
@@ -228,7 +237,13 @@ class QuerySolver(ABC):
 
     @abc.abstractmethod
     def filter_container_metrics(
-        self, spark, query, container_df, pre_filtered_containers_df=None
+        self,
+        spark,
+        query,
+        container_df,
+        pre_filtered_containers_df=None,
+        required_container_tags=None,
+        required_container_metrics=None,
     ) -> DataFrame:
         """
         Abstract method to filter containers by metrics.
@@ -244,6 +259,12 @@ class QuerySolver(ABC):
         pre_filtered_containers_df : pyspark.sql.DataFrame, optional
             Pre-filtered containers for incremental processing.
             When provided, restricts processing to only these containers.
+        required_container_tags : list of str, optional
+            Container-tag columns retained on *container_df* that must be carried
+            through this stage so they thread downstream to the solve cache.
+        required_container_metrics : list of str, optional
+            Container-metric columns that must exist on ``container_metrics`` and
+            be retained on the result so they thread downstream.
 
         Returns
         -------
@@ -260,7 +281,9 @@ class QuerySolver(ABC):
         )
 
     @abc.abstractmethod
-    def filter_channel_tags(self, spark, db: MeasurementDB, container_df, selectors) -> DataFrame:
+    def filter_channel_tags(
+        self, spark, db: MeasurementDB, container_df, selectors, container_meta_cols=None
+    ) -> DataFrame:
         """
         Stage 3: Filter channels by measurements and tags.
 
@@ -274,6 +297,9 @@ class QuerySolver(ABC):
             DataFrame containing container information.
         selectors : list[TimeSeriesSelector]
             Non-aliased (direct) selectors extracted from the query.
+        container_meta_cols : list of str, optional
+            Container-level metadata columns (tags + metrics) present on
+            *container_df* to carry through onto each matched channel row.
 
         Returns
         -------
@@ -288,7 +314,9 @@ class QuerySolver(ABC):
         raise NotImplementedError("Each solver must implement the filter_channel_tags method.")
 
     @abc.abstractmethod
-    def filter_channel_metrics(self, spark, db: MeasurementDB, channel_df, selectors) -> DataFrame:
+    def filter_channel_metrics(
+        self, spark, db: MeasurementDB, channel_df, selectors, container_meta_cols=None
+    ) -> DataFrame:
         """
         Stage 4: Filter channels by metrics.
 
@@ -302,6 +330,9 @@ class QuerySolver(ABC):
             DataFrame containing channel information.
         selectors : list[TimeSeriesSelector]
             Non-aliased (direct) selectors extracted from the query.
+        container_meta_cols : list of str, optional
+            Container-level metadata columns (tags + metrics) present on
+            *channel_df* to carry through onto each matched channel row.
 
         Returns
         -------
@@ -316,7 +347,7 @@ class QuerySolver(ABC):
         raise NotImplementedError("Each solver must implement the filter_channel_metrics method.")
 
     def filter_aliased_channel_metrics(
-        self, spark, db: MeasurementDB, container_df, selectors
+        self, spark, db: MeasurementDB, container_df, selectors, container_meta_cols=None
     ) -> DataFrame:
         """
         Resolve aliased channel selections via the channel_mapping table.
@@ -331,6 +362,9 @@ class QuerySolver(ABC):
             DataFrame containing filtered container IDs.
         selectors : list[TimeSeriesSelector]
             Aliased selectors extracted from the query.
+        container_meta_cols : list of str, optional
+            Container-level metadata columns (tags + metrics) present on
+            *container_df* to carry through onto each resolved alias row.
 
         Returns
         -------
@@ -393,7 +427,15 @@ class QuerySolver(ABC):
         pass
 
     @abc.abstractmethod
-    def solve(self, query, channels_df, selections, dtypes):
+    def solve(
+        self,
+        query,
+        channels_df,
+        selections,
+        dtypes,
+        container_tag_cols=None,
+        container_metric_cols=None,
+    ):
         """
         Stage 6: Solve query.
 
@@ -402,11 +444,19 @@ class QuerySolver(ABC):
         query : QueryBuilder
             Query object containing database and filter information.
         channels_df : pyspark.sql.DataFrame
-            DataFrame containing channel information.
+            DataFrame containing channel information.  Already carries any
+            requested container-metadata columns, threaded through the filter
+            cascade.
         selections : list
             List of selection expressions to apply.
         dtypes : list
             List of data types for each selection.
+        container_tag_cols : list of str, optional
+            Names of the container-tag columns on *channels_df*, exposed to the
+            solve cache as ``container_tags``.
+        container_metric_cols : list of str, optional
+            Names of the container-metric columns on *channels_df*, exposed to
+            the solve cache as ``container_metrics``.
 
         Returns
         -------
@@ -415,7 +465,14 @@ class QuerySolver(ABC):
         """
         pass
 
-    def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
+    def solve_calculated_channels(
+        self,
+        query,
+        channels_df,
+        selections,
+        container_tag_cols=None,
+        container_metric_cols=None,
+    ) -> DataFrame:
         """
         Solve calculated channels into a narrow, silver-shaped DataFrame.
 
@@ -432,6 +489,10 @@ class QuerySolver(ABC):
             Channel-match DataFrame from the filter pipeline.
         selections : list
             List of ``CalculatedChannel`` selections to evaluate.
+        container_tag_cols : list of str, optional
+            Names of the container-tag columns on *channels_df*.
+        container_metric_cols : list of str, optional
+            Names of the container-metric columns on *channels_df*.
 
         Returns
         -------

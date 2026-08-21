@@ -16,6 +16,7 @@ Covers both silver-layer shapes:
 import pytest
 from pyspark.sql import SparkSession
 
+import impulse_query_engine.schema as S
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
@@ -23,7 +24,7 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
     SolverConfig,
     TableConfig,
 )
-from impulse_query_engine.measurement_db import MeasurementDB
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from tests.conftest import (
     basic_narrow_db,
     key_value_store_alias_with_channel_tags_db,
@@ -96,12 +97,36 @@ def test_eav_model_injects_container_tag(spark: SparkSession, narrow_db: Measure
     assert rows.get(1) == 1.0, rows
 
 
+def test_required_tag_does_not_drop_containers_lacking_it(
+    spark: SparkSession, narrow_db: MeasurementDB
+):
+    """Requesting a container tag must not filter out containers that lack it.
+
+    A container present in ``container_tags`` (via some other key) but without a
+    row for the requested key stays in the result with that column null — a
+    requested tag is injected, not used as a filter.
+    """
+    # Clone narrow_db (container 1 has name=test) and add a container 2 that has
+    # a tag row but no ``name`` row.
+    tables = dict(narrow_db.config.debug_tables)
+    extra = spark.createDataFrame([(2, "other", "x")], schema=S.CONTAINER_TAGS)
+    tables["container_tags"] = tables["container_tags"].unionByName(extra)
+    db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=narrow_db.ws)
+
+    result = DefaultSolver(spark).filter_container_tags(
+        spark, db.query, required_container_tags=["name"]
+    )
+    rows = {row.container_id: row["name"] for row in result.collect()}
+    assert rows == {1: "test", 2: None}, rows
+
+
 def test_eav_model_injects_tag_and_metric_together(spark: SparkSession, narrow_db: MeasurementDB):
     """A UDF requesting both a container tag and a metric gets both.
 
-    Exercises the outer-join branch in ``_build_container_metadata_df`` that
-    combines the EAV ``container_tags`` pivot with the ``container_metrics``
-    columns (narrow_db carries both the ``name`` tag and ``num_channels``).
+    Exercises threading a container tag (from the EAV ``container_tags`` pivot in
+    ``filter_container_tags``) alongside a container metric (from
+    ``filter_container_metrics``) through the whole cascade — narrow_db carries
+    both the ``name`` tag and ``num_channels``.
     """
 
     def grab_both(ts, container_tags, container_metrics):
@@ -234,3 +259,34 @@ def test_calculated_channel_threads_container_metric(
     assert raw_total not in (None, 0), totals
     # Every sample scaled by num_channels == 11.
     assert scaled_total == pytest.approx(11.0 * raw_total), totals
+
+
+def test_pre_filtered_containers_scopes_metric_injection(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """The metric injection honors ``pre_filtered_containers_df``.
+
+    Because the container-metric columns are threaded from
+    ``filter_container_metrics`` (which reads ``pre_filtered_containers_df`` when
+    provided) rather than an independent full read, a subset restricted to a
+    single container (a) processes only that container and (b) still injects its
+    metric value correctly.
+    """
+
+    def grab_metric(ts, container_metrics):
+        value = container_metrics["num_channels"]
+        return float(value) if value is not None else -1.0
+
+    query = basic_narrow_db.query
+    # Incremental subset: container 1 only. Default config has no column mapping,
+    # so the physical container_metrics frame is a valid pre-filtered input.
+    subset = basic_narrow_db.container_metrics(spark).where("container_id = 1")
+    result = query.select(
+        query.channel(channel_name="Engine RPM")
+        .apply(grab_metric, container_metrics=["num_channels"])
+        .alias("nc")
+    ).solve(spark, solver=DefaultSolver(spark), pre_filtered_containers_df=subset)
+
+    rows = {row.container_id: row.nc for row in result.collect()}
+    assert set(rows.keys()) == {1}, rows  # only the pre-filtered subset is processed
+    assert rows[1] == 11.0, rows  # injected metric value is correct

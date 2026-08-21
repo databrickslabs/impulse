@@ -236,19 +236,36 @@ class QueryBuilder:
             self.result_dtypes,
         ) = self._determine_result_objects_dtypes()
 
-        channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
+        channel_metrics_df, container_tag_cols, container_metric_cols = self._run_filter_pipeline(
+            spark, solver, pre_filtered_containers_df
+        )
 
-        return solver.solve(self, channel_metrics_df, self.selections, self.result_dtypes)
+        return solver.solve(
+            self,
+            channel_metrics_df,
+            self.selections,
+            self.result_dtypes,
+            container_tag_cols,
+            container_metric_cols,
+        )
 
-    def _run_filter_pipeline(self, spark, solver, pre_filtered_containers_df) -> DataFrame:
+    def _run_filter_pipeline(
+        self, spark, solver, pre_filtered_containers_df
+    ) -> tuple[DataFrame, list[str], list[str]]:
         """Run the shared metadata filter pipeline and return the channel-match frame.
 
         Extracts the selector split, the four filter stages
         (container tags → container metrics → channel tags → channel metrics) and
         the optional channel-alias resolution that both :meth:`solve` and
         :meth:`solve_calculated_channels` drive before their differing final
-        ``solver`` call.  Returns the ``(container_id, channel_id, selector_ids …)``
-        DataFrame identifying the channels selected by the current selections.
+        ``solver`` call.  Any container tags/metrics a selected expression needs
+        are threaded through the cascade so they ride on the returned frame.
+
+        Returns
+        -------
+        tuple[DataFrame, list[str], list[str]]
+            The ``(container_id, channel_id, selector_ids [, *meta])`` channel-match
+            frame plus the requested container-tag / container-metric column names.
         """
         # extract selectors upfront
         direct_selectors = TimeSeriesExpression.collect_selectors(
@@ -258,27 +275,49 @@ class QueryBuilder:
             self.selections, uses_alias=True
         )
 
+        # Container-metadata columns to thread through the cascade.
+        container_tag_cols = TimeSeriesExpression.collect_container_tags(self.selections)
+        container_metric_cols = TimeSeriesExpression.collect_container_metrics(self.selections)
+        container_meta_cols = container_tag_cols + container_metric_cols
+
         # create Query
-        tags_df = solver.filter_container_tags(spark, self)
-        metrics_df = solver.filter_container_metrics(
-            spark, self, tags_df, pre_filtered_containers_df
+        tags_df = solver.filter_container_tags(
+            spark, self, required_container_tags=container_tag_cols
         )
-        channel_tags_df = solver.filter_channel_tags(spark, self.db, metrics_df, direct_selectors)
+        metrics_df = solver.filter_container_metrics(
+            spark,
+            self,
+            tags_df,
+            pre_filtered_containers_df,
+            required_container_tags=container_tag_cols,
+            required_container_metrics=container_metric_cols,
+        )
+        channel_tags_df = solver.filter_channel_tags(
+            spark, self.db, metrics_df, direct_selectors, container_meta_cols=container_meta_cols
+        )
         channel_metrics_df = solver.filter_channel_metrics(
-            spark, self.db, channel_tags_df, direct_selectors
+            spark,
+            self.db,
+            channel_tags_df,
+            direct_selectors,
+            container_meta_cols=container_meta_cols,
         )
 
         if len(aliased_selectors) > 0:
             # Aliased resolution must run against the full tag-filtered container
             # set (metrics_df).
             aliased_channel_metrics_df = solver.filter_aliased_channel_metrics(
-                spark, self.db, metrics_df, aliased_selectors
+                spark,
+                self.db,
+                metrics_df,
+                aliased_selectors,
+                container_meta_cols=container_meta_cols,
             )
             channel_metrics_df = solver.resolve_channel_selections(
                 spark, channel_metrics_df, aliased_channel_metrics_df
             )
 
-        return channel_metrics_df
+        return channel_metrics_df, container_tag_cols, container_metric_cols
 
     @telemetry_logger("query", "solve_calculated_channels")
     def solve_calculated_channels(
@@ -324,9 +363,17 @@ class QueryBuilder:
         """
         self._validate_calculated_channels()
 
-        channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
+        channel_metrics_df, container_tag_cols, container_metric_cols = self._run_filter_pipeline(
+            spark, solver, pre_filtered_containers_df
+        )
 
-        return solver.solve_calculated_channels(self, channel_metrics_df, self.selections)
+        return solver.solve_calculated_channels(
+            self,
+            channel_metrics_df,
+            self.selections,
+            container_tag_cols,
+            container_metric_cols,
+        )
 
     def _validate_calculated_channels(self) -> None:
         """Validate the selections for :meth:`solve_calculated_channels`.

@@ -81,22 +81,32 @@ class BlobSolver(QuerySolver):
         """
         pass
 
-    def filter_container_tags(self, spark, query) -> DataFrame:
-        """Passthrough — returns an empty DataFrame."""
+    def filter_container_tags(self, spark, query, required_container_tags=None) -> DataFrame:
+        """Passthrough — returns an empty DataFrame (container metadata unused)."""
         return spark.createDataFrame([], schema=T.StructType([]))
 
     def filter_container_metrics(
-        self, spark, query, container_df, pre_filtered_containers_df=None
+        self,
+        spark,
+        query,
+        container_df,
+        pre_filtered_containers_df=None,
+        required_container_tags=None,
+        required_container_metrics=None,
     ) -> DataFrame:
-        """Passthrough — returns container_df unchanged."""
+        """Passthrough — returns container_df unchanged (container metadata unused)."""
         return container_df
 
-    def filter_channel_tags(self, spark, db, container_df, selectors) -> DataFrame:
-        """Passthrough — returns container_df unchanged."""
+    def filter_channel_tags(
+        self, spark, db, container_df, selectors, container_meta_cols=None
+    ) -> DataFrame:
+        """Passthrough — returns container_df unchanged (container metadata unused)."""
         return container_df
 
-    def filter_channel_metrics(self, spark, db, channel_df, selectors) -> DataFrame:
-        """Passthrough — returns channel_df unchanged."""
+    def filter_channel_metrics(
+        self, spark, db, channel_df, selectors, container_meta_cols=None
+    ) -> DataFrame:
+        """Passthrough — returns channel_df unchanged (container metadata unused)."""
         return channel_df
 
     @staticmethod
@@ -128,7 +138,15 @@ class BlobSolver(QuerySolver):
             result[s._alias] = s.build(cache)
         return result
 
-    def solve(self, query, channels_df, selections, dtypes=None):
+    def solve(
+        self,
+        query,
+        channels_df,
+        selections,
+        dtypes=None,
+        container_tag_cols=None,
+        container_metric_cols=None,
+    ):
         """
         Solve the query by grouping channels and applying selections.
 
@@ -142,6 +160,10 @@ class BlobSolver(QuerySolver):
             List of selection expressions to apply.
         dtypes : list, optional
             List of data types for each selection.
+        container_tag_cols : list of str, optional
+            Accepted for interface compatibility; unused by this solver.
+        container_metric_cols : list of str, optional
+            Accepted for interface compatibility; unused by this solver.
 
         Returns
         -------
