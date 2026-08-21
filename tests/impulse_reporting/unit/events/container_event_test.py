@@ -163,9 +163,9 @@ def test_determine_events(spark, basic_narrow_db):
     assert "end_ts" in df.columns
     assert df.count() > 0
 
-    # Compare event_instance_id with crc32(container_id)
+    # Compare event_instance_id with xxhash64(container_id)
 
-    df_with_test = df.withColumn("test_values", f.crc32(f.col("container_id").cast("string")))
+    df_with_test = df.withColumn("test_values", f.xxhash64(f.col("container_id").cast("string")))
     for row in df_with_test.collect():
         assert row.event_instance_id == row.test_values, (
             f"container_id={row.container_id}: "

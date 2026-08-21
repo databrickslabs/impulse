@@ -502,15 +502,15 @@ def test_determine_aggregations_container_event_instance_id(spark, basic_narrow_
         spark=spark,
         aggregations=[container_stats, basic_stats],
         solved_df=solved_df,
-    ).withColumn("expected_container_id", f.crc32(f.col("container_id").cast("string")))
+    ).withColumn("expected_container_id", f.xxhash64(f.col("container_id").cast("string")))
 
-    # Every container-event row uses crc32(container_id) — matching event_instance_fact.
+    # Every container-event row uses xxhash64(container_id) — matching event_instance_fact.
     container_rows = df.filter(f.col("visual_id") == container_stats.get_id()).collect()
     assert len(container_rows) > 0
     for row in container_rows:
         assert row.event_instance_id == row.expected_container_id, (
             f"container_id={row.container_id}: event_instance_id="
-            f"{row.event_instance_id} != crc32(container_id)={row.expected_container_id}"
+            f"{row.event_instance_id} != xxhash64(container_id)={row.expected_container_id}"
         )
 
     # ... and exactly one distinct event_instance_id per container (no fragmentation).
