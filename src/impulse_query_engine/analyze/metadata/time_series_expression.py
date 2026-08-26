@@ -655,18 +655,16 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         uses_alias : bool, optional
             Whether the channel resolves via the channel-alias table.
         series_type : SeriesType, optional
-            How the selected channel's samples are interpreted.  ``CONTINUOUS``
-            (default) builds a :class:`SampleSeries` — today's behavior,
-            unchanged.  ``POINTS_IN_TIME`` builds a :class:`PointsInTimeSeries`
-            (values valid only at their timestamps); identification / matching is
-            identical, only the built object and its result dtype differ.  This is
-            the plan-time source of truth for the series type (so ``dtype()`` is
-            correct for a bare POI selection with no per-channel metadata lookup).
+            Which object this selector builds. The default (``CONTINUOUS``)
+            builds a :class:`SampleSeries`; ``POINTS_IN_TIME`` builds a
+            :class:`PointsInTimeSeries`. Matching is identical; only the built
+            object and its result dtype differ. This is the plan-time source of
+            truth for the series type.
         value_type : SeriesValueType, optional
-            For a ``POINTS_IN_TIME`` selection, the declared value data type
-            (``DOUBLE`` / ``STRING``).  Ignored for ``CONTINUOUS``.  Drives plan-time
-            typing and string-op gating; validated against the silver
-            ``poi_channels.dtype`` at solve time (assertion contract).
+            For ``POINTS_IN_TIME``, the declared value data type
+            (``DOUBLE`` / ``STRING``); ignored otherwise. Drives plan-time typing
+            and string-op gating; validated against the silver
+            ``poi_channels.dtype`` at solve time.
         """
         self._expr = expr
         self._uses_alias = uses_alias
@@ -688,10 +686,8 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
     @property
     def selector_id(self) -> int:
-        # Include series_type (and, for POI, value_type) so a CONTINUOUS vs a
-        # POINTS_IN_TIME selection — or a double- vs string-typed POI selection —
-        # of the same tag expression resolve as distinct channels.  CONTINUOUS keeps
-        # the historical id (bare ``str(expr)`` hash) for backward compatibility.
+        # series_type / value_type keep distinct-typed selections of the same tag
+        # apart; CONTINUOUS uses the bare ``str(expr)`` hash for back-compat.
         if self._series_type is SeriesType.CONTINUOUS:
             return zlib.crc32(str(self._expr).encode())
         return zlib.crc32(f"{self._series_type}|{self._expr}|{self._value_type}".encode())
@@ -703,9 +699,10 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         Returns
         -------
         pyspark.sql.types.DataType
-            ``BinaryType`` for a CONTINUOUS selection (serialized ``SampleSeries``),
-            or the value-type-aware ``PointsInTimeSeries.dtype()`` for a
-            POINTS_IN_TIME selection (``array<array<double>>`` for numeric,
+            ``BinaryType`` when this selector builds a :class:`SampleSeries`
+            (a serialized blob). When it builds a :class:`PointsInTimeSeries`,
+            the value-type-aware ``PointsInTimeSeries.dtype()``
+            (``array<array<double>>`` for numeric,
             ``array<struct<tstart,value>>`` for string).
         """
         if self._series_type is SeriesType.POINTS_IN_TIME:
@@ -714,11 +711,11 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
     def deserialize(self, d):
         """
-        Deserialize a CONTINUOUS result after collection/toPandas.
+        Deserialize a :class:`SampleSeries` result after collection/toPandas.
 
-        POINTS_IN_TIME results are serialized by ``get_data()`` (a plain
-        ``[[t, v], ...]`` list) and need no deserialization, so they are returned
-        as-is; only a CONTINUOUS (binary) blob is decoded to a :class:`SampleSeries`.
+        A :class:`PointsInTimeSeries` result is serialized by ``get_data()``
+        (a plain ``[[t, v], ...]`` list) and needs no deserialization, so it is
+        returned as-is; only a :class:`SampleSeries` (binary) blob is decoded.
 
         Parameters
         ----------
@@ -728,7 +725,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         Returns
         -------
         SampleSeries or Any
-            Deserialized sample series (CONTINUOUS), else *d* unchanged.
+            The decoded :class:`SampleSeries`, else *d* unchanged.
         """
         if self._series_type is SeriesType.POINTS_IN_TIME:
             return d
@@ -920,7 +917,7 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         Returns
         -------
         SampleSeries or PointsInTimeSeries
-            Built series (a ``SampleSeries`` for the CONTINUOUS-only aliases used today).
+            Built series (aliased selectors build a :class:`SampleSeries` today).
         """
         candidates = [alias.build(cache) for alias in self._aliases]
         # TODO: propery select best candidate

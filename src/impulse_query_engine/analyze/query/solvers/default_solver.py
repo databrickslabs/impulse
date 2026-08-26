@@ -49,11 +49,9 @@ class TimeSeriesCache(SeriesCache):
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
-            ``"conv"`` column is optional in *pdf*.  For a POI (``POINTS_IN_TIME``)
-            selector, :meth:`load_blob` builds a :class:`PointsInTimeSeries` — the
-            **selector** (not a per-row column) chooses the series type; the
-            ``"value_string"`` key names the string value column that a string POI
-            slice reads.
+            ``"conv"`` column is optional in *pdf*.  The ``"value_string"`` key
+            names the string value column read when :meth:`load_blob` builds a
+            string :class:`PointsInTimeSeries`.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -133,7 +131,7 @@ class TimeSeriesCache(SeriesCache):
         column named by ``col_map["conv"]``) **and** the caller evaluates
         to a SampleSeries, the values are multiplied by that factor.
         Direct selectors on the same physical channel always receive raw
-        values — unit conversion is a property of the alias, not of the channel.
+        values; unit conversion is a property of the alias, not of the channel.
 
         Parameters
         ----------
@@ -146,7 +144,8 @@ class TimeSeriesCache(SeriesCache):
             Gates the per-channel conversion factor; defaults to ``False``.
         series_type : SeriesType, optional
             The calling selector's series type; ``POINTS_IN_TIME`` builds a
-            :class:`PointsInTimeSeries`. ``None`` (default) => CONTINUOUS.
+            :class:`PointsInTimeSeries`. ``None`` (default) builds a
+            :class:`SampleSeries`.
         value_type : SeriesValueType, optional
             For a POI selector, its declared value type; ``STRING`` reads the
             string value column, otherwise the numeric one.
