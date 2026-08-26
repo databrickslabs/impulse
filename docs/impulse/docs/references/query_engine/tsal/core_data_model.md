@@ -6,8 +6,9 @@ title: Core Data Model
 # Core Data Model
 
 A TSAL expression resolves to one of a small set of in-memory, numpy-backed classes — the **core data
-model**. Channel selection and arithmetic produce a `SampleSeries`, comparisons produce `Intervals`,
-edge detection produces `PointsInTime`, and sampling at instants produces a `PointsInTimeSeries`.
+model**. A `channel()` selection and arithmetic produce a `SampleSeries` (a `poi_channel()` selection
+a `PointsInTimeSeries`), comparisons produce `Intervals`, edge detection produces `PointsInTime`, and
+sampling a signal at instants produces a `PointsInTimeSeries`.
 ([Evaluation](evaluation.md) explains how a query produces these per container.)
 
 | Class                | Carries values? | Has duration? | Typical source                                  |
