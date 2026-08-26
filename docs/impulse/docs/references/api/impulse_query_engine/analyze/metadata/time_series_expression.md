@@ -11,10 +11,13 @@ class SeriesType(StrEnum)
 
 Determines how a channel's values are interpreted:
 
-``SAMPLE`` — the default; the time series is considered *valid* within the given intervals.
-Value v_i was measured at tstart_i and no other value was measured until tend_i.
+``CONTINUOUS`` — the default; the channel is a continuous signal captured by sampling,
+considered *valid* within each ``[tstart, tend)`` interval. Value v_i was measured at
+tstart_i and no other value was measured until tend_i; the value between samples can
+be reconstructed by interpolation.
 
-``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their timestamps.
+``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their timestamps,
+with no interpolation or validity in between.
 
 
 ## TimeSeriesSelector
@@ -28,7 +31,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization)
 ```python
 def __init__(expr,
              uses_alias: bool = False,
-             series_type: SeriesType = SeriesType.SAMPLE,
+             series_type: SeriesType = SeriesType.CONTINUOUS,
              value_type: SeriesValueType = SeriesValueType.DOUBLE)
 ```
 
@@ -38,7 +41,7 @@ Initialize a TimeSeriesSelector.
 
 - `expr` (`TagExpression`): Tag expression to select.
 - `uses_alias` (`bool`): Whether the channel resolves via the channel-alias table.
-- `series_type` (`SeriesType`): How the selected channel's samples are interpreted.  ``SAMPLE``
+- `series_type` (`SeriesType`): How the selected channel's samples are interpreted.  ``CONTINUOUS``
 (default) builds a :class:`SampleSeries` — today's behavior,
 unchanged.  ``POINTS_IN_TIME`` builds a :class:`PointsInTimeSeries`
 (values valid only at their timestamps); identification / matching is
@@ -46,7 +49,7 @@ identical, only the built object and its result dtype differ.  This is
 the plan-time source of truth for the series type (so ``dtype()`` is
 correct for a bare POI selection with no per-channel metadata lookup).
 - `value_type` (`SeriesValueType`): For a ``POINTS_IN_TIME`` selection, the declared value data type
-(``DOUBLE`` / ``STRING``).  Ignored for ``SAMPLE``.  Drives plan-time
+(``DOUBLE`` / ``STRING``).  Ignored for ``CONTINUOUS``.  Drives plan-time
 typing and string-op gating; validated against the silver
 ``poi_channels.dtype`` at solve time (assertion contract).
 
@@ -60,7 +63,7 @@ Returns the Spark data type.
 
 **Returns**:
 
-`pyspark.sql.types.DataType`: ``BinaryType`` for a SAMPLE selection (serialized ``SampleSeries``),
+`pyspark.sql.types.DataType`: ``BinaryType`` for a CONTINUOUS selection (serialized ``SampleSeries``),
 or the value-type-aware ``PointsInTimeSeries.dtype()`` for a
 POINTS_IN_TIME selection (``array<array<double>>`` for numeric,
 ``array<struct<tstart,value>>`` for string).
@@ -71,11 +74,11 @@ POINTS_IN_TIME selection (``array<array<double>>`` for numeric,
 def deserialize(d)
 ```
 
-Deserialize a SAMPLE result after collection/toPandas.
+Deserialize a CONTINUOUS result after collection/toPandas.
 
 POINTS_IN_TIME results are serialized by ``get_data()`` (a plain
 ``[[t, v], ...]`` list) and need no deserialization, so they are returned
-as-is; only a SAMPLE (binary) blob is decoded to a :class:`SampleSeries`.
+as-is; only a CONTINUOUS (binary) blob is decoded to a :class:`SampleSeries`.
 
 **Arguments**:
 
@@ -83,7 +86,7 @@ as-is; only a SAMPLE (binary) blob is decoded to a :class:`SampleSeries`.
 
 **Returns**:
 
-`SampleSeries or Any`: Deserialized sample series (SAMPLE), else *d* unchanged.
+`SampleSeries or Any`: Deserialized sample series (CONTINUOUS), else *d* unchanged.
 
 #### build
 
@@ -235,7 +238,7 @@ Build the time series from cache.
 
 **Returns**:
 
-`SampleSeries or PointsInTimeSeries`: Built series (a ``SampleSeries`` for the SAMPLE-only aliases used today).
+`SampleSeries or PointsInTimeSeries`: Built series (a ``SampleSeries`` for the CONTINUOUS-only aliases used today).
 
 #### get\_required\_tag\_exprs
 
