@@ -262,5 +262,5 @@ class TestPoiChannelDtypeArg:
             expr, series_type=SeriesType.POINTS_IN_TIME, value_type=SeriesValueType.STRING
         )
         assert dbl.selector_id != strg.selector_id
-        # SAMPLE keeps the historical id (independent of value_type), distinct from POI.
+        # CONTINUOUS keeps the historical id (independent of value_type), distinct from POI.
         assert TimeSeriesSelector(expr).selector_id != dbl.selector_id

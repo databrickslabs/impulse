@@ -55,12 +55,12 @@ class SeriesCache(ABC):
             The calling selector's series type. The selector — not a per-row
             data column — is the source of truth for which object to build:
             ``POINTS_IN_TIME`` builds a :class:`PointsInTimeSeries`, otherwise a
-            :class:`SampleSeries`. ``None`` (default) means SAMPLE, so callers
+            :class:`SampleSeries`. ``None`` (default) means CONTINUOUS, so callers
             that predate POI are unchanged.
         value_type : SeriesValueType, optional
             For a ``POINTS_IN_TIME`` selector, its declared value type
             (``DOUBLE`` / ``STRING``) — selects the numeric vs string value
-            column. Ignored for SAMPLE. The declared type is validated against
+            column. Ignored for CONTINUOUS. The declared type is validated against
             the silver metadata in the solve prelude, so the data stays
             authoritative.
 

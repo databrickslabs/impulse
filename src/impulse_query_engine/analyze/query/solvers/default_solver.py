@@ -130,11 +130,10 @@ class TimeSeriesCache(SeriesCache):
         metadata in the solve prelude, so the data stays authoritative.
 
         When the underlying *pdf* carries a conversion-factor column (the
-        column named by ``col_map["conv"]``) **and** the caller is an
-        aliased selector (``uses_alias=True``), the returned SAMPLE values are
-        multiplied by that factor.  Direct selectors on the same physical
-        channel always receive raw values — unit conversion is a property
-        of the alias, not of the channel.
+        column named by ``col_map["conv"]``) **and** the caller evaluates
+        to a SampleSeries, the values are multiplied by that factor.
+        Direct selectors on the same physical channel always receive raw
+        values — unit conversion is a property of the alias, not of the channel.
 
         Parameters
         ----------
@@ -147,7 +146,7 @@ class TimeSeriesCache(SeriesCache):
             Gates the per-channel conversion factor; defaults to ``False``.
         series_type : SeriesType, optional
             The calling selector's series type; ``POINTS_IN_TIME`` builds a
-            :class:`PointsInTimeSeries`. ``None`` (default) => SAMPLE.
+            :class:`PointsInTimeSeries`. ``None`` (default) => CONTINUOUS.
         value_type : SeriesValueType, optional
             For a POI selector, its declared value type; ``STRING`` reads the
             string value column, otherwise the numeric one.
@@ -1089,7 +1088,7 @@ class DefaultSolver(QuerySolver):
         """True when any *leaf* selector resolved by the query is a POINTS_IN_TIME channel.
 
         Walks the full expression tree via ``collect_selectors``,
-        used to skip the POI-table union for pure-SAMPLE queries.
+        used to skip the POI-table union if no POI channels are present.
         """
         return any(
             selector.series_type is SeriesType.POINTS_IN_TIME
@@ -1099,7 +1098,7 @@ class DefaultSolver(QuerySolver):
     def _union_poi_channel_data(self, query, channels_q: DataFrame) -> DataFrame:
         """Union POI channel-data rows into the (already-encoded) channel-data frame.
 
-        Reads ``poi_channels``, column-maps it, and projects it into the SAMPLE
+        Reads ``poi_channels``, column-maps it, and projects it into the
         channel-data superset — POI ``timestamp`` becomes ``tstart`` (``tend``
         **null**, since a point has no validity interval, which is also the signal
         the cache validates a POI selector against), ``value_double`` becomes the

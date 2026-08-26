@@ -57,7 +57,7 @@ class TimeSeriesCache(SeriesCache):
         Load a time series blob from disk.
 
         ``series_type`` / ``value_type`` are accepted for interface compatibility
-        with :class:`SeriesCache`; this blob cache serves only SAMPLE series.
+        with :class:`SeriesCache`; this blob cache serves only CONTINUOUS series.
 
         Parameters
         ----------

@@ -22,13 +22,16 @@ if TYPE_CHECKING:
 class SeriesType(StrEnum):
     """Determines how a channel's values are interpreted:
 
-    ``SAMPLE`` — the default; the time series is considered *valid* within the given intervals.
-    Value v_i was measured at tstart_i and no other value was measured until tend_i.
+    ``CONTINUOUS`` — the default; the channel is a continuous signal captured by sampling,
+    considered *valid* within each ``[tstart, tend)`` interval. Value v_i was measured at
+    tstart_i and no other value was measured until tend_i; the value between samples can
+    be reconstructed by interpolation.
 
-    ``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their timestamps.
+    ``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their timestamps,
+    with no interpolation or validity in between.
     """
 
-    SAMPLE = "SAMPLE"
+    CONTINUOUS = "CONTINUOUS"
     POINTS_IN_TIME = "POINTS_IN_TIME"
 
 
@@ -639,7 +642,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         self,
         expr,
         uses_alias: bool = False,
-        series_type: SeriesType = SeriesType.SAMPLE,
+        series_type: SeriesType = SeriesType.CONTINUOUS,
         value_type: SeriesValueType = SeriesValueType.DOUBLE,
     ):
         """
@@ -652,7 +655,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         uses_alias : bool, optional
             Whether the channel resolves via the channel-alias table.
         series_type : SeriesType, optional
-            How the selected channel's samples are interpreted.  ``SAMPLE``
+            How the selected channel's samples are interpreted.  ``CONTINUOUS``
             (default) builds a :class:`SampleSeries` — today's behavior,
             unchanged.  ``POINTS_IN_TIME`` builds a :class:`PointsInTimeSeries`
             (values valid only at their timestamps); identification / matching is
@@ -661,7 +664,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             correct for a bare POI selection with no per-channel metadata lookup).
         value_type : SeriesValueType, optional
             For a ``POINTS_IN_TIME`` selection, the declared value data type
-            (``DOUBLE`` / ``STRING``).  Ignored for ``SAMPLE``.  Drives plan-time
+            (``DOUBLE`` / ``STRING``).  Ignored for ``CONTINUOUS``.  Drives plan-time
             typing and string-op gating; validated against the silver
             ``poi_channels.dtype`` at solve time (assertion contract).
         """
@@ -685,11 +688,11 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
     @property
     def selector_id(self) -> int:
-        # Include series_type (and, for POI, value_type) so a SAMPLE vs a
+        # Include series_type (and, for POI, value_type) so a CONTINUOUS vs a
         # POINTS_IN_TIME selection — or a double- vs string-typed POI selection —
-        # of the same tag expression resolve as distinct channels.  SAMPLE keeps
+        # of the same tag expression resolve as distinct channels.  CONTINUOUS keeps
         # the historical id (bare ``str(expr)`` hash) for backward compatibility.
-        if self._series_type is SeriesType.SAMPLE:
+        if self._series_type is SeriesType.CONTINUOUS:
             return zlib.crc32(str(self._expr).encode())
         return zlib.crc32(f"{self._series_type}|{self._expr}|{self._value_type}".encode())
 
@@ -700,7 +703,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         Returns
         -------
         pyspark.sql.types.DataType
-            ``BinaryType`` for a SAMPLE selection (serialized ``SampleSeries``),
+            ``BinaryType`` for a CONTINUOUS selection (serialized ``SampleSeries``),
             or the value-type-aware ``PointsInTimeSeries.dtype()`` for a
             POINTS_IN_TIME selection (``array<array<double>>`` for numeric,
             ``array<struct<tstart,value>>`` for string).
@@ -711,11 +714,11 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
     def deserialize(self, d):
         """
-        Deserialize a SAMPLE result after collection/toPandas.
+        Deserialize a CONTINUOUS result after collection/toPandas.
 
         POINTS_IN_TIME results are serialized by ``get_data()`` (a plain
         ``[[t, v], ...]`` list) and need no deserialization, so they are returned
-        as-is; only a SAMPLE (binary) blob is decoded to a :class:`SampleSeries`.
+        as-is; only a CONTINUOUS (binary) blob is decoded to a :class:`SampleSeries`.
 
         Parameters
         ----------
@@ -725,7 +728,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         Returns
         -------
         SampleSeries or Any
-            Deserialized sample series (SAMPLE), else *d* unchanged.
+            Deserialized sample series (CONTINUOUS), else *d* unchanged.
         """
         if self._series_type is SeriesType.POINTS_IN_TIME:
             return d
@@ -868,12 +871,12 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             Selector instance.
         """
         expr = TimeSeriesExpression.from_dict(obj["expr"])
-        # Default to SAMPLE / DOUBLE so selectors serialized before POI support
+        # Default to CONTINUOUS / DOUBLE so selectors serialized before POI support
         # (no series_type / value_type keys) deserialize unchanged.
         m = TimeSeriesSelector(
             expr,
             uses_alias=obj.get("uses_alias", False),
-            series_type=SeriesType(obj.get("series_type", SeriesType.SAMPLE)),
+            series_type=SeriesType(obj.get("series_type", SeriesType.CONTINUOUS)),
             value_type=SeriesValueType(obj.get("value_type", SeriesValueType.DOUBLE)),
         )
         if "alias" in obj and obj["alias"] is not None:
@@ -917,7 +920,7 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         Returns
         -------
         SampleSeries or PointsInTimeSeries
-            Built series (a ``SampleSeries`` for the SAMPLE-only aliases used today).
+            Built series (a ``SampleSeries`` for the CONTINUOUS-only aliases used today).
         """
         candidates = [alias.build(cache) for alias in self._aliases]
         # TODO: propery select best candidate

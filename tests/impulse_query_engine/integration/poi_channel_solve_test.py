@@ -9,7 +9,7 @@ on ``container_id = 1`` alongside the existing sample channels (see conftest /
 - ``channel_id = 91`` — a **numeric** DTC-count channel (values ``1, 2, 3``)
 
 Covers: numeric POI unweighted reductions, string POI equality + op gating, the
-mix-and-match case (a SAMPLE and a POI channel in one expression), and SAMPLE
+mix-and-match case (a CONTINUOUS and a POI channel in one expression), and CONTINUOUS
 backward-compatibility.
 """
 
@@ -55,7 +55,7 @@ class TestNumericPoi:
         self, spark: SparkSession, basic_narrow_db
     ):
         """A bare numeric POI selection serializes as ``array<array<double>>``
-        (PointsInTimeSeries), not the SAMPLE ``binary`` blob type."""
+        (PointsInTimeSeries), not the CONTINUOUS ``binary`` blob type."""
         solver = DefaultSolver(spark)
         q = basic_narrow_db.query
         dtc_count = q.poi_channel(channel_name="DTC_count").alias("pit")
@@ -111,11 +111,11 @@ class TestStringPoi:
 
 
 class TestMixAndMatch:
-    """The primary correctness case: a SAMPLE and a POI channel in one expression, both
+    """The primary correctness case: a CONTINUOUS and a POI channel in one expression, both
     in the same per-container pandas frame, aligned via ``synchronized``."""
 
     def test_sample_channel_sampled_at_poi_instants(self, spark: SparkSession, narrow_db):
-        """Sample the ``seed`` SAMPLE channel at the instants of the numeric POI channel.
+        """Sample the ``seed`` CONTINUOUS channel at the instants of the numeric POI channel.
 
         narrow_db container 1: ``seed`` sample channel has values 1..10 over t=0..10; the
         numeric POI channel (91) has points at t = 2, 5, 8. Sampling seed at those instants
@@ -205,7 +205,7 @@ class TestMixAndMatch:
 
 class TestBackwardCompat:
     def test_sample_channel_unaffected_by_poi(self, spark: SparkSession, basic_narrow_db):
-        """An ordinary SAMPLE ``channel(...)`` selection is unchanged by POI support."""
+        """An ordinary CONTINUOUS ``channel(...)`` selection is unchanged by POI support."""
         solver = DefaultSolver(spark)
         q = basic_narrow_db.query
         rpm = q.channel(channel_name="Engine RPM")
