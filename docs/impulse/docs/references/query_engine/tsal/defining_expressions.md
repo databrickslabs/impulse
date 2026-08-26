@@ -40,10 +40,10 @@ between. Which selector you reach for follows the **nature of the data**, not th
 write:
 
 :::tip `channel()` vs `poi_channel()`
-- **`channel()` → [`SampleSeries`](core_data_model.md#sampleseries)** — a measured signal, **valid
-  within its `[tstart, tend)` intervals**: a value is measured at each `tstart` and reconstructed
-  between measurements by interpolation (zero-order hold today), so it has a value at *every* instant
-  of a valid interval. Aggregations are duration-weighted; it can be resampled. Examples: engine RPM,
+- **`channel()` → [`SampleSeries`](core_data_model.md#sampleseries)** — a continuous signal captured
+  by sampling, **valid within its `[tstart, tend)` intervals**: a value is measured at each `tstart`
+  and no other value is measured until `tend`; values between samples (within valid intervals) can be
+  reconstructed by interpolation (e.g. zero-order hold). It can be resampled. Examples: engine RPM,
   vehicle speed, coolant temperature.
 - **`poi_channel()` → [`PointsInTimeSeries`](core_data_model.md#pointsintimeseries)** — discrete
   events whose value exists *only at* its own instant and says nothing about the time in between (DTC
