@@ -50,8 +50,8 @@ write:
   / fault codes, event logs, a count stamped at a moment). No interpolation between points, no
   durations, unweighted aggregations.
 
-**Litmus test:** *does the value still hold a moment later, until the next reading?* If yes, it's a
-sample → `channel()`. If it is a momentary event, it's a POI channel → `poi_channel()`.
+**Litmus test:** *was the underlying signal/channel derived by sampling a continuous time signal?* If yes,
+it's a sample series → `channel()`. If it is a momentary event, it's a POI channel → `poi_channel()`.
 :::
 
 `poi_channel()` resolves channels exactly like `channel()` (same tag filters), but builds a
