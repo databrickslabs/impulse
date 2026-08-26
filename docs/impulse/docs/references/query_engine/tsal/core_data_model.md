@@ -130,9 +130,11 @@ dtc_count = db.query.poi_channel(channel_name='DTC_count')  # straight from a PO
 rpm_at_starts = eng_rpm.where(veh_spd.rising_edges())       # sampled from a signal
 ```
 
-Prefer a `PointsInTimeSeries` over a `SampleSeries` whenever a value belongs to a single instant and
-carrying it forward until the next reading would be wrong — see the [`channel()` vs `poi_channel()`
-decision guide](defining_expressions.md#points-in-time-poi-channels).
+Reach for a `PointsInTimeSeries` when the channel *is* a stream of discrete events — values recorded
+when something happened, not sampled from an underlying continuous signal. Reach for a `SampleSeries`
+when the channel is a continuous signal captured by sampling. The type follows the nature of the
+data, not the query — see the [`channel()` vs `poi_channel()` decision
+guide](defining_expressions.md#points-in-time-poi-channels).
 
 Because there is no validity between points, the operators differ from `SampleSeries`:
 
