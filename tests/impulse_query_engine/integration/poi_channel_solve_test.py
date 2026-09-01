@@ -97,6 +97,40 @@ class TestStringPoi:
 
         assert {r.container_id: r.c for r in result.collect()}[1] == 3
 
+    def test_bare_string_poi_selection_types_as_points_in_time(
+        self, spark: SparkSession, basic_narrow_db
+    ):
+        """A bare string POI selection serializes as ``array<struct<tstart,value>>``
+        and collects to (tstart, code) points.
+
+        Unlike the numeric bare selection, the string path is otherwise only
+        exercised through ``==`` / ``count`` / ``.where``, all of which reduce the
+        series before it is serialized. This drives the raw string
+        ``PointsInTimeSeries`` result the whole way through the GROUPED_MAP UDF's
+        Arrow serialization.
+        """
+        solver = DefaultSolver(spark)
+        q = basic_narrow_db.query
+        dtc = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING).alias("pit")
+
+        result = q.select(dtc).solve(spark=spark, solver=solver)
+        assert result.schema["pit"].dataType == T.ArrayType(
+            T.StructType(
+                [
+                    T.StructField("tstart", T.DoubleType()),
+                    T.StructField("value", T.StringType()),
+                ]
+            )
+        )
+        rows = {r.container_id: r.pit for r in result.collect()}
+        # three DTC codes P0301, P0420, P0301 in timestamp order.
+        assert [pt["value"] for pt in rows[1]] == ["P0301", "P0420", "P0301"]
+        assert [pt["tstart"] for pt in rows[1]] == [
+            1499929300000000.0,
+            1499931000000000.0,
+            1499933000000000.0,
+        ]
+
     @pytest.mark.parametrize("reduction", ["mean", "sum", "min", "max"])
     def test_string_poi_numeric_reduction_rejected_at_build(
         self, spark: SparkSession, basic_narrow_db, reduction
