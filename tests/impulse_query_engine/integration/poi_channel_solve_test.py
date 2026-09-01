@@ -21,7 +21,7 @@ from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import SeriesValueType
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
-from impulse_query_engine.measurement_db import MeasurementDB
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 
 
 class TestNumericPoi:
@@ -248,3 +248,48 @@ class TestBackwardCompat:
 
         rows = {r.container_id for r in result.collect()}
         assert rows == {1, 2, 3}
+
+
+class TestSingleValueColumnPoiTable:
+    """A ``poi_channels`` table may carry only one of the two value columns.
+
+    ``schema.py`` types are reference-only (not enforced on read), so a customer
+    table with just ``value_double`` (numeric channels) or just ``value_string``
+    (string channels) is a legitimate shape. The POI union must not require both
+    columns to be present.
+    """
+
+    @staticmethod
+    def _db_with_poi(basic_narrow_db, spark, drop_col: str) -> MeasurementDB:
+        """Clone ``basic_narrow_db`` with one value column dropped from poi_channels."""
+        tables = {
+            "container_metrics": spark.read.table("spark_catalog.silver.container_metrics"),
+            "channel_metrics": spark.read.table("spark_catalog.silver.channel_metrics"),
+            "channels": spark.read.table("spark_catalog.silver.channels"),
+            "poi_channels": basic_narrow_db.poi_channels(spark).drop(drop_col),
+        }
+        return MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+    def test_numeric_only_poi_table_solves(self, spark: SparkSession, basic_narrow_db):
+        """A numeric-only poi_channels table (no ``value_string``) resolves a numeric
+        POI selection without raising an ``AnalysisException`` on the missing column."""
+        db = self._db_with_poi(basic_narrow_db, spark, drop_col="value_string")
+        q = db.query
+        dtc_count = q.poi_channel(channel_name="DTC_count")
+
+        result = q.select(dtc_count.sum().alias("s")).solve(
+            spark=spark, solver=DefaultSolver(spark)
+        )
+
+        assert {r.container_id: r.s for r in result.collect()}[1] == 6.0  # 1 + 2 + 3
+
+    def test_string_only_poi_table_solves(self, spark: SparkSession, basic_narrow_db):
+        """A string-only poi_channels table (no ``value_double``) resolves a string
+        POI selection without raising an ``AnalysisException`` on the missing column."""
+        db = self._db_with_poi(basic_narrow_db, spark, drop_col="value_double")
+        q = db.query
+        dtc = q.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
+
+        result = q.select(dtc.count().alias("c")).solve(spark=spark, solver=DefaultSolver(spark))
+
+        assert {r.container_id: r.c for r in result.collect()}[1] == 3

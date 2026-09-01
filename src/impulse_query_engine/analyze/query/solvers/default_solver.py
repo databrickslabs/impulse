@@ -1102,8 +1102,11 @@ class DefaultSolver(QuerySolver):
         **null**, since a point has no validity interval, which is also the signal
         the cache validates a POI selector against), ``value_double`` becomes the
         numeric ``value`` column, and ``value_string`` rides alongside for a string
-        POI channel. No per-row ``series_type`` / ``dtype`` marker is shipped: the
-        selector drives series-type dispatch in :meth:`TimeSeriesCache.load_blob`.
+        POI channel. Each value column is projected only when the table actually
+        carries it, so a numeric-only or string-only ``poi_channels`` table is
+        supported; ``unionByName(allowMissingColumns=True)`` null-fills the rest.
+        No per-row ``series_type`` / ``dtype`` marker is shipped: the selector
+        drives series-type dispatch in :meth:`TimeSeriesCache.load_blob`.
         Returns *channels_q* unchanged when no ``poi_channels`` table is configured.
         """
         db = query.db
@@ -1118,14 +1121,17 @@ class DefaultSolver(QuerySolver):
         channels_q_t_start_dtype: T.DataType = channels_q.schema[cfg.tstart_col].dataType
         channels_q_t_end_dtype: T.DataType = channels_q.schema[cfg.tend_col].dataType
 
-        poi_proj = poi.select(
+        select_items = [
             F.col(cfg.container_id_col),
             F.col(cfg.channel_id_col),
             F.col(cfg.poi_timestamp_col).cast(channels_q_t_start_dtype).alias(cfg.tstart_col),
             F.lit(None).cast(channels_q_t_end_dtype).alias(cfg.tend_col),
-            F.col(cfg.poi_value_double_col).alias(cfg.value_col),
-            F.col(cfg.poi_value_string_col),
-        )
+        ]
+        if cfg.poi_value_double_col in poi.columns:
+            select_items.append(F.col(cfg.poi_value_double_col).alias(cfg.value_col))
+        if cfg.poi_value_string_col in poi.columns:
+            select_items.append(F.col(cfg.poi_value_string_col))
+        poi_proj = poi.select(*select_items)
         return channels_q.unionByName(poi_proj, allowMissingColumns=True)
 
     def _apply_grouped_map(self, joined_df, container_count, schema, solve_udf) -> DataFrame:
