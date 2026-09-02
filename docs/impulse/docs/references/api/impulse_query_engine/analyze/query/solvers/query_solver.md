@@ -166,6 +166,31 @@ aliasing (e.g. ``DefaultSolver``) must override this.
 
 `pyspark.sql.DataFrame`: Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
 
+#### attach\_container\_metadata
+
+```python
+def attach_container_metadata(query,
+                              channels_df,
+                              pre_filtered_containers_df=None) -> DataFrame
+```
+
+Attach requested container-level tags/metrics onto the channel-match frame.
+
+No-op by default; solvers that inject container metadata (e.g.
+``DefaultSolver``) override this to left-join the columns.  When
+*pre_filtered_containers_df* is given, the metadata read is scoped to
+those containers.
+
+**Arguments**:
+
+- `query` (`QueryBuilder`): Query object (selections + db info).
+- `channels_df` (`pyspark.sql.DataFrame`): Channel-match frame from the filter pipeline.
+- `pre_filtered_containers_df` (`pyspark.sql.DataFrame`): Incremental container subset to scope the metadata read to.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: *channels_df*, unchanged by default.
+
 #### filter\_candidates
 
 ```python
