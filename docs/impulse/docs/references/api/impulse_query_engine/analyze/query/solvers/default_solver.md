@@ -289,6 +289,32 @@ the source to the target unit on the fly.
 
 `pyspark.sql.DataFrame`: DataFrame containing results for each container.
 
+#### attach\_container\_metadata
+
+```python
+def attach_container_metadata(query,
+                              channels_df,
+                              pre_filtered_containers_df=None) -> DataFrame
+```
+
+Left-join the container tags/metrics the selections request onto *channels_df*.
+
+The columns ride into each group's pandas frame via the broadcast join in
+:meth:`_prepare_channels_join`, without dropping channel rows.  When
+*pre_filtered_containers_df* is given, the metadata read is scoped to
+those containers.
+
+**Arguments**:
+
+- `query` (`QueryBuilder`): Query object (selections + db info).
+- `channels_df` (`pyspark.sql.DataFrame`): Channel-match frame from the filter pipeline.
+- `pre_filtered_containers_df` (`pyspark.sql.DataFrame`): Incremental container subset to scope the metadata read to.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: *channels_df* with one column per requested tag/metric left-joined on
+(unchanged when nothing is requested).
+
 #### solve\_calculated\_channels
 
 ```python
