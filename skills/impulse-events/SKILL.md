@@ -11,7 +11,9 @@ description: >
 # Impulse — events
 
 An event defines time windows within a recording that scope downstream aggregations (see
-`impulse-aggregations`). Events are built from TSAL expressions (see `impulse-tsal`).
+`impulse-aggregations`). Events are built from TSAL expressions (see `impulse-tsal`). When an event
+expression contains a UDF that declares `container_tags` / `container_metrics`, those values are
+injected as usual — the requirement propagates through the event.
 
 **Every event used by an aggregation must be registered with the report before computing:**
 

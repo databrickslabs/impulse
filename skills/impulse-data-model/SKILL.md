@@ -66,6 +66,11 @@ resolves a selection depends on which optional tables you configured:
 - With `container_tags` configured → containers filtered from EAV rows; without it, from
   `container_metrics` columns (wide-only model).
 
+Beyond filtering, these container tables also feed **container-level metadata into UDFs** at solve
+time: a UDF declaring `container_metrics=[...]` (columns) or `container_tags=[...]` (EAV keys, which
+require a `container_tags_table`) receives their per-container values as keyword arguments — see
+`impulse-tsal`.
+
 ### Landing data (ingestion pattern)
 
 If your CSVs already match the shape, loading is a few lines:

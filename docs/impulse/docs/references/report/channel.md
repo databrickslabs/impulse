@@ -16,6 +16,12 @@ evaluate to a `SampleSeries`**. This is the *persisted, labeled* form of the eph
 [virtual signals](../query_engine/tsal/defining_expressions.md#virtual-signals) you can build ad-hoc in a
 query.
 
+:::note
+If the wrapped expression contains a UDF that declares
+[container tags/metrics](../query_engine/tsal/defining_expressions.md#reading-container-level-metadata-inside-a-udf),
+those values are injected as usual — the requirement propagates through the calculated channel.
+:::
+
 Every calculated channel used in a report **must** be registered with the report via
 `add_calculated_channel()` before `determine_report()` is called.
 

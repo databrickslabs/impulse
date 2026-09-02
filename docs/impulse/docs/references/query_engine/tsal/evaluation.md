@@ -22,9 +22,29 @@ Under the hood, TSAL expressions form a tree of typed nodes:
 Operators and signal methods on a `TimeSeriesExpression` ([Defining Expressions](defining_expressions.md))
 build `TimeSeriesOp` nodes around their operands rather than computing anything immediately.
 
+## Planning: type inference before solve
+
+Before any real data is read, `QueryBuilder.solve()` first **plans** the query: it runs each
+expression once via a build call against an **empty time series cache**, so the engine can infer
+each result's type (and therefore the output DataFrame schema) without waiting for solve-time
+data.
+
+This planning build executes the full expression tree **once, including every UDF**, but with
+empty inputs:
+
+- Core-model arguments (`SampleSeries`, `Intervals`, `PointsInTimeSeries`, …) are **empty**.
+- Declared `container_tags` / `container_metrics` keys are **present but their values are `None`**.
+  Real per-container values are only available at solve time.
+
+Every node, UDFs included, must still return a valid object of its declared return type on this
+call. For example, a `SampleSeries`-returning UDF must return a valid (possibly empty)
+`SampleSeries`. UDFs that read container metadata must therefore be **null-safe** during planning;
+see [Reading container-level metadata inside a UDF](defining_expressions.md#reading-container-level-metadata-inside-a-udf).
+
 ## From expression to result
 
-When `QueryBuilder.solve()` runs, the [solver](../query_solvers.md) does the following per container:
+After planning, when `QueryBuilder.solve()` proceeds, the [solver](../query_solvers.md) does the
+following per container:
 
 1. **Resolve leaves.** Each `TimeSeriesSelector` is matched to a physical channel and loaded from the
    silver-layer data: a `channel()` selector into a `SampleSeries` from `channels`, a `poi_channel()`

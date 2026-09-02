@@ -247,7 +247,7 @@ These are lower-level methods on the expression itself. For report-level aggrega
 
 | Method                           | Signature        | Description                                             |
 |----------------------------------|------------------|---------------------------------------------------------|
-| `.apply(func)`                   | `func: callable` | Apply a custom function to the resolved `SampleSeries`. |
+| `.apply(func, ...)`              | `func: callable` | Apply a custom function to the resolved `SampleSeries`. |
 | `TimeSeriesExpression.udf(func)` | `func: callable` | Wrap a function as a reusable TSAL expression.          |
 
 ```python
@@ -257,6 +257,58 @@ def custom_transform(series):
 
 squared_rpm = custom_transform(eng_rpm)
 ```
+
+#### Reading container-level metadata inside a UDF
+
+A UDF can declare **container-level tags and metrics** it needs, and the engine injects
+their per-container values into the function at evaluation time. Declare them on `.apply(...)`
+or on the `@udf(...)` decorator; the function then receives `container_tags` and/or
+`container_metrics` as keyword arguments — dicts keyed by the names you declared (a value is
+`None` when the container has no entry for that key):
+
+```python
+# Decorator form — a reusable, self-describing expression:
+@TimeSeriesExpression.udf(container_metrics=["nominal_power"], container_tags=["vehicle_type"])
+def derate(series, container_metrics, container_tags):
+    factor = 0.8 if container_tags["vehicle_type"] == "heavy" else 1.0
+    return series / container_metrics["nominal_power"] * factor
+
+derated = derate(power)
+
+# Inline form — same declaration on .apply(...):
+derated = power.apply(derate_fn, container_metrics=["nominal_power"])
+```
+
+Where the values come from:
+
+- **`container_metrics=[...]`** are read as **columns on the `container_metrics` table**. Requesting
+  a column that does not exist raises a `ValueError`.
+- **`container_tags=[...]`** are read from the EAV **`container_tags` table** and require a
+  `container_tags_table` to be configured; requesting them on the wide-only model raises a
+  `ValueError`.
+
+The values are constant per container. The engine derives the union of everything the selected
+expressions ask for, reads only those columns from the silver layer, and joins them onto the
+per-container evaluation — see [Query Solvers](../query_solvers.md#container-level-metadata-in-expressions).
+
+:::note Works through aggregations, events, and calculated channels
+Container-metadata declared on a UDF still reaches it when the UDF is **wrapped** inside a
+histogram, a `SequenceOfEventsExpression`, or a
+[`CalculatedChannel`](../../report/channel.md): the requirement propagates up the expression
+tree exactly like a required tag, so the wrapping expression does not need to redeclare anything.
+:::
+
+:::caution Be null-safe during planning
+UDFs run once at **planning time**, before any solve-time data exists, via a build call against
+an empty time series cache, so the engine can infer the result type (see
+[Evaluation](evaluation.md#planning-type-inference-before-solve)). On that call the declared
+`container_tags` / `container_metrics` keys are present but **every value is `None`**, and the
+`series` arguments are **empty**. This is distinct from a solve-time value being `None` because a
+specific container has no entry for that key (above): during planning *all* declared values are
+`None` regardless of the data. Guard metadata lookups accordingly (treat `None` as a default), and
+still return a valid object of the declared type. For example, an empty `SampleSeries`-returning
+UDF should return a valid, empty `SampleSeries`.
+:::
 
 ---
 

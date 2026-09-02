@@ -141,6 +141,26 @@ squared_rpm = squared(eng_rpm)          # a reusable TSAL expression
 # or apply inline: eng_rpm.apply(some_callable)
 ```
 
+A UDF can also declare **container-level tags/metrics** it needs; the engine injects their
+per-container values as `container_tags` / `container_metrics` keyword arguments (dicts keyed by the
+names you declared, value `None` when absent). Declare them on `@udf(...)` or `.apply(...)`:
+
+```python
+@TimeSeriesExpression.udf(container_metrics=["nominal_power"], container_tags=["vehicle_type"])
+def derate(series, container_metrics, container_tags):
+    return series / container_metrics["nominal_power"]
+
+derated = derate(power)
+# inline equivalent: power.apply(derate_fn, container_metrics=["nominal_power"])
+```
+
+- `container_metrics=[...]` are read as **columns on `container_metrics`** (a missing column raises
+  `ValueError`).
+- `container_tags=[...]` are read from the EAV **`container_tags` table** and **require a
+  `container_tags_table`** (else `ValueError`). See `impulse-data-model`.
+- Values are constant per container. The declaration **propagates** when the UDF is wrapped in an
+  aggregation, event, or calculated channel — the wrapper does not redeclare anything.
+
 ## What an expression evaluates to (the core data model)
 
 Every expression resolves — per container — to one of four in-memory types. Knowing the type tells you

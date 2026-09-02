@@ -67,6 +67,28 @@ example, a single-column join when `data_key` is not part of the channel
 identity in your layout) — see
 [Alias-resolution join keys](../../config/configuration.md#alias-resolution-join-keys-optional).
 
+## Container-level metadata in expressions
+
+Expressions can pull **container-level metadata** into their evaluation. When a selected
+expression — or a UDF wrapped inside an aggregation, event, or calculated channel — declares
+container tags or metrics via `container_tags=` / `container_metrics=` (see
+[Defining Expressions](tsal/defining_expressions.md#reading-container-level-metadata-inside-a-udf)),
+`DefaultSolver` gathers the union across all selections, reads just those values from the silver
+layer — **metrics** from `container_metrics` columns, **tags** from the EAV `container_tags` table
+(pivoted) — and broadcast-joins them onto each container's evaluation frame so the UDF receives them.
+The values are constant per container, and the same wiring applies to
+[`solve_calculated_channels`](#calculated-channels).
+
+Requesting a nonexistent `container_metrics` column, or any `container_tags` without a
+`container_tags_table` configured, raises a `ValueError`.
+
+:::note Planning call
+During the planning build that precedes solve-time (an empty run the engine uses to infer result
+types; see [Evaluation](tsal/evaluation.md#planning-type-inference-before-solve)), these declared
+keys are present but their values are `None`. UDFs that read container metadata must be null-safe
+for that call.
+:::
+
 ## Table requirements
 
 | Silver table        | Required?  | Notes                                                                                  |

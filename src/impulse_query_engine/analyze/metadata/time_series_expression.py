@@ -305,6 +305,75 @@ class TimeSeriesExpression(abc.ABC):
                 selectors.append(selector)
         return selectors
 
+    def required_container_tags(self) -> set[str]:
+        """Container tag keys this expression needs injected at solve time.
+
+        Default: none.  Overridden by :class:`TimeSeriesUDF` (its declared
+        keys) and by composite nodes that union their children's needs.
+
+        Returns
+        -------
+        set of str
+            Required container-tag keys.
+        """
+        return set()
+
+    def required_container_metrics(self) -> set[str]:
+        """Container metric columns this expression needs injected at solve time.
+
+        Default: none.  See :meth:`required_container_tags`.
+
+        Returns
+        -------
+        set of str
+            Required container-metric column names.
+        """
+        return set()
+
+    @staticmethod
+    def collect_container_tags(expressions: Iterable[Any]) -> list[str]:
+        """Ordered union of required container-tag keys across *expressions*.
+
+        Mirrors :meth:`collect_selectors`: non-``TimeSeriesExpression`` items
+        are skipped and keys are deduplicated preserving discovery order so
+        downstream ``select`` column order is deterministic.
+
+        Parameters
+        ----------
+        expressions : Iterable[Any]
+            Items to walk; non-``TimeSeriesExpression`` entries are skipped.
+
+        Returns
+        -------
+        list of str
+            Deduplicated container-tag keys in discovery order.
+        """
+        return TimeSeriesExpression._collect_container_meta(expressions, "required_container_tags")
+
+    @staticmethod
+    def collect_container_metrics(expressions: Iterable[Any]) -> list[str]:
+        """Ordered union of required container-metric columns across *expressions*.
+
+        See :meth:`collect_container_tags`.
+        """
+        return TimeSeriesExpression._collect_container_meta(
+            expressions, "required_container_metrics"
+        )
+
+    @staticmethod
+    def _collect_container_meta(expressions: Iterable[Any], method: str) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for expression in expressions:
+            if not isinstance(expression, TimeSeriesExpression):
+                continue
+            for name in sorted(getattr(expression, method)()):
+                if name in seen:
+                    continue
+                seen.add(name)
+                result.append(name)
+        return result
+
     @abc.abstractmethod
     def __str__(self) -> str:
         """
@@ -570,7 +639,7 @@ class TimeSeriesExpression(abc.ABC):
             weight_type=weight_type,
         )
 
-    def apply(self, func) -> TimeSeriesUDF:
+    def apply(self, func, container_tags=None, container_metrics=None) -> TimeSeriesUDF:
         """
         Apply a function to the expression.
 
@@ -578,30 +647,70 @@ class TimeSeriesExpression(abc.ABC):
         ----------
         func : callable
             Function to apply.
+        container_tags : list of str, optional
+            Container-tag keys the function wants injected at solve time.
+            When set, the resolved values are passed to *func* as a
+            ``container_tags={key: value}`` keyword argument.
+        container_metrics : list of str, optional
+            Container-metric column names the function wants injected at
+            solve time, passed as a ``container_metrics={col: value}``
+            keyword argument.
 
         Returns
         -------
         TimeSeriesUDF
             UDF-wrapped expression.
         """
-        return TimeSeriesUDF(func, self)
+        return TimeSeriesUDF(
+            func,
+            self,
+            container_tags=container_tags,
+            container_metrics=container_metrics,
+        )
 
     @staticmethod
-    def udf(func: Callable) -> CallableTimeSeriesExpression:
+    def udf(
+        func: Callable = None, *, container_tags=None, container_metrics=None
+    ) -> CallableTimeSeriesExpression:
         """
         Wrap a function as a CallableTimeSeriesExpression.
 
+        Usable bare (``@TimeSeriesExpression.udf``) or parametrized
+        (``@TimeSeriesExpression.udf(container_tags=[...],
+        container_metrics=[...])``) to declare the container-level metadata
+        the wrapped function needs injected at solve time.
+
         Parameters
         ----------
-        func : callable
-            Function to wrap.
+        func : callable, optional
+            Function to wrap.  When omitted (parametrized form), a decorator
+            is returned.
+        container_tags : list of str, optional
+            Container-tag keys to inject as a ``container_tags`` kwarg.
+        container_metrics : list of str, optional
+            Container-metric columns to inject as a ``container_metrics`` kwarg.
 
         Returns
         -------
-        CallableTimeSeriesExpression
-            Callable wrapper.
+        CallableTimeSeriesExpression or callable
+            The callable wrapper, or a decorator when *func* is omitted.
         """
-        return CallableTimeSeriesExpression(func)
+        if func is None:
+
+            def _decorator(f: Callable) -> CallableTimeSeriesExpression:
+                return CallableTimeSeriesExpression(
+                    f,
+                    container_tags=container_tags,
+                    container_metrics=container_metrics,
+                )
+
+            return _decorator
+
+        return CallableTimeSeriesExpression(
+            func,
+            container_tags=container_tags,
+            container_metrics=container_metrics,
+        )
 
     def as_dict(self) -> dict[str, Any]:
         """
@@ -951,6 +1060,18 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
             tags.extend(alias.required_tags())
         return set(tags)
 
+    def required_container_tags(self) -> set[str]:
+        tags: set[str] = set()
+        for alias in self._aliases:
+            tags |= alias.required_container_tags()
+        return tags
+
+    def required_container_metrics(self) -> set[str]:
+        metrics: set[str] = set()
+        for alias in self._aliases:
+            metrics |= alias.required_container_metrics()
+        return metrics
+
     def get_selector_expr(self):
         """
         Get selector expression.
@@ -1047,6 +1168,23 @@ class TimeSeriesOp(TimeSeriesExpression):
             if hasattr(kwarg, "required_tags"):
                 tags.extend(kwarg.required_tags())
         return set(tags)
+
+    def required_container_tags(self) -> set[str]:
+        return self._collect_child_container_meta("required_container_tags")
+
+    def required_container_metrics(self) -> set[str]:
+        return self._collect_child_container_meta("required_container_metrics")
+
+    def _collect_child_container_meta(self, method: str) -> set[str]:
+        """Union *method*'s result over child args/kwargs that support it."""
+        names: set[str] = set()
+        for arg in self.args:
+            if hasattr(arg, method):
+                names |= getattr(arg, method)()
+        for kwarg in self.kwargs.values():
+            if hasattr(kwarg, method):
+                names |= getattr(kwarg, method)()
+        return names
 
     def get_selector_expr(self):
         """
@@ -1180,7 +1318,7 @@ class TimeSeriesOp(TimeSeriesExpression):
 
 
 class TimeSeriesUDF(TimeSeriesOp):
-    def __init__(self, func, *args, **kwargs):
+    def __init__(self, func, *args, container_tags=None, container_metrics=None, **kwargs):
         """
         Initialize a TimeSeriesUDF.
 
@@ -1190,6 +1328,14 @@ class TimeSeriesUDF(TimeSeriesOp):
             The user-defined function to apply.
         *args
             Arguments for the UDF.
+        container_tags : list of str, optional
+            Container-tag keys to inject into *func* as a ``container_tags``
+            keyword argument at build time (keyword-only; not treated as an
+            operand).
+        container_metrics : list of str, optional
+            Container-metric columns to inject into *func* as a
+            ``container_metrics`` keyword argument at build time
+            (keyword-only; not treated as an operand).
         **kwargs
             Keyword arguments for the UDF.
         """
@@ -1201,10 +1347,27 @@ class TimeSeriesUDF(TimeSeriesOp):
         self.is_single_signal = True
         self.args = args
         self.kwargs = kwargs
+        self._container_tags = tuple(container_tags or ())
+        self._container_metrics = tuple(container_metrics or ())
+
+    def required_container_tags(self) -> set[str]:
+        tags = set(super().required_container_tags())
+        tags.update(self._container_tags)
+        return tags
+
+    def required_container_metrics(self) -> set[str]:
+        metrics = set(super().required_container_metrics())
+        metrics.update(self._container_metrics)
+        return metrics
 
     def build(self, cache: SeriesCache):
         """
         Build the time series from cache using the UDF.
+
+        When the UDF declared ``container_tags`` / ``container_metrics``, the
+        requested values are resolved from *cache* and passed to *func* as
+        ``container_tags`` / ``container_metrics`` keyword arguments (dicts
+        keyed by the declared names; missing values are ``None``).
 
         Parameters
         ----------
@@ -1221,6 +1384,14 @@ class TimeSeriesUDF(TimeSeriesOp):
             k: a.build(cache) if isinstance(a, TimeSeriesExpression) else a
             for k, a in self.kwargs.items()
         }
+        if self._container_tags:
+            kwargsb["container_tags"] = {
+                k: cache.container_tags.get(k) for k in self._container_tags
+            }
+        if self._container_metrics:
+            kwargsb["container_metrics"] = {
+                k: cache.container_metrics.get(k) for k in self._container_metrics
+            }
         if isinstance(self.operation, str):
             op = getattr(argsb[0], self.operation)
             return op(*argsb[1:], **kwargsb)
@@ -1245,7 +1416,7 @@ class TimeSeriesUDF(TimeSeriesOp):
 
 
 class CallableTimeSeriesExpression:
-    def __init__(self, func):
+    def __init__(self, func, container_tags=None, container_metrics=None):
         """
         Initialize a CallableTimeSeriesExpression.
 
@@ -1253,8 +1424,16 @@ class CallableTimeSeriesExpression:
         ----------
         func : callable
             Function to wrap.
+        container_tags : list of str, optional
+            Container-tag keys forwarded to each :class:`TimeSeriesUDF` this
+            wrapper builds.
+        container_metrics : list of str, optional
+            Container-metric columns forwarded to each :class:`TimeSeriesUDF`
+            this wrapper builds.
         """
         self.func = func
+        self._container_tags = container_tags
+        self._container_metrics = container_metrics
 
     def __call__(self, *args, **kwargs):
         """
@@ -1272,4 +1451,10 @@ class CallableTimeSeriesExpression:
         TimeSeriesUDF
             UDF-wrapped expression.
         """
-        return TimeSeriesUDF(self.func, *args, **kwargs)
+        return TimeSeriesUDF(
+            self.func,
+            *args,
+            container_tags=self._container_tags,
+            container_metrics=self._container_metrics,
+            **kwargs,
+        )

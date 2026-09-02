@@ -69,3 +69,31 @@ class SeriesCache(ABC):
             The loaded series object.
         """
         pass
+
+    @property
+    def container_tags(self) -> dict:
+        """Container-level tag values available to UDFs.
+
+        Default: an empty dict.  Caches backed by per-container metadata
+        (e.g. :class:`DefaultSolver.TimeSeriesCache`) override this to expose
+        the requested container tags.
+
+        Returns
+        -------
+        dict
+            Mapping of container-tag key to value.
+        """
+        return {}
+
+    @property
+    def container_metrics(self) -> dict:
+        """Container-level metric values available to UDFs.
+
+        Default: an empty dict.  See :meth:`container_tags`.
+
+        Returns
+        -------
+        dict
+            Mapping of container-metric column name to value.
+        """
+        return {}

@@ -32,6 +32,10 @@ report.add_calculated_channel(my_channel)
 The wrapped TSAL expression **must evaluate to a `SampleSeries`** (a signal), not `Intervals` — validated
 at construction (raises `ValueError`).
 
+If the wrapped expression contains a UDF that declares `container_tags` / `container_metrics`, those
+values are injected as usual — the requirement propagates through the calculated channel (see
+`impulse-tsal`).
+
 ## CalculatedChannel
 
 Couples a TSAL expression with an `identity` — an arbitrary key-value dict identifying the channel (stored
