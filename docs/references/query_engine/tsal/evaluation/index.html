@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Evaluation | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/references/query_engine/tsal/evaluation"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Evaluation | Impulse"><meta data-rh="true" name="description" content="A TSAL expression is lazy: building it constructs a tree of typed nodes and computes nothing. The"><meta data-rh="true" property="og:description" content="A TSAL expression is lazy: building it constructs a tree of typed nodes and computes nothing. The"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/references/query_engine/tsal/evaluation"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/query_engine/tsal/evaluation" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/references/query_engine/tsal/evaluation" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Reference","item":"https://databrickslabs.github.io/impulse/docs/references/"},{"@type":"ListItem","position":2,"name":"Query Engine","item":"https://databrickslabs.github.io/impulse/docs/references/query_engine/"},{"@type":"ListItem","position":3,"name":"TSAL","item":"https://databrickslabs.github.io/impulse/docs/references/query_engine/tsal/"},{"@type":"ListItem","position":4,"name":"Evaluation","item":"https://databrickslabs.github.io/impulse/docs/references/query_engine/tsal/evaluation"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.efe290e5.css">
-<script src="/impulse/assets/js/runtime~main.aa607062.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.51452d9a.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.31724bc4.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.87dc59c8.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -45,8 +45,9 @@ build <code>TimeSeriesOp</code> nodes around their operands rather than computin
 <p>When <code>QueryBuilder.solve()</code> runs, the <a class="" href="/impulse/docs/references/query_engine/query_solvers">solver</a> does the following per container:</p>
 <ol>
 <li class="">
-<p><strong>Resolve leaves.</strong> Each <code>TimeSeriesSelector</code> is matched to a physical channel and loaded into a
-<code>SampleSeries</code> from the silver-layer data.</p>
+<p><strong>Resolve leaves.</strong> Each <code>TimeSeriesSelector</code> is matched to a physical channel and loaded from the
+silver-layer data: a <code>channel()</code> selector into a <code>SampleSeries</code> from <code>channels</code>, a <code>poi_channel()</code>
+selector into a <code>PointsInTimeSeries</code> from <code>poi_channels</code>.</p>
 </li>
 <li class="">
 <p><strong>Evaluate bottom-up.</strong> Each <code>TimeSeriesOp</code> calls the corresponding method/operator on the

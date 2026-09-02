@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Silver Layer Schema | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Silver Layer Schema | Impulse"><meta data-rh="true" name="description" content="The Silver layer stores measurement data in a normalized model: time-series"><meta data-rh="true" property="og:description" content="The Silver layer stores measurement data in a normalized model: time-series"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Data Model","item":"https://databrickslabs.github.io/impulse/docs/data_model/"},{"@type":"ListItem","position":2,"name":"Silver Layer Schema","item":"https://databrickslabs.github.io/impulse/docs/data_model/silver_layer_schema"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.efe290e5.css">
-<script src="/impulse/assets/js/runtime~main.aa607062.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.51452d9a.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.31724bc4.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.87dc59c8.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -715,6 +715,92 @@ when your physical column has a different name.</p>
 <code>timestamp</code> replaces the <code>tstart</code>/<code>tend</code> pair; the engine derives <code>tend</code>
 during raw→interval conversion (see <code>query_engine.raw_encoder</code>).</p>
 <hr>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="poi_channels-optional">poi_channels (optional)<a href="#poi_channels-optional" class="hash-link" aria-label="Direct link to poi_channels (optional)" title="Direct link to poi_channels (optional)" translate="no">​</a></h2>
+<p><strong>Optional</strong> — only needed for <a class="" href="/impulse/docs/references/query_engine/tsal/core_data_model#pointsintimeseries">Points-in-Time (POI) channels</a>
+selected via <code>QueryBuilder.poi_channel()</code>. Omit it for sample-only data models.
+Unlike <code>channels</code>, a POI channel&#x27;s value is defined <strong>only at its timestamp</strong>.</p>
+<p><strong><code>QueryBuilder.poi_channel(...)</code> is the discriminator</strong>: the user tells the engine to build a
+<code>PointsInTimeSeries</code> for a specific channel by providing its name and the corresponding <code>dtype</code>.</p>
+<p>A POI value may be numeric or a string (e.g. an ECU Diagnostic Trouble Code). The two typed value
+columns cover both, and <strong>exactly one is populated per row</strong> — chosen by the channel&#x27;s declared
+<code>dtype</code> at query time (<code>poi_channel(dtype=&#x27;double&#x27;|&#x27;string&#x27;)</code>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Description</th></tr></thead><tbody><tr><td><code>container_id</code></td><td><code>long</code></td><td>No</td><td>Parent container identifier.</td></tr><tr><td><code>channel_id</code></td><td><code>int</code></td><td>No</td><td>Channel identifier.</td></tr><tr><td><code>timestamp</code></td><td><code>long</code></td><td>No</td><td>Point timestamp (microseconds).</td></tr><tr><td><code>value_double</code></td><td><code>double</code></td><td>Yes</td><td>Numeric value (populated for a <code>double</code> POI channel).</td></tr><tr><td><code>value_string</code></td><td><code>string</code></td><td>Yes</td><td>String value (populated for a <code>string</code> POI channel).</td></tr></tbody></table>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-5">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-5" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<p>Map any silver column to these via
+<a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.poi_channels.column_name_mapping</code></a>
+when your physical column has a different name.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>container_id</code></td><td>Composite key joining points back to their container</td></tr><tr><td><code>channel_id</code></td><td>Composite key joining points back to their channel</td></tr><tr><td><code>timestamp</code></td><td>Point timestamp — becomes the point&#x27;s <code>tstart</code> (with a null <code>tend</code>) at solve</td></tr><tr><td><code>value_double</code></td><td>Numeric point value — consumed by the solve UDF</td></tr><tr><td><code>value_string</code></td><td>String point value — consumed by the solve UDF for a <code>string</code> POI channel</td></tr></tbody></table>
+<hr>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="channel_mapping-optional">channel_mapping (optional)<a href="#channel_mapping-optional" class="hash-link" aria-label="Direct link to channel_mapping (optional)" title="Direct link to channel_mapping (optional)" translate="no">​</a></h2>
 <p>Alias-resolution table used by <code>DefaultSolver</code> when selectors are
 created via <code>QueryBuilder.channel_with_alias()</code>. Each row maps a logical
@@ -806,7 +892,7 @@ conversion factor per physical channel and cannot apply two distinct
 conversions to the same channel in the same query. Workarounds: select
 the conflicting aliases in <strong>separate queries</strong>, or align the mapping rows
 so they agree on the unit pair per physical channel.</p>
-<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-5">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-5" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-6">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-6" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
 <p>Map any silver column to these via
 <a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.channel_mapping.column_name_mapping</code></a>
 when your physical column has a different name. Note: <code>channel_mapping</code>
@@ -897,7 +983,7 @@ whose <code>unit</code> matches <code>source_unit</code>) and <code>target_facto
 <code>unit</code> matches <code>target_unit</code>, constrained to the same <code>group_id</code>) and
 multiplies values by <code>source_factor / target_factor</code>. Missing rows or a
 <code>group_id</code> mismatch yield a null factor and no conversion.</p>
-<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-6">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-6" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="internal-columns-referenced-by-the-framework-7">Internal columns referenced by the framework<a href="#internal-columns-referenced-by-the-framework-7" class="hash-link" aria-label="Direct link to Internal columns referenced by the framework" title="Direct link to Internal columns referenced by the framework" translate="no">​</a></h4>
 <p>Map any silver column to these via
 <a class="" href="/impulse/docs/config/configuration#solver-column-mappings-and-filters"><code>solver_config.unit_conversion.column_name_mapping</code></a>
 when your physical column has a different name. Note: <code>unit_conversion</code>
@@ -925,6 +1011,6 @@ is read by <code>DefaultSolver</code> only when a <code>unit_conversion_table</c
 
 <table><thead><tr><th>Internal name</th><th>Referenced by</th></tr></thead><tbody><tr><td><code>group_id</code></td><td>Constraint that source and target units live in the same family</td></tr><tr><td><code>unit</code></td><td>Lookup key matched against <code>channel_mapping.source_unit</code> / <code>target_unit</code></td></tr><tr><td><code>conversion_factor</code></td><td>Multiplier to the family&#x27;s base unit; combined into the per-channel <code>source/target</code> factor</td></tr></tbody></table>
 <p>Configured via <code>source.unit_conversion_table</code> (see
-<a class="" href="/impulse/docs/config/configuration">Configuration</a>).</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/data_model/silver_layer_schema.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/data_model/ingestion"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Ingestion</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/data_model/gold_layer_event_normalized"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Gold Layer Schema</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#entity-relationship-diagram" class="table-of-contents__link toc-highlight">Entity-relationship diagram</a></li><li><a href="#container_metrics" class="table-of-contents__link toc-highlight">container_metrics</a><ul><li><a href="#additional-columns-commonly-populated" class="table-of-contents__link toc-highlight">Additional columns commonly populated</a></li></ul></li><li><a href="#container_tags-optional" class="table-of-contents__link toc-highlight">container_tags (optional)</a></li><li><a href="#channel_metrics" class="table-of-contents__link toc-highlight">channel_metrics</a></li><li><a href="#channel_tags-optional" class="table-of-contents__link toc-highlight">channel_tags (optional)</a></li><li><a href="#channels" class="table-of-contents__link toc-highlight">channels</a><ul><li><a href="#rle-format-default" class="table-of-contents__link toc-highlight">RLE format (default)</a></li><li><a href="#raw-format" class="table-of-contents__link toc-highlight">Raw format</a></li><li><a href="#optional-is_plausible-column" class="table-of-contents__link toc-highlight">Optional <code>is_plausible</code> column</a></li></ul></li><li><a href="#channel_mapping-optional" class="table-of-contents__link toc-highlight">channel_mapping (optional)</a></li><li><a href="#unit_conversion-optional" class="table-of-contents__link toc-highlight">unit_conversion (optional)</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
+<a class="" href="/impulse/docs/config/configuration">Configuration</a>).</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/databrickslabs/impulse/tree/main/docs/impulse/docs/data_model/silver_layer_schema.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>Edit this page</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/impulse/docs/data_model/ingestion"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Ingestion</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/impulse/docs/data_model/gold_layer_event_normalized"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Gold Layer Schema</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#entity-relationship-diagram" class="table-of-contents__link toc-highlight">Entity-relationship diagram</a></li><li><a href="#container_metrics" class="table-of-contents__link toc-highlight">container_metrics</a><ul><li><a href="#additional-columns-commonly-populated" class="table-of-contents__link toc-highlight">Additional columns commonly populated</a></li></ul></li><li><a href="#container_tags-optional" class="table-of-contents__link toc-highlight">container_tags (optional)</a></li><li><a href="#channel_metrics" class="table-of-contents__link toc-highlight">channel_metrics</a></li><li><a href="#channel_tags-optional" class="table-of-contents__link toc-highlight">channel_tags (optional)</a></li><li><a href="#channels" class="table-of-contents__link toc-highlight">channels</a><ul><li><a href="#rle-format-default" class="table-of-contents__link toc-highlight">RLE format (default)</a></li><li><a href="#raw-format" class="table-of-contents__link toc-highlight">Raw format</a></li><li><a href="#optional-is_plausible-column" class="table-of-contents__link toc-highlight">Optional <code>is_plausible</code> column</a></li></ul></li><li><a href="#poi_channels-optional" class="table-of-contents__link toc-highlight">poi_channels (optional)</a></li><li><a href="#channel_mapping-optional" class="table-of-contents__link toc-highlight">channel_mapping (optional)</a></li><li><a href="#unit_conversion-optional" class="table-of-contents__link toc-highlight">unit_conversion (optional)</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Impulse. Docs built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>
