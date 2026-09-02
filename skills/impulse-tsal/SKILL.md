@@ -194,6 +194,12 @@ Transitions between them:
 `debounce(d)`, and `filter(d)` (drop windows shorter than `d`). `where(PointsInTime)` drops any instant
 that falls in a gap where the signal is not valid, so the result may be shorter than the input.
 
+**String-valued `PointsInTimeSeries`** (from `poi_channel(dtype="string")`, e.g. DTC codes) is
+restricted: only equality (`== "code"` / `!=` → `PointsInTime`) and sampling via `.where(...)` apply.
+Arithmetic (`+ - * /`), ordering (`> >= < <=`), and numeric reductions (`sum`/`mean`/`min`/`max`) raise a
+`TypeError` at build time — the `PointsInTimeSeries` reduction/ordering rows above apply to **numeric**
+POI series only.
+
 ## Which type does each consumer need
 
 - **Events** (`impulse-events`): `BasicEvent` and `SequenceOfEvents` need **`Intervals`**;

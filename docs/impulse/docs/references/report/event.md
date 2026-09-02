@@ -220,7 +220,7 @@ Stores materialized event occurrences (one row per event instance per container)
 | Column              | Type   | Description                              |
 |---------------------|--------|------------------------------------------|
 | `container_id`      | `int`  | Container identifier.                    |
-| `event_instance_id` | `long` | Unique instance identifier (CRC32 hash). |
+| `event_instance_id` | `long` | Unique instance identifier (xxHash64). |
 | `event_id`          | `int`  | Foreign key to `event_dimension`.        |
 | `start_ts`          | `long` | Event instance start timestamp.          |
 | `end_ts`            | `long` | Event instance end timestamp.            |

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyspark.sql.functions as F
@@ -11,7 +11,12 @@ from pyspark.sql import DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
-from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    SeriesType,
+    SeriesValueType,
+    TimeSeriesExpression,
+)
+from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
@@ -50,7 +55,9 @@ class TimeSeriesCache(SeriesCache):
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
-            ``"conv"`` column is optional in *pdf*.
+            ``"conv"`` column is optional in *pdf*.  The ``"value_string"`` key
+            names the string value column read when :meth:`load_blob` builds a
+            string :class:`PointsInTimeSeries`.
         container_tag_cols : list of str, optional
             Columns on *pdf* holding container-level tag values, exposed via
             :attr:`container_tags`.  These are constant per container.
@@ -65,6 +72,9 @@ class TimeSeriesCache(SeriesCache):
         self._val_col = col_map["val"]
         self._conv_col = col_map.get("conv")
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
+        # String POI slices read their value from this column; series-type dispatch
+        # is driven by the selector passed to load_blob, not a per-row marker.
+        self._value_string_col = col_map.get("value_string")
         self._container_tag_cols = list(container_tag_cols or [])
         self._container_metric_cols = list(container_metric_cols or [])
 
@@ -93,13 +103,13 @@ class TimeSeriesCache(SeriesCache):
 
     def resolve(self, selection):
         """
-        Resolve selected tags/metrics to a list of candidates.
+        Resolve a channel (time-series) selector to its candidate rows.
 
         Parameters
         ----------
-        selection : Any
-            The selection object specifying tags or metrics.
-
+        selection : TimeSeriesSelector
+            The channel selector whose tag expression (``selection._expr``)
+            identifies the matching channel(s).
         Returns
         -------
         pd.DataFrame
@@ -113,16 +123,29 @@ class TimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
 
-    def load_blob(self, mid, cid, uses_alias: bool = False):
+    def load_blob(
+        self,
+        mid,
+        cid,
+        uses_alias: bool = False,
+        series_type=None,
+        value_type=SeriesValueType.DOUBLE,
+    ):
         """
         Load a time series blob from the DataFrame.
 
+        The **calling selector** chooses the series type (via *series_type* /
+        *value_type*), so no per-row discriminator column is needed: a
+        ``POINTS_IN_TIME`` selector yields a :class:`PointsInTimeSeries` (string-
+        valued when *value_type* is ``STRING``, else numeric), otherwise a
+        :class:`SampleSeries`. The declared type is validated against the silver
+        metadata in the solve prelude, so the data stays authoritative.
+
         When the underlying *pdf* carries a conversion-factor column (the
-        column named by ``col_map["conv"]``) **and** the caller is an
-        aliased selector (``uses_alias=True``), the returned values are
-        multiplied by that factor.  Direct selectors on the same physical
-        channel always receive raw values — unit conversion is a property
-        of the alias, not of the channel.
+        column named by ``col_map["conv"]``) **and** the caller evaluates
+        to a SampleSeries, the values are multiplied by that factor.
+        Direct selectors on the same physical channel always receive raw
+        values; unit conversion is a property of the alias, not of the channel.
 
         Parameters
         ----------
@@ -133,14 +156,34 @@ class TimeSeriesCache(SeriesCache):
         uses_alias : bool, optional
             ``True`` when the calling selector resolved via channel_mapping.
             Gates the per-channel conversion factor; defaults to ``False``.
+        series_type : SeriesType, optional
+            The calling selector's series type; ``POINTS_IN_TIME`` builds a
+            :class:`PointsInTimeSeries`. ``None`` (default) builds a
+            :class:`SampleSeries`.
+        value_type : SeriesValueType, optional
+            For a POI selector, its declared value type; ``STRING`` reads the
+            string value column, otherwise the numeric one.
 
         Returns
         -------
-        SampleSeries
-            The loaded sample series object.
+        SampleSeries or PointsInTimeSeries
         """
         lo, hi = self._ranges.get((mid, cid), (0, 0))
         s = self.pdf.iloc[lo:hi]
+
+        if series_type == SeriesType.POINTS_IN_TIME:
+            # The selector's declared value type picks the column; the constructor
+            # reconciles values-vs-type. A channel may carry both value columns —
+            # we simply read the declared one.
+            value_col = (
+                self._value_string_col if value_type is SeriesValueType.STRING else self._val_col
+            )
+            if value_col is None or value_col not in s.columns:
+                raise ValueError(
+                    f"POI channel declared {value_type} but its value column is not available"
+                )
+            return PointsInTimeSeries(s[self._ts_col], s[value_col], value_type=value_type)
+
         values = s[self._val_col]
         if self._has_conversion and len(s) > 0 and uses_alias:
             factor = s[self._conv_col].iloc[0]
@@ -1144,12 +1187,69 @@ class DefaultSolver(QuerySolver):
             self.config.value_col,
         )
 
+        # POI channel data is unioned in AFTER RLE encoding above, so its
+        # zero-duration points are never run-length merged.
+        if DefaultSolver._query_contains_poi_selections(query.selections):
+            q = self._union_poi_channel_data(query, q)
+
         joined_df = q.join(
             F.broadcast(channels_df),
             on=[self.config.container_id_col, self.config.channel_id_col],
         )
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         return q, joined_df, container_count
+
+    @staticmethod
+    def _query_contains_poi_selections(selections: Iterable[Any]) -> bool:
+        """True when any *leaf* selector resolved by the query is a POINTS_IN_TIME channel.
+
+        Walks the full expression tree via ``collect_selectors``,
+        used to skip the POI-table union if no POI channels are present.
+        """
+        return any(
+            selector.series_type is SeriesType.POINTS_IN_TIME
+            for selector in TimeSeriesExpression.collect_selectors(selections)
+        )
+
+    def _union_poi_channel_data(self, query, channels_q: DataFrame) -> DataFrame:
+        """Union POI channel-data rows into the (already-encoded) channel-data frame.
+
+        Reads ``poi_channels``, column-maps it, and projects it into the
+        channel-data superset — POI ``timestamp`` becomes ``tstart`` (``tend``
+        **null**, since a point has no validity interval, which is also the signal
+        the cache validates a POI selector against), ``value_double`` becomes the
+        numeric ``value`` column, and ``value_string`` rides alongside for a string
+        POI channel. Each value column is projected only when the table actually
+        carries it, so a numeric-only or string-only ``poi_channels`` table is
+        supported; ``unionByName(allowMissingColumns=True)`` null-fills the rest.
+        No per-row ``series_type`` / ``dtype`` marker is shipped: the selector
+        drives series-type dispatch in :meth:`TimeSeriesCache.load_blob`.
+        Returns *channels_q* unchanged when no ``poi_channels`` table is configured.
+        """
+        db = query.db
+        if not (hasattr(db, "has_poi_channels") and db.has_poi_channels()):
+            return channels_q
+
+        cfg = self.config
+        poi = db.poi_channels(self.spark)
+        poi = self._apply_column_mapping(poi, cfg.poi_channels.column_name_mapping)
+
+        # ensures poi and channel have the same dtype for start and end timestamp
+        channels_q_t_start_dtype: T.DataType = channels_q.schema[cfg.tstart_col].dataType
+        channels_q_t_end_dtype: T.DataType = channels_q.schema[cfg.tend_col].dataType
+
+        select_items = [
+            F.col(cfg.container_id_col),
+            F.col(cfg.channel_id_col),
+            F.col(cfg.poi_timestamp_col).cast(channels_q_t_start_dtype).alias(cfg.tstart_col),
+            F.lit(None).cast(channels_q_t_end_dtype).alias(cfg.tend_col),
+        ]
+        if cfg.poi_value_double_col in poi.columns:
+            select_items.append(F.col(cfg.poi_value_double_col).alias(cfg.value_col))
+        if cfg.poi_value_string_col in poi.columns:
+            select_items.append(F.col(cfg.poi_value_string_col))
+        poi_proj = poi.select(*select_items)
+        return channels_q.unionByName(poi_proj, allowMissingColumns=True)
 
     def _container_meta_cols(self, query) -> tuple[list[str], list[str]]:
         """Container-tag / container-metric column names the selections request."""

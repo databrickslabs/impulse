@@ -4,16 +4,35 @@ import abc
 import operator
 import zlib
 from collections.abc import Callable, Iterable
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import pyspark.sql.types as T
 
 import impulse_query_engine.util as U
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
+from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
+from impulse_query_engine.model.series.value_type import SeriesValueType
 
 if TYPE_CHECKING:
     from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
+
+
+class SeriesType(StrEnum):
+    """Determines how a channel's values are interpreted:
+
+    ``CONTINUOUS`` — the default; the channel is a continuous signal captured by sampling,
+    considered *valid* within each ``[tstart, tend)`` interval. Value v_i was measured at
+    tstart_i and no other value was measured until tend_i; the value between samples can
+    be reconstructed by interpolation.
+
+    ``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their timestamps,
+    with no interpolation or validity in between.
+    """
+
+    CONTINUOUS = "CONTINUOUS"
+    POINTS_IN_TIME = "POINTS_IN_TIME"
 
 
 class RequiresDeserialization:
@@ -50,7 +69,7 @@ class TimeSeriesExpression(abc.ABC):
         """
         return not self.is_single_signal
 
-    def dtype(self):
+    def dtype(self) -> T.DataType:
         """
         Get the default Spark data type.
 
@@ -728,7 +747,13 @@ class TimeSeriesExpression(abc.ABC):
 
 
 class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
-    def __init__(self, expr, uses_alias: bool = False):
+    def __init__(
+        self,
+        expr,
+        uses_alias: bool = False,
+        series_type: SeriesType = SeriesType.CONTINUOUS,
+        value_type: SeriesValueType = SeriesValueType.DOUBLE,
+    ):
         """
         Initialize a TimeSeriesSelector.
 
@@ -736,9 +761,24 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         ----------
         expr : TagExpression
             Tag expression to select.
+        uses_alias : bool, optional
+            Whether the channel resolves via the channel-alias table.
+        series_type : SeriesType, optional
+            Which object this selector builds. The default (``CONTINUOUS``)
+            builds a :class:`SampleSeries`; ``POINTS_IN_TIME`` builds a
+            :class:`PointsInTimeSeries`. Matching is identical; only the built
+            object and its result dtype differ. This is the plan-time source of
+            truth for the series type.
+        value_type : SeriesValueType, optional
+            For ``POINTS_IN_TIME``, the declared value data type
+            (``DOUBLE`` / ``STRING``); ignored otherwise. Drives plan-time typing
+            and string-op gating; validated against the silver
+            ``poi_channels.dtype`` at solve time.
         """
         self._expr = expr
         self._uses_alias = uses_alias
+        self._series_type = series_type
+        self._value_type = value_type
         TimeSeriesExpression.__init__(self, is_single_signal=True)
 
     @property
@@ -746,23 +786,45 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         return self._uses_alias
 
     @property
-    def selector_id(self) -> int:
-        return zlib.crc32(str(self._expr).encode())
+    def series_type(self) -> SeriesType:
+        return self._series_type
 
-    def dtype(self):
+    @property
+    def value_type(self) -> SeriesValueType:
+        return self._value_type
+
+    @property
+    def selector_id(self) -> int:
+        # series_type / value_type keep distinct-typed selections of the same tag
+        # apart; CONTINUOUS uses the bare ``str(expr)`` hash for back-compat.
+        if self._series_type is SeriesType.CONTINUOUS:
+            return zlib.crc32(str(self._expr).encode())
+        return zlib.crc32(f"{self._series_type}|{self._expr}|{self._value_type}".encode())
+
+    def dtype(self) -> T.DataType:
         """
         Returns the Spark data type.
 
         Returns
         -------
         pyspark.sql.types.DataType
-            Data type (BinaryType).
+            ``BinaryType`` when this selector builds a :class:`SampleSeries`
+            (a serialized blob). When it builds a :class:`PointsInTimeSeries`,
+            the value-type-aware ``PointsInTimeSeries.dtype()``
+            (``array<array<double>>`` for numeric,
+            ``array<struct<tstart,value>>`` for string).
         """
+        if self._series_type is SeriesType.POINTS_IN_TIME:
+            return PointsInTimeSeries.empty(value_type=self._value_type).dtype()
         return T.BinaryType()
 
     def deserialize(self, d):
         """
-        Deserialize sample series after collection/toPandas.
+        Deserialize a :class:`SampleSeries` result after collection/toPandas.
+
+        A :class:`PointsInTimeSeries` result is serialized by ``get_data()``
+        (a plain ``[[t, v], ...]`` list) and needs no deserialization, so it is
+        returned as-is; only a :class:`SampleSeries` (binary) blob is decoded.
 
         Parameters
         ----------
@@ -771,14 +833,26 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
         Returns
         -------
-        SampleSeries
-            Deserialized sample series.
+        SampleSeries or Any
+            The decoded :class:`SampleSeries`, else *d* unchanged.
         """
+        if self._series_type is SeriesType.POINTS_IN_TIME:
+            return d
         return SampleSeries.deserialize(d)
 
-    def build(self, cache: SeriesCache) -> SampleSeries:
+    def build(self, cache: SeriesCache) -> SampleSeries | PointsInTimeSeries:
         """
-        Instantiate a SampleSeries from given cache data.
+        Instantiate the selected series from cache data.
+
+        Resolution is identical regardless of series type — resolve the matching
+        candidates, take the first ``(container_id, channel_id)``, and let the
+        cache build the right object.  The **data** is authoritative for the built
+        type: :meth:`TimeSeriesCache.load_blob` returns a
+        :class:`PointsInTimeSeries` for a ``POINTS_IN_TIME`` slice and a
+        :class:`SampleSeries` otherwise.  The selector's own :attr:`series_type` /
+        :attr:`value_type` are used only for **plan-time** typing (:meth:`dtype`
+        against an empty cache), so a bare POI selection types correctly and a
+        string-only op is rejected before Spark runs.
 
         Parameters
         ----------
@@ -787,16 +861,25 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
         Returns
         -------
-        SampleSeries
-            Built sample series.
+        SampleSeries or PointsInTimeSeries
         """
         candidates = cache.resolve(self)
         if len(candidates) == 0:
+            if self._series_type is SeriesType.POINTS_IN_TIME:
+                return PointsInTimeSeries.empty(value_type=self._value_type)
             return SampleSeries.empty()
         # TODO: select candidate
         mid = candidates.container_id.iloc[0]
         cid = candidates.channel_id.iloc[0]
-        return cache.load_blob(mid, cid, uses_alias=self.uses_alias)
+        # The selector is the source of truth for the series type: pass it to the
+        # cache so load_blob builds the right object without a per-row discriminator.
+        return cache.load_blob(
+            mid,
+            cid,
+            uses_alias=self.uses_alias,
+            series_type=self._series_type,
+            value_type=self._value_type,
+        )
 
     def get_required_tag_exprs(self) -> set[TagExpression]:
         """
@@ -874,6 +957,8 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         obj["type"] = U.name_of(TimeSeriesSelector)
         obj["expr"] = self._expr.as_dict()
         obj["uses_alias"] = self._uses_alias
+        obj["series_type"] = str(self._series_type)
+        obj["value_type"] = str(self._value_type)
         return obj
 
     @staticmethod
@@ -892,7 +977,14 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             Selector instance.
         """
         expr = TimeSeriesExpression.from_dict(obj["expr"])
-        m = TimeSeriesSelector(expr, uses_alias=obj.get("uses_alias", False))
+        # Default to CONTINUOUS / DOUBLE so selectors serialized before POI support
+        # (no series_type / value_type keys) deserialize unchanged.
+        m = TimeSeriesSelector(
+            expr,
+            uses_alias=obj.get("uses_alias", False),
+            series_type=SeriesType(obj.get("series_type", SeriesType.CONTINUOUS)),
+            value_type=SeriesValueType(obj.get("value_type", SeriesValueType.DOUBLE)),
+        )
         if "alias" in obj and obj["alias"] is not None:
             m.alias(obj["alias"])
         return m
@@ -911,7 +1003,7 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         self._aliases = aliases
         TimeSeriesExpression.__init__(self, is_single_signal=True)
 
-    def dtype(self):
+    def dtype(self) -> T.DataType:
         """
         Returns the Spark data type.
 
@@ -922,7 +1014,7 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         """
         return T.BinaryType()
 
-    def build(self, cache: SeriesCache) -> SampleSeries:
+    def build(self, cache: SeriesCache) -> SampleSeries | PointsInTimeSeries:
         """
         Build the time series from cache.
 
@@ -933,8 +1025,8 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
 
         Returns
         -------
-        SampleSeries
-            Built sample series.
+        SampleSeries or PointsInTimeSeries
+            Built series (aliased selectors build a :class:`SampleSeries` today).
         """
         candidates = [alias.build(cache) for alias in self._aliases]
         # TODO: propery select best candidate

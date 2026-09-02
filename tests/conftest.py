@@ -47,6 +47,7 @@ def basic_narrow_db(spark, mock_workspace_client) -> MeasurementDB:
     tables["container_metrics"] = spark.read.table("spark_catalog.silver.container_metrics")
     tables["channel_metrics"] = spark.read.table("spark_catalog.silver.channel_metrics")
     tables["channels"] = spark.read.table("spark_catalog.silver.channels")
+    tables["poi_channels"] = spark.read.table("spark_catalog.silver.poi_channels")
 
     cfg = MeasurementDBConfig.for_debug(tables)
     return MeasurementDB(cfg, ws=mock_workspace_client)
@@ -96,6 +97,20 @@ def setup_narrow_db(spark):
         ),
         schema=S.CHANNELS_SCHEMA,
     )
+    poi_channels = spark.createDataFrame(
+        pd.read_csv(
+            f"{base_path}/tests/unit/data/unit_test_csv/1_poi_channels.csv",
+            dtype={
+                "container_id": np.int64,
+                "channel_id": np.int32,
+                "timestamp": np.longlong,
+                "value_double": np.float64,
+                "value_string": "object",
+                "dtype": "object",
+            },
+        ),
+        schema=S.POI_CHANNELS_SCHEMA,
+    )
 
     container_tags.write.format("delta").mode("overwrite").saveAsTable(
         "spark_catalog.silver_narrow_db.container_tags"
@@ -111,6 +126,9 @@ def setup_narrow_db(spark):
     )
     channels.write.format("delta").mode("overwrite").saveAsTable(
         "spark_catalog.silver_narrow_db.channels"
+    )
+    poi_channels.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver_narrow_db.poi_channels"
     )
 
 
@@ -131,11 +149,20 @@ def setup_basic_db(spark):
     container_metric_path = f"{base_path}/tests/unit/data/basic_narrow_csv/container_metrics.csv"
     channel_metric_path = f"{base_path}/tests/unit/data/basic_narrow_csv/channel_metrics.csv"
     channels_path = f"{base_path}/tests/unit/data/basic_narrow_csv/channel_data.csv"
+    poi_channels_path = f"{base_path}/tests/unit/data/basic_narrow_csv/poi_channels.csv"
 
     options = {"header": "True", "delimiter": ",", "inferSchema": "True"}
     container_metrics = spark.read.options(**options).csv(container_metric_path)
     channel_metrics = spark.read.options(**options).csv(channel_metric_path)
     channels = spark.read.options(**options).csv(channels_path)
+    # POI channel data: explicit schema so empty value columns keep their nullable
+    # typed shape (value_double double / value_string string) rather than being
+    # inferred as all-null strings.
+    poi_channels = (
+        spark.read.schema(S.POI_CHANNELS_SCHEMA)
+        .options(header="True", delimiter=",")
+        .csv(poi_channels_path)
+    )
 
     container_metrics.write.format("delta").mode("overwrite").saveAsTable(
         "spark_catalog.silver.container_metrics"
@@ -150,6 +177,9 @@ def setup_basic_db(spark):
         "spark_catalog.silver.channel_metrics"
     )
     channels.write.format("delta").mode("overwrite").saveAsTable("spark_catalog.silver.channels")
+    poi_channels.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver.poi_channels"
+    )
 
 
 @pytest.fixture(scope="session")
@@ -236,6 +266,7 @@ def narrow_db(spark, setup_narrow_db, mock_workspace_client) -> MeasurementDB:
         "spark_catalog.silver_narrow_db.channel_metrics"
     )
     debug_tables["channels"] = spark.read.table("spark_catalog.silver_narrow_db.channels")
+    debug_tables["poi_channels"] = spark.read.table("spark_catalog.silver_narrow_db.poi_channels")
 
     cfg = MeasurementDBConfig.for_debug(debug_tables)
     return MeasurementDB(cfg, ws=mock_workspace_client)

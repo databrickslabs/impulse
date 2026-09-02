@@ -31,6 +31,49 @@ Each tag passed to `channel(...)` must be resolvable by the solver — either as
 table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolver-adapts).
 :::
 
+### Points-in-Time (POI) channels
+
+Not every channel can be interpreted as a continuous signal within its `[tstart, tend)` intervals.
+Some record values meaningful only **at an
+instant** — an ECU Diagnostic Trouble Code (DTC), a discrete event code — with no validity in
+between. Which selector you reach for follows the **nature of the data**, not the query you want to
+write:
+
+:::tip `channel()` vs `poi_channel()`
+- **`channel()` → [`SampleSeries`](core_data_model.md#sampleseries)** — a continuous signal captured
+  by sampling, **valid within its `[tstart, tend)` intervals**: a value is measured at each `tstart`
+  and no other value is measured until `tend`; values between samples (within valid intervals) can be
+  reconstructed by interpolation (e.g. zero-order hold). It can be resampled. Examples: engine RPM,
+  vehicle speed, coolant temperature.
+- **`poi_channel()` → [`PointsInTimeSeries`](core_data_model.md#pointsintimeseries)** — discrete
+  events whose value exists *only at* its own instant and says nothing about the time in between (DTC
+  / fault codes, event logs, a count stamped at a moment). No interpolation between points, no
+  durations, unweighted aggregations.
+
+**Litmus test:** *was the underlying signal/channel derived by sampling a continuous time signal?* If yes,
+it's a sample series → `channel()`. If it is a momentary event, it's a POI channel → `poi_channel()`.
+:::
+
+`poi_channel()` resolves channels exactly like `channel()` (same tag filters), but builds a
+`PointsInTimeSeries` from the
+[`poi_channels`](../../../data_model/silver_layer_schema.md#poi_channels-optional) table rather than a
+`SampleSeries` from `channels`.
+
+```python
+# numeric POI channel (default dtype='double')
+dtc_count = db.query.poi_channel(channel_name='DTC_count')
+
+# string POI channel — e.g. fault codes like "P0301"
+dtc = db.query.poi_channel(channel_name='DTC', dtype='string')
+faults = dtc == 'P0301'                 # PointsInTime: the instants the code was P0301
+rpm_at_faults = eng_rpm.where(faults)   # freeze-frame: RPM at each fault instant
+```
+
+`dtype` accepts the `SeriesValueType.DOUBLE` / `SeriesValueType.STRING` enum or the plain string
+`'double'` / `'string'` (default `'double'`). A **string** POI channel supports only equality
+(`==` / `!=`) and sampling (`.where(...)`) — arithmetic, ordering, and numeric reductions raise, as
+they are not implemented for string values.
+
 ### Logical aliases via channel mapping
 
 For workflows where a stable logical name should resolve to one of many physical channels through a separately

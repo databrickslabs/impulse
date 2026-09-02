@@ -336,7 +336,7 @@ class StatsAggregator(Aggregation):
             .transform(StatsAggregator._explode_stats_values)
             .transform(StatsAggregator._add_channel_name_column(aggregations))
             .transform(StatsAggregator._add_cross_channel_name_column(aggregations))
-            .transform(StatsAggregator._add_event_instance_id_column)
+            .transform(StatsAggregator._add_event_instance_id_column(aggregations))
             .transform(StatsAggregator._add_visual_id_column(aggregations))
             .select(STATS_AGGREGATOR_FACT_SCHEMA.fieldNames())
         )
@@ -656,24 +656,48 @@ class StatsAggregator(Aggregation):
         return _
 
     @staticmethod
-    def _add_event_instance_id_column(df: DataFrame) -> DataFrame:
+    def _add_event_instance_id_column(
+        aggregations: list[StatsAggregator],
+    ) -> Callable[..., DataFrame]:
         """
-        Add an event_instance_id column to the DataFrame.
+        Add an event_instance_id column, matching ``event_instance_fact``.
 
-        The event_instance_id uniquely identifies each event interval instance
-        within a container and event combination.
+        The id comes from ``generate_event_instance_id_column``: a ``ContainerEvent``
+        gets ``xxhash64(container_id)`` (one id per container), all other event types get
+        the timestamp-based hash. The container-event case is applied per row (keyed on
+        ``stats_name``) since a frame may mix event types.
 
         Parameters
         ----------
-        df : pyspark.sql.DataFrame
-            DataFrame containing interval_index column.
+        aggregations : list of StatsAggregator
+            List of StatsAggregator visual aggregations.
 
         Returns
         -------
-        pyspark.sql.DataFrame
-            DataFrame with event_instance_id column added.
+        function
+            Function that adds the event_instance_id column to a DataFrame.
         """
-        return df.withColumn("event_instance_id", generate_event_instance_id_column())
+        from impulse_reporting.events.container_event import ContainerEvent
+
+        def _(df: DataFrame) -> DataFrame:
+            container_event_stats_names = [
+                agg.get_name()
+                for agg in aggregations
+                if agg and isinstance(agg.get_event(), ContainerEvent)
+            ]
+
+            timestamp_based_id = generate_event_instance_id_column()
+            if container_event_stats_names:
+                event_instance_id_column = f.when(
+                    f.col("stats_name").isin(container_event_stats_names),
+                    generate_event_instance_id_column(event_type=ContainerEvent),
+                ).otherwise(timestamp_based_id)
+            else:
+                event_instance_id_column = timestamp_based_id
+
+            return df.withColumn("event_instance_id", event_instance_id_column)
+
+        return _
 
     @staticmethod
     def _add_visual_id_column(

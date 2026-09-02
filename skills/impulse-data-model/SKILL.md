@@ -25,6 +25,7 @@ in `source` (see `impulse-config`).
 | `container_metrics` | **Yes**   | One row per recording — timestamps, duration, channel count, and any container-level columns.     |
 | `channel_metrics`   | **Yes**   | One row per `(container_id, channel_id)` — per-channel statistics; also holds channel-selection columns (e.g. `channel_name`) in the wide model. |
 | `channels`          | **Yes**   | The time-series sample data (RLE or RAW — see below).                                            |
+| `poi_channels`      | Optional  | Points-in-Time (POI) channel data — a time series only defined at the given timestamps (discrete events). Add to select POI channels via `poi_channel()`. |
 | `container_tags`    | Optional  | EAV `(container_id, key, value)`. Add for tag-based container filtering.                          |
 | `channel_tags`      | Optional  | EAV `(container_id, channel_id, key, value)`. Add for EAV channel selection.                     |
 | `channel_mapping`   | Optional  | Logical→physical channel alias table (enables `channel_with_alias()`).                           |
@@ -46,6 +47,8 @@ in `source` (see `impulse-config`).
     `drop_implausible_data=True` (requires RAW).
   - Extra columns on `channels` are ignored — the engine projects down to the columns above before
     solving, so it is safe to keep additional bookkeeping columns on the table.
+- **`poi_channels` holds Points-in-Time (POI) data** — a value defined *only at* its timestamp. Schema: `(container_id long, channel_id int,
+  timestamp long [epoch µs], value_double double nullable, value_string string nullable)`.
 - **Tag tables are strict EAV.** `query.channel(channel_name="Engine RPM")` looks up
   `channel_tags.value` where `key = 'channel_name'`. Without `channel_tags`, channel selectors match
   columns on `channel_metrics` instead.

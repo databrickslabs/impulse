@@ -29,12 +29,13 @@ class TimeSeriesCache(SeriesCache):
 
     def resolve(self, selection):
         """
-        Resolve selected tags/metrics to a list of candidates.
+        Resolve a channel (time-series) selector to its candidate rows.
 
         Parameters
         ----------
-        selection : Any
-            The selection object specifying tags or metrics.
+        selection : TimeSeriesSelector
+            The channel selector whose tag expression (``selection._expr``)
+            identifies the matching channel(s).
 
         Returns
         -------
@@ -49,9 +50,14 @@ class TimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.df)
         return self.df[idx]
 
-    def load_blob(self, container_id, channel_id, uses_alias: bool = False):
+    def load_blob(
+        self, container_id, channel_id, uses_alias: bool = False, series_type=None, value_type=None
+    ):
         """
         Load a time series blob from disk.
+
+        ``series_type`` / ``value_type`` are accepted for interface compatibility
+        with :class:`SeriesCache`; this blob cache serves only :class:`SampleSeries`.
 
         Parameters
         ----------

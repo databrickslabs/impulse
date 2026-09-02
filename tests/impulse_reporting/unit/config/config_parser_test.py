@@ -113,6 +113,57 @@ def test_impulse_config_drop_implausible_data_enabled():
     assert config.query_engine.drop_implausible_data is True
 
 
+# ---------------------------------------------------------------------------
+# Source.poi_channels_uri — must survive parsing AND reach the MeasurementDB.
+# Regression: the field was missing from the Source model, so pydantic silently
+# dropped it and the whole reporting-layer POI path was inert (has_poi_channels
+# always False) even when the config supplied a poi_channels_uri.
+# ---------------------------------------------------------------------------
+def test_source_poi_channels_uri_parsed():
+    config_json = {
+        **impulse_config_JSON,
+        "source": {
+            **impulse_config_JSON["source"],
+            "poi_channels_uri": "impulse_demo.silver.poi_channels",
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.source.poi_channels_uri == "impulse_demo.silver.poi_channels"
+
+
+def test_source_poi_channels_uri_defaults_to_none():
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    assert config.source.poi_channels_uri is None
+
+
+def test_poi_channels_uri_reaches_measurement_db():
+    """End-to-end passthrough: a poi_channels_uri in the config makes the built
+    MeasurementDB POI-aware (this is what was silently broken)."""
+    from unittest.mock import create_autospec
+
+    from databricks.sdk import WorkspaceClient
+
+    from impulse_reporting.core.report import Report
+
+    with_poi = ImpulseConfig.model_validate(
+        {
+            **impulse_config_JSON,
+            "source": {
+                **impulse_config_JSON["source"],
+                "poi_channels_uri": "impulse_demo.silver.poi_channels",
+            },
+        }
+    )
+    db = Report.create_measurement_db(with_poi, create_autospec(WorkspaceClient))
+    assert db.has_poi_channels()
+    assert db.config.poi_channels_uri == "impulse_demo.silver.poi_channels"
+
+    # ...and a config without it stays POI-unaware.
+    without_poi = ImpulseConfig.model_validate(impulse_config_JSON)
+    db2 = Report.create_measurement_db(without_poi, create_autospec(WorkspaceClient))
+    assert not db2.has_poi_channels()
+
+
 def test_impulse_config_drop_implausible_data_rejects_rle():
     """drop_implausible_data=True with RLE data must raise ValidationError.
 

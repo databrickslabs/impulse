@@ -233,6 +233,33 @@ def value_col() -> str
 Internal column name for the signal value on the channels table.
 
 
+#### poi\_timestamp\_col
+
+```python
+def poi_timestamp_col() -> str
+```
+
+Internal column name for the point timestamp on the poi_channels table.
+
+
+#### poi\_value\_double\_col
+
+```python
+def poi_value_double_col() -> str
+```
+
+Internal column name for the numeric value on the poi_channels table.
+
+
+#### poi\_value\_string\_col
+
+```python
+def poi_value_string_col() -> str
+```
+
+Internal column name for the string value on the poi_channels table.
+
+
 #### tag\_key\_col
 
 ```python

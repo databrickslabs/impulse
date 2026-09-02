@@ -59,6 +59,7 @@ Maps the silver-layer input tables.
 | `container_metrics_table` | `str` | Yes      | Full Unity Catalog path. Container metadata (timestamps, duration). |
 | `channel_metrics_table`   | `str` | Yes      | Full Unity Catalog path. Channel-level statistics.        |
 | `channels_uri`            | `str` | Yes      | Full Unity Catalog path. Time-series sample data.         |
+| `poi_channels_uri`        | `str` | No       | Full Unity Catalog path to the Points-in-Time (POI) channel data table. Required only when selecting POI channels via `poi_channel()`; omit for sample-only data models. |
 | `container_tags_table`    | `str` | No       | Full Unity Catalog path. Container EAV tags.              |
 | `channel_tags_table`      | `str` | No       | Full Unity Catalog path. Channel EAV tags.                |
 | `channel_mapping_table`   | `str` | No       | Full Unity Catalog path. Logical-to-physical channel alias table. Required when using `QueryBuilder.channel_with_alias()`. In reporting mode the resolved alias-to-physical-channel mapping is materialized to the gold-layer [`channel_mapping_resolution_dimension`](../data_model/gold_layer_event_normalized.md#dimension-tables). |
