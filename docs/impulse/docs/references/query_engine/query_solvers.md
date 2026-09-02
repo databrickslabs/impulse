@@ -82,6 +82,13 @@ The values are constant per container, and the same wiring applies to
 Requesting a nonexistent `container_metrics` column, or any `container_tags` without a
 `container_tags_table` configured, raises a `ValueError`.
 
+:::note Planning call
+During the planning build that precedes solve-time (an empty run the engine uses to infer result
+types; see [Evaluation](tsal/evaluation.md#planning-type-inference-before-solve)), these declared
+keys are present but their values are `None`. UDFs that read container metadata must be null-safe
+for that call.
+:::
+
 ## Table requirements
 
 | Silver table        | Required?  | Notes                                                                                  |

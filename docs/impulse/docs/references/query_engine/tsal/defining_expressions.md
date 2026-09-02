@@ -298,6 +298,18 @@ histogram, a `SequenceOfEventsExpression`, or a
 tree exactly like a required tag, so the wrapping expression does not need to redeclare anything.
 :::
 
+:::caution Be null-safe during planning
+UDFs run once at **planning time**, before any solve-time data exists, via a build call against
+an empty time series cache, so the engine can infer the result type (see
+[Evaluation](evaluation.md#planning-type-inference-before-solve)). On that call the declared
+`container_tags` / `container_metrics` keys are present but **every value is `None`**, and the
+`series` arguments are **empty**. This is distinct from a solve-time value being `None` because a
+specific container has no entry for that key (above): during planning *all* declared values are
+`None` regardless of the data. Guard metadata lookups accordingly (treat `None` as a default), and
+still return a valid object of the declared type. For example, an empty `SampleSeries`-returning
+UDF should return a valid, empty `SampleSeries`.
+:::
+
 ---
 
 ## Virtual signals
