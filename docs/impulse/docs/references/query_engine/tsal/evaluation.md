@@ -26,8 +26,9 @@ build `TimeSeriesOp` nodes around their operands rather than computing anything 
 
 When `QueryBuilder.solve()` runs, the [solver](../query_solvers.md) does the following per container:
 
-1. **Resolve leaves.** Each `TimeSeriesSelector` is matched to a physical channel and loaded into a
-   `SampleSeries` from the silver-layer data.
+1. **Resolve leaves.** Each `TimeSeriesSelector` is matched to a physical channel and loaded from the
+   silver-layer data: a `channel()` selector into a `SampleSeries` from `channels`, a `poi_channel()`
+   selector into a `PointsInTimeSeries` from `poi_channels`.
 2. **Evaluate bottom-up.** Each `TimeSeriesOp` calls the corresponding method/operator on the
    core-model object its children produced — e.g. `eng_rpm > 2000` builds a `SampleSeries` for
    `eng_rpm`, then the `>` op turns it into an `Intervals`. The result of the whole tree is one

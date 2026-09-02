@@ -27,7 +27,14 @@ class SeriesCache(ABC):
         pass
 
     @abstractmethod
-    def load_blob(self, mid, cid, uses_alias: bool = False) -> SampleSeries:
+    def load_blob(
+        self,
+        mid,
+        cid,
+        uses_alias: bool = False,
+        series_type=None,
+        value_type=None,
+    ) -> SampleSeries:
         """
         Resolve given mid and cid to a series.
 
@@ -44,10 +51,21 @@ class SeriesCache(ABC):
             conversion factor when this is ``True``, so a direct selector
             on the same physical channel always returns raw values.
             Defaults to ``False`` (direct / no-conversion semantics).
+        series_type : SeriesType, optional
+            The calling selector's series type. The selector (not a per-row
+            data column) decides which object to build: ``POINTS_IN_TIME`` builds
+            a :class:`PointsInTimeSeries`, otherwise a :class:`SampleSeries`.
+            ``None`` (default) builds a :class:`SampleSeries`.
+        value_type : SeriesValueType, optional
+            For a ``POINTS_IN_TIME`` selector, its declared value type
+            (``DOUBLE`` / ``STRING``); selects the numeric vs string value
+            column. Ignored otherwise. The declared type is validated against
+            the silver metadata in the solve prelude, so the data stays
+            authoritative.
 
         Returns
         -------
-        SampleSeries
-            The loaded sample series object.
+        SampleSeries or PointsInTimeSeries
+            The loaded series object.
         """
         pass

@@ -82,6 +82,9 @@ configured) regardless of whether ``container_tags_table`` is set.
 - `container_metrics_table` (`str`): Full Unity Catalog path to the container metrics table.
 - `channel_metrics_table` (`str`): Full Unity Catalog path to the channel metrics table.
 - `channels_uri` (`str`): Full Unity Catalog path to the channels data table.
+- `poi_channels_uri` (`str`): Full Unity Catalog path to the Points-in-Time (POI) channel data table.
+Required only when the report selects POI channels via ``poi_channel()``;
+omit it for sample-only data models.
 - `channel_mapping_table` (`str`): Full Unity Catalog path to the channel mapping table. Required when using
 ``channel_with_alias()`` for logical alias resolution.
 - `unit_conversion_table` (`str`): Full Unity Catalog path to the unit conversion table. When set together

@@ -41,6 +41,9 @@ coverage:
 build:
 	uv build --require-hashes --build-constraints=.build-constraints.txt
 
+update-api-docs:
+	cd docs/impulse && uv run pydoc-markdown
+
 lock-dependencies: UV_LOCKED := 0
 lock-dependencies:
 	uv lock
@@ -56,4 +59,4 @@ fork-sync:
 	./.github/scripts/fork-sync-pr.sh $(PR)
 
 .DEFAULT: all
-.PHONY: all clean dev lint fmt test coverage build lock-dependencies fork-sync
+.PHONY: all clean dev lint fmt test coverage build update-api-docs lock-dependencies fork-sync

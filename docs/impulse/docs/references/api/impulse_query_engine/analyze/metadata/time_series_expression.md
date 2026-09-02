@@ -3,6 +3,23 @@ sidebar_label: time_series_expression
 title: impulse_query_engine.analyze.metadata.time_series_expression
 ---
 
+## SeriesType
+
+```python
+class SeriesType(StrEnum)
+```
+
+Determines how a channel's values are interpreted:
+
+``CONTINUOUS`` — the default; the channel is a continuous signal captured by sampling,
+considered *valid* within each ``[tstart, tend)`` interval. Value v_i was measured at
+tstart_i and no other value was measured until tend_i; the value between samples can
+be reconstructed by interpolation.
+
+``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their timestamps,
+with no interpolation or validity in between.
+
+
 ## TimeSeriesSelector
 
 ```python
@@ -12,7 +29,10 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization)
 #### \_\_init\_\_
 
 ```python
-def __init__(expr, uses_alias: bool = False)
+def __init__(expr,
+             uses_alias: bool = False,
+             series_type: SeriesType = SeriesType.CONTINUOUS,
+             value_type: SeriesValueType = SeriesValueType.DOUBLE)
 ```
 
 Initialize a TimeSeriesSelector.
@@ -20,18 +40,33 @@ Initialize a TimeSeriesSelector.
 **Arguments**:
 
 - `expr` (`TagExpression`): Tag expression to select.
+- `uses_alias` (`bool`): Whether the channel resolves via the channel-alias table.
+- `series_type` (`SeriesType`): How the selected channel's samples are interpreted.  ``CONTINUOUS``
+(default) builds a :class:`SampleSeries` — today's behavior,
+unchanged.  ``POINTS_IN_TIME`` builds a :class:`PointsInTimeSeries`
+(values valid only at their timestamps); identification / matching is
+identical, only the built object and its result dtype differ.  This is
+the plan-time source of truth for the series type (so ``dtype()`` is
+correct for a bare POI selection with no per-channel metadata lookup).
+- `value_type` (`SeriesValueType`): For a ``POINTS_IN_TIME`` selection, the declared value data type
+(``DOUBLE`` / ``STRING``).  Ignored for ``CONTINUOUS``.  Drives plan-time
+typing and string-op gating; validated against the silver
+``poi_channels.dtype`` at solve time (assertion contract).
 
 #### dtype
 
 ```python
-def dtype()
+def dtype() -> T.DataType
 ```
 
 Returns the Spark data type.
 
 **Returns**:
 
-`pyspark.sql.types.DataType`: Data type (BinaryType).
+`pyspark.sql.types.DataType`: ``BinaryType`` for a CONTINUOUS selection (serialized ``SampleSeries``),
+or the value-type-aware ``PointsInTimeSeries.dtype()`` for a
+POINTS_IN_TIME selection (``array<array<double>>`` for numeric,
+``array<struct<tstart,value>>`` for string).
 
 #### deserialize
 
@@ -39,7 +74,11 @@ Returns the Spark data type.
 def deserialize(d)
 ```
 
-Deserialize sample series after collection/toPandas.
+Deserialize a CONTINUOUS result after collection/toPandas.
+
+POINTS_IN_TIME results are serialized by ``get_data()`` (a plain
+``[[t, v], ...]`` list) and need no deserialization, so they are returned
+as-is; only a CONTINUOUS (binary) blob is decoded to a :class:`SampleSeries`.
 
 **Arguments**:
 
@@ -47,23 +86,21 @@ Deserialize sample series after collection/toPandas.
 
 **Returns**:
 
-`SampleSeries`: Deserialized sample series.
+`SampleSeries or Any`: Deserialized sample series (CONTINUOUS), else *d* unchanged.
 
 #### build
 
 ```python
-def build(cache: SeriesCache) -> SampleSeries
+def build(cache: SeriesCache) -> SampleSeries | PointsInTimeSeries
 ```
 
-Instantiate a SampleSeries from given cache data.
+Instantiate the selected series from cache data.
 
-**Arguments**:
+Resolution is identical regardless of series type — resolve the matching
+candidates, take the first ``(container_id, channel_id)``, and let the
+cache build the right object.  The **data** is authoritative for the built
+type: :meth:`TimeSeriesCache.load_blob` returns a
 
-- `cache` (`SeriesCache`): Cache containing time series data.
-
-**Returns**:
-
-`SampleSeries`: Built sample series.
 
 #### get\_required\_tag\_exprs
 
@@ -178,7 +215,7 @@ Initialize a TimeSeriesAliasSelector.
 #### dtype
 
 ```python
-def dtype()
+def dtype() -> T.DataType
 ```
 
 Returns the Spark data type.
@@ -190,7 +227,7 @@ Returns the Spark data type.
 #### build
 
 ```python
-def build(cache: SeriesCache) -> SampleSeries
+def build(cache: SeriesCache) -> SampleSeries | PointsInTimeSeries
 ```
 
 Build the time series from cache.
@@ -201,7 +238,7 @@ Build the time series from cache.
 
 **Returns**:
 
-`SampleSeries`: Built sample series.
+`SampleSeries or PointsInTimeSeries`: Built series (a ``SampleSeries`` for the CONTINUOUS-only aliases used today).
 
 #### get\_required\_tag\_exprs
 
