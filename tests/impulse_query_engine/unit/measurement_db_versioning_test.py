@@ -50,6 +50,25 @@ def test_pin_versions_freezes_snapshot(spark, pin_schema):  # noqa: F811
     assert db.container_metrics(spark).count() == 10
 
 
+def test_pin_versions_freezes_snapshot_path_mode(spark, tmp_path):  # noqa: F811
+    # Path mode (``external_locations``): reads and version resolution go through
+    # the filesystem path rather than a catalog name.
+    path = str(tmp_path / "container_metrics")
+    spark.range(3).toDF("container_id").write.format("delta").mode("overwrite").save(path)
+
+    cfg = MeasurementDBConfig(container_metrics_table=path, table_locations="external_locations")
+    db = _db(cfg)
+    db.pin_versions(spark)
+    assert cfg.pinned_versions == {path: 0}
+
+    # Mutate after pinning; the pinned read must still see the original snapshot.
+    spark.range(3, 10).toDF("container_id").write.format("delta").mode("append").save(path)
+    assert db.container_metrics(spark).count() == 3
+
+    cfg.pinned_versions = {}
+    assert db.container_metrics(spark).count() == 10
+
+
 def test_pin_versions_skips_debug_mode(spark):  # noqa: F811
     cfg = MeasurementDBConfig.for_debug({"container_metrics": spark.range(2).toDF("container_id")})
     db = _db(cfg)
