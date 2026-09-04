@@ -67,6 +67,28 @@ example, a single-column join when `data_key` is not part of the channel
 identity in your layout) — see
 [Alias-resolution join keys](../../config/configuration.md#alias-resolution-join-keys-optional).
 
+## Container-level metadata in expressions
+
+Expressions can pull **container-level metadata** into their evaluation. When a selected
+expression — or a UDF wrapped inside an aggregation, event, or calculated channel — declares
+container tags or metrics via `container_tags=` / `container_metrics=` (see
+[Defining Expressions](tsal/defining_expressions.md#reading-container-level-metadata-inside-a-udf)),
+`DefaultSolver` gathers the union across all selections, reads just those values from the silver
+layer — **metrics** from `container_metrics` columns, **tags** from the EAV `container_tags` table
+(pivoted) — and broadcast-joins them onto each container's evaluation frame so the UDF receives them.
+The values are constant per container, and the same wiring applies to
+[`solve_calculated_channels`](#calculated-channels).
+
+Requesting a nonexistent `container_metrics` column, or any `container_tags` without a
+`container_tags_table` configured, raises a `ValueError`.
+
+:::note Planning call
+During the planning build that precedes solve-time (an empty run the engine uses to infer result
+types; see [Evaluation](tsal/evaluation.md#planning-type-inference-before-solve)), these declared
+keys are present but their values are `None`. UDFs that read container metadata must be null-safe
+for that call.
+:::
+
 ## Table requirements
 
 | Silver table        | Required?  | Notes                                                                                  |
@@ -90,6 +112,16 @@ Solver tuning lives under the `query_engine` section of your report config:
   — the solver to use. Defaults to `"DefaultSolver"`. The values
   `"DeltaSolver"` and `"KeyValueStoreSolver"` are **deprecated aliases**
   retained for backward compatibility; both resolve to `DefaultSolver`.
+- [`query_engine.data_type` and `raw_encoder`](../../config/configuration.md#query_engine-optional)
+  — declare whether `channels` holds pre-encoded `[tstart, tend)` intervals
+  (`"RLE"`, the default) or raw point samples (`"RAW"`). For raw data,
+  `raw_encoder` selects how samples are converted to intervals at query
+  time: `"RLE"` (default) run-length encodes equal-valued runs into single
+  intervals; `"INTERVAL"` only derives `tend` and drops exact duplicates.
+  In both modes `tend` is derived from the **next sample's timestamp**
+  (the last sample falls back to its own timestamp) — see
+  [How Impulse interprets intervals](../../data_model/silver_layer_schema.md#raw-format)
+  for validity semantics and the definition of a duplicate point.
 - [Solver column mappings and filters](../../config/configuration.md#solver-column-mappings-and-filters)
   — adapt the solver to a silver layer whose physical column names
   diverge from Impulse's internal names, scope reads by `project_id`, or
@@ -97,6 +129,34 @@ Solver tuning lives under the `query_engine` section of your report config:
 
 If `query_engine` is omitted from your config entirely, the engine runs
 with `DefaultSolver` and `data_type = "RLE"`.
+
+## Calculated channels
+
+The standard `solve()` produces a **wide** result — one row per container, one column per selection.
+`DefaultSolver.solve_calculated_channels` is a parallel entry point that produces a **narrow**,
+silver-shaped result instead: it explodes each selection's `SampleSeries` into one row per sample
+interval, emitting `container_id, channel_id, tstart, tend, value` plus a single self-describing
+`identity` `map` column.
+
+Every selection must be a [`CalculatedChannel`](../report/channel.md) (identity keys are arbitrary and
+need not match across selections), and each wrapped expression must evaluate to a `SampleSeries`. The stage reuses the same
+metadata filter pipeline as `solve()` to resolve the input channels, then runs a grouped-map UDF per
+container. Only `DefaultSolver` implements it — the base `QuerySolver` raises `NotImplementedError`.
+
+```python
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+
+cc = CalculatedChannel(
+  db.query.channel(channel_name="Vehicle Speed Sensor") * 3.6,
+  {"channel_name": "speed_kmh", "data_key": "CALC"},
+)
+df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+# df: [container_id, channel_id, tstart, tend, value, channel_name, data_key]
+```
+
+The reporting layer builds on this stage to persist derived channels to the gold layer — see
+[Channels](../report/channel.md).
 
 ## API reference
 

@@ -6,6 +6,12 @@ from databricks.sdk import WorkspaceClient
 
 from impulse_reporting.aggregations.point_value_aggregator import PointValueAggregator
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
+from impulse_reporting.config.config_parser import (
+    ImpulseConfig,
+    IncrementalConfig,
+    Source,
+    UnitySink,
+)
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
@@ -16,6 +22,27 @@ def _config_path():
     base_path = os.path.dirname(os.path.abspath(__file__))
     base_path = base_path[: base_path.find("tests")]
     return os.path.join(base_path, "tests", "data", "config", "config.json")
+
+
+def _incremental_config(is_enabled: bool):
+    """Incremental-capable config writing to the shared ``evaluation_*`` gold tables."""
+    return ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver.container_metrics_inc_1_2",
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri="spark_catalog.silver.channels",
+        ),
+        unity_sink=UnitySink(
+            catalog="spark_catalog",
+            schema="gold",
+            table_prefix="evaluation",
+        ),
+        incremental=IncrementalConfig(
+            enabled=is_enabled,
+            silver_last_modified_column="timestamp",
+            gold_last_modified_column="_created_at",
+        ),
+    )
 
 
 def test_persist_point_value_aggregator(spark):
@@ -163,3 +190,96 @@ def test_stats_and_point_value_share_fact_table_without_clobber(spark):
         "rpm_stats": "stats_aggregator",
         "rpm_at_edges": "point_value_aggregator",
     }
+
+
+def _add_stats_and_pva(report, *, statistics, pva_scale):
+    """Add a StatsAggregator + PointValueAggregator (both → stats_aggregator_fact).
+
+    Events are identical across runs (stable ``event_instance_fact``); only the
+    aggregation definitions vary: ``statistics`` changes the stats hash and
+    ``pva_scale`` changes the PVA's input expression (and thus its hash), so both
+    aggregation types land in the changed-DF union on the shared fact table.
+    """
+    q = report.get_db().query
+    eng_rpm = q.channel(channel_name="Engine RPM")
+
+    rpm_event = BasicEvent(name="rpm_gt_0", expr=eng_rpm > 0)
+    pit_event = PointsInTimeEvent(name="rpm_rising", expr=eng_rpm.rising_edges())
+    report.add_event(rpm_event)
+    report.add_event(pit_event)
+
+    page = Page(page_number=1)
+    report.add_page(page)
+    stats = StatsAggregator(
+        name="rpm_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=statistics,
+        event=rpm_event,
+    )
+    pva = PointValueAggregator(
+        name="rpm_at_edges",
+        input_expressions=[eng_rpm * pva_scale],
+        channel_names=["Engine RPM"],
+        event=pit_event,
+    )
+    page.add_aggregation(stats)
+    page.add_aggregation(pva)
+    return stats, pva
+
+
+def test_incremental_stats_and_point_value_shared_fact_changed_defs(spark):
+    """Two aggregation types sharing stats_aggregator_fact, both with CHANGED
+    definitions, persisted incrementally.
+
+    Exercises the aggregation branch of ``persist_facts_incremental`` where the
+    changed DataFrames of *different* types on one fact table are ``unionByName``
+    -combined into a single ``merge_incremental`` (delete scope on ``visual_id``)
+    — the cross-type union must not clobber either type's rows.
+    """
+    # --- Run 1: seed both aggregators into the shared fact table ---
+    report_1 = Report(
+        name="agg_shared_fact_incremental",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_incremental_config(is_enabled=False)),
+    )
+    stats_1, pva_1 = _add_stats_and_pva(report_1, statistics=["min", "max"], pva_scale=1.0)
+    report_1.determine_report()
+    report_1.persist_results()
+
+    fact_run1 = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_fact")
+    assert fact_run1.where(F.col("visual_id") == stats_1.get_id()).count() > 0
+    assert fact_run1.where(F.col("visual_id") == pva_1.get_id()).count() > 0
+
+    # --- Run 2 (incremental): change BOTH definitions ---
+    # stats: expanded statistics list; PVA: changed event expression threshold.
+    report_2 = Report(
+        name="agg_shared_fact_incremental",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_incremental_config(is_enabled=True)),
+    )
+    stats_2, pva_2 = _add_stats_and_pva(report_2, statistics=["min", "max", "mean"], pva_scale=2.0)
+    # same identities → same visual_ids across runs
+    assert stats_2.get_id() == stats_1.get_id()
+    assert pva_2.get_id() == pva_1.get_id()
+
+    report_2.determine_report()
+    report_2.persist_results()
+
+    fact_run2 = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_fact")
+    stats_rows = fact_run2.where(F.col("visual_id") == stats_2.get_id())
+    pva_rows = fact_run2.where(F.col("visual_id") == pva_2.get_id())
+
+    # Both types survive the cross-type union + single merge_incremental (no clobber).
+    assert stats_rows.count() > 0
+    assert pva_rows.count() > 0
+    # The changed stats definition took effect: the expanded statistics are present.
+    stats_labels = {
+        r["aggregation_label"] for r in stats_rows.select("aggregation_label").distinct().collect()
+    }
+    assert stats_labels == {"min", "max", "mean"}
+    assert {
+        r["aggregation_label"] for r in pva_rows.select("aggregation_label").distinct().collect()
+    } == {"value"}

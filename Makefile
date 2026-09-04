@@ -12,6 +12,10 @@ export UV_BUILD_CONSTRAINT := .build-constraints.txt
 
 UV_RUN := uv run --exact --all-extras
 
+# Path(s) passed to pytest. Defaults to the whole suite; CI overrides this to run a
+# single component's tests in parallel, e.g. `make test TEST_PATH=tests/impulse_query_engine`.
+TEST_PATH ?= tests/
+
 clean:
 	rm -fr .venv htmlcov .pytest_cache .ruff_cache .coverage coverage.xml test-results.xml
 	find . -name '__pycache__' -print0 | xargs -0 rm -fr
@@ -28,7 +32,7 @@ fmt:
 	$(UV_RUN) ruff check src/ tests/ --fix
 
 test:
-	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=xml
+	$(UV_RUN) pytest $(TEST_PATH) --cov=src --cov-branch --cov-report=xml
 
 coverage:
 	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=html
@@ -36,6 +40,9 @@ coverage:
 
 build:
 	uv build --require-hashes --build-constraints=.build-constraints.txt
+
+update-api-docs:
+	cd docs/impulse && uv run pydoc-markdown
 
 lock-dependencies: UV_LOCKED := 0
 lock-dependencies:
@@ -52,4 +59,4 @@ fork-sync:
 	./.github/scripts/fork-sync-pr.sh $(PR)
 
 .DEFAULT: all
-.PHONY: all clean dev lint fmt test coverage build lock-dependencies fork-sync
+.PHONY: all clean dev lint fmt test coverage build update-api-docs lock-dependencies fork-sync

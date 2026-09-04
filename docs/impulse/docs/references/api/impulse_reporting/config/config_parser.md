@@ -82,6 +82,9 @@ configured) regardless of whether ``container_tags_table`` is set.
 - `container_metrics_table` (`str`): Full Unity Catalog path to the container metrics table.
 - `channel_metrics_table` (`str`): Full Unity Catalog path to the channel metrics table.
 - `channels_uri` (`str`): Full Unity Catalog path to the channels data table.
+- `poi_channels_uri` (`str`): Full Unity Catalog path to the Points-in-Time (POI) channel data table.
+Required only when the report selects POI channels via ``poi_channel()``;
+omit it for sample-only data models.
 - `channel_mapping_table` (`str`): Full Unity Catalog path to the channel mapping table. Required when using
 ``channel_with_alias()`` for logical alias resolution.
 - `unit_conversion_table` (`str`): Full Unity Catalog path to the unit conversion table. When set together
@@ -102,6 +105,10 @@ Configuration for data sink location in Unity Catalog.
 - `catalog` (`str`): Target catalog name for output tables.
 - `schema` (`str`): Target schema name for output tables.
 - `table_prefix` (`str`): Prefix to use for generated output table names.
+- `cleanup_temp_tables` (`bool`): When ``True``, the intermediate ``__impulse_temp_*`` tables written to this
+sink during batch solving are dropped after ``persist_results()`` completes
+successfully. Defaults to ``False`` (temp tables are retained for inspection
+and only cleared at the start of the next report run).
 
 ## Comparator
 
@@ -180,6 +187,12 @@ Configuration for the query engine solver.
 **Arguments**:
 
 - `solver` (`Solvers, default=Solvers.DEFAULT_SOLVER`): The solver type to use for query execution.
+- `raw_encoder` (`RawEncoder, optional, default=None`): Encoder used to convert RAW point data into intervals.  ``RLE``
+collapses consecutive equal-valued samples into runs; ``INTERVAL``
+only derives ``tend`` and drops exact duplicates.  Only takes effect
+when ``data_type=RAW``; ignored for RLE input.  When omitted and
+``data_type=RAW``, it is resolved to ``RLE`` at validation time;
+for RLE input the field stays ``None`` and is never consulted.
 - `solver_config` (`SolverConfig`): Per-table column name mappings and filter configuration for
 the solver.  Use this when your silver-layer tables use
 non-default column names or when you need project/toolbox
@@ -204,10 +217,17 @@ def validate_drop_implausible_data_requires_raw()
 
 `drop_implausible_data=True` currently only takes effect with RAW data.
 
-The filter is applied inside the RAW -> RLE conversion path in
-``IntervalEncoder.prepare_channels_df``. RLE input short-circuits that
-path and the flag is silently ignored, so we reject the combination at
-config validation time.
+The filter is applied inside the RAW -> interval conversion path by the
+selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).
+
+
+#### default\_raw\_encoder\_for\_raw\_data
+
+```python
+def default_raw_encoder_for_raw_data()
+```
+
+When ``data_type=RAW`` and ``raw_encoder`` is unset, default to RLE.
 
 
 ## IncrementalConfig
@@ -223,6 +243,27 @@ Configuration for incremental processing behavior.
 - `enabled` (`bool, default=False`): Whether incremental processing is enabled.
 - `silver_last_modified_column` (`str, default="timestamp"`): Column name in the silver layer used for freshness comparison.
 - `gold_last_modified_column` (`str, default="last_modified"`): Column name in the gold layer used for freshness comparison.
+
+## CalculatedChannels
+
+```python
+class CalculatedChannels(BaseModel)
+```
+
+Configuration for calculated-channel outputs.
+
+**Arguments**:
+
+- `emit_channel_metrics` (`bool, default=False`): When True, also emit a ``calculated_channel_metrics`` gold table (silver
+``channel_metrics`` shape) alongside the calculated-channel fact table, so
+the fact + metrics pair can serve as an Impulse silver source.
+- `attribute_columns` (`list of str, default=[]`): Calculated-channel attribute keys to surface as columns on the metrics
+table (e.g. ``["unit"]``). Empty (the default) → no attribute columns.
+Identity keys are always surfaced dynamically and win over an
+attribute key of the same name.
+- `kpis` (`list of str, default=["duration", "min", "max", "mean"]`): KPIs computed on the metrics table, one column per name. Each must be a
+registered KPI (see ``calculated_channel_kpis.KPI_BUILDERS``); an unknown
+name is rejected at validation. Duplicates are removed (order preserved).
 
 ## ImpulseConfig
 
@@ -244,6 +285,9 @@ Attributes
      Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
  incremental : IncrementalConfig, optional
      Optional incremental processing configuration. Defaults to IncrementalConfig().
+ calculated_channels : CalculatedChannels, optional
+     Optional calculated-channel output configuration (e.g. opting in to the
+     ``calculated_channel_metrics`` table). Defaults to CalculatedChannels().
  measurement_dimensions : list of str, optional
      Column names to surface from ``container_metrics`` into the
      gold-layer ``measurement_dimension`` table. Names are matched

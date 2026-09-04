@@ -4,16 +4,35 @@ import abc
 import operator
 import zlib
 from collections.abc import Callable, Iterable
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import pyspark.sql.types as T
 
 import impulse_query_engine.util as U
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
+from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
+from impulse_query_engine.model.series.value_type import SeriesValueType
 
 if TYPE_CHECKING:
     from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
+
+
+class SeriesType(StrEnum):
+    """Determines how a channel's values are interpreted:
+
+    ``CONTINUOUS`` — the default; the channel is a continuous signal captured by sampling,
+    considered *valid* within each ``[tstart, tend)`` interval. Value v_i was measured at
+    tstart_i and no other value was measured until tend_i; the value between samples can
+    be reconstructed by interpolation.
+
+    ``POINTS_IN_TIME`` — a time series of discrete events, valid *only at* their timestamps,
+    with no interpolation or validity in between.
+    """
+
+    CONTINUOUS = "CONTINUOUS"
+    POINTS_IN_TIME = "POINTS_IN_TIME"
 
 
 class RequiresDeserialization:
@@ -50,7 +69,7 @@ class TimeSeriesExpression(abc.ABC):
         """
         return not self.is_single_signal
 
-    def dtype(self):
+    def dtype(self) -> T.DataType:
         """
         Get the default Spark data type.
 
@@ -285,6 +304,75 @@ class TimeSeriesExpression(abc.ABC):
                 seen_ids.add(selector.selector_id)
                 selectors.append(selector)
         return selectors
+
+    def required_container_tags(self) -> set[str]:
+        """Container tag keys this expression needs injected at solve time.
+
+        Default: none.  Overridden by :class:`TimeSeriesUDF` (its declared
+        keys) and by composite nodes that union their children's needs.
+
+        Returns
+        -------
+        set of str
+            Required container-tag keys.
+        """
+        return set()
+
+    def required_container_metrics(self) -> set[str]:
+        """Container metric columns this expression needs injected at solve time.
+
+        Default: none.  See :meth:`required_container_tags`.
+
+        Returns
+        -------
+        set of str
+            Required container-metric column names.
+        """
+        return set()
+
+    @staticmethod
+    def collect_container_tags(expressions: Iterable[Any]) -> list[str]:
+        """Ordered union of required container-tag keys across *expressions*.
+
+        Mirrors :meth:`collect_selectors`: non-``TimeSeriesExpression`` items
+        are skipped and keys are deduplicated preserving discovery order so
+        downstream ``select`` column order is deterministic.
+
+        Parameters
+        ----------
+        expressions : Iterable[Any]
+            Items to walk; non-``TimeSeriesExpression`` entries are skipped.
+
+        Returns
+        -------
+        list of str
+            Deduplicated container-tag keys in discovery order.
+        """
+        return TimeSeriesExpression._collect_container_meta(expressions, "required_container_tags")
+
+    @staticmethod
+    def collect_container_metrics(expressions: Iterable[Any]) -> list[str]:
+        """Ordered union of required container-metric columns across *expressions*.
+
+        See :meth:`collect_container_tags`.
+        """
+        return TimeSeriesExpression._collect_container_meta(
+            expressions, "required_container_metrics"
+        )
+
+    @staticmethod
+    def _collect_container_meta(expressions: Iterable[Any], method: str) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for expression in expressions:
+            if not isinstance(expression, TimeSeriesExpression):
+                continue
+            for name in sorted(getattr(expression, method)()):
+                if name in seen:
+                    continue
+                seen.add(name)
+                result.append(name)
+        return result
 
     @abc.abstractmethod
     def __str__(self) -> str:
@@ -551,7 +639,7 @@ class TimeSeriesExpression(abc.ABC):
             weight_type=weight_type,
         )
 
-    def apply(self, func) -> TimeSeriesUDF:
+    def apply(self, func, container_tags=None, container_metrics=None) -> TimeSeriesUDF:
         """
         Apply a function to the expression.
 
@@ -559,30 +647,70 @@ class TimeSeriesExpression(abc.ABC):
         ----------
         func : callable
             Function to apply.
+        container_tags : list of str, optional
+            Container-tag keys the function wants injected at solve time.
+            When set, the resolved values are passed to *func* as a
+            ``container_tags={key: value}`` keyword argument.
+        container_metrics : list of str, optional
+            Container-metric column names the function wants injected at
+            solve time, passed as a ``container_metrics={col: value}``
+            keyword argument.
 
         Returns
         -------
         TimeSeriesUDF
             UDF-wrapped expression.
         """
-        return TimeSeriesUDF(func, self)
+        return TimeSeriesUDF(
+            func,
+            self,
+            container_tags=container_tags,
+            container_metrics=container_metrics,
+        )
 
     @staticmethod
-    def udf(func: Callable) -> CallableTimeSeriesExpression:
+    def udf(
+        func: Callable = None, *, container_tags=None, container_metrics=None
+    ) -> CallableTimeSeriesExpression:
         """
         Wrap a function as a CallableTimeSeriesExpression.
 
+        Usable bare (``@TimeSeriesExpression.udf``) or parametrized
+        (``@TimeSeriesExpression.udf(container_tags=[...],
+        container_metrics=[...])``) to declare the container-level metadata
+        the wrapped function needs injected at solve time.
+
         Parameters
         ----------
-        func : callable
-            Function to wrap.
+        func : callable, optional
+            Function to wrap.  When omitted (parametrized form), a decorator
+            is returned.
+        container_tags : list of str, optional
+            Container-tag keys to inject as a ``container_tags`` kwarg.
+        container_metrics : list of str, optional
+            Container-metric columns to inject as a ``container_metrics`` kwarg.
 
         Returns
         -------
-        CallableTimeSeriesExpression
-            Callable wrapper.
+        CallableTimeSeriesExpression or callable
+            The callable wrapper, or a decorator when *func* is omitted.
         """
-        return CallableTimeSeriesExpression(func)
+        if func is None:
+
+            def _decorator(f: Callable) -> CallableTimeSeriesExpression:
+                return CallableTimeSeriesExpression(
+                    f,
+                    container_tags=container_tags,
+                    container_metrics=container_metrics,
+                )
+
+            return _decorator
+
+        return CallableTimeSeriesExpression(
+            func,
+            container_tags=container_tags,
+            container_metrics=container_metrics,
+        )
 
     def as_dict(self) -> dict[str, Any]:
         """
@@ -619,7 +747,13 @@ class TimeSeriesExpression(abc.ABC):
 
 
 class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
-    def __init__(self, expr, uses_alias: bool = False):
+    def __init__(
+        self,
+        expr,
+        uses_alias: bool = False,
+        series_type: SeriesType = SeriesType.CONTINUOUS,
+        value_type: SeriesValueType = SeriesValueType.DOUBLE,
+    ):
         """
         Initialize a TimeSeriesSelector.
 
@@ -627,9 +761,24 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         ----------
         expr : TagExpression
             Tag expression to select.
+        uses_alias : bool, optional
+            Whether the channel resolves via the channel-alias table.
+        series_type : SeriesType, optional
+            Which object this selector builds. The default (``CONTINUOUS``)
+            builds a :class:`SampleSeries`; ``POINTS_IN_TIME`` builds a
+            :class:`PointsInTimeSeries`. Matching is identical; only the built
+            object and its result dtype differ. This is the plan-time source of
+            truth for the series type.
+        value_type : SeriesValueType, optional
+            For ``POINTS_IN_TIME``, the declared value data type
+            (``DOUBLE`` / ``STRING``); ignored otherwise. Drives plan-time typing
+            and string-op gating; validated against the silver
+            ``poi_channels.dtype`` at solve time.
         """
         self._expr = expr
         self._uses_alias = uses_alias
+        self._series_type = series_type
+        self._value_type = value_type
         TimeSeriesExpression.__init__(self, is_single_signal=True)
 
     @property
@@ -637,23 +786,45 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         return self._uses_alias
 
     @property
-    def selector_id(self) -> int:
-        return zlib.crc32(str(self._expr).encode())
+    def series_type(self) -> SeriesType:
+        return self._series_type
 
-    def dtype(self):
+    @property
+    def value_type(self) -> SeriesValueType:
+        return self._value_type
+
+    @property
+    def selector_id(self) -> int:
+        # series_type / value_type keep distinct-typed selections of the same tag
+        # apart; CONTINUOUS uses the bare ``str(expr)`` hash for back-compat.
+        if self._series_type is SeriesType.CONTINUOUS:
+            return zlib.crc32(str(self._expr).encode())
+        return zlib.crc32(f"{self._series_type}|{self._expr}|{self._value_type}".encode())
+
+    def dtype(self) -> T.DataType:
         """
         Returns the Spark data type.
 
         Returns
         -------
         pyspark.sql.types.DataType
-            Data type (BinaryType).
+            ``BinaryType`` when this selector builds a :class:`SampleSeries`
+            (a serialized blob). When it builds a :class:`PointsInTimeSeries`,
+            the value-type-aware ``PointsInTimeSeries.dtype()``
+            (``array<array<double>>`` for numeric,
+            ``array<struct<tstart,value>>`` for string).
         """
+        if self._series_type is SeriesType.POINTS_IN_TIME:
+            return PointsInTimeSeries.empty(value_type=self._value_type).dtype()
         return T.BinaryType()
 
     def deserialize(self, d):
         """
-        Deserialize sample series after collection/toPandas.
+        Deserialize a :class:`SampleSeries` result after collection/toPandas.
+
+        A :class:`PointsInTimeSeries` result is serialized by ``get_data()``
+        (a plain ``[[t, v], ...]`` list) and needs no deserialization, so it is
+        returned as-is; only a :class:`SampleSeries` (binary) blob is decoded.
 
         Parameters
         ----------
@@ -662,14 +833,26 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
         Returns
         -------
-        SampleSeries
-            Deserialized sample series.
+        SampleSeries or Any
+            The decoded :class:`SampleSeries`, else *d* unchanged.
         """
+        if self._series_type is SeriesType.POINTS_IN_TIME:
+            return d
         return SampleSeries.deserialize(d)
 
-    def build(self, cache: SeriesCache) -> SampleSeries:
+    def build(self, cache: SeriesCache) -> SampleSeries | PointsInTimeSeries:
         """
-        Instantiate a SampleSeries from given cache data.
+        Instantiate the selected series from cache data.
+
+        Resolution is identical regardless of series type — resolve the matching
+        candidates, take the first ``(container_id, channel_id)``, and let the
+        cache build the right object.  The **data** is authoritative for the built
+        type: :meth:`TimeSeriesCache.load_blob` returns a
+        :class:`PointsInTimeSeries` for a ``POINTS_IN_TIME`` slice and a
+        :class:`SampleSeries` otherwise.  The selector's own :attr:`series_type` /
+        :attr:`value_type` are used only for **plan-time** typing (:meth:`dtype`
+        against an empty cache), so a bare POI selection types correctly and a
+        string-only op is rejected before Spark runs.
 
         Parameters
         ----------
@@ -678,16 +861,25 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
 
         Returns
         -------
-        SampleSeries
-            Built sample series.
+        SampleSeries or PointsInTimeSeries
         """
         candidates = cache.resolve(self)
         if len(candidates) == 0:
+            if self._series_type is SeriesType.POINTS_IN_TIME:
+                return PointsInTimeSeries.empty(value_type=self._value_type)
             return SampleSeries.empty()
         # TODO: select candidate
         mid = candidates.container_id.iloc[0]
         cid = candidates.channel_id.iloc[0]
-        return cache.load_blob(mid, cid, uses_alias=self.uses_alias)
+        # The selector is the source of truth for the series type: pass it to the
+        # cache so load_blob builds the right object without a per-row discriminator.
+        return cache.load_blob(
+            mid,
+            cid,
+            uses_alias=self.uses_alias,
+            series_type=self._series_type,
+            value_type=self._value_type,
+        )
 
     def get_required_tag_exprs(self) -> set[TagExpression]:
         """
@@ -765,6 +957,8 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         obj["type"] = U.name_of(TimeSeriesSelector)
         obj["expr"] = self._expr.as_dict()
         obj["uses_alias"] = self._uses_alias
+        obj["series_type"] = str(self._series_type)
+        obj["value_type"] = str(self._value_type)
         return obj
 
     @staticmethod
@@ -783,7 +977,14 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             Selector instance.
         """
         expr = TimeSeriesExpression.from_dict(obj["expr"])
-        m = TimeSeriesSelector(expr, uses_alias=obj.get("uses_alias", False))
+        # Default to CONTINUOUS / DOUBLE so selectors serialized before POI support
+        # (no series_type / value_type keys) deserialize unchanged.
+        m = TimeSeriesSelector(
+            expr,
+            uses_alias=obj.get("uses_alias", False),
+            series_type=SeriesType(obj.get("series_type", SeriesType.CONTINUOUS)),
+            value_type=SeriesValueType(obj.get("value_type", SeriesValueType.DOUBLE)),
+        )
         if "alias" in obj and obj["alias"] is not None:
             m.alias(obj["alias"])
         return m
@@ -802,7 +1003,7 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         self._aliases = aliases
         TimeSeriesExpression.__init__(self, is_single_signal=True)
 
-    def dtype(self):
+    def dtype(self) -> T.DataType:
         """
         Returns the Spark data type.
 
@@ -813,7 +1014,7 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         """
         return T.BinaryType()
 
-    def build(self, cache: SeriesCache) -> SampleSeries:
+    def build(self, cache: SeriesCache) -> SampleSeries | PointsInTimeSeries:
         """
         Build the time series from cache.
 
@@ -824,8 +1025,8 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
 
         Returns
         -------
-        SampleSeries
-            Built sample series.
+        SampleSeries or PointsInTimeSeries
+            Built series (aliased selectors build a :class:`SampleSeries` today).
         """
         candidates = [alias.build(cache) for alias in self._aliases]
         # TODO: propery select best candidate
@@ -858,6 +1059,18 @@ class TimeSeriesAliasSelector(TimeSeriesExpression):
         for alias in self._aliases:
             tags.extend(alias.required_tags())
         return set(tags)
+
+    def required_container_tags(self) -> set[str]:
+        tags: set[str] = set()
+        for alias in self._aliases:
+            tags |= alias.required_container_tags()
+        return tags
+
+    def required_container_metrics(self) -> set[str]:
+        metrics: set[str] = set()
+        for alias in self._aliases:
+            metrics |= alias.required_container_metrics()
+        return metrics
 
     def get_selector_expr(self):
         """
@@ -955,6 +1168,23 @@ class TimeSeriesOp(TimeSeriesExpression):
             if hasattr(kwarg, "required_tags"):
                 tags.extend(kwarg.required_tags())
         return set(tags)
+
+    def required_container_tags(self) -> set[str]:
+        return self._collect_child_container_meta("required_container_tags")
+
+    def required_container_metrics(self) -> set[str]:
+        return self._collect_child_container_meta("required_container_metrics")
+
+    def _collect_child_container_meta(self, method: str) -> set[str]:
+        """Union *method*'s result over child args/kwargs that support it."""
+        names: set[str] = set()
+        for arg in self.args:
+            if hasattr(arg, method):
+                names |= getattr(arg, method)()
+        for kwarg in self.kwargs.values():
+            if hasattr(kwarg, method):
+                names |= getattr(kwarg, method)()
+        return names
 
     def get_selector_expr(self):
         """
@@ -1088,7 +1318,7 @@ class TimeSeriesOp(TimeSeriesExpression):
 
 
 class TimeSeriesUDF(TimeSeriesOp):
-    def __init__(self, func, *args, **kwargs):
+    def __init__(self, func, *args, container_tags=None, container_metrics=None, **kwargs):
         """
         Initialize a TimeSeriesUDF.
 
@@ -1098,6 +1328,14 @@ class TimeSeriesUDF(TimeSeriesOp):
             The user-defined function to apply.
         *args
             Arguments for the UDF.
+        container_tags : list of str, optional
+            Container-tag keys to inject into *func* as a ``container_tags``
+            keyword argument at build time (keyword-only; not treated as an
+            operand).
+        container_metrics : list of str, optional
+            Container-metric columns to inject into *func* as a
+            ``container_metrics`` keyword argument at build time
+            (keyword-only; not treated as an operand).
         **kwargs
             Keyword arguments for the UDF.
         """
@@ -1109,10 +1347,27 @@ class TimeSeriesUDF(TimeSeriesOp):
         self.is_single_signal = True
         self.args = args
         self.kwargs = kwargs
+        self._container_tags = tuple(container_tags or ())
+        self._container_metrics = tuple(container_metrics or ())
+
+    def required_container_tags(self) -> set[str]:
+        tags = set(super().required_container_tags())
+        tags.update(self._container_tags)
+        return tags
+
+    def required_container_metrics(self) -> set[str]:
+        metrics = set(super().required_container_metrics())
+        metrics.update(self._container_metrics)
+        return metrics
 
     def build(self, cache: SeriesCache):
         """
         Build the time series from cache using the UDF.
+
+        When the UDF declared ``container_tags`` / ``container_metrics``, the
+        requested values are resolved from *cache* and passed to *func* as
+        ``container_tags`` / ``container_metrics`` keyword arguments (dicts
+        keyed by the declared names; missing values are ``None``).
 
         Parameters
         ----------
@@ -1129,6 +1384,14 @@ class TimeSeriesUDF(TimeSeriesOp):
             k: a.build(cache) if isinstance(a, TimeSeriesExpression) else a
             for k, a in self.kwargs.items()
         }
+        if self._container_tags:
+            kwargsb["container_tags"] = {
+                k: cache.container_tags.get(k) for k in self._container_tags
+            }
+        if self._container_metrics:
+            kwargsb["container_metrics"] = {
+                k: cache.container_metrics.get(k) for k in self._container_metrics
+            }
         if isinstance(self.operation, str):
             op = getattr(argsb[0], self.operation)
             return op(*argsb[1:], **kwargsb)
@@ -1153,7 +1416,7 @@ class TimeSeriesUDF(TimeSeriesOp):
 
 
 class CallableTimeSeriesExpression:
-    def __init__(self, func):
+    def __init__(self, func, container_tags=None, container_metrics=None):
         """
         Initialize a CallableTimeSeriesExpression.
 
@@ -1161,8 +1424,16 @@ class CallableTimeSeriesExpression:
         ----------
         func : callable
             Function to wrap.
+        container_tags : list of str, optional
+            Container-tag keys forwarded to each :class:`TimeSeriesUDF` this
+            wrapper builds.
+        container_metrics : list of str, optional
+            Container-metric columns forwarded to each :class:`TimeSeriesUDF`
+            this wrapper builds.
         """
         self.func = func
+        self._container_tags = container_tags
+        self._container_metrics = container_metrics
 
     def __call__(self, *args, **kwargs):
         """
@@ -1180,4 +1451,10 @@ class CallableTimeSeriesExpression:
         TimeSeriesUDF
             UDF-wrapped expression.
         """
-        return TimeSeriesUDF(self.func, *args, **kwargs)
+        return TimeSeriesUDF(
+            self.func,
+            *args,
+            container_tags=self._container_tags,
+            container_metrics=self._container_metrics,
+            **kwargs,
+        )

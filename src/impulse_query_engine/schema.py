@@ -52,6 +52,18 @@ CHANNEL_METRICS = T.StructType(
     ]
 )
 
+# Points-in-Time (POI) channel samples: a value defined only *at* its timestamp
+# (no derived tend / validity interval).
+POI_CHANNELS_SCHEMA = T.StructType(
+    [
+        T.StructField("container_id", T.LongType(), nullable=False),
+        T.StructField("channel_id", T.IntegerType(), nullable=False),
+        T.StructField("timestamp", T.LongType(), nullable=False),
+        T.StructField("value_double", T.DoubleType()),
+        T.StructField("value_string", T.StringType()),
+    ]
+)
+
 CHANNELS_SCHEMA = T.StructType(
     [
         T.StructField("container_id", T.LongType(), nullable=False),

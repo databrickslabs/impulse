@@ -1,14 +1,27 @@
 """Unit tests for report_utils helper functions."""
 
+from enum import Enum
 from unittest.mock import MagicMock, create_autospec, patch
 
+import pyspark.sql.functions as F
+import pytest
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame
 
 from impulse_reporting.core.report import Report
 from impulse_reporting.core.report_utils import (
     build_batches,
+    build_metadata_dfs,
+    dispatch_calculated_channel_metrics,
     dispatch_events,
+    group_dfs_by_table,
+    group_selectables_by_type,
+    persist_channel_metrics,
+    merge_changed_unchanged,
+    persist_dimensions_full,
+    persist_dimensions_incremental,
+    persist_facts_full,
+    persist_facts_incremental,
     split_by_hash_change,
 )
 
@@ -193,7 +206,7 @@ class TestSplitByHashChange:
             sink=None,
             spark=MagicMock(),
             hash_comparator=MagicMock(),
-            is_event=True,
+            kind="event",
         )
 
         assert changed == {"BASIC_EVENT": [item1, item2]}
@@ -211,7 +224,7 @@ class TestSplitByHashChange:
             sink=None,
             spark=MagicMock(),
             hash_comparator=MagicMock(),
-            is_event=False,
+            kind="aggregation",
         )
 
         assert changed == {"HISTOGRAM": [item]}
@@ -253,7 +266,7 @@ class TestSplitByHashChange:
             sink=mock_sink,
             spark=MagicMock(),
             hash_comparator=mock_comparator,
-            is_event=True,
+            kind="event",
         )
 
         mock_comparator.group_events_by_hash_change.assert_called_once()
@@ -262,7 +275,7 @@ class TestSplitByHashChange:
         assert changed_ids == {"BASIC_EVENT": [10]}
 
     def test_with_sink_delegates_to_group_aggregations_by_hash_change(self):
-        """When is_event=False, group_aggregations_by_hash_change is called."""
+        """When kind="aggregation", group_aggregations_by_hash_change is called."""
         item = MagicMock()
         item.get_id.return_value = 42
 
@@ -278,7 +291,7 @@ class TestSplitByHashChange:
             sink=mock_sink,
             spark=MagicMock(),
             hash_comparator=mock_comparator,
-            is_event=False,
+            kind="aggregation",
         )
 
         mock_comparator.group_aggregations_by_hash_change.assert_called_once()
@@ -301,7 +314,7 @@ class TestSplitByHashChange:
             sink=mock_sink,
             spark=MagicMock(),
             hash_comparator=mock_comparator,
-            is_event=True,
+            kind="event",
         )
 
         assert changed == {}
@@ -335,12 +348,24 @@ class TestSplitByHashChange:
             sink=mock_sink,
             spark=MagicMock(),
             hash_comparator=mock_comparator,
-            is_event=True,
+            kind="event",
         )
 
         assert call_count[0] == 2
         assert "BASIC_EVENT" in changed
         assert "SEQUENCE_OF_EVENTS" in changed
+
+    def test_unknown_kind_raises(self):
+        """An unsupported `kind` is rejected before any comparison runs."""
+        with pytest.raises(ValueError, match="Unsupported kind 'bogus'"):
+            split_by_hash_change(
+                items_by_type={"BASIC_EVENT": [MagicMock()]},
+                type_enum=MagicMock(),
+                sink=MagicMock(),
+                spark=MagicMock(),
+                hash_comparator=MagicMock(),
+                kind="bogus",
+            )
 
 
 # ============================================================================
@@ -535,6 +560,123 @@ class TestDispatchEvents:
         assert len(meta_calls) == 0
 
 
+class TestDispatchCalculatedChannelMetrics:
+    """Tests for dispatch_calculated_channel_metrics helper (routing only)."""
+
+    def _make_enum(self, cls):
+        mock_type_enum = MagicMock()
+        mock_type_enum.__getitem__.return_value.value = cls
+        return mock_type_enum
+
+    def test_empty_channels_by_type_returns_empty(self):
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={},
+            fact_dfs_by_type={},
+            type_enum=MagicMock(),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+        assert metrics == {}
+
+    def test_routes_fact_df_channels_and_config(self):
+        """Each type's fact df + channel list + config are forwarded verbatim."""
+        mock_result = MagicMock(spec=DataFrame)
+        mock_fact = MagicMock(spec=DataFrame)
+        channel = MagicMock()
+        received = {}
+
+        class FakeCls:
+            @classmethod
+            def determine_channel_metrics(cls, spark, channels, fact_df, **kwargs):
+                received["channels"] = channels
+                received["fact_df"] = fact_df
+                received["kwargs"] = kwargs
+                return mock_result
+
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": [channel]},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": mock_fact},
+            type_enum=self._make_enum(FakeCls),
+            attribute_columns=["unit"],
+            kpis=["duration", "mean"],
+        )
+
+        assert metrics["CALCULATED_CHANNEL"] is mock_result
+        assert received["channels"] == [channel]
+        assert received["fact_df"] is mock_fact
+        assert received["kwargs"] == {"attribute_columns": ["unit"], "kpis": ["duration", "mean"]}
+
+    def test_type_without_fact_df_is_skipped(self):
+        """A type present in channels but with no fact df (None) yields no entry."""
+        calls = []
+
+        class FakeCls:
+            @classmethod
+            def determine_channel_metrics(cls, spark, channels, fact_df, **kwargs):
+                calls.append(fact_df)
+                return MagicMock(spec=DataFrame)
+
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": [MagicMock()]},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": None},
+            type_enum=self._make_enum(FakeCls),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+
+        assert metrics == {}
+        assert calls == []  # determine_channel_metrics never invoked
+
+    def test_empty_channel_list_for_type_is_skipped(self):
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": []},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": MagicMock(spec=DataFrame)},
+            type_enum=MagicMock(),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+        assert metrics == {}
+
+
+class TestGroupDfsByTable:
+    """Tests for the group-per-output-table shaping helper (returns lists)."""
+
+    def test_empty_returns_empty(self):
+        assert group_dfs_by_table({}, lambda _t: "tbl") == {}
+
+    def test_bare_df_grouped_into_list(self):
+        df = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table({"A": df}, lambda _t: "tbl_a")
+        assert out == {"tbl_a": [df]}
+
+    def test_changed_unchanged_dict_flattened_changed_then_unchanged(self):
+        changed = MagicMock(spec=DataFrame)
+        unchanged = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table(
+            {"A": {"changed": changed, "unchanged": unchanged}}, lambda _t: "tbl_a"
+        )
+        # Order is changed then unchanged (per _fact_dfs_for_table).
+        assert out == {"tbl_a": [changed, unchanged]}
+
+    def test_types_sharing_a_table_are_combined(self):
+        df_a = MagicMock(spec=DataFrame)
+        df_b = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table({"A": df_a, "B": df_b}, lambda _t: "shared")
+        assert out == {"shared": [df_a, df_b]}
+
+    def test_none_and_empty_values_skipped(self):
+        df = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table(
+            {"A": None, "B": {"changed": None, "unchanged": None}, "C": df},
+            lambda t: t,
+        )
+        assert out == {"C": [df]}
+
+
 # ============================================================================
 # Tests: Report._solve_expressions_batched
 # ============================================================================
@@ -715,3 +857,646 @@ class TestSolveExpressionsBatched:
 
         report.query.select.assert_called_once_with(expr)
         report.query.select.return_value.solve.assert_called_once()
+
+
+class TestSolveCalculatedChannelsBatched:
+    """Tests for Report._solve_calculated_channels_batched() (narrow / append)."""
+
+    def test_empty_channels_returns_none(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+        assert report._solve_calculated_channels_batched([]) is None
+
+    def test_single_batch_sinkless_creates_temp_view(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        result = report._solve_calculated_channels_batched([ch])
+
+        mock_batch_df.createOrReplaceTempView.assert_called_once()
+        view_name = mock_batch_df.createOrReplaceTempView.call_args[0][0]
+        assert view_name.startswith("__impulse_temp_")
+        report.spark.table.assert_called_once_with(view_name)
+        assert result is mock_table_df
+
+    def test_single_batch_with_sink_writes_delta_table(self, spark):
+        report = _build_report_for_solve(spark, _SINK_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        result = report._solve_calculated_channels_batched([ch])
+
+        write_chain = mock_batch_df.write.format.return_value.mode.return_value
+        write_chain.saveAsTable.assert_called_once()
+        fq_name = write_chain.saveAsTable.call_args[0][0]
+        assert "__impulse_temp_" in fq_name
+        assert "spark_catalog" in fq_name
+        assert "gold" in fq_name
+        report.spark.table.assert_called_once_with(fq_name)
+        assert result is mock_table_df
+
+    def test_multiple_batches_combined_with_union_by_name(self, spark):
+        """Narrow batches are row-appended with unionByName, NOT joined."""
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_df1 = MagicMock(spec=DataFrame)
+        mock_df2 = MagicMock(spec=DataFrame)
+        mock_unioned = MagicMock(spec=DataFrame)
+        mock_df1.unionByName.return_value = mock_unioned
+
+        table_returns = [mock_df1, mock_df2]
+        call_idx = [0]
+
+        def fake_table(name):
+            df = table_returns[call_idx[0]]
+            call_idx[0] += 1
+            return df
+
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = MagicMock(
+            spec=DataFrame
+        )
+        report.spark = MagicMock()
+        report.spark.table.side_effect = fake_table
+
+        ch1, ch2 = MagicMock(), MagicMock()
+        ch1.get_selectors.return_value = [MagicMock()]
+        ch2.get_selectors.return_value = [MagicMock()]
+
+        with patch(
+            "impulse_reporting.core.report_utils.build_batches", return_value=[[ch1], [ch2]]
+        ):
+            result = report._solve_calculated_channels_batched([ch1, ch2])
+
+        mock_df1.unionByName.assert_called_once_with(mock_df2)
+        mock_df1.join.assert_not_called()
+        assert result is mock_unioned
+
+    def test_query_select_called_with_batch_channels(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = MagicMock(spec=DataFrame)
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        report._solve_calculated_channels_batched([ch])
+
+        report.query.select.assert_called_once_with(ch)
+        report.query.select.return_value.solve_calculated_channels.assert_called_once()
+
+
+# ============================================================================
+# Fixtures for the generic entity orchestration/persistence helpers
+# ============================================================================
+class _FooEntity:
+    pass
+
+
+class _BarEntity:
+    pass
+
+
+class _FakeType(Enum):
+    """Two-member entity type-enum mirroring ChannelType's resolver shape.
+
+    FOO and BAR intentionally share a fact table (``shared_fact``) but have
+    distinct dimension tables, so grouping-by-output-table is exercised.
+    """
+
+    FOO = _FooEntity
+    BAR = _BarEntity
+
+    def get_fact_table_name(self):
+        return "shared_fact"
+
+    def get_dimension_table_name(self):
+        return {"FOO": "foo_dim", "BAR": "bar_dim"}[self.name]
+
+    @classmethod
+    def get_any_for_fact_table(cls, table_name):
+        for member in cls:
+            if member.get_fact_table_name() == table_name:
+                return member
+        raise ValueError(f"no type for fact table {table_name}")
+
+    @classmethod
+    def get_any_for_dimension_table(cls, table_name):
+        for member in cls:
+            if member.get_dimension_table_name() == table_name:
+                return member
+        raise ValueError(f"no type for dimension table {table_name}")
+
+
+class TestGroupSelectablesByType:
+    def test_buckets_by_isinstance(self):
+        foo1, bar, foo2 = _FooEntity(), _BarEntity(), _FooEntity()
+        result = group_selectables_by_type([foo1, bar, foo2], _FakeType)
+        assert result["FOO"] == [foo1, foo2]
+        assert result["BAR"] == [bar]
+
+    def test_every_member_gets_a_bucket_even_when_empty(self):
+        result = group_selectables_by_type([], _FakeType)
+        assert set(result) == {"FOO", "BAR"}
+        assert result["FOO"] == [] and result["BAR"] == []
+
+    def test_item_matching_no_type_is_dropped(self):
+        # An item that isn't an instance of any member's class lands in no bucket.
+        result = group_selectables_by_type([object()], _FakeType)
+        assert result == {"FOO": [], "BAR": []}
+
+
+class TestMergeChangedUnchanged:
+    def test_only_changed(self):
+        df = MagicMock()
+        result = merge_changed_unchanged({"FOO": df}, {})
+        assert result == {"FOO": {"changed": df, "unchanged": None}}
+
+    def test_only_unchanged(self):
+        df = MagicMock()
+        result = merge_changed_unchanged({}, {"FOO": df})
+        assert result == {"FOO": {"changed": None, "unchanged": df}}
+
+    def test_both_sides_present(self):
+        c, u = MagicMock(), MagicMock()
+        result = merge_changed_unchanged({"FOO": c}, {"FOO": u})
+        assert result == {"FOO": {"changed": c, "unchanged": u}}
+
+
+class TestBuildMetadataDfs:
+    def test_non_empty_types_build_metadata(self):
+        meta = MagicMock()
+        cls = MagicMock()
+        cls.determine_metadata_df.return_value = meta
+        type_enum = MagicMock()
+        type_enum.__getitem__.return_value.value = cls
+        spark = MagicMock()
+        items = [MagicMock()]
+
+        result = build_metadata_dfs({"FOO": items}, type_enum, spark)
+
+        cls.determine_metadata_df.assert_called_once_with(spark, items)
+        assert result == {"FOO": meta}
+
+    def test_empty_types_skipped(self):
+        type_enum = MagicMock()
+        result = build_metadata_dfs({"FOO": []}, type_enum, MagicMock())
+        assert result == {}
+
+
+class TestPersistFactsFull:
+    def test_groups_by_table_and_flattens_dict_and_bare(self):
+        bare, changed, unchanged = MagicMock(), MagicMock(), MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+
+        persist_facts_full(
+            {"FOO": bare, "BAR": {"changed": changed, "unchanged": unchanged}},
+            _FakeType,
+            factory,
+        )
+
+        # FOO + BAR share "shared_fact" → a single write with all three dfs.
+        writer.write.assert_called_once()
+        written = writer.write.call_args.args[0]
+        assert written == [bare, changed, unchanged]
+
+    def test_none_entries_dropped(self):
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+
+        persist_facts_full({"FOO": {"changed": None, "unchanged": None}}, _FakeType, factory)
+        # Nothing to write → no write call.
+        writer.write.assert_not_called()
+
+
+class TestPersistDimensionsFull:
+    def test_writes_each_dimension_table(self):
+        foo_meta, bar_meta = MagicMock(), MagicMock()
+        writer = MagicMock()
+        writer.extract_metadata_schema_and_output_uri.return_value = ("schema", "uri")
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+
+        persist_dimensions_full({"FOO": foo_meta, "BAR": bar_meta}, _FakeType, factory)
+
+        # Distinct dim tables (foo_dim, bar_dim) → one write each.
+        assert writer.write.call_count == 2
+
+
+class TestPersistFactsIncremental:
+    def _patch_factory(self, writer):
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+        return patch(
+            "impulse_reporting.persist.report_storage.WriterFactory", return_value=factory
+        )
+
+    @staticmethod
+    def _delete_condition_strs(call):
+        """Stringify the delete_conditions Columns of a merge_incremental call."""
+        return sorted(str(c) for c in call.kwargs["delete_conditions"])
+
+    def test_changed_and_unchanged_merged_in_one_call(self):
+        # Changed (all containers) + unchanged (processed) union into a single
+        # MERGE; delete scope covers both updated containers and changed ids.
+        changed, unchanged, unioned = MagicMock(), MagicMock(), MagicMock()
+        changed.unionByName.return_value = unioned
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": changed, "unchanged": unchanged}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["container_id", "channel_id", "tstart"],
+                changed_ids={"FOO": [1, 2]},
+                has_processed_containers=True,
+                updated_container_ids=[10, 20],
+            )
+
+        sink.replace_by_ids.assert_not_called()  # method no longer exists on the sink
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        # Source is the changed ∪ unchanged union; keys forwarded.
+        changed.unionByName.assert_called_once_with(unchanged)
+        assert call.args == (unioned, "uri", ["container_id", "channel_id", "tstart"])
+        assert self._delete_condition_strs(call) == sorted(
+            [
+                str(F.col("target.container_id").isin([10, 20])),
+                str(F.col("target.channel_id").isin([1, 2])),
+            ]
+        )
+
+    def test_new_only_container_merges_without_container_delete(self):
+        # A brand-new container (processed but not updated) must still be inserted,
+        # but carries NO container-scoped delete (it has no gold rows to prune).
+        unchanged = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": None, "unchanged": unchanged}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[],
+            )
+
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (unchanged, "uri", ["channel_id"])
+        # Nothing to delete: new container, no changed ids.
+        assert self._delete_condition_strs(call) == []
+
+    def test_changed_only_scopes_delete_by_changed_ids(self):
+        # No processed containers, but a changed definition → still merges,
+        # deleting stale rows only for the changed entity ids.
+        changed = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": changed, "unchanged": None}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={"FOO": [7]},
+                has_processed_containers=False,
+                updated_container_ids=[],
+            )
+
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (changed, "uri", ["channel_id"])
+        assert self._delete_condition_strs(call) == [str(F.col("target.channel_id").isin([7]))]
+
+    def test_changed_skipped_when_type_not_in_changed_ids(self):
+        # Changed df present but not listed in changed_ids and nothing processed
+        # → no work → skipped entirely.
+        changed = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": changed, "unchanged": None}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=False,
+                updated_container_ids=[],
+            )
+
+        sink.merge_incremental.assert_not_called()
+
+    def test_none_value_is_a_noop(self):
+        # A type whose fact value is None triggers no merge.
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": None},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
+            )
+
+        sink.merge_incremental.assert_not_called()
+
+    def test_no_processed_and_no_changed_is_skipped(self):
+        # Unchanged df but nothing processed and nothing changed → skipped,
+        # keeping gold byte-identical.
+        unchanged = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": None, "unchanged": unchanged}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=False,
+                updated_container_ids=[],
+            )
+
+        sink.merge_incremental.assert_not_called()
+
+    def test_bare_df_is_merged(self):
+        bare = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": bare},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
+            )
+
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (bare, "uri", ["channel_id"])
+        assert self._delete_condition_strs(call) == [str(F.col("target.container_id").isin([10]))]
+
+    def test_callable_merge_keys_resolved_per_type(self):
+        unchanged = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        def keys_for(entity_type):
+            return ["container_id", entity_type.name.lower()]
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": {"changed": None, "unchanged": unchanged}},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="id",
+                merge_keys=keys_for,
+                changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
+            )
+
+        sink.merge_incremental.assert_called_once()
+        assert sink.merge_incremental.call_args.args == (
+            unchanged,
+            "uri",
+            ["container_id", "foo"],
+        )
+
+    def test_custom_container_id_col_used_in_delete_scope(self):
+        bare = MagicMock()
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {"FOO": bare},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="channel_id",
+                merge_keys=["channel_id"],
+                changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
+                container_id_col="cont_id",
+            )
+
+        call = sink.merge_incremental.call_args
+        assert self._delete_condition_strs(call) == [str(F.col("target.cont_id").isin([10]))]
+
+    def test_shared_table_changed_types_union_into_one_merge(self):
+        # FOO and BAR share `shared_fact`: their changed DFs union into a single
+        # MERGE with the combined changed-id delete scope.
+        foo_changed, bar_changed, unioned = MagicMock(), MagicMock(), MagicMock()
+        foo_changed.unionByName.return_value = unioned
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {
+                    "FOO": {"changed": foo_changed, "unchanged": None},
+                    "BAR": {"changed": bar_changed, "unchanged": None},
+                },
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="visual_id",
+                merge_keys=["visual_id"],
+                changed_ids={"FOO": [1], "BAR": [2]},
+                has_processed_containers=False,
+                updated_container_ids=[],
+            )
+
+        # Single MERGE over the shared table with the unioned DF + combined ids.
+        foo_changed.unionByName.assert_called_once_with(bar_changed)
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (unioned, "uri", ["visual_id"])
+        assert self._delete_condition_strs(call) == [str(F.col("target.visual_id").isin([1, 2]))]
+
+    def test_shared_table_unchanged_types_union_into_one_merge(self):
+        # FOO and BAR unchanged dfs both target `shared_fact` → unioned into a
+        # single MERGE (no per-type clobber), scoped to updated containers.
+        foo_unchanged, bar_unchanged, unioned = MagicMock(), MagicMock(), MagicMock()
+        foo_unchanged.unionByName.return_value = unioned
+        writer = MagicMock()
+        writer.extract_fact_schema_and_output_uri.return_value = ("schema", "uri")
+        sink = MagicMock()
+
+        with self._patch_factory(writer):
+            persist_facts_incremental(
+                {
+                    "FOO": {"changed": None, "unchanged": foo_unchanged},
+                    "BAR": {"changed": None, "unchanged": bar_unchanged},
+                },
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                id_column="visual_id",
+                merge_keys=["visual_id"],
+                changed_ids={},
+                has_processed_containers=True,
+                updated_container_ids=[10],
+            )
+
+        foo_unchanged.unionByName.assert_called_once_with(bar_unchanged)
+        sink.merge_incremental.assert_called_once()
+        call = sink.merge_incremental.call_args
+        assert call.args == (unioned, "uri", ["visual_id"])
+        assert self._delete_condition_strs(call) == [str(F.col("target.container_id").isin([10]))]
+
+
+class TestPersistDimensionsIncremental:
+    def test_upserts_each_type_with_merge_keys(self):
+        foo_meta = MagicMock()
+        writer = MagicMock()
+        writer.extract_metadata_schema_and_output_uri.return_value = ("schema", "uri")
+        factory = MagicMock()
+        factory.create_writer.return_value = writer
+        sink = MagicMock()
+
+        with patch("impulse_reporting.persist.report_storage.WriterFactory", return_value=factory):
+            persist_dimensions_incremental(
+                {"FOO": foo_meta},
+                _FakeType,
+                sink,
+                lambda df, _schema: df,
+                merge_keys=["channel_id"],
+            )
+
+        sink.upsert.assert_called_once_with(foo_meta, "uri", ["channel_id"])
+
+
+class TestPersistChannelMetrics:
+    """Tests for the persist_channel_metrics free function (mock-based)."""
+
+    def _mocks(self):
+        combined = MagicMock(spec=DataFrame)
+        combined.transform.return_value = combined  # add_meta_information passthrough
+        transformer = MagicMock()
+        transformer.concat_dataframes.return_value = combined
+        type_enum = MagicMock()
+        type_enum.__getitem__.return_value.get_metrics_table_name.return_value = "metrics"
+        type_enum.get_any_for_metrics_table.return_value = "entity"
+        sink = MagicMock()
+        sink.config.get_output_uri_channel_metrics_table.return_value = "cat.sch.metrics"
+        return combined, transformer, type_enum, sink
+
+    def test_empty_is_noop(self):
+        sink = MagicMock()
+        persist_channel_metrics({}, MagicMock(), sink, MagicMock(), incremental=False)
+        sink.store.assert_not_called()
+        sink.merge_incremental.assert_not_called()
+
+    def test_full_mode_overwrites(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df}, type_enum, sink, transformer, incremental=False
+        )
+
+        sink.store.assert_called_once_with(combined, "cat.sch.metrics")
+        sink.merge_incremental.assert_not_called()
+
+    def test_incremental_merges_with_keys_and_delete_scope(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df},
+            type_enum,
+            sink,
+            transformer,
+            incremental=True,
+            updated_container_ids=[1, 2],
+        )
+
+        sink.store.assert_not_called()
+        args, kwargs = sink.merge_incremental.call_args
+        assert args[0] is combined
+        assert args[1] == "cat.sch.metrics"
+        assert args[2] == ["container_id", "channel_id"]
+        # updated containers → one delete-by-source predicate.
+        assert len(kwargs["delete_conditions"]) == 1
+
+    def test_incremental_without_updated_containers_has_no_delete_scope(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df}, type_enum, sink, transformer, incremental=True
+        )
+
+        _args, kwargs = sink.merge_incremental.call_args
+        assert kwargs["delete_conditions"] == []

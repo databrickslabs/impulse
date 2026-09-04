@@ -15,8 +15,31 @@ properties on :class:`SolverConfig`.
 """
 
 import json
+from enum import StrEnum
 
 from pydantic import BaseModel
+
+
+class RawEncoder(StrEnum):
+    """Encoder used to convert RAW point data into intervals for solving.
+
+    Only relevant when the query engine operates on RAW (point) data; RLE input
+    is passed through unchanged regardless of this setting.
+
+    Values
+    ------
+    RLE
+        Run-length encode: collapse consecutive samples that share the same
+        ``value`` within a container/channel into a single interval (see
+        :class:`~impulse_query_engine.analyze.query.solvers.utils.rle_encoder.RleEncoder`).
+    INTERVAL
+        Derive ``tend`` from the following sample's timestamp and drop exact
+        duplicate points, *without* merging equal-valued runs (see
+        :class:`~impulse_query_engine.analyze.query.solvers.utils.interval_encoder.IntervalEncoder`).
+    """
+
+    RLE = "RLE"
+    INTERVAL = "INTERVAL"
 
 
 class TableConfig(BaseModel):
@@ -120,6 +143,7 @@ class SolverConfig(BaseModel):
     channel_metrics: TableConfig = TableConfig()
     channel_mapping: ChannelMappingConfig = ChannelMappingConfig()
     channels: TableConfig = TableConfig()
+    poi_channels: TableConfig = TableConfig()
     unit_conversion: TableConfig = TableConfig()
 
     # ------------------------------------------------------------------
@@ -207,6 +231,21 @@ class SolverConfig(BaseModel):
     def value_col(self) -> str:
         """Internal column name for the signal value on the channels table."""
         return "value"
+
+    @property
+    def poi_timestamp_col(self) -> str:
+        """Internal column name for the point timestamp on the poi_channels table."""
+        return "timestamp"
+
+    @property
+    def poi_value_double_col(self) -> str:
+        """Internal column name for the numeric value on the poi_channels table."""
+        return "value_double"
+
+    @property
+    def poi_value_string_col(self) -> str:
+        """Internal column name for the string value on the poi_channels table."""
+        return "value_string"
 
     @property
     def tag_key_col(self) -> str:
@@ -318,6 +357,16 @@ class SolverConfig(BaseModel):
         return "group_id"
 
     @property
+    def timestamp_col(self) -> str:
+        """Internal column name for the timestamp on the channels table for raw encoded channel data."""
+        return "timestamp"
+
+    @property
+    def is_plausible_col(self) -> str:
+        """Internal column name for the plausibility flag on the channels table for raw encoded channel data."""
+        return "is_plausible"
+
+    @property
     def effective_alias_join_keys(self) -> list[tuple[str, str]]:
         """Return the resolved alias-resolution join keys as ``(mapping_col, metrics_col)`` tuples.
 
@@ -346,4 +395,8 @@ class SolverConfig(BaseModel):
             "te": self.tend_col,
             "val": self.value_col,
             "conv": self.conversion_factor_col,
+            # String POI slices read their value from this column. Series-type
+            # dispatch is driven by the selector (passed to load_blob), so no
+            # per-row series_type / dtype marker column is needed in the frame.
+            "value_string": self.poi_value_string_col,
         }

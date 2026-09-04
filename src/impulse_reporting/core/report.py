@@ -1,6 +1,5 @@
 import json
 import zlib
-from functools import reduce
 from typing import Any
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
@@ -14,6 +13,7 @@ from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSol
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_reporting.aggregations.aggregation_types import AggregationType
+from impulse_reporting.channels.channel_types import ChannelType
 from impulse_reporting.config.config_parser import (
     ImpulseConfig,
     Solvers,
@@ -21,10 +21,21 @@ from impulse_reporting.config.config_parser import (
 )
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report_utils import (
+    build_metadata_dfs,
     cleanup_temp_tables,
     collect_solvable_expressions,
     dispatch_aggregations,
+    dispatch_calculated_channel_metrics,
+    dispatch_calculated_channels,
     dispatch_events,
+    group_selectables_by_type,
+    merge_changed_unchanged,
+    persist_channel_metrics,
+    persist_dimensions_full,
+    persist_dimensions_incremental,
+    persist_facts_full,
+    persist_facts_incremental,
+    solve_calculated_channels_batched,
     solve_expressions_batched,
     split_by_hash_change,
 )
@@ -90,14 +101,19 @@ class Report:
 
         self.pages = []
         self.events = []
+        self.calculated_channels = []
 
         self.event_dfs = {}
         self.event_metadata_dfs = {}
         self.aggregation_dfs = {}
         self.aggregation_metadata_dfs = {}
+        self.calculated_channel_dfs = {}
+        self.calculated_channel_metadata_dfs = {}
+        self.calculated_channel_metrics_dfs = {}
         self.container_dimension_df = None
         self.channel_mapping_resolution_dimension_df = None
         self._is_incremental = None
+        self._changed_channel_ids = {}
 
         if config:
             self.config = Report.load_config_from_dict(config)
@@ -322,6 +338,7 @@ class Report:
                     config=config.query_engine.solver_config,
                     is_raw_data=config.query_engine.data_type is DataType.RAW,
                     drop_implausible_data=config.query_engine.drop_implausible_data,
+                    raw_encoder=config.query_engine.raw_encoder,
                     enable_predicate_pushdown=config.query_engine.enable_predicate_pushdown,
                 )
             case _:
@@ -424,13 +441,69 @@ class Report:
         dict
             Dictionary mapping event type names to lists of events.
         """
-        event_types = {event_type.name: [] for event_type in EventType}
-        for event in self.events:
-            for event_type in event_types.keys():
-                if isinstance(event, EventType[event_type].value):
-                    event_types[event_type].append(event)
-                    break
-        return event_types
+        return group_selectables_by_type(self.events, EventType)
+
+    def add_calculated_channel(self, channel):
+        """
+        Add a calculated channel to the report.
+
+        Parameters
+        ----------
+        channel : CalculatedChannel
+            The calculated channel to add.
+
+        Returns
+        -------
+        None
+        """
+        self.calculated_channels.append(channel)
+        channel.set_report_id(self.report_id)
+
+    def get_calculated_channels(self) -> list:
+        """
+        Get the list of calculated channels associated with the report.
+
+        Returns
+        -------
+        list of CalculatedChannel
+            List of calculated channels.
+        """
+        return self.calculated_channels
+
+    def _validate_unique_calculated_channels(self):
+        """
+        Reject calculated channels that share a canonical identity.
+
+        ``channel_id`` is derived from the identity, so two channels with the
+        same identity would collide on the fact-table merge key
+        ``(container_id, channel_id, tstart)`` and overwrite each other
+        non-deterministically. Fail fast, naming the colliding identity and the
+        offending channel names.
+
+        Raises
+        ------
+        ValueError
+            If any canonical identity appears on more than one registered
+            calculated channel.
+        """
+        names_by_identity: dict[str, list[str]] = {}
+        for channel in self.calculated_channels:
+            names_by_identity.setdefault(channel.canonical_identity(), []).append(
+                channel.get_name()
+            )
+
+        duplicates = {
+            identity: names for identity, names in names_by_identity.items() if len(names) > 1
+        }
+        if duplicates:
+            details = "; ".join(
+                f"identity [{identity}] used by channels {names}"
+                for identity, names in duplicates.items()
+            )
+            raise ValueError(
+                "Calculated channels must have unique identities — each identity maps "
+                f"to one channel_id and one set of fact rows. Duplicates found: {details}."
+            )
 
     def _group_aggregations_by_type(self):
         """
@@ -441,14 +514,8 @@ class Report:
         dict
             Dictionary mapping aggregation type names to lists of aggregations.
         """
-        agg_types = {agg_type.name: [] for agg_type in AggregationType}
-        for page in self.pages:
-            for aggregation in page.aggregations:
-                for agg_type in agg_types.keys():
-                    if isinstance(aggregation, AggregationType[agg_type].value):
-                        agg_types[agg_type].append(aggregation)
-                        break
-        return agg_types
+        aggregations = [agg for page in self.pages for agg in page.aggregations]
+        return group_selectables_by_type(aggregations, AggregationType)
 
     def _validate_aggregation_events(self) -> None:
         """
@@ -484,13 +551,22 @@ class Report:
             raise ValueError(error_message)
 
     @telemetry_logger("report", "persist_results")
-    def persist_results(self):
+    def persist_results(self, cleanup_temp_tables: bool | None = None):
         """
         Persist report results using appropriate strategy based on definition changes.
 
         Uses tracked state from determine_report() to decide persistence strategy:
         - Changed definitions: replaceWhere (atomic delete + insert)
         - Unchanged definitions: MERGE (upsert)
+
+        Parameters
+        ----------
+        cleanup_temp_tables : bool, optional
+            Whether to drop the batch-solving ``__impulse_temp_*`` tables from the
+            sink schema after persistence completes successfully.
+            - True/False: use this value, overriding the config flag.
+            - None (default): fall back to ``config.unity_sink.cleanup_temp_tables``
+              (which itself defaults to False).
 
         Returns
         -------
@@ -502,11 +578,28 @@ class Report:
         # Use tracked state from determine_report
         changed_aggregation_ids = getattr(self, "_changed_aggregation_ids", {})
         changed_event_ids = getattr(self, "_changed_event_ids", {})
+        changed_channel_ids = getattr(self, "_changed_channel_ids", {})
 
         if self._is_incremental:
-            self._persist_incremental(changed_aggregation_ids, changed_event_ids)
+            self._persist_incremental(
+                changed_aggregation_ids, changed_event_ids, changed_channel_ids
+            )
         else:
             self._persist_full()
+
+        # Only drop the current run's temp tables once persistence has succeeded.
+        if self._resolve_cleanup_temp_tables(cleanup_temp_tables):
+            self._cleanup_temp_tables()
+
+    def _resolve_cleanup_temp_tables(self, cleanup: bool | None) -> bool:
+        """Resolve whether to drop temp tables: explicit arg wins, else config flag.
+
+        ``self.config.unity_sink`` is guaranteed non-None when called, since
+        ``persist_results`` returns early unless a sink is configured.
+        """
+        if cleanup is not None:
+            return cleanup
+        return bool(self.config.unity_sink.cleanup_temp_tables)
 
     def _persist_full(self):
         """
@@ -518,84 +611,30 @@ class Report:
         """
         storage_factory = WriterFactory(self.sink)
 
-        # aggregation fact tables — group by output table to handle shared tables
-        # (e.g. StatsAggregator and PointValueAggregator both write stats_aggregator_fact)
-        agg_fact_by_table = {}
-        for aggregation_type_str, aggregation_dfs in self.aggregation_dfs.items():
-            table_name = AggregationType[aggregation_type_str].get_fact_table_name()
-            agg_fact_by_table.setdefault(table_name, [])
+        # aggregation fact + dimension tables — grouped by output table so shared
+        # tables (e.g. StatsAggregator + PointValueAggregator → stats_aggregator_fact)
+        # are written together.
+        persist_facts_full(self.aggregation_dfs, AggregationType, storage_factory)
+        persist_dimensions_full(self.aggregation_metadata_dfs, AggregationType, storage_factory)
 
-            # Handle both dict format (from incremental mode) and DataFrame format
-            if isinstance(aggregation_dfs, dict):
-                if aggregation_dfs.get("changed") is not None:
-                    agg_fact_by_table[table_name].append(aggregation_dfs["changed"])
-                if aggregation_dfs.get("unchanged") is not None:
-                    agg_fact_by_table[table_name].append(aggregation_dfs["unchanged"])
-            else:
-                agg_fact_by_table[table_name].append(aggregation_dfs)
+        # event fact + dimension tables — grouped by output table to handle mixed
+        # event types sharing a table.
+        persist_facts_full(self.event_dfs, EventType, storage_factory)
+        persist_dimensions_full(self.event_metadata_dfs, EventType, storage_factory)
 
-        for table_name, agg_dfs_list in agg_fact_by_table.items():
-            if not agg_dfs_list:
-                continue
-            aggregation_type = AggregationType.get_any_for_fact_table(table_name)
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(aggregation_type)
-            writer.write(agg_dfs_list, schema=schema, uri=uri)
+        # calculated channel fact + dimension tables
+        persist_facts_full(self.calculated_channel_dfs, ChannelType, storage_factory)
+        persist_dimensions_full(self.calculated_channel_metadata_dfs, ChannelType, storage_factory)
 
-        # aggregation dimension tables — group by output table to handle shared tables
-        agg_dim_by_table = {}
-        for (
-            aggregation_type_str,
-            aggregation_metadata_dfs,
-        ) in self.aggregation_metadata_dfs.items():
-            table_name = AggregationType[aggregation_type_str].get_dimension_table_name()
-            agg_dim_by_table.setdefault(table_name, [])
-            agg_dim_by_table[table_name].append(aggregation_metadata_dfs)
-
-        for table_name, agg_meta_dfs_list in agg_dim_by_table.items():
-            if not agg_meta_dfs_list:
-                continue
-            aggregation_type = AggregationType.get_any_for_dimension_table(table_name)
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(aggregation_type)
-            writer.write(agg_meta_dfs_list, schema=schema, uri=uri)
-
-        # event fact tables — group by output table to handle mixed event types
-        event_fact_by_table = {}
-        for event_type_str, event_dfs in self.event_dfs.items():
-            table_name = EventType[event_type_str].get_fact_table_name()
-            event_fact_by_table.setdefault(table_name, [])
-
-            if isinstance(event_dfs, dict):
-                if event_dfs.get("changed") is not None:
-                    event_fact_by_table[table_name].append(event_dfs["changed"])
-                if event_dfs.get("unchanged") is not None:
-                    event_fact_by_table[table_name].append(event_dfs["unchanged"])
-            else:
-                event_fact_by_table[table_name].append(event_dfs)
-
-        for table_name, event_dfs_list in event_fact_by_table.items():
-            if not event_dfs_list:
-                continue
-            event_type = EventType.get_any_for_fact_table(table_name)
-            writer = storage_factory.create_writer(event_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(event_type)
-            writer.write(event_dfs_list, schema=schema, uri=uri)
-
-        # event dimension tables — group by output table to handle mixed event types
-        event_dim_by_table = {}
-        for event_type_str, event_metadata_dfs in self.event_metadata_dfs.items():
-            table_name = EventType[event_type_str].get_dimension_table_name()
-            event_dim_by_table.setdefault(table_name, [])
-            event_dim_by_table[table_name].append(event_metadata_dfs)
-
-        for table_name, event_meta_dfs_list in event_dim_by_table.items():
-            if not event_meta_dfs_list:
-                continue
-            event_type = EventType.get_any_for_dimension_table(table_name)
-            writer = storage_factory.create_writer(event_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(event_type)
-            writer.write(event_meta_dfs_list, schema=schema, uri=uri)
+        # optional calculated channel metrics table (dynamic schema — stored
+        # directly without the fixed-schema projecting writer)
+        persist_channel_metrics(
+            self.calculated_channel_metrics_dfs,
+            ChannelType,
+            self.sink,
+            ReportEntityTransformer(),
+            incremental=False,
+        )
 
         # persist measurement dimensions
         if self.container_dimension_df:
@@ -614,6 +653,7 @@ class Report:
         self,
         changed_aggregation_ids: dict[str, list[int]],
         changed_event_ids: dict[str, list[int]],
+        changed_channel_ids: dict[str, list[int]] = None,
     ):
         """
         Persist results using incremental strategy.
@@ -626,129 +666,102 @@ class Report:
             Mapping of aggregation type to list of visual_ids with changed definitions.
         changed_event_ids : dict[str, list[int]]
             Mapping of event type to list of event_ids with changed definitions.
+        changed_channel_ids : dict[str, list[int]], optional
+            Mapping of channel type to list of channel_ids with changed definitions.
 
         Returns
         -------
         None
         """
+        changed_channel_ids = changed_channel_ids or {}
+        has_processed_containers = getattr(self, "_has_processed_containers", False)
+        updated_container_ids = getattr(self, "_updated_container_ids", [])
         storage_factory = WriterFactory(self.sink)
         transformer = ReportEntityTransformer()
 
-        # Persist aggregation facts
-        for aggregation_type_str, agg_data in self.aggregation_dfs.items():
-            aggregation_type = AggregationType[aggregation_type_str]
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(aggregation_type)
-            merge_keys = self._get_aggregation_merge_keys(aggregation_type)
+        def _transform(df, schema):
+            return self._transform_for_persistence(df, schema, transformer)
 
-            if isinstance(agg_data, dict):
-                # Structured format: {'changed': df, 'unchanged': df}
-                changed_df = agg_data.get("changed")
-                unchanged_df = agg_data.get("unchanged")
+        # Persist aggregation facts + dimensions. StatsAggregator and
+        # PointValueAggregator share stats_aggregator_fact, so facts group by
+        # table; merge keys are per-type (via _get_aggregation_merge_keys).
+        persist_facts_incremental(
+            self.aggregation_dfs,
+            AggregationType,
+            self.sink,
+            _transform,
+            id_column="visual_id",
+            merge_keys=self._get_aggregation_merge_keys,
+            changed_ids=changed_aggregation_ids,
+            has_processed_containers=has_processed_containers,
+            updated_container_ids=updated_container_ids,
+        )
+        persist_dimensions_incremental(
+            self.aggregation_metadata_dfs,
+            AggregationType,
+            self.sink,
+            _transform,
+            merge_keys=["visual_id"],
+        )
 
-                # Changed definitions: replaceWhere (atomic)
-                if changed_df is not None and aggregation_type_str in changed_aggregation_ids:
-                    changed_ids = changed_aggregation_ids[aggregation_type_str]
-                    # Transform and enrich the DataFrame before persisting
-                    df_enriched = self._transform_for_persistence(changed_df, schema, transformer)
-                    self.sink.replace_by_ids(
-                        df=df_enriched,
-                        uri=uri,
-                        id_column="visual_id",
-                        ids_to_replace=changed_ids,
-                    )
+        # Persist event facts + dimensions. Mixed event types share
+        # event_instance_fact, so facts group by table and union changed defs
+        # before a single replaceWhere.
+        persist_facts_incremental(
+            self.event_dfs,
+            EventType,
+            self.sink,
+            _transform,
+            id_column="event_id",
+            merge_keys=["container_id", "event_id", "event_instance_id"],
+            changed_ids=changed_event_ids,
+            has_processed_containers=has_processed_containers,
+            updated_container_ids=updated_container_ids,
+        )
+        persist_dimensions_incremental(
+            self.event_metadata_dfs,
+            EventType,
+            self.sink,
+            _transform,
+            merge_keys=["event_id"],
+        )
 
-                # Unchanged definitions: MERGE
-                if unchanged_df is not None:
-                    df_enriched = self._transform_for_persistence(
-                        unchanged_df, schema, transformer
-                    )
-                    self.sink.upsert(df_enriched, uri, merge_keys)
-            else:
-                # Backward compatibility: single DataFrame - use MERGE
-                df_enriched = self._transform_for_persistence(agg_data, schema, transformer)
-                self.sink.upsert(df_enriched, uri, merge_keys)
+        # Persist calculated channel facts + dimensions
+        persist_facts_incremental(
+            self.calculated_channel_dfs,
+            ChannelType,
+            self.sink,
+            _transform,
+            id_column="channel_id",
+            merge_keys=["container_id", "channel_id", "tstart"],
+            changed_ids=changed_channel_ids,
+            has_processed_containers=has_processed_containers,
+            updated_container_ids=updated_container_ids,
+        )
+        persist_dimensions_incremental(
+            self.calculated_channel_metadata_dfs,
+            ChannelType,
+            self.sink,
+            _transform,
+            merge_keys=["channel_id"],
+        )
 
-        # Persist aggregation dimensions (always upsert by visual_id)
-        for (
-            aggregation_type_str,
-            aggregation_metadata_df,
-        ) in self.aggregation_metadata_dfs.items():
-            aggregation_type = AggregationType[aggregation_type_str]
-            writer = storage_factory.create_writer(aggregation_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(aggregation_type)
-            df_enriched = self._transform_for_persistence(
-                aggregation_metadata_df, schema, transformer
-            )
-            self.sink.upsert(df_enriched, uri, ["visual_id"])
+        # Optional calculated channel metrics table (dynamic schema — merged
+        # directly, scoping the delete-by-source to updated containers).
+        persist_channel_metrics(
+            self.calculated_channel_metrics_dfs,
+            ChannelType,
+            self.sink,
+            transformer,
+            incremental=True,
+            updated_container_ids=updated_container_ids,
+        )
 
-        # Persist event facts — group by output table to handle mixed event types
-        event_fact_changed_by_table: dict[str, list] = {}
-        event_fact_unchanged_by_table: dict[str, list] = {}
-        event_changed_ids_by_table: dict[str, list[int]] = {}
-        for event_type_str, event_data in self.event_dfs.items():
-            table_name = EventType[event_type_str].get_fact_table_name()
-
-            if isinstance(event_data, dict):
-                changed_df = event_data.get("changed")
-                unchanged_df = event_data.get("unchanged")
-
-                if changed_df is not None and event_type_str in changed_event_ids:
-                    event_fact_changed_by_table.setdefault(table_name, []).append(changed_df)
-                    event_changed_ids_by_table.setdefault(table_name, []).extend(
-                        changed_event_ids[event_type_str]
-                    )
-
-                if unchanged_df is not None:
-                    event_fact_unchanged_by_table.setdefault(table_name, []).append(unchanged_df)
-            else:
-                event_fact_unchanged_by_table.setdefault(table_name, []).append(event_data)
-
-        for table_name in set(
-            list(event_fact_changed_by_table.keys()) + list(event_fact_unchanged_by_table.keys())
-        ):
-            event_type = EventType.get_any_for_fact_table(table_name)
-            writer = storage_factory.create_writer(event_type)
-            schema, uri = writer.extract_fact_schema_and_output_uri(event_type)
-            merge_keys = ["container_id", "event_id", "event_instance_id"]
-
-            # Changed definitions: replaceWhere (atomic)
-            changed_dfs = event_fact_changed_by_table.get(table_name, [])
-            changed_ids = event_changed_ids_by_table.get(table_name, [])
-            if changed_dfs and changed_ids:
-                transformed = [
-                    self._transform_for_persistence(cdf, schema, transformer)
-                    for cdf in changed_dfs
-                ]
-                combined_df = reduce(lambda a, b: a.unionByName(b), transformed)
-                self.sink.replace_by_ids(
-                    df=combined_df,
-                    uri=uri,
-                    id_column="event_id",
-                    ids_to_replace=changed_ids,
-                )
-
-            # Unchanged definitions: MERGE
-            unchanged_dfs = event_fact_unchanged_by_table.get(table_name, [])
-            for udf in unchanged_dfs:
-                df_enriched = self._transform_for_persistence(udf, schema, transformer)
-                self.sink.upsert(df_enriched, uri, merge_keys)
-
-        # Persist event dimensions — group by output table to handle mixed event types
-        event_dim_by_table: dict[str, list] = {}
-        for event_type_str, event_metadata_df in self.event_metadata_dfs.items():
-            table_name = EventType[event_type_str].get_dimension_table_name()
-            event_dim_by_table.setdefault(table_name, []).append(event_metadata_df)
-
-        for table_name, event_meta_dfs_list in event_dim_by_table.items():
-            event_type = EventType.get_any_for_dimension_table(table_name)
-            writer = storage_factory.create_writer(event_type)
-            schema, uri = writer.extract_metadata_schema_and_output_uri(event_type)
-            for mdf in event_meta_dfs_list:
-                df_enriched = self._transform_for_persistence(mdf, schema, transformer)
-                self.sink.upsert(df_enriched, uri, ["event_id"])
-
-        # Persist measurement dimension (upsert by container_id)
+        # Persist the measurement dimension LAST (as ``_persist_full`` does). It
+        # holds the gold timestamp that container-update detection compares
+        # against; the fact solves above are lazy, so writing it earlier would
+        # bump that timestamp before they materialize and drop the containers
+        # being reprocessed.
         if self.container_dimension_df:
             writer = storage_factory.create_container_dimension_writer()
             uri = writer.get_output_uri()
@@ -877,6 +890,28 @@ class Report:
             pre_filtered_containers_df=pre_filtered_containers_df,
         )
 
+    def _solve_calculated_channels_batched(
+        self,
+        qe_channels: list,
+        pre_filtered_containers_df: DataFrame = None,
+    ) -> DataFrame | None:
+        """Solve calculated channels in configurable batches; return the unioned rows.
+
+        Narrow counterpart to :meth:`_solve_expressions_batched`; delegates to
+        :func:`solve_calculated_channels_batched` in ``report_utils``.
+        """
+        return solve_calculated_channels_batched(
+            spark=self.spark,
+            qe_channels=qe_channels,
+            query=self.query,
+            solver=self.solver,
+            batch_size=self.config.query_engine.batch_size,
+            has_sink=self._has_sink,
+            catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
+            schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
+            pre_filtered_containers_df=pre_filtered_containers_df,
+        )
+
     @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
         """
@@ -916,10 +951,23 @@ class Report:
         # Determine processing mode: config overrides signature, gold must exist
         self._is_incremental = self._resolve_is_incremental(is_incremental)
 
-        # Detect containers to process (incremental mode only)
+        # Detect containers to process (incremental mode only): new + updated.
         pre_filtered_containers_df = None
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
+
+        # Two signals for persistence:
+        # - has_processed_containers (new + updated): gates whether a fact table is
+        #   written (new containers must be inserted). Only a bool is needed, so
+        #   probe emptiness with isEmpty() rather than collecting the whole id list.
+        # - updated container ids: scopes the delete-by-source, since only
+        #   containers that already have gold rows can have stale rows to prune.
+        self._has_processed_containers = (
+            pre_filtered_containers_df is not None and not pre_filtered_containers_df.isEmpty()
+        )
+        self._updated_container_ids = self._collect_container_ids(
+            self._detect_updated_containers() if self._is_incremental else None
+        )
 
         hash_comparator = DefinitionHashComparator(self.spark)
 
@@ -930,7 +978,7 @@ class Report:
         # Split changed/unchanged definitions
         changed_events_by_type, unchanged_events_by_type, self._changed_event_ids = (
             split_by_hash_change(
-                events_by_type, EventType, self.sink, self.spark, hash_comparator, is_event=True
+                events_by_type, EventType, self.sink, self.spark, hash_comparator, kind="event"
             )
         )
         changed_aggs_by_type, unchanged_aggs_by_type, self._changed_aggregation_ids = (
@@ -940,7 +988,7 @@ class Report:
                 self.sink,
                 self.spark,
                 hash_comparator,
-                is_event=False,
+                kind="aggregation",
             )
         )
 
@@ -982,25 +1030,10 @@ class Report:
             ContainerEvent,
         )
 
-        # Merge event results into {type: {"changed": df, "unchanged": df}}
-        event_dfs = {}
-        all_event_types = set(list(changed_event_dfs.keys()) + list(unchanged_event_dfs.keys()))
-        for t in all_event_types:
-            event_dfs[t] = {
-                "changed": changed_event_dfs.get(t),
-                "unchanged": unchanged_event_dfs.get(t),
-            }
-
-        # Metadata: merge from all events (changed + unchanged)
-        event_metadata_dfs = {}
-        for event_name, events_list in events_by_type.items():
-            if not events_list:
-                continue
-            cls = EventType[event_name].value
-            event_metadata_dfs[event_name] = cls.determine_metadata_df(self.spark, events_list)
-
-        self.event_dfs = event_dfs
-        self.event_metadata_dfs = event_metadata_dfs
+        # Merge event results into {type: {"changed": df, "unchanged": df}} and
+        # build event dimensions from all (changed + unchanged) events.
+        self.event_dfs = merge_changed_unchanged(changed_event_dfs, unchanged_event_dfs)
+        self.event_metadata_dfs = build_metadata_dfs(events_by_type, EventType, self.spark)
 
         # Dispatch aggregations
         changed_agg_dfs = dispatch_aggregations(
@@ -1016,25 +1049,91 @@ class Report:
             unchanged_solved_df,
         )
 
-        # Merge aggregation results
-        aggregation_dfs = {}
-        all_agg_types = set(list(changed_agg_dfs.keys()) + list(unchanged_agg_dfs.keys()))
-        for t in all_agg_types:
-            aggregation_dfs[t] = {
-                "changed": changed_agg_dfs.get(t),
-                "unchanged": unchanged_agg_dfs.get(t),
-            }
+        # Merge aggregation results and build aggregation dimensions from all.
+        self.aggregation_dfs = merge_changed_unchanged(changed_agg_dfs, unchanged_agg_dfs)
+        self.aggregation_metadata_dfs = build_metadata_dfs(
+            aggs_by_type, AggregationType, self.spark
+        )
 
-        # Metadata: merge from all aggregations
-        aggregation_metadata_dfs = {}
-        for agg_name, agg_list in aggs_by_type.items():
-            if not agg_list:
-                continue
-            cls = AggregationType[agg_name].value
-            aggregation_metadata_dfs[agg_name] = cls.determine_metadata_df(self.spark, agg_list)
+        # Calculated channels: own narrow batched solve driven here (mirrors the
+        # wide expression solve above), producing a narrow ``solved_df`` that each
+        # channel type then shapes. Changed definitions recompute over all
+        # containers; unchanged ones over the incrementally-detected subset.
+        self._validate_unique_calculated_channels()
+        channels_by_type = group_selectables_by_type(self.calculated_channels, ChannelType)
+        changed_channels_by_type, unchanged_channels_by_type, self._changed_channel_ids = (
+            split_by_hash_change(
+                channels_by_type,
+                ChannelType,
+                self.sink,
+                self.spark,
+                hash_comparator,
+                kind="channel",
+            )
+        )
+        # Collect the query-engine channel expressions across types for the batched
+        # solve (mirrors collect_solvable_expressions for aggregations/events).
+        changed_channel_exprs = [
+            c.expression for cs in changed_channels_by_type.values() for c in cs
+        ]
+        unchanged_channel_exprs = [
+            c.expression for cs in unchanged_channels_by_type.values() for c in cs
+        ]
+        changed_channel_solved_df = self._solve_calculated_channels_batched(
+            changed_channel_exprs, pre_filtered_containers_df=None
+        )
+        unchanged_channel_solved_df = self._solve_calculated_channels_batched(
+            unchanged_channel_exprs, pre_filtered_containers_df=pre_filtered_containers_df
+        )
+        changed_channel_dfs = dispatch_calculated_channels(
+            self.spark,
+            changed_channels_by_type,
+            ChannelType,
+            changed_channel_solved_df,
+        )
+        unchanged_channel_dfs = dispatch_calculated_channels(
+            self.spark,
+            unchanged_channels_by_type,
+            ChannelType,
+            unchanged_channel_solved_df,
+        )
+        self.calculated_channel_dfs = merge_changed_unchanged(
+            changed_channel_dfs, unchanged_channel_dfs
+        )
+        self.calculated_channel_metadata_dfs = build_metadata_dfs(
+            channels_by_type, ChannelType, self.spark
+        )
 
-        self.aggregation_dfs = aggregation_dfs
-        self.aggregation_metadata_dfs = aggregation_metadata_dfs
+        # Optionally derive a silver-shaped channel_metrics table from the fact
+        # rows so the fact + metrics pair can serve as an Impulse silver source.
+        # Identity/attribute columns are derived dynamically; the full per-type
+        # channel list is passed to both buckets so changed/unchanged share a
+        # schema (extra channels are ignored by the fact-driven left join).
+        self.calculated_channel_metrics_dfs = {}
+        if self.config.calculated_channels.emit_channel_metrics:
+            cc = self.config.calculated_channels
+            # Pass the full per-type channel list to both buckets so changed and
+            # unchanged metrics share one schema (extra channels are dropped by the
+            # fact-driven left join in determine_channel_metrics).
+            changed_metrics = dispatch_calculated_channel_metrics(
+                self.spark,
+                channels_by_type,
+                changed_channel_dfs,
+                ChannelType,
+                attribute_columns=cc.attribute_columns,
+                kpis=cc.kpis,
+            )
+            unchanged_metrics = dispatch_calculated_channel_metrics(
+                self.spark,
+                channels_by_type,
+                unchanged_channel_dfs,
+                ChannelType,
+                attribute_columns=cc.attribute_columns,
+                kpis=cc.kpis,
+            )
+            self.calculated_channel_metrics_dfs = merge_changed_unchanged(
+                changed_metrics, unchanged_metrics
+            )
 
         # Determine container dimension
         self.container_dimension_df = ContainerDimension.get_dimension(
@@ -1149,22 +1248,80 @@ class Report:
             DataFrame containing containers to process, or None if gold table
             doesn't exist (indicating full processing is needed).
         """
-        if not self._has_sink:
+        args = self._container_detection_args()
+        if args is None:
             return None
-        detector = ContainerUpsertDetector(self.spark)
-        silver_containers = self.db.container_metrics(self.spark)
-        measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
-
-        # Retrieve configurable column names (default: "last_modified")
-        silver_col = "last_modified"
-        gold_col = "last_modified"
-        if hasattr(self.config, "incremental") and self.config.incremental is not None:
-            silver_col = self.config.incremental.silver_last_modified_column
-            gold_col = self.config.incremental.gold_last_modified_column
-
+        detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
         return detector.detect_upserted_containers(
             silver_containers,
             measurement_dim_table,
             silver_last_modified_col=silver_col,
             gold_last_modified_col=gold_col,
         )
+
+    def _detect_updated_containers(self) -> DataFrame | None:
+        """Detect only UPDATED containers (present in gold, newer silver timestamp).
+
+        Excludes new containers — see
+        ``ContainerUpsertDetector.detect_updated_containers``. Used to scope the
+        incremental delete-by-source. Returns None in sinkless mode or when the
+        gold table doesn't exist.
+
+        Returns
+        -------
+        DataFrame | None
+            Updated containers, or None.
+        """
+        args = self._container_detection_args()
+        if args is None:
+            return None
+        detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
+        return detector.detect_updated_containers(
+            silver_containers,
+            measurement_dim_table,
+            silver_last_modified_col=silver_col,
+            gold_last_modified_col=gold_col,
+        )
+
+    def _container_detection_args(self):
+        """Shared inputs for container detection, or None in sinkless mode.
+
+        Returns
+        -------
+        tuple | None
+            ``(detector, silver_containers_df, measurement_dim_table, silver_col,
+            gold_col)`` — the freshness column names come from the incremental
+            config (default ``"last_modified"``). None when no sink is configured.
+        """
+        if not self._has_sink:
+            return None
+        detector = ContainerUpsertDetector(self.spark)
+        silver_containers = self.db.container_metrics(self.spark)
+        measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
+
+        silver_col = "last_modified"
+        gold_col = "last_modified"
+        if hasattr(self.config, "incremental") and self.config.incremental is not None:
+            silver_col = self.config.incremental.silver_last_modified_column
+            gold_col = self.config.incremental.gold_last_modified_column
+
+        return detector, silver_containers, measurement_dim_table, silver_col, gold_col
+
+    @staticmethod
+    def _collect_container_ids(containers_df: DataFrame | None) -> list:
+        """Collect ``container_id`` values from a detected-containers DataFrame.
+
+        Parameters
+        ----------
+        containers_df : DataFrame | None
+            A detected-containers DataFrame (silver schema, includes
+            ``container_id``), or None.
+
+        Returns
+        -------
+        list
+            Container id values (empty when None).
+        """
+        if containers_df is None:
+            return []
+        return [row["container_id"] for row in containers_df.select("container_id").collect()]

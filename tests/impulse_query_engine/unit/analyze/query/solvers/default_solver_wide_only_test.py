@@ -12,6 +12,8 @@ Covers:
 """
 
 import pandas as pd
+import pyspark.sql.functions as F
+import pytest
 from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -25,7 +27,7 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
     SolverConfig,
     TableConfig,
 )
-from impulse_query_engine.measurement_db import MeasurementDB
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from tests.conftest import basic_narrow_db, spark
 
 # ---------------------------------------------------------------------------
@@ -115,18 +117,121 @@ class TestTimeSeriesCache:
         assert "t_stop" not in cache.mdf.columns
         assert "val" not in cache.mdf.columns
 
-    def test_pdf_sorted_correctly(self):
-        """pdf should be sorted by (container_id, channel_id, tstart) within each group."""
+    def test_mdf_keeps_first_row_per_channel(self):
+        """mdf keeps the first occurrence of per-channel metadata."""
         pdf = _make_channel_pdf()
-        # Scramble order
-        pdf = pdf.sample(frac=1, random_state=0).reset_index(drop=True)
+        pdf["quality"] = ["good", "bad", "ok", "worse"]
         cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
-        # Verify that for each (container_id, channel_id) group, tstarts are sorted
-        for (cid, chid), group in cache.pdf.groupby([cache._cid_col, cache._ch_col]):
-            ts_vals = list(group[cache._ts_col])
-            assert ts_vals == sorted(
-                ts_vals
-            ), f"tstart not sorted for container_id={cid}, channel_id={chid}: {ts_vals}"
+        assert len(cache.mdf) == 2
+        quality = cache.mdf.set_index("channel_id")["quality"]
+        assert quality[10] == "good"
+        assert quality[20] == "ok"
+
+    def test_load_blob_missing_channel_returns_empty(self):
+        """Unknown (container_id, channel_id) yields an empty series."""
+        cache = TimeSeriesCache(_make_channel_pdf(), col_map=DEFAULT_COL_MAP)
+        assert len(cache.load_blob(1, 999)) == 0
+        assert len(cache.load_blob(999, 10)) == 0
+
+    def test_load_blob_applies_conversion_only_for_alias(self):
+        """The per-channel factor multiplies values for aliased reads only."""
+        pdf = _make_channel_pdf()
+        pdf["conversion_factor"] = [2.0, 2.0, 0.5, 0.5]
+        col_map = {**DEFAULT_COL_MAP, "conv": "conversion_factor"}
+        cache = TimeSeriesCache(pdf, col_map=col_map)
+        assert list(cache.load_blob(1, 10, uses_alias=True).values) == [2.0, 4.0]
+        assert list(cache.load_blob(1, 10, uses_alias=False).values) == [1.0, 2.0]
+        assert list(cache.load_blob(2, 20, uses_alias=True).values) == [1.5, 2.0]
+
+    def test_load_blob_nan_conversion_factor_is_noop(self):
+        """A null factor (no conversion resolved) leaves values unchanged."""
+        pdf = _make_channel_pdf()
+        pdf["conversion_factor"] = float("nan")
+        col_map = {**DEFAULT_COL_MAP, "conv": "conversion_factor"}
+        cache = TimeSeriesCache(pdf, col_map=col_map)
+        assert list(cache.load_blob(1, 10, uses_alias=True).values) == [1.0, 2.0]
+
+    def test_load_blob_preserves_input_order_for_duplicate_timestamps(self):
+        """The (cid, ch, tstart) sort must stay stable for equal timestamps."""
+        pdf = pd.DataFrame(
+            {
+                "container_id": [1, 1, 1],
+                "channel_id": [10, 10, 10],
+                "tstart": [0, 0, 100],
+                "tend": [100, 100, 200],
+                "value": [1.0, 2.0, 3.0],
+            }
+        )
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert list(cache.load_blob(1, 10).values) == [1.0, 2.0, 3.0]
+
+    def test_cache_handles_non_default_index(self):
+        """Duplicate / non-monotonic input index must not confuse mdf or load_blob."""
+        pdf = _make_channel_pdf()
+        pdf.index = [7, 3, 7, 5]
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert len(cache.mdf) == 2
+        assert list(cache.load_blob(1, 10).values) == [1.0, 2.0]
+        assert list(cache.load_blob(2, 20).values) == [3.0, 4.0]
+
+    def test_load_blob_with_string_container_id(self):
+        """The range index must work for any id type, including strings."""
+        pdf = pd.DataFrame(
+            {
+                "container_id": ["veh_b", "veh_a", "veh_a", "veh_b"],
+                "channel_id": [20, 10, 10, 20],
+                "tstart": [0, 100, 0, 200],
+                "tend": [200, 200, 100, 400],
+                "value": [3.0, 2.0, 1.0, 4.0],
+            }
+        )
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert list(cache.load_blob("veh_a", 10).values) == [1.0, 2.0]
+        assert list(cache.load_blob("veh_b", 20).values) == [3.0, 4.0]
+        assert len(cache.load_blob("veh_c", 10)) == 0
+
+    def test_cache_from_empty_frame(self):
+        """An empty input frame constructs and yields empty series."""
+        cache = TimeSeriesCache(_make_channel_pdf().head(0), col_map=DEFAULT_COL_MAP)
+        assert len(cache.mdf) == 0
+        assert len(cache.load_blob(1, 10)) == 0
+
+    def test_mdf_from_metadata_bearing_rows_only(self):
+        """Solve-shaped input: selector_ids carried by metadata-bearing rows.
+
+        Channel 20 carries its metadata on a non-first row (arrival order
+        after the shuffle is arbitrary — mdf selection must go by notna, not
+        position); channel 10 carries it on two rows (dedup must still apply
+        after the notna filter).
+        """
+        pdf = _make_channel_pdf()
+        pdf["selector_ids"] = [[111], [111], None, [222]]
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert len(cache.mdf) == 2
+        sel = cache.mdf.set_index("channel_id")["selector_ids"]
+        assert list(sel[10]) == [111]
+        assert list(sel[20]) == [222]
+
+        class _Selection:
+            selector_id = 222
+
+        resolved = cache.resolve(_Selection())
+        assert list(resolved.channel_id) == [20]
+        # data access is unaffected by the nulled metadata cells
+        assert list(cache.load_blob(1, 10).values) == [1.0, 2.0]
+
+    def test_cache_sorts_input_frame_in_place(self):
+        """The cache takes ownership of the input frame and sorts it in place.
+
+        Pins the intentional side effect: constructing a cache reorders the
+        caller's frame (and resets its index) instead of keeping a copy.
+        """
+        pdf = _make_channel_pdf().sample(frac=1, random_state=0).reset_index(drop=True)
+        cache = TimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        assert cache.pdf is pdf
+        assert list(pdf.index) == list(range(len(pdf)))
+        key_tuples = list(zip(pdf["container_id"], pdf["channel_id"], pdf["tstart"], strict=True))
+        assert key_tuples == sorted(key_tuples)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +340,132 @@ class TestDefaultSolverEndToEndWideOnly:
         assert "container_id" in result.columns
         assert result.count() > 0
 
+    def test_solve_ignores_extra_channels_columns(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """Extra physical columns on the channels table don't change solve() results.
+
+        Guards the UDF-input projection in ``DefaultSolver.solve``: only the
+        framework data columns may reach the grouped-map UDF, and results must
+        be identical with or without extra columns on the silver table.
+        """
+        tables = {
+            name: (df.withColumn("extra_col", F.lit("x")) if name == "channels" else df)
+            for name, df in basic_narrow_db.config.debug_tables.items()
+        }
+        db_extra = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+        def _means(db):
+            query = db.query
+            result = query.select(
+                query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
+            ).solve(spark, solver=DefaultSolver(spark))
+            return {row.container_id: row.m for row in result.collect()}
+
+        base = _means(basic_narrow_db)
+        extra = _means(db_extra)
+        assert base.keys() == extra.keys()
+        for container_id in base:
+            assert extra[container_id] == pytest.approx(base[container_id])
+        assert any(m is not None and m != 0 for m in base.values()), base
+
+    def test_solve_raw_point_data_with_extra_columns(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """is_raw_data=True works end-to-end with extra physical columns.
+
+        Also guards the ordering of the UDF-input projection in
+        ``DefaultSolver.solve``: it must run *after* the interval encoder,
+        which consumes ``timestamp`` / ``is_plausible``.
+        """
+        tables = dict(basic_narrow_db.config.debug_tables)
+        tables["channels"] = (
+            tables["channels"]
+            .select("container_id", "channel_id", F.col("tstart").alias("timestamp"), "value")
+            .withColumn("extra_col", F.lit("x"))
+            .withColumn("is_plausible", F.lit(True))
+        )
+        db_raw = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+        def _means(solver):
+            query = db_raw.query
+            result = query.select(
+                query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
+            ).solve(spark, solver=solver)
+            return {row.container_id: row.m for row in result.collect()}
+
+        raw = _means(DefaultSolver(spark, is_raw_data=True))
+        assert any(m is not None and m != 0 for m in raw.values()), raw
+
+        # All rows are plausible, so dropping implausible rows must not
+        # change the results (pins the is_plausible column surviving until
+        # the encoder's filter and being projected away afterwards).
+        dropped = _means(DefaultSolver(spark, is_raw_data=True, drop_implausible_data=True))
+        assert raw.keys() == dropped.keys()
+        for container_id in raw:
+            assert dropped[container_id] == pytest.approx(raw[container_id])
+
+    def test_solve_raw_point_data_with_mapped_timestamp_column(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """RAW mode reaches the timestamp column through the config vocabulary.
+
+        The physical channels table carries ``ts_raw`` instead of
+        ``timestamp``; the per-table ``column_name_mapping`` renames it to
+        the internal name the IntervalEncoder retrieves from the
+        SolverConfig (``timestamp_col``).
+        """
+        tables = dict(basic_narrow_db.config.debug_tables)
+        tables["channels"] = tables["channels"].select(
+            "container_id", "channel_id", F.col("tstart").alias("ts_raw"), "value"
+        )
+        db_raw = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+        cfg = SolverConfig(channels=TableConfig(column_name_mapping={"ts_raw": "timestamp"}))
+        solver = DefaultSolver(spark, config=cfg, is_raw_data=True)
+
+        query = db_raw.query
+        result = query.select(
+            query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
+        ).solve(spark, solver=solver)
+        means = {row.container_id: row.m for row in result.collect()}
+        assert any(m is not None and m != 0 for m in means.values()), means
+
+    def test_solve_means_match_manual_computation(
+        self, spark: SparkSession, basic_narrow_db: MeasurementDB
+    ):
+        """Solve results equal duration-weighted means computed directly in pandas.
+
+        Pins that the first-row metadata nulling in ``solve`` and the
+        notna-based mdf derivation reproduce the exact pre-change results.
+        """
+        metrics = basic_narrow_db.config.debug_tables["channel_metrics"].toPandas()
+        channels = basic_narrow_db.config.debug_tables["channels"].toPandas()
+        vss = metrics[metrics["channel_name"] == "Vehicle Speed Sensor"]
+        # Only containers with exactly one matching channel: for several
+        # candidates the engine's pick is arrival-order-dependent.
+        counts = vss.groupby("container_id").size()
+        unambiguous = set(counts[counts == 1].index)
+        assert unambiguous, "fixture must contain at least one unambiguous container"
+        expected = {}
+        for _, row in vss[vss["container_id"].isin(unambiguous)].iterrows():
+            s = channels[
+                (channels["container_id"] == row["container_id"])
+                & (channels["channel_id"] == row["channel_id"])
+            ]
+            d = s["tend"] - s["tstart"]
+            if d.sum() > 0:
+                expected[row["container_id"]] = float((s["value"] * d).sum() / d.sum())
+        assert expected
+
+        query = basic_narrow_db.query
+        result = query.select(
+            query.channel(channel_name="Vehicle Speed Sensor").mean().alias("m")
+        ).solve(spark, solver=DefaultSolver(spark))
+        means = {r.container_id: r.m for r in result.collect()}
+        for container_id, exp in expected.items():
+            assert means[container_id] == pytest.approx(exp), container_id
+
     def test_backward_compat_no_config_arg(
         self, spark: SparkSession, basic_narrow_db: MeasurementDB
     ):
@@ -274,6 +505,7 @@ class TestDefaultSolverEndToEndWideOnly:
             "te": "tend",
             "val": "value",
             "conv": "conversion_factor",
+            "value_string": "value_string",
         }
 
     def test_config_properties_return_internal_names(self, spark: SparkSession):

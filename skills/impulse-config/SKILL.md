@@ -6,7 +6,7 @@ description: >
   "configure an Impulse report", set the source/sink tables, filter which containers are processed,
   choose RLE vs RAW, turn on incremental processing, run without writing (sinkless), remap column
   names, or scope by project. Covers source, unity_sink, container_filters, query_engine, solver_config,
-  incremental, and measurement_dimensions, all validated by Pydantic.
+  incremental, measurement_dimensions, and calculated_channels, all validated by Pydantic.
 ---
 
 # Impulse — configuration
@@ -24,6 +24,7 @@ config = {
         "container_metrics_table": "my_catalog.silver.container_metrics",
         "channel_metrics_table": "my_catalog.silver.channel_metrics",
         "channels_uri": "my_catalog.silver.channels",
+        "poi_channels_uri": "my_catalog.silver.poi_channels",         # optional
         "container_tags_table": "my_catalog.silver.container_tags",   # optional
         "channel_tags_table": "my_catalog.silver.channel_tags",       # optional
     },
@@ -40,6 +41,7 @@ config = {
     },
     "incremental": {"enabled": True},
     "measurement_dimensions": ["container_id", "vehicle_key", "start_ts", "stop_ts"],
+    "calculated_channels": {"emit_channel_metrics": True, "attribute_columns": ["unit"]},  # optional
 }
 ```
 
@@ -53,6 +55,7 @@ Maps the silver-layer input tables. Values are full Unity Catalog paths (`catalo
 | `container_metrics_table` | Yes      | Container metadata (timestamps, duration).                          |
 | `channel_metrics_table`   | Yes      | Per-channel statistics; channel-selection columns in the wide model. |
 | `channels_uri`            | Yes      | Time-series sample data.                                            |
+| `poi_channels_uri`        | No       | Points-in-Time (POI) channel data. Required only when selecting POI channels via `poi_channel()`; omit for sample-only models. |
 | `container_tags_table`    | No       | Container EAV tags. Required to use `tag_filters`.                   |
 | `channel_tags_table`      | No       | Channel EAV tags. Required to select channels by tag.               |
 | `channel_mapping_table`   | No       | Logical→physical alias table. Required for `channel_with_alias()`.  |
@@ -62,11 +65,12 @@ Maps the silver-layer input tables. Values are full Unity Catalog paths (`catalo
 
 Where gold tables are written. Output tables are named `{table_prefix}_{entity}`.
 
-| Field          | Required | Description        |
-|----------------|----------|--------------------|
-| `catalog`      | Yes      | Target catalog.    |
-| `schema`       | Yes      | Target schema.     |
-| `table_prefix` | Yes      | Prefix for tables. |
+| Field                 | Required | Description        |
+|-----------------------|----------|--------------------|
+| `catalog`             | Yes      | Target catalog.    |
+| `schema`              | Yes      | Target schema.     |
+| `table_prefix`        | Yes      | Prefix for tables. |
+| `cleanup_temp_tables` | No       | Drop the batch-solving `__impulse_temp_*` tables from the schema after `persist_results()` succeeds. Defaults to `false`. Overridable per call via `persist_results(cleanup_temp_tables=...)`. |
 
 **Sinkless mode:** omit `unity_sink` entirely. `determine_report()` still computes everything and
 exposes it on the report object, but `persist_results()` becomes a no-op. Use it for ad-hoc analysis,
@@ -94,8 +98,9 @@ Omit entirely for `DefaultSolver` + `data_type="RLE"`.
 |-------------------------|--------------------|---------------------------------------------------------------------------------------------------|
 | `solver`                | `"DefaultSolver"`  | The solver. `"DeltaSolver"` / `"KeyValueStoreSolver"` are **deprecated aliases** for `DefaultSolver`. |
 | `data_type`             | `"RLE"`            | `"RLE"` for interval-encoded `[tstart, tend)` samples; `"RAW"` for `(timestamp, value)` samples.  |
+| `raw_encoder`           | `null` (→ `"RLE"`) | How RAW point data becomes intervals. `"RLE"` collapses equal-valued runs (default); `"INTERVAL"` keeps every sample, only deriving `tend` + dropping exact duplicates. Only used when `data_type="RAW"`. |
 | `drop_implausible_data` | `false`            | Drop `channels` rows where `is_plausible = false`. **Requires `data_type="RAW"`** (RLE raises).   |
-| `batch_size`            | `500`              | Max selectors solved per batch.                                                                   |
+| `batch_size`            | `500`              | Max selectors solved per batch. Applies to events, aggregations, and calculated channels.         |
 | `solver_config`         | `null`             | Per-table column mappings, per-table filters, and project scoping (below).                        |
 
 ## solver_config (optional) — adapt to an existing layout
@@ -106,6 +111,10 @@ renames each table at read time. Each silver table has a section with:
 
 - `column_name_mapping` (`{physical: internal}`) — applied once, when the table is read.
 - `filters` (`{internal: literal}`) — equality filters applied **after** renaming (e.g. project scoping).
+
+With `data_type="RAW"`, the `channels` table additionally uses the internal names `timestamp` (the
+per-sample timestamp) and — only when `drop_implausible_data` is on — `is_plausible`. Remap them the
+same way, e.g. `"channels": {"column_name_mapping": {"ts_raw": "timestamp"}}`.
 
 Top-level `project_id` (str, optional) applies an equality filter on the `project_id` column of every
 table that has one (`container_tags`, `container_metrics`, `channel_mapping`). Omit if not needed.
@@ -167,3 +176,19 @@ List of `container_metrics` columns (post-mapping **internal** names) to surface
 Default: `["container_id", "start_ts", "stop_ts"]`. Keep `container_id` — it is the incremental upsert
 key and the join key to fact tables. Any column present in your post-mapping `container_metrics`
 DataFrame is valid; a missing one fails the run fast with a `ValueError` naming it.
+
+## calculated_channels (optional)
+
+Controls the optional `calculated_channel_metrics` table. Off by default; when on, it is written alongside
+`calculated_channel_fact` / `calculated_channel_dimension` in the silver `channel_metrics` shape, so the
+fact + metrics pair can serve as an Impulse silver source. See `impulse-channels`.
+
+| Field                  | Default                              | Description                                                                 |
+|------------------------|--------------------------------------|-----------------------------------------------------------------------------|
+| `emit_channel_metrics` | `false`                              | Turn on the `calculated_channel_metrics` table.                             |
+| `attribute_columns`    | `[]`                                 | Calculated-channel `attributes` keys to surface as columns (e.g. `["unit"]`). |
+| `kpis`                 | `["duration", "min", "max", "mean"]` | KPIs computed per `(container_id, channel_id)`, one column each.            |
+
+Each metrics row is one `(container_id, channel_id)` pair with the selected `kpis` (duration-weighted) plus
+dynamic identity columns (union of `identity` keys) and the configured `attribute_columns`; identity wins
+over an attribute of the same name. An unknown KPI name is rejected at config validation.

@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from impulse_reporting.config.config_parser import (
+    CalculatedChannels,
     CastType,
     Comparator,
     ContainerFilters,
@@ -9,6 +10,7 @@ from impulse_reporting.config.config_parser import (
     IncrementalConfig,
     ImpulseConfig,
     MetricFilter,
+    RawEncoder,
     Solvers,
     TagFilter,
     is_valid_table_name,
@@ -111,6 +113,57 @@ def test_impulse_config_drop_implausible_data_enabled():
     assert config.query_engine.drop_implausible_data is True
 
 
+# ---------------------------------------------------------------------------
+# Source.poi_channels_uri — must survive parsing AND reach the MeasurementDB.
+# Regression: the field was missing from the Source model, so pydantic silently
+# dropped it and the whole reporting-layer POI path was inert (has_poi_channels
+# always False) even when the config supplied a poi_channels_uri.
+# ---------------------------------------------------------------------------
+def test_source_poi_channels_uri_parsed():
+    config_json = {
+        **impulse_config_JSON,
+        "source": {
+            **impulse_config_JSON["source"],
+            "poi_channels_uri": "impulse_demo.silver.poi_channels",
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.source.poi_channels_uri == "impulse_demo.silver.poi_channels"
+
+
+def test_source_poi_channels_uri_defaults_to_none():
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    assert config.source.poi_channels_uri is None
+
+
+def test_poi_channels_uri_reaches_measurement_db():
+    """End-to-end passthrough: a poi_channels_uri in the config makes the built
+    MeasurementDB POI-aware (this is what was silently broken)."""
+    from unittest.mock import create_autospec
+
+    from databricks.sdk import WorkspaceClient
+
+    from impulse_reporting.core.report import Report
+
+    with_poi = ImpulseConfig.model_validate(
+        {
+            **impulse_config_JSON,
+            "source": {
+                **impulse_config_JSON["source"],
+                "poi_channels_uri": "impulse_demo.silver.poi_channels",
+            },
+        }
+    )
+    db = Report.create_measurement_db(with_poi, create_autospec(WorkspaceClient))
+    assert db.has_poi_channels()
+    assert db.config.poi_channels_uri == "impulse_demo.silver.poi_channels"
+
+    # ...and a config without it stays POI-unaware.
+    without_poi = ImpulseConfig.model_validate(impulse_config_JSON)
+    db2 = Report.create_measurement_db(without_poi, create_autospec(WorkspaceClient))
+    assert not db2.has_poi_channels()
+
+
 def test_impulse_config_drop_implausible_data_rejects_rle():
     """drop_implausible_data=True with RLE data must raise ValidationError.
 
@@ -127,6 +180,51 @@ def test_impulse_config_drop_implausible_data_rejects_rle():
         },
     }
     with pytest.raises(ValidationError, match="requires data_type=RAW"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_impulse_config_cleanup_temp_tables_defaults_to_false():
+    config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
+    assert config.unity_sink.cleanup_temp_tables is False
+
+
+def test_impulse_config_cleanup_temp_tables_enabled():
+    config_json = {
+        **impulse_config_JSON,
+        "unity_sink": {
+            "catalog": "test_catalog",
+            "schema": "test_schema",
+            "table_prefix": "test_prefix",
+            "cleanup_temp_tables": True,
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.unity_sink.cleanup_temp_tables is True
+
+
+def test_impulse_config_raw_encoder_interval():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "raw_encoder": "INTERVAL",
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.raw_encoder is RawEncoder.INTERVAL
+
+
+def test_impulse_config_raw_encoder_rejects_unknown_value():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "raw_encoder": "BOGUS",
+        },
+    }
+    with pytest.raises(ValidationError):
         ImpulseConfig.model_validate(config_json)
 
 
@@ -928,3 +1026,22 @@ def test_impulse_config_source_rejects_invalid_channel_mapping_table():
     config_json["source"]["channel_mapping_table"] = "invalid_table_name"
     with pytest.raises(ValidationError):
         ImpulseConfig.model_validate(config_json)
+
+
+def test_calculated_channels_default_kpis():
+    """CalculatedChannels defaults to the four built-in KPIs."""
+    config = CalculatedChannels()
+    assert config.emit_channel_metrics is False
+    assert config.kpis == ["duration", "min", "max", "mean"]
+
+
+def test_calculated_channels_kpis_dedupe_preserves_order():
+    """Duplicate KPI names are removed, insertion order preserved."""
+    config = CalculatedChannels(kpis=["mean", "mean", "min"])
+    assert config.kpis == ["mean", "min"]
+
+
+def test_calculated_channels_unknown_kpi_rejected():
+    """An unknown KPI name is rejected at validation with a helpful message."""
+    with pytest.raises(ValidationError, match="Unknown calculated-channel KPI"):
+        CalculatedChannels(kpis=["bogus"])

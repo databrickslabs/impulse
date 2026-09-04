@@ -15,7 +15,9 @@ class PointsInTimeSeries()
 #### \_\_init\_\_
 
 ```python
-def __init__(tstarts: Sized, values: Sized)
+def __init__(tstarts: Sized,
+             values: Sized,
+             value_type: SeriesValueType = SeriesValueType.DOUBLE)
 ```
 
 Initialize the PointsInTimeSeries object.
@@ -28,18 +30,45 @@ consecutive timestamps.
 
 - `tstarts` (`Sized`): Array-like of time points.
 - `values` (`Sized`): Array-like of values, one per time point.
+- `value_type` (`SeriesValueType`): The value data type (default ``DOUBLE``). Validated against *values* for a
+non-empty series; carried explicitly so an **empty** series stays typed
+correctly (there are no values to infer from). ``STRING`` series support
+only sampling and equality — see the ``@_numeric_only`` methods.
+
+#### value\_type
+
+```python
+def value_type() -> SeriesValueType
+```
+
+This series' value data type (numeric ``DOUBLE`` or ``STRING``).
+
+
+#### is\_string
+
+```python
+def is_string() -> bool
+```
+
+Whether this series carries string (rather than numeric) values.
+
 
 #### dtype
 
 ```python
-def dtype()
+def dtype() -> T.DataType
 ```
 
 Returns the Spark data type for PointsInTimeSeries.
 
+For numeric values the element is a homogeneous ``[tstart, value]`` double
+pair (``ArrayType(ArrayType(DoubleType))``). String-valued series cannot use
+that homogeneous nested array, so their element is a ``(tstart, value)``
+struct with a double timestamp and a string value.
+
 **Returns**:
 
-`pyspark.sql.types.ArrayType`: Spark ArrayType for points in time series: [[tstart_1, value_1], ...].
+`pyspark.sql.types.ArrayType`: Spark ArrayType matching ``get_data``'s shape for this series' value type.
 
 #### get\_data
 
@@ -47,11 +76,16 @@ Returns the Spark data type for PointsInTimeSeries.
 def get_data() -> list
 ```
 
-Returns the series as a list of [tstart, value] lists.
+Returns the series as a list of ``[tstart, value]`` pairs.
+
+For numeric values this is a list of two-element double lists. For string
+values, ``column_stack`` would coerce the timestamps to strings, so the
+pairs are built explicitly as ``[float(tstart), str(value)]`` — matching the
+struct element type declared by :meth:`dtype`.
 
 **Returns**:
 
-`list`: List of [tstart, value] pairs.
+`list`: List of ``[tstart, value]`` pairs.
 
 #### \_\_len\_\_
 
@@ -407,12 +441,18 @@ Returns a string representation for debugging.
 #### empty
 
 ```python
-def empty() -> PointsInTimeSeries
+def empty(
+    value_type: SeriesValueType = SeriesValueType.DOUBLE
+) -> PointsInTimeSeries
 ```
 
-Returns an empty PointsInTimeSeries.
+Returns an empty PointsInTimeSeries of the given value type.
+
+**Arguments**:
+
+- `value_type` (`SeriesValueType`): The value data type of the empty series (default ``DOUBLE``).
 
 **Returns**:
 
-`PointsInTimeSeries`: Empty PointsInTimeSeries object.
+`PointsInTimeSeries`: Empty PointsInTimeSeries of *value_type*.
 

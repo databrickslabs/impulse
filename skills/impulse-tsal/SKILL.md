@@ -141,6 +141,26 @@ squared_rpm = squared(eng_rpm)          # a reusable TSAL expression
 # or apply inline: eng_rpm.apply(some_callable)
 ```
 
+A UDF can also declare **container-level tags/metrics** it needs; the engine injects their
+per-container values as `container_tags` / `container_metrics` keyword arguments (dicts keyed by the
+names you declared, value `None` when absent). Declare them on `@udf(...)` or `.apply(...)`:
+
+```python
+@TimeSeriesExpression.udf(container_metrics=["nominal_power"], container_tags=["vehicle_type"])
+def derate(series, container_metrics, container_tags):
+    return series / container_metrics["nominal_power"]
+
+derated = derate(power)
+# inline equivalent: power.apply(derate_fn, container_metrics=["nominal_power"])
+```
+
+- `container_metrics=[...]` are read as **columns on `container_metrics`** (a missing column raises
+  `ValueError`).
+- `container_tags=[...]` are read from the EAV **`container_tags` table** and **require a
+  `container_tags_table`** (else `ValueError`). See `impulse-data-model`.
+- Values are constant per container. The declaration **propagates** when the UDF is wrapped in an
+  aggregation, event, or calculated channel — the wrapper does not redeclare anything.
+
 ## What an expression evaluates to (the core data model)
 
 Every expression resolves — per container — to one of four in-memory types. Knowing the type tells you
@@ -174,11 +194,19 @@ Transitions between them:
 `debounce(d)`, and `filter(d)` (drop windows shorter than `d`). `where(PointsInTime)` drops any instant
 that falls in a gap where the signal is not valid, so the result may be shorter than the input.
 
+**String-valued `PointsInTimeSeries`** (from `poi_channel(dtype="string")`, e.g. DTC codes) is
+restricted: only equality (`== "code"` / `!=` → `PointsInTime`) and sampling via `.where(...)` apply.
+Arithmetic (`+ - * /`), ordering (`> >= < <=`), and numeric reductions (`sum`/`mean`/`min`/`max`) raise a
+`TypeError` at build time — the `PointsInTimeSeries` reduction/ordering rows above apply to **numeric**
+POI series only.
+
 ## Which type does each consumer need
 
 - **Events** (`impulse-events`): `BasicEvent` and `SequenceOfEvents` need **`Intervals`**;
   `PointsInTimeEvent` needs **`PointsInTime`**. Validated at construction — a wrong type raises `ValueError`.
 - **Aggregations** (`impulse-aggregations`): histogram/stats signal inputs must be **`SampleSeries`**.
+- **Calculated channels** (`impulse-channels`): the wrapped expression must evaluate to **`SampleSeries`**
+  (it materializes a derived signal). Validated at construction.
 
 ## Common virtual-signal recipes
 

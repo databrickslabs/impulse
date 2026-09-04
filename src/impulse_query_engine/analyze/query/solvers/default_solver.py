@@ -3,7 +3,7 @@ from __future__ import annotations
 import operator
 from collections.abc import Iterable
 from functools import partial, reduce
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyspark.sql.functions as F
@@ -12,12 +12,19 @@ from pyspark.sql import Column, DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    SeriesType,
+    SeriesValueType,
+    TimeSeriesExpression,
+)
+from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
-from .solver_config import SolverConfig
+from .solver_config import RawEncoder, SolverConfig
 from .utils.interval_encoder import IntervalEncoder
+from .utils.rle_encoder import RleEncoder
 from .utils.predicate_pushdown import ALL_ROWS, ValuePredicate, analyze_selections
 
 if TYPE_CHECKING:
@@ -25,7 +32,13 @@ if TYPE_CHECKING:
 
 
 class TimeSeriesCache(SeriesCache):
-    def __init__(self, pdf, col_map: dict[str, str]):
+    def __init__(
+        self,
+        pdf,
+        col_map: dict[str, str],
+        container_tag_cols=None,
+        container_metric_cols=None,
+    ):
         """
         Initialize the TimeSeriesCache.
 
@@ -36,10 +49,23 @@ class TimeSeriesCache(SeriesCache):
             ``col_map["conv"]`` is present, :meth:`load_blob` multiplies the
             loaded values by that per-channel factor.  All rows of a given
             ``(cid, ch)`` slice are expected to share the same factor.
+            The cache takes ownership of *pdf* and **sorts it in place**:
+            the caller's frame is reordered by ``(cid, ch, ts)`` and its
+            index reset.  The sort makes each channel's rows contiguous,
+            which the constructor exploits to build a ``(cid, ch)`` →
+            ``(start, stop)`` range index for :meth:`load_blob`.
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
-            ``"conv"`` column is optional in *pdf*.
+            ``"conv"`` column is optional in *pdf*.  The ``"value_string"`` key
+            names the string value column read when :meth:`load_blob` builds a
+            string :class:`PointsInTimeSeries`.
+        container_tag_cols : list of str, optional
+            Columns on *pdf* holding container-level tag values, exposed via
+            :attr:`container_tags`.  These are constant per container.
+        container_metric_cols : list of str, optional
+            Columns on *pdf* holding container-level metric values, exposed
+            via :attr:`container_metrics`.  These are constant per container.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -48,20 +74,44 @@ class TimeSeriesCache(SeriesCache):
         self._val_col = col_map["val"]
         self._conv_col = col_map.get("conv")
         self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
+        # String POI slices read their value from this column; series-type dispatch
+        # is driven by the selector passed to load_blob, not a per-row marker.
+        self._value_string_col = col_map.get("value_string")
+        self._container_tag_cols = list(container_tag_cols or [])
+        self._container_metric_cols = list(container_metric_cols or [])
 
-        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
-        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
-        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
+        # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
+        meta_cols = [
+            c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
+        ]
+        meta_source = pdf
+        if "selector_ids" in pdf.columns:
+            meta_source = pdf.loc[pdf["selector_ids"].notna()]
+        first_rows = ~meta_source.duplicated(subset=[self._cid_col, self._ch_col])
+        self.mdf = meta_source.loc[first_rows, meta_cols].reset_index(drop=True)
+        pdf.sort_values(
+            [self._cid_col, self._ch_col, self._ts_col], inplace=True, ignore_index=True
+        )
+        self.pdf = pdf
+
+        # Each (cid, ch) group is a contiguous block after the sort, so its
+        # row positions collapse to a (start, stop) range
+        self._ranges = {
+            key: (int(positions[0]), int(positions[-1]) + 1)
+            for key, positions in pdf.groupby(
+                [self._cid_col, self._ch_col], sort=False
+            ).indices.items()
+        }
 
     def resolve(self, selection):
         """
-        Resolve selected tags/metrics to a list of candidates.
+        Resolve a channel (time-series) selector to its candidate rows.
 
         Parameters
         ----------
-        selection : Any
-            The selection object specifying tags or metrics.
-
+        selection : TimeSeriesSelector
+            The channel selector whose tag expression (``selection._expr``)
+            identifies the matching channel(s).
         Returns
         -------
         pd.DataFrame
@@ -75,16 +125,29 @@ class TimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
 
-    def load_blob(self, mid, cid, uses_alias: bool = False):
+    def load_blob(
+        self,
+        mid,
+        cid,
+        uses_alias: bool = False,
+        series_type=None,
+        value_type=SeriesValueType.DOUBLE,
+    ):
         """
         Load a time series blob from the DataFrame.
 
+        The **calling selector** chooses the series type (via *series_type* /
+        *value_type*), so no per-row discriminator column is needed: a
+        ``POINTS_IN_TIME`` selector yields a :class:`PointsInTimeSeries` (string-
+        valued when *value_type* is ``STRING``, else numeric), otherwise a
+        :class:`SampleSeries`. The declared type is validated against the silver
+        metadata in the solve prelude, so the data stays authoritative.
+
         When the underlying *pdf* carries a conversion-factor column (the
-        column named by ``col_map["conv"]``) **and** the caller is an
-        aliased selector (``uses_alias=True``), the returned values are
-        multiplied by that factor.  Direct selectors on the same physical
-        channel always receive raw values — unit conversion is a property
-        of the alias, not of the channel.
+        column named by ``col_map["conv"]``) **and** the caller evaluates
+        to a SampleSeries, the values are multiplied by that factor.
+        Direct selectors on the same physical channel always receive raw
+        values; unit conversion is a property of the alias, not of the channel.
 
         Parameters
         ----------
@@ -95,19 +158,57 @@ class TimeSeriesCache(SeriesCache):
         uses_alias : bool, optional
             ``True`` when the calling selector resolved via channel_mapping.
             Gates the per-channel conversion factor; defaults to ``False``.
+        series_type : SeriesType, optional
+            The calling selector's series type; ``POINTS_IN_TIME`` builds a
+            :class:`PointsInTimeSeries`. ``None`` (default) builds a
+            :class:`SampleSeries`.
+        value_type : SeriesValueType, optional
+            For a POI selector, its declared value type; ``STRING`` reads the
+            string value column, otherwise the numeric one.
 
         Returns
         -------
-        SampleSeries
-            The loaded sample series object.
+        SampleSeries or PointsInTimeSeries
         """
-        s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
+        lo, hi = self._ranges.get((mid, cid), (0, 0))
+        s = self.pdf.iloc[lo:hi]
+
+        if series_type == SeriesType.POINTS_IN_TIME:
+            # The selector's declared value type picks the column; the constructor
+            # reconciles values-vs-type. A channel may carry both value columns —
+            # we simply read the declared one.
+            value_col = (
+                self._value_string_col if value_type is SeriesValueType.STRING else self._val_col
+            )
+            if value_col is None or value_col not in s.columns:
+                raise ValueError(
+                    f"POI channel declared {value_type} but its value column is not available"
+                )
+            return PointsInTimeSeries(s[self._ts_col], s[value_col], value_type=value_type)
+
         values = s[self._val_col]
         if self._has_conversion and len(s) > 0 and uses_alias:
             factor = s[self._conv_col].iloc[0]
             if pd.notna(factor):
                 values = values * factor
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
+
+    @property
+    def container_tags(self) -> dict:
+        """Requested container-tag values for this container (constant per container)."""
+        return self._container_meta(self._container_tag_cols)
+
+    @property
+    def container_metrics(self) -> dict:
+        """Requested container-metric values for this container (constant per container)."""
+        return self._container_meta(self._container_metric_cols)
+
+    def _container_meta(self, cols) -> dict:
+        """Read *cols* off the first metadata row (values are container-constant)."""
+        if not cols or len(self.mdf) == 0:
+            return {}
+        row = self.mdf.iloc[0]
+        return {c: row[c] for c in cols if c in self.mdf.columns}
 
 
 class DefaultSolver(QuerySolver):
@@ -151,6 +252,11 @@ class DefaultSolver(QuerySolver):
         Whether to drop data points marked as implausible before
         processing.  Requires an ``is_plausible`` column in the
         silver layer.
+    raw_encoder : RawEncoder, optional
+        Which encoder converts RAW point data into intervals for solving.
+        ``RawEncoder.RLE`` (default) run-length encodes equal-valued runs;
+        ``RawEncoder.INTERVAL`` only derives ``tend`` and drops exact
+        duplicates.  Only consulted when ``is_raw_data`` is ``True``.
     enable_predicate_pushdown : bool, optional
         When True, value predicates extracted from the selections (e.g.
         ``channel > 2000`` needs only rows with ``value > 2000``) are
@@ -167,6 +273,7 @@ class DefaultSolver(QuerySolver):
         config: SolverConfig | None = None,
         is_raw_data: bool = False,
         drop_implausible_data: bool = False,
+        raw_encoder: RawEncoder = RawEncoder.RLE,
         enable_predicate_pushdown: bool = False,
     ):
         super().__init__(config=config)
@@ -174,14 +281,113 @@ class DefaultSolver(QuerySolver):
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
         self.enable_predicate_pushdown: bool = enable_predicate_pushdown
-        self.interval_encoder: IntervalEncoder = IntervalEncoder(
-            timestamp_col_name="timestamp",
+        self.raw_encoder: RawEncoder = raw_encoder
+        self.channel_encoder: RleEncoder | IntervalEncoder = self._build_channel_encoder()
+
+    def _build_channel_encoder(self) -> RleEncoder | IntervalEncoder:
+        """Construct the raw -> interval encoder selected by ``raw_encoder``.
+
+        Both encoders expose ``prepare_channels_df`` and honor
+        ``drop_implausible_data``; they differ only in whether equal-valued
+        consecutive samples are collapsed into a single run (RLE) or kept as
+        separate intervals (INTERVAL).
+        """
+        if self.raw_encoder is RawEncoder.INTERVAL:
+            return IntervalEncoder(
+                config=self.config,
+                drop_implausible_data_points=self.drop_implausible_data,
+            )
+        return RleEncoder(
+            config=self.config,
             drop_implausible_data_points=self.drop_implausible_data,
         )
 
     # ------------------------------------------------------------------
     # Solver stages
     # ------------------------------------------------------------------
+
+    def _scoped_container_metrics(self, query, pre_filtered_containers_df=None) -> DataFrame:
+        """Read ``container_metrics`` scoped to the solver config.
+
+        Source is *pre_filtered_containers_df* when provided (the incremental
+        container subset), otherwise the full ``container_metrics`` table.
+        Applies the per-table ``column_name_mapping``, the top-level
+        ``project_id`` filter, and the per-table ``container_metrics.filters``.
+        Query-level ``MetricExpression`` filters are **not** applied here —
+        callers add those on top when needed.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (database + config).
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental subset to read instead of the full table.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            The scoped, column-mapped ``container_metrics`` frame.
+        """
+        if pre_filtered_containers_df is not None:
+            metrics = pre_filtered_containers_df
+        else:
+            metrics = query.db.container_metrics(self.spark)
+        metrics = self._apply_column_mapping(
+            metrics, self.config.container_metrics.column_name_mapping
+        )
+        if self.config.project_id is not None:
+            metrics = metrics.where(F.col(self.config.project_id_col) == self.config.project_id)
+        for col_name, value in self.config.container_metrics.filters.items():
+            metrics = metrics.where(F.col(col_name) == value)
+        return metrics
+
+    def _scoped_container_tags(self, query) -> DataFrame:
+        """Read the EAV ``container_tags`` table scoped to the solver config.
+
+        Applies the per-table ``column_name_mapping``, the top-level
+        ``project_id`` filter, and the per-table ``container_tags.filters``.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (database + config).
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            The scoped, column-mapped ``container_tags`` (EAV) frame.
+        """
+        tags = query.db.container_tags(self.spark)
+        tags = self._apply_column_mapping(tags, self.config.container_tags.column_name_mapping)
+        if self.config.project_id is not None:
+            tags = tags.where(F.col(self.config.project_id_col) == self.config.project_id)
+        for col_name, value in self.config.container_tags.filters.items():
+            tags = tags.where(F.col(col_name) == value)
+        return tags
+
+    def _pivot_container_tags(self, tags_df, keys) -> DataFrame:
+        """Pivot scoped ``container_tags`` rows to one column per key in *keys*.
+
+        Parameters
+        ----------
+        tags_df : pyspark.sql.DataFrame
+            Scoped EAV frame from :meth:`_scoped_container_tags`.
+        keys : Iterable[str]
+            Tag keys to pivot into columns.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            ``container_id`` plus one column per requested key (first value per
+            ``(container_id, key)``).
+        """
+        tag_key_col = self.config.tag_key_col
+        return (
+            tags_df.where(F.col(tag_key_col).isin(list(keys)))
+            .groupBy(self.config.container_id_col)
+            .pivot(tag_key_col, list(keys))
+            .agg(F.first(self.config.tag_value_col))
+        )
 
     def filter_container_tags(self, spark, query) -> DataFrame:
         """
@@ -225,29 +431,13 @@ class DefaultSolver(QuerySolver):
                 required_elements.extend(filt.required_tags())
         required_elements = set(required_elements)
 
-        tags = query.db.container_tags(self.spark)
-        tags = self._apply_column_mapping(tags, self.config.container_tags.column_name_mapping)
-
-        if self.config.project_id is not None:
-            tags = tags.where(F.col(self.config.project_id_col) == self.config.project_id)
-
-        for col_name, value in self.config.container_tags.filters.items():
-            tags = tags.where(F.col(col_name) == value)
+        tags = self._scoped_container_tags(query)
 
         if len(filters) == 0:
             return tags.select(container_id_col).distinct()
 
-        tag_key_col = self.config.tag_key_col
-        tags = tags.where(F.col(tag_key_col).isin(required_elements))
-
-        tags = tags.groupBy(container_id_col)
-        tags = tags.pivot(tag_key_col, list(required_elements)).agg(
-            F.first(self.config.tag_value_col)
-        )
-
-        expr = self._build_expr(filters)
-        tags = tags.where(expr)
-
+        tags = self._pivot_container_tags(tags, required_elements)
+        tags = tags.where(self._build_expr(filters))
         return tags.select(container_id_col).distinct()
 
     def filter_container_metrics(
@@ -290,20 +480,7 @@ class DefaultSolver(QuerySolver):
 
         metric_filters = [filt for filt in query.filters if isinstance(filt, MetricExpression)]
 
-        if pre_filtered_containers_df is not None:
-            metrics = pre_filtered_containers_df
-        else:
-            metrics = query.db.container_metrics(self.spark)
-
-        metrics = self._apply_column_mapping(
-            metrics, self.config.container_metrics.column_name_mapping
-        )
-
-        if self.config.project_id is not None:
-            metrics = metrics.where(F.col(self.config.project_id_col) == self.config.project_id)
-
-        for col_name, value in self.config.container_metrics.filters.items():
-            metrics = metrics.where(F.col(col_name) == value)
+        metrics = self._scoped_container_metrics(query, pre_filtered_containers_df)
 
         if len(metric_filters) > 0:
             metrics = metrics.where(self._build_expr(metric_filters))
@@ -867,7 +1044,13 @@ class DefaultSolver(QuerySolver):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _solve_udf(pdf, selections: Iterable, col_map: dict[str, str]) -> pd.DataFrame:
+    def _solve_udf(
+        pdf,
+        selections: Iterable,
+        col_map: dict[str, str],
+        container_tag_cols=None,
+        container_metric_cols=None,
+    ) -> pd.DataFrame:
         """
         UDF to solve for a single container by applying selections.
 
@@ -878,15 +1061,26 @@ class DefaultSolver(QuerySolver):
             List of selection expressions to apply.
         col_map : dict[str, str]
             Column name mapping for the cache.
+        container_tag_cols : list of str, optional
+            Columns on *pdf* holding container-level tag values, exposed to
+            expressions via ``cache.container_tags``.
+        container_metric_cols : list of str, optional
+            Columns on *pdf* holding container-level metric values, exposed to
+            expressions via ``cache.container_metrics``.
 
         Returns
         -------
         pd.DataFrame
             DataFrame containing results for each selection.
         """
-        cache = TimeSeriesCache(pdf, col_map=col_map)
         cid_col = col_map["cid"]
         result = {cid_col: [pdf[cid_col].iloc[0]]}
+        cache = TimeSeriesCache(
+            pdf,
+            col_map=col_map,
+            container_tag_cols=container_tag_cols,
+            container_metric_cols=container_metric_cols,
+        )
         for s in selections:
             res = s.build(cache)
             if hasattr(res, "serialize") and callable(res.serialize):
@@ -965,6 +1159,54 @@ class DefaultSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
+        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
+        container_tag_cols, container_metric_cols = self._container_meta_cols(query)
+
+        schema = self._build_solve_output_schema(q, selections, dtypes)
+        solve_udf = F.pandas_udf(
+            partial(
+                DefaultSolver._solve_udf,
+                selections=selections,
+                col_map=col_map,
+                container_tag_cols=container_tag_cols,
+                container_metric_cols=container_metric_cols,
+            ),
+            schema,
+            F.PandasUDFType.GROUPED_MAP,
+        )
+        return self._apply_grouped_map(
+            joined_df,
+            container_count,
+            schema,
+            solve_udf,
+            container_meta_cols=[*container_tag_cols, *container_metric_cols],
+        )
+
+    def _prepare_channels_join(self, query, channels_df) -> tuple[DataFrame, DataFrame, int]:
+        """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
+
+        Applies optional per-channel unit conversion, reads and column-maps the
+        channel-data table (raw-encoding it when in raw mode), broadcast-joins it
+        to the channel-match frame on ``[container_id, channel_id]``, and counts
+        the distinct containers.  Any container-metadata columns already on
+        *channels_df* (attached by :meth:`attach_container_metadata`) ride
+        through the broadcast join into ``joined_df``.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object containing database and filter information.
+        channels_df : pyspark.sql.DataFrame
+            Channel-match DataFrame from the filter pipeline.
+
+        Returns
+        -------
+        tuple[DataFrame, DataFrame, int]
+            ``(channels_q, joined_df, container_count)`` — the column-mapped
+            channel-data DataFrame (authoritative for output ``container_id`` /
+            ``channel_id`` types), the join fed to the grouped-map UDF, and the
+            number of distinct containers.
+        """
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
 
@@ -984,17 +1226,344 @@ class DefaultSolver(QuerySolver):
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
 
         if self.is_raw_data:
-            # Calculate the tend info and prepare the data for the solving step.
-            q = self.interval_encoder.prepare_channels_df(q)
+            # Encode the raw samples into intervals (RLE or interval) for the solving step.
+            q = self.channel_encoder.prepare_channels_df(q)
 
-        schema = self._build_solve_output_schema(q, selections, dtypes)
+        # Ship only the columns the UDF consumes; any extra physical columns
+        # on the channels table would otherwise cross Arrow into every group's
+        # pandas frame.
+        q = q.select(
+            self.config.container_id_col,
+            self.config.channel_id_col,
+            self.config.tstart_col,
+            self.config.tend_col,
+            self.config.value_col,
+        )
+
+        # POI channel data is unioned in AFTER RLE encoding above, so its
+        # zero-duration points are never run-length merged.
+        if DefaultSolver._query_contains_poi_selections(query.selections):
+            q = self._union_poi_channel_data(query, q)
+
+        joined_df = q.join(
+            F.broadcast(channels_df),
+            on=[self.config.container_id_col, self.config.channel_id_col],
+        )
+        container_count = channels_df.select(self.config.container_id_col).distinct().count()
+        return q, joined_df, container_count
+
+    @staticmethod
+    def _query_contains_poi_selections(selections: Iterable[Any]) -> bool:
+        """True when any *leaf* selector resolved by the query is a POINTS_IN_TIME channel.
+
+        Walks the full expression tree via ``collect_selectors``,
+        used to skip the POI-table union if no POI channels are present.
+        """
+        return any(
+            selector.series_type is SeriesType.POINTS_IN_TIME
+            for selector in TimeSeriesExpression.collect_selectors(selections)
+        )
+
+    def _union_poi_channel_data(self, query, channels_q: DataFrame) -> DataFrame:
+        """Union POI channel-data rows into the (already-encoded) channel-data frame.
+
+        Reads ``poi_channels``, column-maps it, and projects it into the
+        channel-data superset — POI ``timestamp`` becomes ``tstart`` (``tend``
+        **null**, since a point has no validity interval, which is also the signal
+        the cache validates a POI selector against), ``value_double`` becomes the
+        numeric ``value`` column, and ``value_string`` rides alongside for a string
+        POI channel. Each value column is projected only when the table actually
+        carries it, so a numeric-only or string-only ``poi_channels`` table is
+        supported; ``unionByName(allowMissingColumns=True)`` null-fills the rest.
+        No per-row ``series_type`` / ``dtype`` marker is shipped: the selector
+        drives series-type dispatch in :meth:`TimeSeriesCache.load_blob`.
+        Returns *channels_q* unchanged when no ``poi_channels`` table is configured.
+        """
+        db = query.db
+        if not (hasattr(db, "has_poi_channels") and db.has_poi_channels()):
+            return channels_q
+
+        cfg = self.config
+        poi = db.poi_channels(self.spark)
+        poi = self._apply_column_mapping(poi, cfg.poi_channels.column_name_mapping)
+
+        # ensures poi and channel have the same dtype for start and end timestamp
+        channels_q_t_start_dtype: T.DataType = channels_q.schema[cfg.tstart_col].dataType
+        channels_q_t_end_dtype: T.DataType = channels_q.schema[cfg.tend_col].dataType
+
+        select_items = [
+            F.col(cfg.container_id_col),
+            F.col(cfg.channel_id_col),
+            F.col(cfg.poi_timestamp_col).cast(channels_q_t_start_dtype).alias(cfg.tstart_col),
+            F.lit(None).cast(channels_q_t_end_dtype).alias(cfg.tend_col),
+        ]
+        if cfg.poi_value_double_col in poi.columns:
+            select_items.append(F.col(cfg.poi_value_double_col).alias(cfg.value_col))
+        if cfg.poi_value_string_col in poi.columns:
+            select_items.append(F.col(cfg.poi_value_string_col))
+        poi_proj = poi.select(*select_items)
+        return channels_q.unionByName(poi_proj, allowMissingColumns=True)
+
+    def _container_meta_cols(self, query) -> tuple[list[str], list[str]]:
+        """Container-tag / container-metric column names the selections request."""
+        return (
+            TimeSeriesExpression.collect_container_tags(query.selections),
+            TimeSeriesExpression.collect_container_metrics(query.selections),
+        )
+
+    def attach_container_metadata(
+        self, query, channels_df, pre_filtered_containers_df=None
+    ) -> DataFrame:
+        """Left-join the container tags/metrics the selections request onto *channels_df*.
+
+        The columns ride into each group's pandas frame via the broadcast join in
+        :meth:`_prepare_channels_join`, without dropping channel rows.  When
+        *pre_filtered_containers_df* is given, the metadata read is scoped to
+        those containers.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (selections + db info).
+        channels_df : pyspark.sql.DataFrame
+            Channel-match frame from the filter pipeline.
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental container subset to scope the metadata read to.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            *channels_df* with one column per requested tag/metric left-joined on
+            (unchanged when nothing is requested).
+        """
+        tag_keys, metric_cols = self._container_meta_cols(query)
+        if not (tag_keys or metric_cols):
+            return channels_df
+        meta_df = self._build_container_metadata_df(
+            query, tag_keys, metric_cols, pre_filtered_containers_df
+        )
+        return channels_df.join(F.broadcast(meta_df), on=self.config.container_id_col, how="left")
+
+    def _build_container_metadata_df(
+        self, query, tag_keys, metric_cols, pre_filtered_containers_df=None
+    ) -> DataFrame:
+        """Build a one-row-per-container frame of the requested tags/metrics.
+
+        Reads ``container_metrics`` (for metric columns) and, when tag keys are
+        requested, the EAV ``container_tags`` table (pivoted to one column per
+        key), reusing the shared scoping/pivot helpers.  The two sides are
+        outer-joined on ``container_id``.  The result is broadcast-left-joined
+        onto the channel-match frame in :meth:`attach_container_metadata`.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (database + config).
+        tag_keys : list of str
+            Requested container-tag keys (EAV).  Requires a ``container_tags_table``.
+        metric_cols : list of str
+            Requested container-metric column names (on ``container_metrics``).
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental container subset.  When provided, both the metrics read
+            and the tags pivot are scoped to these containers.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            ``container_id`` plus one column per requested tag/metric.
+
+        Raises
+        ------
+        ValueError
+            If a requested metric column does not exist on ``container_metrics``,
+            or if container tags are requested without a ``container_tags_table``.
+        """
+        container_id_col = self.config.container_id_col
+        meta_df = None
+
+        if metric_cols:
+            metrics = self._scoped_container_metrics(query, pre_filtered_containers_df)
+            missing = [c for c in metric_cols if c not in metrics.columns]
+            if missing:
+                raise ValueError(
+                    f"Container metric column(s) {missing} requested by an expression are "
+                    f"not present on container_metrics. Available columns: {metrics.columns}"
+                )
+            meta_df = metrics.select(container_id_col, *metric_cols).dropDuplicates(
+                [container_id_col]
+            )
+
+        if tag_keys:
+            if query.db.config.container_tags_table is None:
+                raise ValueError(
+                    "Container tags requested by an expression "
+                    f"({tag_keys}) require a container_tags_table, but none is "
+                    "configured on the database."
+                )
+            tags = self._scoped_container_tags(query)
+            if pre_filtered_containers_df is not None:
+                # Scope the EAV rows to the incremental container subset before
+                # the pivot so only relevant containers are read and grouped.
+                scoped_ids = (
+                    self._scoped_container_metrics(query, pre_filtered_containers_df)
+                    .select(container_id_col)
+                    .distinct()
+                )
+                tags = tags.join(F.broadcast(scoped_ids), on=container_id_col, how="inner")
+            tags = self._pivot_container_tags(tags, tag_keys)
+            meta_df = (
+                tags if meta_df is None else meta_df.join(tags, on=container_id_col, how="outer")
+            )
+
+        return meta_df
+
+    def _apply_grouped_map(
+        self, joined_df, container_count, schema, solve_udf, container_meta_cols=None
+    ) -> DataFrame:
+        """Run *solve_udf* per container, or return an empty frame when none match."""
+        if container_count == 0:
+            return self.spark.createDataFrame([], schema=schema)
+
+        # selector_ids is per-channel metadata and the container tags/metrics are
+        # per-container — both are identical across a channel's rows.  Keep them
+        # on a single row per (container_id, channel_id) so the repeated values
+        # don't inflate every group's pandas frame; the cache reads them off the
+        # surviving ``selector_ids``-notna row (by notna, not by position), so the
+        # order is arbitrary — order by a constant to avoid an unnecessary
+        # per-channel sort (row_number just requires *some* ordering).
+        df = joined_df.repartition(container_count, self.config.container_id_col)
+        w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
+            F.lit(1)
+        )
+        df = df.withColumn("_rn", F.row_number().over(w))
+        for col_name in ["selector_ids", *(container_meta_cols or [])]:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, F.when(F.col("_rn") == 1, F.col(col_name)))
+        df = df.drop("_rn")
+        return df.groupBy(self.config.container_id_col).apply(solve_udf)
+
+    # ------------------------------------------------------------------
+    # Calculated channels (narrow output)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _solve_calculated_channels_udf(
+        pdf,
+        selections: Iterable,
+        col_map: dict[str, str],
+        container_tag_cols=None,
+        container_metric_cols=None,
+    ) -> pd.DataFrame:
+        """
+        UDF to solve calculated channels for a single container.
+
+        Unlike :meth:`_solve_udf` (one wide row per container), this emits many
+        narrow rows: each ``CalculatedChannel`` builds to its raw
+        ``(tstarts, tends, values)`` arrays that are exploded into
+        ``(container_id, channel_id, tstart, tend, value)`` rows.  Each channel
+        supplies its own deterministic ``channel_id``
+        (:attr:`CalculatedChannel.channel_id`); the identity map is *not* emitted
+        here — it is constant per ``channel_id`` and attached afterward by
+        :meth:`solve_calculated_channels` to keep the UDF's Arrow payload small.
+
+        Parameters
+        ----------
+        pdf : pd.DataFrame
+            Rows for a single container (all input channels joined in).
+        selections : Iterable
+            The ``CalculatedChannel`` selections to evaluate.
+        col_map : dict[str, str]
+            Column-name mapping for the cache (cid/ch/ts/te/val/conv).
+        container_tag_cols : list of str, optional
+            Columns on *pdf* holding container-level tag values, exposed to
+            expressions via ``cache.container_tags``.
+        container_metric_cols : list of str, optional
+            Columns on *pdf* holding container-level metric values, exposed to
+            expressions via ``cache.container_metrics``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Narrow rows for this container; empty (but full-width) when no
+            calculated channel produced any samples.
+        """
+        cache = TimeSeriesCache(
+            pdf,
+            col_map=col_map,
+            container_tag_cols=container_tag_cols,
+            container_metric_cols=container_metric_cols,
+        )
+        cid_col = col_map["cid"]
+        ch_col = col_map["ch"]
+        container_id = pdf[cid_col].iloc[0]
+
+        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": []}
+
+        for cc in selections:
+            tstarts, tends, values = cc.build(cache)
+            for tstart, tend, value in zip(tstarts, tends, values, strict=False):
+                cols[cid_col].append(container_id)
+                cols[ch_col].append(cc.channel_id)
+                cols["tstart"].append(tstart)
+                cols["tend"].append(tend)
+                cols["value"].append(value)
+
+        return pd.DataFrame(cols)
+
+    @staticmethod
+    def _identity_map_expr(identity: dict[str, str]) -> "F.Column":
+        """Build a ``map<string,string>`` literal column from an identity dict."""
+        kv_literals = [F.lit(str(x)) for k, v in identity.items() for x in (k, v)]
+        return F.create_map(*kv_literals)
+
+    def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
+        """
+        Solve calculated channels by grouping channels and exploding each result.
+
+        Structurally parallels :meth:`solve` — sharing the
+        :meth:`_prepare_channels_join` prelude and :meth:`_apply_grouped_map`
+        tail — but the grouped-map UDF emits narrow silver-shaped rows (many per
+        container) instead of one wide row.  Output columns are
+        ``[container_id, channel_id, tstart, tend, value, identity]`` where
+        ``identity`` is a ``MapType(string, string)`` holding the channel's
+        identity dict.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object containing database and filter information.
+        channels_df : pyspark.sql.DataFrame
+            Channel-match DataFrame from the filter pipeline.
+        selections : list
+            List of ``CalculatedChannel`` selections to evaluate.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            Narrow DataFrame of calculated-channel samples.
+        """
+        col_map = self.config.col_map
+        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
+        container_tag_cols, container_metric_cols = self._container_meta_cols(query)
+
+        schema = self._build_calculated_channels_udf_schema(q)
         solve_udf = F.pandas_udf(
-            partial(DefaultSolver._solve_udf, selections=selections, col_map=col_map),
+            partial(
+                DefaultSolver._solve_calculated_channels_udf,
+                selections=selections,
+                col_map=col_map,
+                container_tag_cols=container_tag_cols,
+                container_metric_cols=container_metric_cols,
+            ),
             schema,
             F.PandasUDFType.GROUPED_MAP,
         )
-        df = q.join(
-            F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
+        res = self._apply_grouped_map(
+            joined_df,
+            container_count,
+            schema,
+            solve_udf,
+            container_meta_cols=[*container_tag_cols, *container_metric_cols],
         )
 
         if self.enable_predicate_pushdown:
@@ -1004,12 +1573,16 @@ class DefaultSolver(QuerySolver):
                 if pushdown_filter is not None:
                     df = df.where(pushdown_filter)
 
-        container_count = channels_df.select(self.config.container_id_col).distinct().count()
-        if container_count == 0:
-            return self.spark.createDataFrame([], schema=schema)
-        res = (
-            df.repartition(container_count, self.config.container_id_col)
-            .groupBy(self.config.container_id_col)
-            .apply(solve_udf)
-        )
-        return res
+        # Identity is constant per channel_id, so attach it here via a
+        # channel_id-keyed CASE instead of the UDF shipping a copy per row.
+        channel_id_col = self.config.channel_id_col
+        identity_expr = None
+        for cc in selections:
+            branch = F.col(channel_id_col) == F.lit(cc.channel_id)
+            id_map = self._identity_map_expr(cc.identity)
+            identity_expr = (
+                F.when(branch, id_map)
+                if identity_expr is None
+                else identity_expr.when(branch, id_map)
+            )
+        return res.withColumn("identity", identity_expr)

@@ -268,10 +268,38 @@ Get a dictionary of events part of the report keyed by event name.
 
 `dict`: Dictionary mapping event names to Event objects.
 
+#### add\_calculated\_channel
+
+```python
+def add_calculated_channel(channel)
+```
+
+Add a calculated channel to the report.
+
+**Arguments**:
+
+- `channel` (`CalculatedChannel`): The calculated channel to add.
+
+**Returns**:
+
+`None`: 
+
+#### get\_calculated\_channels
+
+```python
+def get_calculated_channels() -> list
+```
+
+Get the list of calculated channels associated with the report.
+
+**Returns**:
+
+`list of CalculatedChannel`: List of calculated channels.
+
 #### persist\_results
 
 ```python
-def persist_results()
+def persist_results(cleanup_temp_tables: bool | None = None)
 ```
 
 Persist report results using appropriate strategy based on definition changes.
@@ -279,6 +307,14 @@ Persist report results using appropriate strategy based on definition changes.
 Uses tracked state from determine_report() to decide persistence strategy:
 - Changed definitions: replaceWhere (atomic delete + insert)
 - Unchanged definitions: MERGE (upsert)
+
+**Arguments**:
+
+- `cleanup_temp_tables` (`bool`): Whether to drop the batch-solving ``__impulse_temp_*`` tables from the
+sink schema after persistence completes successfully.
+- True/False: use this value, overriding the config flag.
+- None (default): fall back to ``config.unity_sink.cleanup_temp_tables``
+  (which itself defaults to False).
 
 **Returns**:
 

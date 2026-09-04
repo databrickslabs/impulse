@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from functools import reduce
 
 import pyspark.sql.functions as F
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql.types import StructType
 
 from impulse_reporting.aggregations.aggregation_types import AggregationType
+from impulse_reporting.channels.channel_types import ChannelType
 from impulse_reporting.events.event_types import EventType
 
 
@@ -26,13 +27,13 @@ class SinkConfig(ABC):
     table_prefix: str
 
     @abstractmethod
-    def get_output_uri_fact_table(self, element: AggregationType | EventType) -> str:
+    def get_output_uri_fact_table(self, element: AggregationType | EventType | ChannelType) -> str:
         """
         Get the corresponding output URI for the fact table.
 
         Parameters
         ----------
-        element : AggregationType | EventType
+        element : AggregationType | EventType | ChannelType
             The aggregation or event type to get the URI for.
 
         Returns
@@ -43,13 +44,15 @@ class SinkConfig(ABC):
         pass
 
     @abstractmethod
-    def get_output_uri_dimension_table(self, element: AggregationType | EventType) -> str:
+    def get_output_uri_dimension_table(
+        self, element: AggregationType | EventType | ChannelType
+    ) -> str:
         """
         Get the corresponding output URI for a dimension table.
 
         Parameters
         ----------
-        element : AggregationType | EventType
+        element : AggregationType | EventType | ChannelType
             The aggregation or event type to get the URI for.
 
         Returns
@@ -83,6 +86,23 @@ class SinkConfig(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_output_uri_channel_metrics_table(self, element: ChannelType) -> str:
+        """
+        Get the output URI for the (optional) channel-metrics table.
+
+        Parameters
+        ----------
+        element : ChannelType
+            The channel type to get the URI for.
+
+        Returns
+        -------
+        str
+            The output URI for the channel-metrics table.
+        """
+        pass
+
 
 @dataclass()
 class UnitySinkConfig(SinkConfig):
@@ -102,13 +122,13 @@ class UnitySinkConfig(SinkConfig):
     catalog_name: str
     schema_name: str
 
-    def get_output_uri_fact_table(self, element: AggregationType | EventType) -> str:
+    def get_output_uri_fact_table(self, element: AggregationType | EventType | ChannelType) -> str:
         """
         Get the output URI for a fact table in Unity Catalog format.
 
         Parameters
         ----------
-        element : AggregationType | EventType
+        element : AggregationType | EventType | ChannelType
             The aggregation or event type to get the URI for.
 
         Returns
@@ -123,13 +143,15 @@ class UnitySinkConfig(SinkConfig):
             uri = f"{self.catalog_name}.{self.schema_name}.{table_name}"
         return uri
 
-    def get_output_uri_dimension_table(self, element: AggregationType | EventType) -> str:
+    def get_output_uri_dimension_table(
+        self, element: AggregationType | EventType | ChannelType
+    ) -> str:
         """
         Get the output URI for the dimension table in Unity Catalog format.
 
         Parameters
         ----------
-        element : AggregationType | EventType
+        element : AggregationType | EventType | ChannelType
             The aggregation or event type to get the URI for.
 
         Returns
@@ -178,6 +200,27 @@ class UnitySinkConfig(SinkConfig):
             )
         else:
             uri = f"{self.catalog_name}.{self.schema_name}." "channel_mapping_resolution_dimension"
+        return uri
+
+    def get_output_uri_channel_metrics_table(self, element: ChannelType) -> str:
+        """
+        Get the output URI for the channel-metrics table in Unity Catalog format.
+
+        Parameters
+        ----------
+        element : ChannelType
+            The channel type to get the URI for.
+
+        Returns
+        -------
+        str
+            The Unity Catalog URI for the channel-metrics table.
+        """
+        table_name = element.get_metrics_table_name()
+        if self.table_prefix:
+            uri = f"{self.catalog_name}.{self.schema_name}.{self.table_prefix}_{table_name}"
+        else:
+            uri = f"{self.catalog_name}.{self.schema_name}.{table_name}"
         return uri
 
 
@@ -283,32 +326,46 @@ class UnityCatalogSink(Sink):
             .execute()
         )
 
-    def replace_by_ids(
+    def merge_incremental(
         self,
         df: DataFrame,
         uri: str,
-        id_column: str,
-        ids_to_replace: list[int],
+        merge_keys: list[str],
+        *,
+        delete_conditions: list[Column] | None = None,
         overwrite_schema: bool = True,
     ):
-        """
-        Atomically replace all records for specified IDs using Delta Lake's replaceWhere.
+        """Upsert ``df`` and prune stale rows in one Delta MERGE.
 
-        This is a single atomic transaction - no intermediate inconsistent state.
-        Use for CHANGED definitions where old data structure is incompatible with new.
+        Matched rows update, source-only rows insert, and target rows within the
+        ``delete_conditions`` scope that are absent from the source are deleted
+        (removing the surplus a shrunk container leaves behind). Rows outside the
+        scope are untouched.
+
+        The MERGE runs with ``withSchemaEvolution()`` so a fact-schema change
+        between releases doesn't break an incremental run: a column added to the
+        source is added to the gold table (existing rows get NULL). A column
+        dropped from the source is *retained* in gold (new rows get NULL for it) —
+        Delta does not drop columns via MERGE evolution, so a true column removal
+        still needs a full overwrite. Incompatible type changes still error rather
+        than silently coerce. When source and gold schemas match (the normal case)
+        this is a no-op.
 
         Parameters
         ----------
         df : DataFrame
-            Source DataFrame with new records to insert.
+            Source rows to upsert. May be empty (stale rows are still deleted).
         uri : str
             Target Unity Catalog table URI.
-        id_column : str
-            Column containing the entity ID (e.g., "visual_id" for aggregations, "event_id" for events).
-        ids_to_replace : list[int]
-            List of IDs whose records should be completely replaced.
+        merge_keys : list[str]
+            Columns matched between source and target.
+        delete_conditions : list[Column], optional
+            Target-scoped predicates OR-ed together to bound
+            ``whenNotMatchedBySourceDelete``. Must reference the ``target`` alias
+            (a bare column is ambiguous with the merge keys). None/empty → pure
+            upsert; ``.isin([])`` is always false, so it can never mass-delete.
         overwrite_schema : bool, optional
-            Whether to overwrite the schema of the target table, by default True.
+            Only consumed on first write (table creation), by default True.
 
         Returns
         -------
@@ -318,21 +375,22 @@ class UnityCatalogSink(Sink):
             df.write.format("delta").option("overwriteSchema", overwrite_schema).saveAsTable(uri)
             return
 
-        if not ids_to_replace:
-            # No IDs to replace, nothing to do
-            return
+        merge_condition = " AND ".join([f"target.{k} = source.{k}" for k in merge_keys])
 
-        # Build replaceWhere condition
-        replace_condition = f"{id_column} IN ({','.join(map(str, ids_to_replace))})"
-
-        # Atomic operation: deletes all matching rows and inserts new data in single transaction
-        (
-            df.write.format("delta")
-            .mode("overwrite")
-            .option("replaceWhere", replace_condition)
-            .option("overwriteSchema", overwrite_schema)
-            .saveAsTable(uri)
+        target = self._resolve_delta_table(df.sparkSession, uri)
+        builder = (
+            target.alias("target")
+            .merge(df.alias("source"), merge_condition)
+            .withSchemaEvolution()
+            .whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
         )
+
+        if delete_conditions:
+            combined = reduce(lambda a, b: a | b, delete_conditions)
+            builder = builder.whenNotMatchedBySourceDelete(condition=combined)
+
+        builder.execute()
 
     def _table_exists(self, spark: SparkSession, uri: str) -> bool:
         """
@@ -492,14 +550,14 @@ class ReportEntityWriter(ABC):
 
     @abstractmethod
     def extract_fact_schema_and_output_uri(
-        self, aggregation_type: AggregationType | EventType
+        self, aggregation_type: AggregationType | EventType | ChannelType
     ) -> tuple[StructType, str]:
         """
         Extract fact schema and output URI for the given aggregation or event type.
 
         Parameters
         ----------
-        aggregation_type : AggregationType | EventType
+        aggregation_type : AggregationType | EventType | ChannelType
             The aggregation or event type to extract information for.
 
         Returns
@@ -561,14 +619,14 @@ class DefaultReportEntityWriter(ReportEntityWriter):
         self.sink.store(df_enriched, uri)
 
     def extract_fact_schema_and_output_uri(
-        self, entity_type: AggregationType | EventType
+        self, entity_type: AggregationType | EventType | ChannelType
     ) -> tuple[StructType, str]:
         """
         Extract fact schema and output URI for the given aggregation type.
 
         Parameters
         ----------
-        entity_type : AggregationType | EventType
+        entity_type : AggregationType | EventType | ChannelType
             The aggregation or event type to extract information for.
 
         Returns
@@ -581,14 +639,14 @@ class DefaultReportEntityWriter(ReportEntityWriter):
         return schema, uri
 
     def extract_metadata_schema_and_output_uri(
-        self, entity_type: AggregationType | EventType
+        self, entity_type: AggregationType | EventType | ChannelType
     ) -> tuple[StructType, str]:
         """
         Extract metadata schema and output URI for the given aggregation type.
 
         Parameters
         ----------
-        entity_type : AggregationType | EventType
+        entity_type : AggregationType | EventType | ChannelType
             The aggregation type to extract information for.
 
         Returns
@@ -682,14 +740,16 @@ class WriterFactory:
         self.sink_config: SinkConfig = sink.config
         self._default_transformer = ReportEntityTransformer()
 
-    def create_writer(self, element: AggregationType | EventType) -> DefaultReportEntityWriter:
+    def create_writer(
+        self, element: AggregationType | EventType | ChannelType
+    ) -> DefaultReportEntityWriter:
         """
-        Get the appropriate writer for the given aggregation or event type.
+        Get the appropriate writer for the given aggregation, event, or channel type.
 
         Parameters
         ----------
-        element : AggregationType | EventType
-            The aggregation or event type to create a writer for.
+        element : AggregationType | EventType | ChannelType
+            The aggregation, event, or channel type to create a writer for.
 
         Returns
         -------
@@ -702,12 +762,13 @@ class WriterFactory:
             If the element type is not supported.
 
         """
-        if isinstance(element, AggregationType):
-            return DefaultReportEntityWriter(self.sink, self._default_transformer)
-        elif isinstance(element, EventType):
+        if isinstance(element, (AggregationType, EventType, ChannelType)):
             return DefaultReportEntityWriter(self.sink, self._default_transformer)
         else:
-            error_msg = f"No writer found for element: {element}. Supported types are: AggregationType and EventType"
+            error_msg = (
+                f"No writer found for element: {element}. Supported types are: "
+                "AggregationType, EventType and ChannelType"
+            )
             raise ValueError(error_msg)
 
     def create_container_dimension_writer(self) -> ContainerDimensionWriter:

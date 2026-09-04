@@ -4,6 +4,8 @@ import pytest
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import (
+    SeriesValueType,
+    SeriesType,
     TimeSeriesSelector,
 )
 from impulse_query_engine.model.series import Intervals
@@ -195,3 +197,70 @@ def test_timeseries_selector_dtype_matches_sample_series_dtype():
     ts = TimeSeriesSelector(TagSelector("name") == "test")
     ss = SampleSeries.empty()
     assert ts.dtype() == ss.dtype()
+
+
+# ---------------------------------------------------------------------------
+# QueryBuilder.poi_channel — dtype accepts the enum OR its string value
+# ---------------------------------------------------------------------------
+class TestPoiChannelDtypeArg:
+    """``poi_channel(dtype=...)`` must accept both ``SeriesValueType`` and the plain
+    string value (``"double"`` / ``"string"``). A regression guard: a plain
+    ``dtype="string"`` used to be stored verbatim (a ``str``, not the enum), so the
+    ``is SeriesValueType.STRING`` identity checks silently fell through and a string
+    POI channel behaved as numeric — blowing up on the first string comparison.
+    """
+
+    def test_default_dtype_is_double(self, narrow_db):
+        sel = narrow_db.query.poi_channel(channel_name="DTC_count")
+        assert sel.series_type is SeriesType.POINTS_IN_TIME
+        assert sel.value_type is SeriesValueType.DOUBLE
+
+    def test_enum_string_dtype(self, narrow_db):
+        sel = narrow_db.query.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
+        assert sel.value_type is SeriesValueType.STRING
+
+    def test_plain_string_dtype_coerced_to_enum(self, narrow_db):
+        # the design-doc form: poi_channel(..., dtype="string")
+        sel = narrow_db.query.poi_channel(channel_name="DTC", dtype="string")
+        assert sel.value_type is SeriesValueType.STRING
+
+    def test_plain_string_double_dtype_coerced_to_enum(self, narrow_db):
+        sel = narrow_db.query.poi_channel(channel_name="DTC_count", dtype="double")
+        assert sel.value_type is SeriesValueType.DOUBLE
+
+    def test_invalid_dtype_raises(self, narrow_db):
+        with pytest.raises(ValueError):
+            narrow_db.query.poi_channel(channel_name="DTC", dtype="int")
+
+    def test_string_poi_types_as_struct_regardless_of_arg_form(self, narrow_db):
+        # both arg forms must produce an identical string-typed result dtype
+        enum_sel = narrow_db.query.poi_channel(channel_name="DTC", dtype=SeriesValueType.STRING)
+        str_sel = narrow_db.query.poi_channel(channel_name="DTC", dtype="string")
+        assert enum_sel.dtype() == str_sel.dtype()
+        # string POI serializes as array<struct<tstart,value>>, not array<array<double>>
+        assert isinstance(str_sel.dtype(), T.ArrayType)
+        assert isinstance(str_sel.dtype().elementType, T.StructType)
+
+    def test_string_poi_equality_evaluates_to_points_in_time(self, narrow_db):
+        # dtype="string" must yield a string series so `== "code"` works at plan time
+        dtc = narrow_db.query.poi_channel(channel_name="DTC", dtype="string")
+        assert (dtc == "P0301").evaluation_type() is PointsInTime
+
+    def test_string_poi_mean_rejected_at_build_time(self, narrow_db):
+        dtc = narrow_db.query.poi_channel(channel_name="DTC", dtype="string")
+        with pytest.raises(TypeError, match="non-numeric"):
+            dtc.mean().evaluation_type()
+
+    def test_poi_selector_id_distinguishes_value_type(self):
+        # A double- vs string-typed POI selection of the *same* expression must resolve
+        # as distinct channels, so their selector_id must differ.
+        expr = TagSelector("channel_name") == "DTC"
+        dbl = TimeSeriesSelector(
+            expr, series_type=SeriesType.POINTS_IN_TIME, value_type=SeriesValueType.DOUBLE
+        )
+        strg = TimeSeriesSelector(
+            expr, series_type=SeriesType.POINTS_IN_TIME, value_type=SeriesValueType.STRING
+        )
+        assert dbl.selector_id != strg.selector_id
+        # CONTINUOUS keeps the historical id (independent of value_type), distinct from POI.
+        assert TimeSeriesSelector(expr).selector_id != dbl.selector_id

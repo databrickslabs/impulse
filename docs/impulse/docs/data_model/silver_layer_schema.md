@@ -341,9 +341,38 @@ interval `[tstart, tend)` with a constant value. Used when
 ### Raw format
 
 Raw timestamp-based data without RLE encoding — one row per sample. Used
-when `data_type: RAW` is set in the report config; the engine derives
-`tend` from subsequent timestamps and transforms the data into RLE before
-query execution.
+when `data_type: RAW` is set in the report config; the engine converts it
+to `[tstart, tend)` intervals before query execution. The conversion
+strategy is selected by
+[`query_engine.raw_encoder`](../config/configuration.md#query_engine-optional):
+
+- **`RLE`** (the default) — derives `tend` from the next sample's timestamp
+  and collapses consecutive equal values into a single `[tstart, tend)`
+  interval per run.
+- **`INTERVAL`** — only derives `tend` and drops exact duplicate points;
+  equal-valued runs remain separate intervals.
+
+:::note How Impulse interprets intervals
+
+- A time series is considered **valid within its `[tstart, tend)`
+  intervals**. Operations like time-series synchronization use these
+  validity windows.
+- **Deriving `tend`.** Within each `(container_id, channel_id)`, samples
+  are ordered by timestamp and each sample's `tend` is set to the *next*
+  sample's timestamp. The last sample in a channel has no successor, so
+  its `tend` falls back to its own timestamp.
+- **Identifying redundancy differs by encoder.** `INTERVAL` drops a
+  **duplicate point** — a row whose timestamp *and* value both equal the
+  next row's — and keeps every other sample as its own interval. `RLE`
+  instead merges a **run** — consecutive samples that share the same
+  value — into a single `[tstart, tend)` interval, regardless of their
+  timestamps.
+- `RLE` (default) does this merging **on the fly to reduce memory
+  consumption**; `INTERVAL` keeps **every original sample** and only adds
+  `tend` — choose it when downstream analysis needs all original
+  timestamps.
+
+:::
 
 | Column         | Type     | Nullable | Description                      |
 |----------------|----------|----------|----------------------------------|
@@ -357,7 +386,8 @@ query execution.
 An optional `is_plausible: boolean` column may be present on `channels`
 in either format. It is **only consulted** when the solver is
 constructed with `drop_implausible_data=True` — in that mode, samples
-with `is_plausible = False` are filtered before RLE encoding. If the
+with `is_plausible = False` are filtered during the raw→interval
+conversion (both `raw_encoder` variants honor the flag). If the
 flag is `False` (the default), the column is ignored and may be omitted.
 
 #### Internal columns referenced by the framework
@@ -376,7 +406,44 @@ when your physical column has a different name.
 
 For raw-format `channels`, the same internal names apply except that
 `timestamp` replaces the `tstart`/`tend` pair; the engine derives `tend`
-during raw→RLE conversion.
+during raw→interval conversion (see `query_engine.raw_encoder`).
+
+---
+
+## poi_channels (optional)
+
+**Optional** — only needed for [Points-in-Time (POI) channels](../references/query_engine/tsal/core_data_model.md#pointsintimeseries) 
+selected via `QueryBuilder.poi_channel()`. Omit it for sample-only data models. 
+Unlike `channels`, a POI channel's value is defined **only at its timestamp**.
+
+**`QueryBuilder.poi_channel(...)` is the discriminator**: the user tells the engine to build a 
+`PointsInTimeSeries` for a specific channel by providing its name and the corresponding `dtype`.
+
+A POI value may be numeric or a string (e.g. an ECU Diagnostic Trouble Code). The two typed value 
+columns cover both, and **exactly one is populated per row** — chosen by the channel's declared
+`dtype` at query time (`poi_channel(dtype='double'|'string')`).
+
+| Column         | Type     | Nullable | Description                                            |
+|----------------|----------|----------|--------------------------------------------------------|
+| `container_id` | `long`   | No       | Parent container identifier.                           |
+| `channel_id`   | `int`    | No       | Channel identifier.                                    |
+| `timestamp`    | `long`   | No       | Point timestamp (microseconds).                        |
+| `value_double` | `double` | Yes      | Numeric value (populated for a `double` POI channel).  |
+| `value_string` | `string` | Yes      | String value (populated for a `string` POI channel).   |
+
+#### Internal columns referenced by the framework
+
+Map any silver column to these via
+[`solver_config.poi_channels.column_name_mapping`](../config/configuration.md#solver-column-mappings-and-filters)
+when your physical column has a different name.
+
+| Internal name  | Referenced by                                                                |
+|----------------|------------------------------------------------------------------------------|
+| `container_id` | Composite key joining points back to their container                         |
+| `channel_id`   | Composite key joining points back to their channel                           |
+| `timestamp`    | Point timestamp — becomes the point's `tstart` (with a null `tend`) at solve |
+| `value_double` | Numeric point value — consumed by the solve UDF                              |
+| `value_string` | String point value — consumed by the solve UDF for a `string` POI channel    |
 
 ---
 

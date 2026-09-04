@@ -59,6 +59,7 @@ Maps the silver-layer input tables.
 | `container_metrics_table` | `str` | Yes      | Full Unity Catalog path. Container metadata (timestamps, duration). |
 | `channel_metrics_table`   | `str` | Yes      | Full Unity Catalog path. Channel-level statistics.        |
 | `channels_uri`            | `str` | Yes      | Full Unity Catalog path. Time-series sample data.         |
+| `poi_channels_uri`        | `str` | No       | Full Unity Catalog path to the Points-in-Time (POI) channel data table. Required only when selecting POI channels via `poi_channel()`; omit for sample-only data models. |
 | `container_tags_table`    | `str` | No       | Full Unity Catalog path. Container EAV tags.              |
 | `channel_tags_table`      | `str` | No       | Full Unity Catalog path. Channel EAV tags.                |
 | `channel_mapping_table`   | `str` | No       | Full Unity Catalog path. Logical-to-physical channel alias table. Required when using `QueryBuilder.channel_with_alias()`. In reporting mode the resolved alias-to-physical-channel mapping is materialized to the gold-layer [`channel_mapping_resolution_dimension`](../data_model/gold_layer_event_normalized.md#dimension-tables). |
@@ -76,9 +77,10 @@ Defines where gold-layer tables are written.
 
 | Field          | Type  | Required | Description                           |
 |----------------|-------|----------|---------------------------------------|
-| `catalog`      | `str` | Yes      | Target catalog name.                  |
-| `schema`       | `str` | Yes      | Target schema name.                   |
-| `table_prefix` | `str` | Yes      | Prefix for all generated table names. |
+| `catalog`             | `str`  | Yes      | Target catalog name.                  |
+| `schema`              | `str`  | Yes      | Target schema name.                   |
+| `table_prefix`        | `str`  | Yes      | Prefix for all generated table names. |
+| `cleanup_temp_tables` | `bool` | No       | Drop the batch-solving `__impulse_temp_*` tables from this schema after `persist_results()` completes successfully. Defaults to `false`. Overridable per call via `persist_results(cleanup_temp_tables=...)`. |
 
 Output tables are named `{table_prefix}_{entity}` (e.g.
 `my_report_histogram_fact`).
@@ -134,9 +136,10 @@ Two independent filter families:
 | Field                   | Type           | Default                  | Description                                                                                                                 |
 |-------------------------|----------------|--------------------------|-----------------------------------------------------------------------------------------------------------------------------|
 | `solver`                | `str`          | `"DefaultSolver"`        | `"DefaultSolver"` adapts to the silver layer: it selects channels from a narrow EAV `channel_tags` table when `source.channel_tags_table` is set and otherwise from columns on `channel_metrics`; it filters containers via a narrow EAV `container_tags` table or, when `source.container_tags_table` is omitted, a wide-only `container_metrics`. `"DeltaSolver"` and `"KeyValueStoreSolver"` are **deprecated aliases** that resolve to `DefaultSolver`. |
-| `data_type`             | `str`          | `"RLE"`                  | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to RLE before aggregation).                      |
+| `data_type`             | `str`          | `"RLE"`                  | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to intervals at query time by the configured `raw_encoder`). |
+| `raw_encoder`           | `str`          | `null` (resolves to `"RLE"` when `data_type = "RAW"`) | How RAW point data is converted to intervals. `"RLE"` (the default) run-length encodes on the fly to reduce memory consumption: consecutive samples with the same value collapse into a single `[tstart, tend)` interval per run. `"INTERVAL"` keeps every original sample, only deriving `tend` from the next sample's timestamp and dropping exact duplicate points — use it when downstream analysis needs all original timestamps. Only takes effect with `data_type = "RAW"`; ignored for `"RLE"` input. See [How Impulse interprets intervals](../data_model/silver_layer_schema.md#raw-format) for validity semantics and what counts as a duplicate point. |
 | `drop_implausible_data` | `bool`         | `false`                  | When `true`, drops `channels` rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
-| `batch_size`            | `int`          | `500`                    | Maximum number of selectors solved per batch.                                                                               |
+| `batch_size`            | `int`          | `500`                    | Maximum number of selectors solved per batch. Applies to events, aggregations, and calculated channels.                     |
 | `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` to scope reads by project — it is applied to `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured), so it works in both narrow EAV and wide-only data models. Omit it when you don't need project scoping. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
 
 If `query_engine` is omitted, the default is `DefaultSolver` with
@@ -348,6 +351,40 @@ mode-resolution rules and what counts as a definition change.
 | `enabled`                     | `bool` | `false`         | Turns incremental processing on.                                       |
 | `silver_last_modified_column` | `str`  | `"timestamp"`   | Silver-side column used to detect container updates.                   |
 | `gold_last_modified_column`   | `str`  | `"_created_at"` | Gold-side column used to detect prior-run freshness.                   |
+
+---
+
+## calculated_channels (optional)
+
+Controls the optional `calculated_channel_metrics` output. By default a report
+writes calculated channels to `calculated_channel_fact` (the derived signal) and
+`calculated_channel_dimension` (the definitions). Setting `emit_channel_metrics`
+adds a third table, `calculated_channel_metrics`, shaped like the silver
+`channel_metrics` table so the fact + metrics pair can serve as an Impulse silver
+source. See the [Channels reference](../references/report/channel.md) for the
+output schema.
+
+| Field                 | Type        | Default                              | Description                                                                                       |
+|-----------------------|-------------|--------------------------------------|---------------------------------------------------------------------------------------------------|
+| `emit_channel_metrics`| `bool`      | `false`                              | Turns on the `calculated_channel_metrics` table.                                                  |
+| `attribute_columns`   | `list[str]` | `[]`                                 | Calculated-channel `attributes` keys to surface as columns on the metrics table (e.g. `["unit"]`). |
+| `kpis`                | `list[str]` | `["duration", "min", "max", "mean"]` | KPIs computed per `(container_id, channel_id)`, one column each. Must be registered KPI names.     |
+
+When enabled, each row of `calculated_channel_metrics` is one
+`(container_id, channel_id)` pair, carrying the selected `kpis` plus dynamic
+identity columns (the union of `identity` keys across the report's channels) and
+the configured `attribute_columns`. A channel that omits an identity or attribute
+key gets `null` for that column; an identity key wins over an attribute key of the
+same name.
+
+The available `kpis` are `duration`, `min`, `max`, and `mean` (all
+duration-weighted, matching the silver ingestion semantics). An unknown KPI name is
+rejected at config validation with a `ValueError` naming the valid KPIs.
+
+:::note Off by default
+When `emit_channel_metrics` is `false` (the default), no metrics table is written
+and `attribute_columns` / `kpis` have no effect.
+:::
 
 ---
 

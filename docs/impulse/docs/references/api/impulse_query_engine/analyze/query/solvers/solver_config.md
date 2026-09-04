@@ -19,6 +19,29 @@ filter application — uses the framework-internal column names exposed as
 properties on :class:`SolverConfig`.
 
 
+## RawEncoder
+
+```python
+class RawEncoder(StrEnum)
+```
+
+Encoder used to convert RAW point data into intervals for solving.
+
+Only relevant when the query engine operates on RAW (point) data; RLE input
+is passed through unchanged regardless of this setting.
+
+Values
+------
+RLE
+    Run-length encode: collapse consecutive samples that share the same
+    ``value`` within a container/channel into a single interval (see
+    :class:`~impulse_query_engine.analyze.query.solvers.utils.rle_encoder.RleEncoder`).
+INTERVAL
+    Derive ``tend`` from the following sample's timestamp and drop exact
+    duplicate points, *without* merging equal-valued runs (see
+    :class:`~impulse_query_engine.analyze.query.solvers.utils.interval_encoder.IntervalEncoder`).
+
+
 ## TableConfig
 
 ```python
@@ -210,6 +233,33 @@ def value_col() -> str
 Internal column name for the signal value on the channels table.
 
 
+#### poi\_timestamp\_col
+
+```python
+def poi_timestamp_col() -> str
+```
+
+Internal column name for the point timestamp on the poi_channels table.
+
+
+#### poi\_value\_double\_col
+
+```python
+def poi_value_double_col() -> str
+```
+
+Internal column name for the numeric value on the poi_channels table.
+
+
+#### poi\_value\_string\_col
+
+```python
+def poi_value_string_col() -> str
+```
+
+Internal column name for the string value on the poi_channels table.
+
+
 #### tag\_key\_col
 
 ```python
@@ -361,6 +411,24 @@ def group_id_col() -> str
 ```
 
 Internal column name for the unit group id on the unit_conversion table.
+
+
+#### timestamp\_col
+
+```python
+def timestamp_col() -> str
+```
+
+Internal column name for the timestamp on the channels table for raw encoded channel data.
+
+
+#### is\_plausible\_col
+
+```python
+def is_plausible_col() -> str
+```
+
+Internal column name for the plausibility flag on the channels table for raw encoded channel data.
 
 
 #### effective\_alias\_join\_keys

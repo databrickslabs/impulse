@@ -1,12 +1,15 @@
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
 from databricks.sdk import WorkspaceClient
 
 from impulse_reporting.aggregations.histogram import (
     HistogramDuration,
 )
+from impulse_reporting.aggregations.point_value_aggregator import PointValueAggregator
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
+from impulse_reporting.channels.calculated_channel import CalculatedChannel
 from impulse_reporting.config.config_parser import (
     IncrementalConfig,
     ImpulseConfig,
@@ -17,7 +20,11 @@ from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
 from impulse_reporting.events.container_event import ContainerEvent
+from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from tests.conftest import spark
+from tests.impulse_reporting.integration.test_helpers import (
+    clone_silver_with_shrunk_container,
+)
 
 
 def set_config(silver_table, is_enabled=True):
@@ -668,3 +675,299 @@ def test_incremental_cross_type_event_definition_change(spark):
     assert (
         seq_count_run2 > 0
     ), "SequenceOfEvents fact data must survive after cross-type incremental persistence"
+
+
+def test_incremental_long_seeded_event_fact_accepts_double_event(spark):
+    """A mixture of event types (PointsInTimeEvent, ContainerEvent, BasicEvent) added across
+    incremental runs must keep a consistent event_instance_fact output structure.
+
+    Run 1 seeds the shared table with PointsInTimeEvent + ContainerEvent; run 2 adds a new
+    BasicEvent incrementally. All event types must agree on the ``start_ts``/``end_ts`` type
+    (double) so the run-2 write fits the seeded table.
+    """
+    # --- Run 1 (seed): only long-emitting event types (PointsInTimeEvent + ContainerEvent) ---
+    report_1 = Report(
+        name="long_seeded_event_fact_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(set_config("container_metrics_inc_1_2", False)),
+    )
+    eng_rpm = report_1.get_db().query.channel(channel_name="Engine RPM")
+    pit_event = PointsInTimeEvent(name="rpm_rising", expr=eng_rpm.rising_edges())
+    container_event = ContainerEvent(name="full_measurement")
+    report_1.add_event(pit_event)
+    report_1.add_event(container_event)
+    page = Page(page_number=1)
+    report_1.add_page(page)
+    page.add_aggregation(
+        PointValueAggregator(
+            name="rpm_at_edges",
+            input_expressions=[eng_rpm],
+            channel_names=["Engine RPM"],
+            event=pit_event,
+        )
+    )
+    report_1.determine_report()
+    report_1.persist_results()
+
+    event_fact_run1 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
+    pit_event_id = pit_event.get_id()
+    container_event_id = container_event.get_id()
+    assert (
+        event_fact_run1.where(F.col("event_id") == pit_event_id).count() > 0
+    ), "PointsInTimeEvent should have fact rows after run 1"
+    assert (
+        event_fact_run1.where(F.col("event_id") == container_event_id).count() > 0
+    ), "ContainerEvent should have fact rows after run 1"
+
+    # --- Run 2 (incremental): keep the long events, add a NEW (double-emitting) BasicEvent ---
+    report_2 = Report(
+        name="long_seeded_event_fact_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(set_config("container_metrics_inc_1_2", True)),
+    )
+    eng_rpm_2 = report_2.get_db().query.channel(channel_name="Engine RPM")
+    pit_event_2 = PointsInTimeEvent(name="rpm_rising", expr=eng_rpm_2.rising_edges())
+    container_event_2 = ContainerEvent(name="full_measurement")
+    basic_event = BasicEvent(name="rpm_gt_0", expr=eng_rpm_2 > 0)
+    report_2.add_event(pit_event_2)
+    report_2.add_event(container_event_2)
+    report_2.add_event(basic_event)
+    page_2 = Page(page_number=1)
+    report_2.add_page(page_2)
+    page_2.add_aggregation(
+        PointValueAggregator(
+            name="rpm_at_edges",
+            input_expressions=[eng_rpm_2],
+            channel_names=["Engine RPM"],
+            event=pit_event_2,
+        )
+    )
+    page_2.add_aggregation(
+        StatsAggregator(
+            name="rpm_stats",
+            input_expressions=[eng_rpm_2],
+            channel_names=["Engine RPM"],
+            statistics=["min", "max"],
+            event=basic_event,
+        )
+    )
+    report_2.determine_report()
+    report_2.persist_results()
+
+    event_fact_run2 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
+    basic_event_id = basic_event.get_id()
+
+    # The long-seeded event types AND the newly-added double BasicEvent all survive together.
+    assert (
+        event_fact_run2.where(F.col("event_id") == pit_event_id).count() > 0
+    ), "PointsInTimeEvent fact data must survive incremental persistence"
+    assert (
+        event_fact_run2.where(F.col("event_id") == container_event_id).count() > 0
+    ), "ContainerEvent fact data must survive incremental persistence"
+    assert (
+        event_fact_run2.where(F.col("event_id") == basic_event_id).count() > 0
+    ), "newly-added BasicEvent must be persisted into the shared event_instance_fact"
+
+    # The shared timestamp columns are double across every event type (not long-seeded).
+    assert event_fact_run2.schema["start_ts"].dataType == T.DoubleType()
+    assert event_fact_run2.schema["end_ts"].dataType == T.DoubleType()
+
+
+# ---------------------------------------------------------------------------
+# Multi-family shrink: one modified container producing FEWER rows under
+# UNCHANGED definitions must have its surplus rows deleted across every fact
+# table (calc channel + event + event-scoped stats), while non-reprocessed
+# containers stay byte-identical.
+# ---------------------------------------------------------------------------
+
+_CC_FACT = "spark_catalog.gold.evaluation_calculated_channel_fact"
+_EVENT_FACT = "spark_catalog.gold.evaluation_event_instance_fact"
+_STATS_FACT = "spark_catalog.gold.evaluation_stats_aggregator_fact"
+
+
+def _shrink_config(container_metrics_table, channels_uri, is_enabled):
+    return ImpulseConfig(
+        source=Source(
+            container_metrics_table=container_metrics_table,
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri=channels_uri,
+        ),
+        unity_sink=UnitySink(catalog="spark_catalog", schema="gold", table_prefix="evaluation"),
+        incremental=IncrementalConfig(
+            enabled=is_enabled,
+            silver_last_modified_column="timestamp",
+            gold_last_modified_column="_created_at",
+        ),
+    )
+
+
+def _add_multi_family(report):
+    """Register calc channel + event + event-scoped stats on one report.
+
+    - calc channel ``speed_kmh`` = Vehicle Speed Sensor (channel 7) * 3.6 → rows
+      1:1 with that channel's silver intervals.
+    - ``rpm_high`` = Engine RPM (channel 5) > 1000 → one event instance per
+      contiguous crossing above 1000.
+    - ``rpm_high_stats`` = min/max of Engine RPM over ``rpm_high`` → one row per
+      (instance × statistic).
+    Returns ``(calc_channel, event, stats)``.
+    """
+    q = report.get_db().query
+    c1 = q.channel(channel_name="Engine RPM")
+    c2 = q.channel(channel_name="Vehicle Speed Sensor")
+
+    calc = CalculatedChannel(
+        name="speed_kmh",
+        expr=c2 * 3.6,
+        identity={"channel_name": "speed_kmh", "data_key": "CALC"},
+    )
+    report.add_calculated_channel(calc)
+
+    event = BasicEvent(name="rpm_high", expr=c1 > 1000)
+    report.add_event(event)
+
+    page = Page(page_number=1)
+    report.add_page(page)
+    stats = StatsAggregator(
+        name="rpm_high_stats",
+        input_expressions=[c1],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max"],
+        event=event,
+    )
+    page.add_aggregation(stats)
+    return calc, event, stats
+
+
+def _rows(spark, table, id_col, entity_id, container_id):
+    return (
+        spark.read.table(table)
+        .filter((F.col(id_col) == entity_id) & (F.col("container_id") == container_id))
+        .count()
+    )
+
+
+def _others_snapshot(spark, table, id_col, entity_id, value_cols):
+    """Ordered snapshot of the non-container-1 rows for byte-identical comparison."""
+    return (
+        spark.read.table(table)
+        .filter((F.col(id_col) == entity_id) & (F.col("container_id") != 1))
+        .select(*value_cols)
+        .orderBy(*value_cols)
+        .collect()
+    )
+
+
+def test_incremental_modified_container_multi_family_shrink_deletes_stale(spark):
+    """A modified container emitting FEWER rows under UNCHANGED definitions must
+    leave no stale rows in any fact table, and must not touch other containers.
+
+    One incremental run reprocesses container 1 (bumped ``timestamp``) whose Engine
+    RPM (ch 5) and Vehicle Speed Sensor (ch 7) signals are truncated to 5 samples.
+    Exact counts are pinned from a probe run:
+      - calculated_channel_fact: 50 → 5   (1:1 with the 5 kept ch-7 samples)
+      - event_instance_fact:      3 → 1   (``rpm > 1000`` crossings collapse to 1)
+      - stats_aggregator_fact:    6 → 2   (1 instance × 1 signal × 2 statistics)
+    Containers 2 & 3 keep an old timestamp → not reprocessed → byte-identical.
+    """
+    # --- Run 1 (full): seed all three fact tables from base silver (3 containers) ---
+    r1 = Report(
+        name="multi_family_shrink_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(
+            _shrink_config(
+                "spark_catalog.silver.container_metrics", "spark_catalog.silver.channels", False
+            )
+        ),
+    )
+    calc, event, stats = _add_multi_family(r1)
+    r1.determine_report()
+    r1.persist_results()
+
+    # Baseline container-1 counts (exact) + byte-identical snapshots of 2 & 3.
+    assert _rows(spark, _CC_FACT, "channel_id", calc.get_id(), 1) == 50
+    assert _rows(spark, _EVENT_FACT, "event_id", event.get_id(), 1) == 3
+    assert _rows(spark, _STATS_FACT, "visual_id", stats.get_id(), 1) == 6
+
+    cc_others_before = _others_snapshot(
+        spark, _CC_FACT, "channel_id", calc.get_id(), ["container_id", "tstart", "value"]
+    )
+    event_others_before = _others_snapshot(
+        spark, _EVENT_FACT, "event_id", event.get_id(), ["container_id", "start_ts", "end_ts"]
+    )
+    stats_others_before = _others_snapshot(
+        spark,
+        _STATS_FACT,
+        "visual_id",
+        stats.get_id(),
+        ["container_id", "aggregation_label", "statistic_value"],
+    )
+
+    shrink_cm = "spark_catalog.silver.container_metrics_multi_shrink"
+    shrink_channels = "spark_catalog.silver.channels_multi_shrink"
+    try:
+        # Modified silver: container 1 updated (bumped timestamp) with Engine RPM
+        # (ch 5) and Vehicle Speed (ch 7) truncated to the first 5 samples; 2 & 3
+        # keep the old timestamp so they are skipped.
+        clone_silver_with_shrunk_container(
+            spark,
+            updated_container_id=1,
+            shrink_channel_ids=[5, 7],
+            keep_n=5,
+            cm_table=shrink_cm,
+            channels_table=shrink_channels,
+        )
+
+        # --- Run 2 (incremental): same definitions (unchanged path) ---
+        r2 = Report(
+            name="multi_family_shrink_report",
+            spark=spark,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=dict(_shrink_config(shrink_cm, shrink_channels, True)),
+        )
+        calc2, event2, stats2 = _add_multi_family(r2)
+        # Same identities → unchanged definitions → the incremental (not replace) path.
+        assert calc2.get_id() == calc.get_id()
+        assert event2.get_id() == event.get_id()
+        assert stats2.get_id() == stats.get_id()
+        r2.determine_report()
+        r2.persist_results()
+
+        # Container 1 shrank on every fact table — no stale orphans survive.
+        assert _rows(spark, _CC_FACT, "channel_id", calc.get_id(), 1) == 5
+        assert _rows(spark, _EVENT_FACT, "event_id", event.get_id(), 1) == 1
+        assert _rows(spark, _STATS_FACT, "visual_id", stats.get_id(), 1) == 2
+
+        # Containers 2 & 3 were not reprocessed → byte-identical across all tables.
+        assert (
+            _others_snapshot(
+                spark, _CC_FACT, "channel_id", calc.get_id(), ["container_id", "tstart", "value"]
+            )
+            == cc_others_before
+        )
+        assert (
+            _others_snapshot(
+                spark,
+                _EVENT_FACT,
+                "event_id",
+                event.get_id(),
+                ["container_id", "start_ts", "end_ts"],
+            )
+            == event_others_before
+        )
+        assert (
+            _others_snapshot(
+                spark,
+                _STATS_FACT,
+                "visual_id",
+                stats.get_id(),
+                ["container_id", "aggregation_label", "statistic_value"],
+            )
+            == stats_others_before
+        )
+    finally:
+        spark.sql(f"DROP TABLE IF EXISTS {shrink_cm}")
+        spark.sql(f"DROP TABLE IF EXISTS {shrink_channels}")

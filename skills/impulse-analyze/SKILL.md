@@ -87,17 +87,49 @@ to collect a pandas DataFrame directly:
 pdf = db.query.select(eng_rpm.mean().alias("rpm_mean")).toPandas(spark, solver=DefaultSolver(spark))
 ```
 
+## Selecting Points-in-Time (POI) channels
+
+POI channels represent time series of discrete events and are only valid at the given timestamps.
+Select one with `poi_channel(...)` instead of `channel(...)` — identification (tags / `channel_metrics` columns) is
+identical; only the built series type differs:
+
+**Which to use** — pick by the nature of the data, not the query. Use `channel()` (→ `SampleSeries`)
+for a measured signal that is valid within its `[tstart, tend)` intervals — a value measured at each
+`tstart`, reconstructed between measurements by interpolation (zero-order hold today);
+duration-weighted aggregations (RPM, speed, temperature). Use `poi_channel()` (→ `PointsInTimeSeries`)
+for discrete events valid only at their instant, with no value in between (DTC / fault codes, event
+logs; unweighted aggregations). Litmus test: *is the reading still meaningful a moment later, until
+the next one?* Yes → `channel()`; a momentary event → `poi_channel()`.
+
+```python
+# numeric POI channel (default dtype="double")
+dtc_count = db.query.poi_channel(channel_name="DTC_count")
+# string POI channel (e.g. DTC fault codes)
+dtc = db.query.poi_channel(channel_name="DTC", dtype="string")
+```
+
+- `dtype` is `"double"` (default, numeric) or `"string"`, and accepts either the `SeriesValueType` enum
+  or the plain string.
+- **String** POI series support only equality (`== "P0301"` / `!=`) and sampling (`.where(...)`);
+  arithmetic, ordering and numeric reductions (`sum`/`mean`/`min`/`max`) are rejected at build time.
+- The declared `dtype` is validated against the silver data at solve time (a declared-vs-actual mismatch
+  raises). See `impulse-data-model` for the `poi_channels` table and `impulse-tsal` for the algebra.
+
 ## Choosing the solver
 
 `DefaultSolver(spark)` reads your silver layer. Constructor:
 
 ```python
-DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False)
+DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False, raw_encoder=RawEncoder.RLE)
 ```
 
 - `is_raw_data=True` when `channels` stores raw `(timestamp, value)` samples (default `False` expects
   RLE `[tstart, tend)` intervals). This is the ad-hoc equivalent of `query_engine.data_type` in a report
   config.
+- `raw_encoder` (`RawEncoder.RLE` default, or `RawEncoder.INTERVAL`) chooses how raw points become
+  intervals — RLE collapses equal-valued runs, INTERVAL keeps every sample. Only used when
+  `is_raw_data=True`; the ad-hoc equivalent of `query_engine.raw_encoder`. Import from
+  `impulse_query_engine.analyze.query.solvers.solver_config`.
 - `drop_implausible_data=True` drops rows where `is_plausible = false` (requires `is_raw_data=True`).
 - `config` takes a `SolverConfig` for column-name remapping / project scoping — the same object
   described under `solver_config` in `impulse-config`.
@@ -118,9 +150,31 @@ Each selected expression is typed by what it evaluates to (see `impulse-tsal` fo
 | `SampleSeries`       | `BinaryType` (pickle+lz4)          | deserialized back into an object    |
 | `Intervals`          | `ArrayType(ArrayType(DoubleType))` | nested lists `[[tstart, tend], ...]` |
 | `PointsInTime`       | `ArrayType(DoubleType)`            | list `[tstart, ...]`                |
-| `PointsInTimeSeries` | `ArrayType(ArrayType(DoubleType))` | nested lists `[[tstart, value], ...]` |
+| `PointsInTimeSeries` (numeric) | `ArrayType(ArrayType(DoubleType))` | nested lists `[[tstart, value], ...]` |
+| `PointsInTimeSeries` (string)  | `ArrayType(StructType[tstart:double, value:string])` | list of `(tstart, value)` structs |
 | scalar               | `DoubleType`                       | the value                           |
 
 For scalar-per-container summaries (means, maxima, counts), `select()` the reducer expressions as
 above. When you want the results persisted as a star schema instead of returned inline, use
 `impulse-reporting`.
+
+## Solving calculated channels
+
+`solve()` returns one **wide** row per container. To get a **narrow**, silver-shaped result instead —
+one row per sample interval — use `solve_calculated_channels()` with `CalculatedChannel` selections (see
+`impulse-channels`). It requires a `DefaultSolver` (the default `BlobSolver` raises).
+
+```python
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+
+cc = CalculatedChannel(
+    db.query.channel(channel_name="Vehicle Speed Sensor") * 3.6,
+    {"channel_name": "speed_kmh", "data_key": "CALC"},
+)
+df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
+# df: [container_id, channel_id, tstart, tend, value, identity]
+#     identity is a map<string,string> holding the channel's identity dict
+```
+
+All selections must be `CalculatedChannel`s; identity keys are arbitrary and need not match across
+selections (each row carries its own identity map).

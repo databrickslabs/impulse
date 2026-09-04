@@ -5,7 +5,8 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
-from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
+from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
+from impulse_reporting.channels.calculated_channel_kpis import DEFAULT_KPIS, KPI_BUILDERS
 
 
 def is_valid_table_name(table_name: str) -> str:
@@ -127,6 +128,10 @@ class Source(BaseModel):
         Full Unity Catalog path to the channel metrics table.
     channels_uri : str
         Full Unity Catalog path to the channels data table.
+    poi_channels_uri : str, optional
+        Full Unity Catalog path to the Points-in-Time (POI) channel data table.
+        Required only when the report selects POI channels via ``poi_channel()``;
+        omit it for sample-only data models.
     channel_mapping_table : str, optional
         Full Unity Catalog path to the channel mapping table. Required when using
         ``channel_with_alias()`` for logical alias resolution.
@@ -147,6 +152,7 @@ class Source(BaseModel):
     container_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channel_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channels_uri: Annotated[str, AfterValidator(is_valid_table_name)]
+    poi_channels_uri: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
     channel_mapping_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
     unit_conversion_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
 
@@ -163,6 +169,11 @@ class UnitySink(BaseModel):
         Target schema name for output tables.
     table_prefix : str
         Prefix to use for generated output table names.
+    cleanup_temp_tables : bool
+        When ``True``, the intermediate ``__impulse_temp_*`` tables written to this
+        sink during batch solving are dropped after ``persist_results()`` completes
+        successfully. Defaults to ``False`` (temp tables are retained for inspection
+        and only cleared at the start of the next report run).
 
     Notes
     -----
@@ -175,6 +186,7 @@ class UnitySink(BaseModel):
         str,
         AfterValidator(lambda v: v if v == "" else is_valid_unity_entity_name(v)),
     ]
+    cleanup_temp_tables: bool = False
 
 
 class Comparator(str, Enum):
@@ -343,6 +355,13 @@ class QueryEngine(BaseModel):
     ----------
     solver : Solvers, default=Solvers.DEFAULT_SOLVER
         The solver type to use for query execution.
+    raw_encoder : RawEncoder, optional, default=None
+        Encoder used to convert RAW point data into intervals.  ``RLE``
+        collapses consecutive equal-valued samples into runs; ``INTERVAL``
+        only derives ``tend`` and drops exact duplicates.  Only takes effect
+        when ``data_type=RAW``; ignored for RLE input.  When omitted and
+        ``data_type=RAW``, it is resolved to ``RLE`` at validation time;
+        for RLE input the field stays ``None`` and is never consulted.
     enable_predicate_pushdown : bool, default=False
         When True, the solver extracts value predicates from the report's
         event and aggregation expressions (e.g. an event ``channel > 2000``
@@ -386,6 +405,7 @@ class QueryEngine(BaseModel):
     solver: Solvers = Solvers.DEFAULT_SOLVER
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
+    raw_encoder: RawEncoder | None = None
     enable_predicate_pushdown: bool = False
     solver_config: SolverConfig | None = None
     batch_size: int = 500
@@ -394,10 +414,8 @@ class QueryEngine(BaseModel):
     def validate_drop_implausible_data_requires_raw(self):
         """`drop_implausible_data=True` currently only takes effect with RAW data.
 
-        The filter is applied inside the RAW -> RLE conversion path in
-        ``IntervalEncoder.prepare_channels_df``. RLE input short-circuits that
-        path and the flag is silently ignored, so we reject the combination at
-        config validation time.
+        The filter is applied inside the RAW -> interval conversion path by the
+        selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).
         """
         if self.drop_implausible_data and self.data_type is not DataType.RAW:
             raise ValueError(
@@ -405,6 +423,13 @@ class QueryEngine(BaseModel):
                 "The implausible-data filter is only applied during the RAW -> RLE "
                 "conversion path; RLE input is passed through unchanged."
             )
+        return self
+
+    @model_validator(mode="after")
+    def default_raw_encoder_for_raw_data(self):
+        """When ``data_type=RAW`` and ``raw_encoder`` is unset, default to RLE."""
+        if self.data_type is DataType.RAW and self.raw_encoder is None:
+            self.raw_encoder = RawEncoder.RLE
         return self
 
 
@@ -433,6 +458,58 @@ class IncrementalConfig(BaseModel):
     gold_last_modified_column: str = "_created_at"
 
 
+class CalculatedChannels(BaseModel):
+    """
+    Configuration for calculated-channel outputs.
+
+    Attributes
+    ----------
+    emit_channel_metrics : bool, default=False
+        When True, also emit a ``calculated_channel_metrics`` gold table (silver
+        ``channel_metrics`` shape) alongside the calculated-channel fact table, so
+        the fact + metrics pair can serve as an Impulse silver source.
+    attribute_columns : list of str, default=[]
+        Calculated-channel attribute keys to surface as columns on the metrics
+        table (e.g. ``["unit"]``). Empty (the default) → no attribute columns.
+        Identity keys are always surfaced dynamically and win over an
+        attribute key of the same name.
+    kpis : list of str, default=["duration", "min", "max", "mean"]
+        KPIs computed on the metrics table, one column per name. Each must be a
+        registered KPI (see ``calculated_channel_kpis.KPI_BUILDERS``); an unknown
+        name is rejected at validation. Duplicates are removed (order preserved).
+    """
+
+    emit_channel_metrics: bool = False
+    attribute_columns: list[str] = []
+    kpis: list[str] = list(DEFAULT_KPIS)
+
+    @field_validator("attribute_columns", mode="after")
+    @classmethod
+    def _normalize_attribute_columns(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for name in value:
+            is_valid_unity_entity_name(name)
+            if name not in seen:
+                seen.add(name)
+                normalized.append(name)
+        return normalized
+
+    @field_validator("kpis", mode="after")
+    @classmethod
+    def _normalize_kpis(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for name in value:
+            if name not in KPI_BUILDERS:
+                valid = ", ".join(sorted(KPI_BUILDERS))
+                raise ValueError(f"Unknown calculated-channel KPI: {name}. Valid KPIs: {valid}.")
+            if name not in seen:
+                seen.add(name)
+                normalized.append(name)
+        return normalized
+
+
 class ImpulseConfig(BaseModel):
     """
      Main configuration model.
@@ -449,6 +526,9 @@ class ImpulseConfig(BaseModel):
          Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
      incremental : IncrementalConfig, optional
          Optional incremental processing configuration. Defaults to IncrementalConfig().
+     calculated_channels : CalculatedChannels, optional
+         Optional calculated-channel output configuration (e.g. opting in to the
+         ``calculated_channel_metrics`` table). Defaults to CalculatedChannels().
      measurement_dimensions : list of str, optional
          Column names to surface from ``container_metrics`` into the
          gold-layer ``measurement_dimension`` table. Names are matched
@@ -523,6 +603,7 @@ class ImpulseConfig(BaseModel):
     container_filters: ContainerFilters | None = None
     query_engine: QueryEngine = QueryEngine(solver=Solvers.DEFAULT_SOLVER)
     incremental: IncrementalConfig | None = None
+    calculated_channels: CalculatedChannels = CalculatedChannels()
 
     measurement_dimensions: list[str] = list(DEFAULT_MEASUREMENT_DIMENSIONS)
 

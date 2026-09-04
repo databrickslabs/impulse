@@ -31,6 +31,49 @@ Each tag passed to `channel(...)` must be resolvable by the solver — either as
 table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolver-adapts).
 :::
 
+### Points-in-Time (POI) channels
+
+Not every channel can be interpreted as a continuous signal within its `[tstart, tend)` intervals.
+Some record values meaningful only **at an
+instant** — an ECU Diagnostic Trouble Code (DTC), a discrete event code — with no validity in
+between. Which selector you reach for follows the **nature of the data**, not the query you want to
+write:
+
+:::tip `channel()` vs `poi_channel()`
+- **`channel()` → [`SampleSeries`](core_data_model.md#sampleseries)** — a continuous signal captured
+  by sampling, **valid within its `[tstart, tend)` intervals**: a value is measured at each `tstart`
+  and no other value is measured until `tend`; values between samples (within valid intervals) can be
+  reconstructed by interpolation (e.g. zero-order hold). It can be resampled. Examples: engine RPM,
+  vehicle speed, coolant temperature.
+- **`poi_channel()` → [`PointsInTimeSeries`](core_data_model.md#pointsintimeseries)** — discrete
+  events whose value exists *only at* its own instant and says nothing about the time in between (DTC
+  / fault codes, event logs, a count stamped at a moment). No interpolation between points, no
+  durations, unweighted aggregations.
+
+**Litmus test:** *was the underlying signal/channel derived by sampling a continuous time signal?* If yes,
+it's a sample series → `channel()`. If it is a momentary event, it's a POI channel → `poi_channel()`.
+:::
+
+`poi_channel()` resolves channels exactly like `channel()` (same tag filters), but builds a
+`PointsInTimeSeries` from the
+[`poi_channels`](../../../data_model/silver_layer_schema.md#poi_channels-optional) table rather than a
+`SampleSeries` from `channels`.
+
+```python
+# numeric POI channel (default dtype='double')
+dtc_count = db.query.poi_channel(channel_name='DTC_count')
+
+# string POI channel — e.g. fault codes like "P0301"
+dtc = db.query.poi_channel(channel_name='DTC', dtype='string')
+faults = dtc == 'P0301'                 # PointsInTime: the instants the code was P0301
+rpm_at_faults = eng_rpm.where(faults)   # freeze-frame: RPM at each fault instant
+```
+
+`dtype` accepts the `SeriesValueType.DOUBLE` / `SeriesValueType.STRING` enum or the plain string
+`'double'` / `'string'` (default `'double'`). A **string** POI channel supports only equality
+(`==` / `!=`) and sampling (`.where(...)`) — arithmetic, ordering, and numeric reductions raise, as
+they are not implemented for string values.
+
 ### Logical aliases via channel mapping
 
 For workflows where a stable logical name should resolve to one of many physical channels through a separately
@@ -204,7 +247,7 @@ These are lower-level methods on the expression itself. For report-level aggrega
 
 | Method                           | Signature        | Description                                             |
 |----------------------------------|------------------|---------------------------------------------------------|
-| `.apply(func)`                   | `func: callable` | Apply a custom function to the resolved `SampleSeries`. |
+| `.apply(func, ...)`              | `func: callable` | Apply a custom function to the resolved `SampleSeries`. |
 | `TimeSeriesExpression.udf(func)` | `func: callable` | Wrap a function as a reusable TSAL expression.          |
 
 ```python
@@ -215,12 +258,70 @@ def custom_transform(series):
 squared_rpm = custom_transform(eng_rpm)
 ```
 
+#### Reading container-level metadata inside a UDF
+
+A UDF can declare **container-level tags and metrics** it needs, and the engine injects
+their per-container values into the function at evaluation time. Declare them on `.apply(...)`
+or on the `@udf(...)` decorator; the function then receives `container_tags` and/or
+`container_metrics` as keyword arguments — dicts keyed by the names you declared (a value is
+`None` when the container has no entry for that key):
+
+```python
+# Decorator form — a reusable, self-describing expression:
+@TimeSeriesExpression.udf(container_metrics=["nominal_power"], container_tags=["vehicle_type"])
+def derate(series, container_metrics, container_tags):
+    factor = 0.8 if container_tags["vehicle_type"] == "heavy" else 1.0
+    return series / container_metrics["nominal_power"] * factor
+
+derated = derate(power)
+
+# Inline form — same declaration on .apply(...):
+derated = power.apply(derate_fn, container_metrics=["nominal_power"])
+```
+
+Where the values come from:
+
+- **`container_metrics=[...]`** are read as **columns on the `container_metrics` table**. Requesting
+  a column that does not exist raises a `ValueError`.
+- **`container_tags=[...]`** are read from the EAV **`container_tags` table** and require a
+  `container_tags_table` to be configured; requesting them on the wide-only model raises a
+  `ValueError`.
+
+The values are constant per container. The engine derives the union of everything the selected
+expressions ask for, reads only those columns from the silver layer, and joins them onto the
+per-container evaluation — see [Query Solvers](../query_solvers.md#container-level-metadata-in-expressions).
+
+:::note Works through aggregations, events, and calculated channels
+Container-metadata declared on a UDF still reaches it when the UDF is **wrapped** inside a
+histogram, a `SequenceOfEventsExpression`, or a
+[`CalculatedChannel`](../../report/channel.md): the requirement propagates up the expression
+tree exactly like a required tag, so the wrapping expression does not need to redeclare anything.
+:::
+
+:::caution Be null-safe during planning
+UDFs run once at **planning time**, before any solve-time data exists, via a build call against
+an empty time series cache, so the engine can infer the result type (see
+[Evaluation](evaluation.md#planning-type-inference-before-solve)). On that call the declared
+`container_tags` / `container_metrics` keys are present but **every value is `None`**, and the
+`series` arguments are **empty**. This is distinct from a solve-time value being `None` because a
+specific container has no entry for that key (above): during planning *all* declared values are
+`None` regardless of the data. Guard metadata lookups accordingly (treat `None` as a default), and
+still return a valid object of the declared type. For example, an empty `SampleSeries`-returning
+UDF should return a valid, empty `SampleSeries`.
+:::
+
 ---
 
 ## Virtual signals
 
 Virtual signals are TSAL expressions that derive new channels from physical ones. They are not stored in the Silver
 layer but computed on-the-fly by the solver.
+
+:::note Persisting a virtual signal
+A virtual signal is ephemeral — it exists only for the query that defines it. To *materialize* a derived
+signal into a queryable gold table (with incremental updates), wrap the same expression in a
+[`CalculatedChannel`](../../report/channel.md) and register it on a report.
+:::
 
 ### Derived signals
 

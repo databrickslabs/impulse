@@ -40,7 +40,7 @@ HISTOGRAM2D_FACT_SCHEMA = StructType(
 EVENT_INSTANCE_FACT_SCHEMA = StructType(
     [
         StructField("container_id", IntegerType(), False),
-        StructField("event_instance_id", IntegerType(), False),
+        StructField("event_instance_id", LongType(), False),
         StructField("event_id", IntegerType(), False),
         StructField("start_ts", LongType(), False),
         StructField("end_ts", LongType(), False),
@@ -56,5 +56,20 @@ STATS_AGGREGATOR_FACT_SCHEMA = StructType(
         StructField("event_instance_id", LongType(), False),
         StructField("aggregation_label", StringType(), False),
         StructField("statistic_value", DoubleType(), False),
+    ]
+)
+
+# Narrow, silver-shaped facts for calculated channels: one row per RLE sample
+# interval. The channel's identity lives on ``calculated_channel_dimension`` (joined
+# via ``channel_id``), so it is intentionally absent here. Field *types* are cosmetic
+# — persistence projects by name only and the real container_id/channel_id types flow
+# from the solved DataFrame.
+CALCULATED_CHANNEL_FACT_SCHEMA = StructType(
+    [
+        StructField("container_id", IntegerType(), False),
+        StructField("channel_id", LongType(), False),
+        StructField("tstart", LongType(), False),
+        StructField("tend", LongType(), False),
+        StructField("value", DoubleType(), False),
     ]
 )

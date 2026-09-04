@@ -315,3 +315,92 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
     assert stats_df.count() > 0
     assert report.aggregation_metadata_dfs["HISTOGRAM"].count() == 1
     assert report.aggregation_metadata_dfs["STATS_AGGREGATOR"].count() == 1
+
+
+def _temp_tables(spark: SparkSession) -> set[str]:
+    return {
+        row.tableName
+        for row in spark.sql("SHOW TABLES IN spark_catalog.gold LIKE '__impulse_temp_*'").collect()
+    }
+
+
+def test_persist_results_retains_temp_tables_by_default(spark, cleanup_gold):
+    """Default behavior: the current run's temp tables survive persist_results()."""
+    report, _ = _build_batched_report(spark)
+
+    report.determine_report()
+    assert _temp_tables(spark)  # temp tables created during solving
+
+    report.persist_results()
+
+    # Gold facts written with real values, and temp tables still present.
+    assert (
+        report.aggregation_dfs["HISTOGRAM"]["changed"].filter(F.col("hist_value") > 0).count() > 0
+    )
+    assert _temp_tables(spark)
+
+
+def test_persist_results_cleans_temp_tables_when_param_true(spark, cleanup_gold):
+    """persist_results(cleanup_temp_tables=True) drops temp tables after a successful write."""
+    report, _ = _build_batched_report(spark)
+
+    report.determine_report()
+    assert _temp_tables(spark)
+
+    report.persist_results(cleanup_temp_tables=True)
+
+    # Assert on the persisted gold fact table (not the report's lazy DataFrames, which
+    # read from the now-dropped temp tables). Persistence completed before cleanup ran.
+    hist_fact = spark.read.table("spark_catalog.gold.evaluation_histogram_fact")
+    assert hist_fact.filter(F.col("hist_value") > 0).count() > 0
+    assert not _temp_tables(spark)
+
+
+def test_persist_results_param_overrides_config_flag(spark, cleanup_gold):
+    """Explicit param wins over config: config True but param False retains temp tables."""
+    config = ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver.container_metrics",
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri="spark_catalog.silver.channels",
+        ),
+        unity_sink=UnitySink(
+            catalog="spark_catalog",
+            schema="gold",
+            table_prefix="evaluation",
+            cleanup_temp_tables=True,
+        ),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER, batch_size=1),
+    )
+    report, _ = _build_batched_report(spark)
+    report.config = config
+
+    report.determine_report()
+    report.persist_results(cleanup_temp_tables=False)
+
+    assert _temp_tables(spark)
+
+
+def test_persist_results_config_flag_cleans_temp_tables(spark, cleanup_gold):
+    """When param is None, the config flag drives cleanup."""
+    config = ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver.container_metrics",
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri="spark_catalog.silver.channels",
+        ),
+        unity_sink=UnitySink(
+            catalog="spark_catalog",
+            schema="gold",
+            table_prefix="evaluation",
+            cleanup_temp_tables=True,
+        ),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER, batch_size=1),
+    )
+    report, _ = _build_batched_report(spark)
+    report.config = config
+
+    report.determine_report()
+    report.persist_results()
+
+    assert not _temp_tables(spark)

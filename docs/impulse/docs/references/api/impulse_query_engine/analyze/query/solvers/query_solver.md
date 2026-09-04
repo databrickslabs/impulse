@@ -166,6 +166,31 @@ aliasing (e.g. ``DefaultSolver``) must override this.
 
 `pyspark.sql.DataFrame`: Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
 
+#### attach\_container\_metadata
+
+```python
+def attach_container_metadata(query,
+                              channels_df,
+                              pre_filtered_containers_df=None) -> DataFrame
+```
+
+Attach requested container-level tags/metrics onto the channel-match frame.
+
+No-op by default; solvers that inject container metadata (e.g.
+``DefaultSolver``) override this to left-join the columns.  When
+*pre_filtered_containers_df* is given, the metadata read is scoped to
+those containers.
+
+**Arguments**:
+
+- `query` (`QueryBuilder`): Query object (selections + db info).
+- `channels_df` (`pyspark.sql.DataFrame`): Channel-match frame from the filter pipeline.
+- `pre_filtered_containers_df` (`pyspark.sql.DataFrame`): Incremental container subset to scope the metadata read to.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: *channels_df*, unchanged by default.
+
 #### filter\_candidates
 
 ```python
@@ -201,4 +226,28 @@ Stage 6: Solve query.
 **Returns**:
 
 `pyspark.sql.DataFrame`: DataFrame containing results for each container.
+
+#### solve\_calculated\_channels
+
+```python
+def solve_calculated_channels(query, channels_df, selections) -> DataFrame
+```
+
+Solve calculated channels into a narrow, silver-shaped DataFrame.
+
+Optional stage, parallel to :meth:`solve` but emitting many rows per
+container (the exploded ``SampleSeries`` of each ``CalculatedChannel``)
+instead of one wide row.  Solvers that support calculated channels
+(e.g. ``DefaultSolver``) override this; the base implementation raises.
+
+**Arguments**:
+
+- `query` (`QueryBuilder`): Query object containing database and filter information.
+- `channels_df` (`pyspark.sql.DataFrame`): Channel-match DataFrame from the filter pipeline.
+- `selections` (`list`): List of ``CalculatedChannel`` selections to evaluate.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: Narrow ``[container_id, channel_id, tstart, tend, value,
+identity]`` DataFrame (``identity`` is a ``MapType(string, string)``).
 

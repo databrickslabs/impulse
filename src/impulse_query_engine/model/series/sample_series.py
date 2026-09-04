@@ -8,11 +8,10 @@ from typing import Union
 
 import numpy as np
 import numpy.typing as npt
-from scipy.integrate import cumulative_trapezoid
-from scipy.interpolate import interp1d
 
 from .intervals import Intervals
 from .points_in_time import PointsInTime
+from .value_type import SeriesValueType
 
 FloatOrNaN = float | np.float64
 
@@ -40,6 +39,11 @@ class SampleSeries:
         self.values = np.array(values, dtype=np.float64)
         self.continuous_interval_indices = self._get_continuous_interval_indices()
         self.requires_deserialization = True
+
+    @property
+    def value_type(self) -> SeriesValueType:
+        """A SampleSeries carries numeric values."""
+        return SeriesValueType.DOUBLE
 
     def dtype(self):
         """
@@ -1060,6 +1064,8 @@ class SampleSeries:
         interp1d
             Interpolation function.
         """
+        from scipy.interpolate import interp1d
+
         times = np.append(self.tstarts, self.tends[-1])
         values = np.append(self.values, self.values[-1])
         return interp1d(
@@ -1261,6 +1267,8 @@ class SampleSeries:
         SampleSeries
             Cumulative integrated SampleSeries.
         """
+        from scipy.integrate import cumulative_trapezoid
+
         res_values = []
         for start_index, stop_index in self.continuous_interval_indices:
             tmp_values = self.values[start_index : stop_index + 1]

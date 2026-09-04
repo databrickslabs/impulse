@@ -25,6 +25,7 @@ in `source` (see `impulse-config`).
 | `container_metrics` | **Yes**   | One row per recording — timestamps, duration, channel count, and any container-level columns.     |
 | `channel_metrics`   | **Yes**   | One row per `(container_id, channel_id)` — per-channel statistics; also holds channel-selection columns (e.g. `channel_name`) in the wide model. |
 | `channels`          | **Yes**   | The time-series sample data (RLE or RAW — see below).                                            |
+| `poi_channels`      | Optional  | Points-in-Time (POI) channel data — a time series only defined at the given timestamps (discrete events). Add to select POI channels via `poi_channel()`. |
 | `container_tags`    | Optional  | EAV `(container_id, key, value)`. Add for tag-based container filtering.                          |
 | `channel_tags`      | Optional  | EAV `(container_id, channel_id, key, value)`. Add for EAV channel selection.                     |
 | `channel_mapping`   | Optional  | Logical→physical channel alias table (enables `channel_with_alias()`).                           |
@@ -44,6 +45,10 @@ in `source` (see `impulse-config`).
     processing time. Set `query_engine.data_type` to `"RAW"` or `"RLE"` to match (see `impulse-config`).
   - An optional boolean `is_plausible` column lets the solver drop implausible samples when
     `drop_implausible_data=True` (requires RAW).
+  - Extra columns on `channels` are ignored — the engine projects down to the columns above before
+    solving, so it is safe to keep additional bookkeeping columns on the table.
+- **`poi_channels` holds Points-in-Time (POI) data** — a value defined *only at* its timestamp. Schema: `(container_id long, channel_id int,
+  timestamp long [epoch µs], value_double double nullable, value_string string nullable)`.
 - **Tag tables are strict EAV.** `query.channel(channel_name="Engine RPM")` looks up
   `channel_tags.value` where `key = 'channel_name'`. Without `channel_tags`, channel selectors match
   columns on `channel_metrics` instead.
@@ -60,6 +65,11 @@ resolves a selection depends on which optional tables you configured:
 - Without it → channels selected from columns on `channel_metrics`.
 - With `container_tags` configured → containers filtered from EAV rows; without it, from
   `container_metrics` columns (wide-only model).
+
+Beyond filtering, these container tables also feed **container-level metadata into UDFs** at solve
+time: a UDF declaring `container_metrics=[...]` (columns) or `container_tags=[...]` (EAV keys, which
+require a `container_tags_table`) receives their per-container values as keyword arguments — see
+`impulse-tsal`.
 
 ### Landing data (ingestion pattern)
 
@@ -92,7 +102,9 @@ A star schema. Every table is prefixed with your configured `table_prefix` (e.g.
 | `event_instance_fact`   | One row per event instance per container |
 | `histogram_fact`        | One row per bin per container            |
 | `histogram2d_fact`      | One row per (x, y) bin per container     |
-| `stats_aggregator_fact` | One row per signal per event instance    |
+| `stats_aggregator_fact` | One row per statistic label per signal per event instance |
+| `calculated_channel_fact` | One row per sample interval per container (a derived signal, silver `channels` shape) |
+| `calculated_channel_metrics` | One row per calculated channel per container (optional; silver `channel_metrics` shape). Written only when `config.calculated_channels.emit_channel_metrics` is set. See `impulse-channels`. |
 
 **Dimension tables**
 
@@ -102,13 +114,15 @@ A star schema. Every table is prefixed with your configured `table_prefix` (e.g.
 | `event_dimension`            | Event definitions (name, TSAL expression, required channels). |
 | `histogram_dimension`        | Histogram metadata (bins, signal info, units).              |
 | `histogram2d_dimension`      | 2D histogram metadata.                                      |
-| `stats_aggregator_dimension` | Statistics metadata (channel names, labels).                |
+| `stats_aggregator_dimension` | Statistics metadata (channel names, statistic labels incl. custom). |
+| `calculated_channel_dimension` | Calculated-channel definitions (name, expression, identity). See `impulse-channels`. |
 
-**Join pattern** — three key columns connect facts to dimensions:
+**Join pattern** — key columns connect facts to dimensions:
 
 - `container_id` → links every fact to `measurement_dimension`.
 - `event_id` → links `event_instance_fact`, `histogram_fact`, `histogram2d_fact` to `event_dimension`.
 - `visual_id` → links each aggregation fact to its own dimension table.
+- `channel_id` → links `calculated_channel_fact` to `calculated_channel_dimension`.
 
 `stats_aggregator_fact` additionally joins to `event_instance_fact` via `event_instance_id` for
 per-interval breakdowns.
@@ -141,6 +155,9 @@ the table is read; everything downstream uses the internal names. Set it under
     }
 }
 ```
+
+In RAW mode the `channels` internal names are `timestamp` and (optionally) `is_plausible` — remap
+them the same way (e.g. `{"ts_raw": "timestamp"}`).
 
 The underlying tables must still follow the silver-layer relationships (EAV tag tables,
 per-`(container_id, channel_id)` channel rows). The full `SolverConfig` schema — per-table `filters`,

@@ -17,9 +17,17 @@
               "items": [
                 {
                   "items": [
+                    "references/api/impulse_query_engine/analyze/query/aggregations/custom_statistic",
                     "references/api/impulse_query_engine/analyze/query/aggregations/statistic_type"
                   ],
                   "label": "impulse_query_engine.analyze.query.aggregations",
+                  "type": "category"
+                },
+                {
+                  "items": [
+                    "references/api/impulse_query_engine/analyze/query/channels/calculated_channel"
+                  ],
+                  "label": "impulse_query_engine.analyze.query.channels",
                   "type": "category"
                 },
                 {
@@ -69,6 +77,14 @@
             "references/api/impulse_reporting/aggregations/stats_aggregator"
           ],
           "label": "impulse_reporting.aggregations",
+          "type": "category"
+        },
+        {
+          "items": [
+            "references/api/impulse_reporting/channels/calculated_channel",
+            "references/api/impulse_reporting/channels/channel_types"
+          ],
+          "label": "impulse_reporting.channels",
           "type": "category"
         },
         {
