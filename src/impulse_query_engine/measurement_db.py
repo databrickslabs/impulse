@@ -1,3 +1,5 @@
+import warnings
+
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame
 
@@ -31,6 +33,10 @@ class MeasurementDBConfig:
         self.unit_conversion_table = unit_conversion_table
         self.table_locations = table_locations
         self.debug_tables = None
+        # URI -> pinned Delta version, populated once per run by
+        # ``MeasurementDB.pin_versions``. Empty means "read latest" (unchanged
+        # behavior). Never populated in debug mode.
+        self.pinned_versions: dict[str, int] = {}
 
     @staticmethod
     def for_unity_catalog(
@@ -86,14 +92,70 @@ class MeasurementDB:
     def query(self):
         return QueryBuilder(db=self)
 
+    def _configured_table_uris(self) -> list[str]:
+        """Return the URIs of every configured (non-``None``) silver table."""
+        return [
+            uri
+            for uri in (
+                self.config.container_tags_table,
+                self.config.container_metrics_table,
+                self.config.channel_tags_table,
+                self.config.channel_metrics_table,
+                self.config.channels_uri,
+                self.config.poi_channels_uri,
+                self.config.channel_mapping_table,
+                self.config.unit_conversion_table,
+            )
+            if uri is not None
+        ]
+
+    @staticmethod
+    def _current_delta_version(spark, table_locations: str, uri: str) -> int:
+        """Resolve the latest committed Delta version of ``uri``.
+
+        Handles UC (``catalog.schema.table``, resolved by ``forName`` with the
+        full name) and path modes. Read-only: if the reference cannot be
+        resolved (view, non-Delta, unknown table), the error propagates to
+        :meth:`pin_versions`, which skips pinning that table so it keeps reading
+        the latest version — never a wrong one.
+        """
+        from delta.tables import DeltaTable
+
+        if table_locations == "unity_catalog":
+            dt = DeltaTable.forName(spark, uri)
+        else:  # path mode
+            dt = DeltaTable.forPath(spark, uri)
+        return int(dt.history(1).select("version").first()[0])
+
+    def pin_versions(self, spark) -> None:
+        """Pin every configured silver table to its current Delta version.
+
+        Resolves each table's latest version once so that all lazily-evaluated
+        reads in a run observe the same snapshot regardless of when they
+        materialize (issue #87). Debug mode is exempt. Tables that cannot be
+        time-traveled (views, non-Delta, unresolvable) are skipped with a
+        warning and continue to read the latest version.
+        """
+        if self.config.table_locations == "debug":
+            return
+        pinned: dict[str, int] = {}
+        for uri in self._configured_table_uris():
+            try:
+                pinned[uri] = self._current_delta_version(spark, self.config.table_locations, uri)
+            except Exception as exc:  # noqa: BLE001 - graceful degradation per table
+                warnings.warn(f"Could not pin Delta version for '{uri}': {exc}", stacklevel=2)
+        self.config.pinned_versions = pinned
+
     def _read_table(self, spark, table_name):
-        # if not DeltaTable.isDeltaTable(spark, table_name):
-        #    raise Exception(f"Table not found: `{table_name}`")
-        if self.config.table_locations == "unity_catalog":
-            return spark.read.table(table_name)
-        elif self.config.table_locations == "debug":
+        if self.config.table_locations == "debug":
             return self.config.debug_tables[table_name]
-        return spark.read.format("delta").load(table_name)
+        reader = spark.read
+        version = self.config.pinned_versions.get(table_name)
+        if version is not None:
+            reader = reader.option("versionAsOf", version)
+        if self.config.table_locations == "unity_catalog":
+            return reader.table(table_name)
+        return reader.format("delta").load(table_name)
 
     def container_tags(self, spark) -> DataFrame:
         return self._read_table(spark, self.config.container_tags_table)
