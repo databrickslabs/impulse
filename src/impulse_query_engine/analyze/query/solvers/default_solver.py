@@ -1038,6 +1038,7 @@ class DefaultSolver(QuerySolver):
         col_map: dict[str, str],
         container_tag_cols=None,
         container_metric_cols=None,
+        secondary_grouping_key_col=None,
     ) -> pd.DataFrame:
         """
         UDF to solve for a single container by applying selections.
@@ -1055,6 +1056,11 @@ class DefaultSolver(QuerySolver):
         container_metric_cols : list of str, optional
             Columns on *pdf* holding container-level metric values, exposed to
             expressions via ``cache.container_metrics``.
+        secondary_grouping_key_col : str, optional
+            Name of the secondary grouping-key column. When given, its value is
+            constant across *pdf* (the frame is one ``(container, key)`` group)
+            and is echoed into the output row so the key survives as an output
+            dimension.
 
         Returns
         -------
@@ -1063,6 +1069,8 @@ class DefaultSolver(QuerySolver):
         """
         cid_col = col_map["cid"]
         result = {cid_col: [pdf[cid_col].iloc[0]]}
+        if secondary_grouping_key_col is not None:
+            result[secondary_grouping_key_col] = [pdf[secondary_grouping_key_col].iloc[0]]
         cache = TimeSeriesCache(
             pdf,
             col_map=col_map,
@@ -1117,6 +1125,7 @@ class DefaultSolver(QuerySolver):
                 col_map=col_map,
                 container_tag_cols=container_tag_cols,
                 container_metric_cols=container_metric_cols,
+                secondary_grouping_key_col=self.config.secondary_grouping_key_col,
             ),
             schema,
             F.PandasUDFType.GROUPED_MAP,
@@ -1179,18 +1188,42 @@ class DefaultSolver(QuerySolver):
         # Ship only the columns the UDF consumes; any extra physical columns
         # on the channels table would otherwise cross Arrow into every group's
         # pandas frame.
-        q = q.select(
+        sgk_cfg = self.config.secondary_grouping
+        select_cols = [
             self.config.container_id_col,
             self.config.channel_id_col,
             self.config.tstart_col,
             self.config.tend_col,
             self.config.value_col,
-        )
+        ]
+        # For the existing-column (``source_column``) mode, carry the physical
+        # source column through the projection so it survives to grouping. In
+        # deriver mode the key is materialized below (post-union), so nothing
+        # extra needs to survive the projection.
+        if sgk_cfg is not None and sgk_cfg.deriver is None:
+            if sgk_cfg.source_column not in q.columns:
+                raise ValueError(
+                    f"Secondary grouping key source_column '{sgk_cfg.source_column}' "
+                    "is not present on the (column-mapped) channel-data table."
+                )
+            if sgk_cfg.source_column not in select_cols:
+                select_cols.append(sgk_cfg.source_column)
+        q = q.select(*select_cols)
 
         # POI channel data is unioned in AFTER RLE encoding above, so its
         # zero-duration points are never run-length merged.
         if DefaultSolver._query_contains_poi_selections(query.selections):
             q = self._union_poi_channel_data(query, q)
+
+        # Materialize the optional secondary grouping key column on the
+        # channel-data frame (after the POI union, so a deriver expression that
+        # reads tstart/value also covers POI rows). It then rides the broadcast
+        # join into ``joined_df`` and promotes the grouping in _apply_grouped_map.
+        if sgk_cfg is not None:
+            if sgk_cfg.deriver is not None:
+                q = q.withColumn(sgk_cfg.name, sgk_cfg.deriver(q))
+            elif sgk_cfg.source_column != sgk_cfg.name:
+                q = q.withColumnRenamed(sgk_cfg.source_column, sgk_cfg.name)
 
         joined_df = q.join(
             F.broadcast(channels_df),
@@ -1378,16 +1411,27 @@ class DefaultSolver(QuerySolver):
         # surviving ``selector_ids``-notna row (by notna, not by position), so the
         # order is arbitrary — order by a constant to avoid an unnecessary
         # per-channel sort (row_number just requires *some* ordering).
-        df = joined_df.repartition(container_count, self.config.container_id_col)
-        w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
-            F.lit(1)
-        )
+        # Promote the grouping to (container_id, secondary_grouping_key) when a
+        # secondary key is configured, so each grouped-map pandas frame is bounded
+        # to one partition of a container's data (avoids OOM on endless streams)
+        # and the key becomes an output dimension. Legacy behavior (container-only)
+        # is preserved when unconfigured.
+        sgk_col = self.config.secondary_grouping_key_col
+        group_cols = [self.config.container_id_col]
+        if sgk_col is not None:
+            group_cols.append(sgk_col)
+
+        df = joined_df.repartition(container_count, *group_cols)
+        # selector_ids/meta are constant within (container_id[, sgk], channel_id);
+        # the dedup window must include the secondary key so every (container, sgk)
+        # group retains a non-null selector_ids row (a channel may span partitions).
+        w = Window.partitionBy(*group_cols, self.config.channel_id_col).orderBy(F.lit(1))
         df = df.withColumn("_rn", F.row_number().over(w))
         for col_name in ["selector_ids", *(container_meta_cols or [])]:
             if col_name in df.columns:
                 df = df.withColumn(col_name, F.when(F.col("_rn") == 1, F.col(col_name)))
         df = df.drop("_rn")
-        return df.groupBy(self.config.container_id_col).apply(solve_udf)
+        return df.groupBy(*group_cols).apply(solve_udf)
 
     # ------------------------------------------------------------------
     # Calculated channels (narrow output)
@@ -1400,6 +1444,7 @@ class DefaultSolver(QuerySolver):
         col_map: dict[str, str],
         container_tag_cols=None,
         container_metric_cols=None,
+        secondary_grouping_key_col=None,
     ) -> pd.DataFrame:
         """
         UDF to solve calculated channels for a single container.
@@ -1444,12 +1489,24 @@ class DefaultSolver(QuerySolver):
         ch_col = col_map["ch"]
         container_id = pdf[cid_col].iloc[0]
 
-        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": []}
+        # Column order must match _build_calculated_channels_udf_schema:
+        # container_id, [secondary_grouping_key], channel_id, tstart, tend, value.
+        sgk_value = (
+            pdf[secondary_grouping_key_col].iloc[0]
+            if secondary_grouping_key_col is not None
+            else None
+        )
+        cols: dict[str, list] = {cid_col: []}
+        if secondary_grouping_key_col is not None:
+            cols[secondary_grouping_key_col] = []
+        cols.update({ch_col: [], "tstart": [], "tend": [], "value": []})
 
         for cc in selections:
             tstarts, tends, values = cc.build(cache)
             for tstart, tend, value in zip(tstarts, tends, values, strict=False):
                 cols[cid_col].append(container_id)
+                if secondary_grouping_key_col is not None:
+                    cols[secondary_grouping_key_col].append(sgk_value)
                 cols[ch_col].append(cc.channel_id)
                 cols["tstart"].append(tstart)
                 cols["tend"].append(tend)
@@ -1501,6 +1558,7 @@ class DefaultSolver(QuerySolver):
                 col_map=col_map,
                 container_tag_cols=container_tag_cols,
                 container_metric_cols=container_metric_cols,
+                secondary_grouping_key_col=self.config.secondary_grouping_key_col,
             ),
             schema,
             F.PandasUDFType.GROUPED_MAP,

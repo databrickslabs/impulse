@@ -17,7 +17,11 @@ from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import HISTOGRAM_DIMENSION_SCHEMA
-from impulse_reporting.persist.fact_schema import HISTOGRAM_FACT_SCHEMA
+from impulse_reporting.persist.fact_schema import (
+    HISTOGRAM_FACT_SCHEMA,
+    fact_field_names,
+    group_id_columns,
+)
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
 
@@ -201,6 +205,7 @@ class Histogram(Aggregation, ABC):
         query: QueryBuilder = None,
         solver: QuerySolver = None,
         pre_filtered_containers_df=None,
+        secondary_grouping_key: str | None = None,
     ):
         """
         Determine histogram aggregation instances and return a Spark DataFrame.
@@ -232,11 +237,12 @@ class Histogram(Aggregation, ABC):
             )
 
         hist_names = [hist.get_name() for hist in aggregations]
+        id_cols = group_id_columns(secondary_grouping_key)
 
         df = (
-            solved_df.select("container_id", *hist_names)
+            solved_df.select(*id_cols, *hist_names)
             .unpivot(
-                f.col("container_id"),
+                [f.col(c) for c in id_cols],
                 hist_names,
                 variableColumnName="hist_name",
                 valueColumnName="value",
@@ -250,7 +256,7 @@ class Histogram(Aggregation, ABC):
                 ),
             )
             .select(
-                "container_id",
+                *id_cols,
                 "hist_name",
                 "event_id",
                 "hist_bins",
@@ -260,7 +266,7 @@ class Histogram(Aggregation, ABC):
             .withColumn("upper_bound", f.col("hist_bins").getItem(f.col("bin_ID") + 1))
             .withColumn("bin_name", f.concat_ws("-", "lower_bound", "upper_bound"))
             .withColumn("visual_id", Histogram.get_visual_id_column(aggregations, "hist_name"))
-            .select(HISTOGRAM_FACT_SCHEMA.fieldNames())
+            .select(*fact_field_names(HISTOGRAM_FACT_SCHEMA, secondary_grouping_key))
         )
         return df
 

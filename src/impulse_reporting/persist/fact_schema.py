@@ -7,6 +7,35 @@ from pyspark.sql.types import (
     StructType,
 )
 
+
+def group_id_columns(secondary_grouping_key: str | None = None) -> list[str]:
+    """Return the identity columns fact rows are grouped/anchored on.
+
+    ``["container_id"]`` normally, plus the optional secondary grouping key when
+    one is configured. Used as the id list for ``unpivot`` and for the explicit
+    ``select`` steps in each aggregation/event explode chain, so the key survives
+    as an output dimension.
+    """
+    cols = ["container_id"]
+    if secondary_grouping_key:
+        cols.append(secondary_grouping_key)
+    return cols
+
+
+def fact_field_names(schema: StructType, secondary_grouping_key: str | None = None) -> list[str]:
+    """Return ``schema.fieldNames()`` plus the secondary grouping key when set.
+
+    The static fact schemas intentionally omit the optional secondary grouping
+    key (its presence and name are config-driven); this appends it to the
+    final projection when one is configured so it is carried into the gold
+    fact table alongside the schema's columns.
+    """
+    names = list(schema.fieldNames())
+    if secondary_grouping_key and secondary_grouping_key not in names:
+        names.append(secondary_grouping_key)
+    return names
+
+
 HISTOGRAM_FACT_SCHEMA = StructType(
     [
         StructField("container_id", IntegerType(), False),

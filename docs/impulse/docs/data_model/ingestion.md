@@ -225,6 +225,70 @@ in particular may be a `long`, `int`, or `string`; the engine adopts
 whatever type your tables use, as long as it is consistent across them.
 For different relationships or composite keys, see custom solvers below.
 
+### Secondary grouping key (optional)
+
+By default the query engine's `solve` stage groups all of a container's
+channel data into **one** group and evaluates it in a single pandas frame.
+For containers that stream endlessly (IIoT machines recording for days,
+weeks or months), that one group is unbounded and both slow and
+memory-hungry. A **secondary grouping key** subdivides each container into
+smaller partitions, so `solve` groups by `(container_id, secondary_grouping_key)`
+instead of by `container_id` alone.
+
+The key is **fully optional** and, when set, becomes a real output
+dimension: aggregation, event and calculated-channel results are reported
+**per `(container_id, secondary_grouping_key)`** and the key joins each gold
+fact table's merge (upsert) identity. When it is not configured, every path
+behaves exactly as before.
+
+Configure it on `SolverConfig.secondary_grouping` in two ways:
+
+- **An existing column** — point at a column already on the (post-mapping)
+  channel-data table, e.g. a `date`:
+
+  ```python
+  from impulse_query_engine.analyze.query.solvers.solver_config import (
+      SecondaryGroupingConfig,
+      SolverConfig,
+  )
+
+  SolverConfig(secondary_grouping=SecondaryGroupingConfig(source_column="date"))
+  ```
+
+- **Derived by your own logic** — a module-level function
+  `fn(channels_df: DataFrame) -> Column` that returns a Spark `Column`
+  computed from the channel-data frame (which carries `container_id`,
+  `channel_id`, `tstart`, `tend`, `value`). For example, a wake-cycle id
+  built from gaps between samples:
+
+  ```python
+  import pyspark.sql.functions as F
+  from pyspark.sql import Window
+
+  def wake_cycle(channels_df):
+      w = Window.partitionBy("container_id").orderBy("tstart")
+      gap = F.col("tstart") - F.lag("tend").over(w)
+      new_cycle = (gap > WAKE_GAP_THRESHOLD).cast("long")
+      return F.sum(new_cycle).over(w.rowsBetween(Window.unboundedPreceding, 0))
+
+  SolverConfig(secondary_grouping=SecondaryGroupingConfig(deriver=wake_cycle))
+  ```
+
+  The deriver returns a lazy Spark `Column` (evaluated distributed, not
+  shipped to executors), so it may use window functions. It is not
+  JSON-serializable, so set it on a Python-constructed config; `source_column`
+  works from a file-based config.
+
+:::note Incremental / late data
+The key becomes part of every fact table's merge identity, so incremental
+runs upsert **process-and-correct**: when a container is reprocessed (e.g.
+more samples arrive for the current day), its partitions are recomputed and
+the MERGE overwrites the earlier rows, pruning any that no longer exist.
+Prefer a **time-localized** key (like a date): recomputing one bounded
+partition stays cheap, and a still-open partition is corrected on the next
+run once its data settles.
+:::
+
 ### Custom solvers
 
 For physical layouts that do not match the silver-layer relationships at

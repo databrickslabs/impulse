@@ -223,11 +223,14 @@ def dispatch_events(
     solver: QuerySolver,
     pre_filtered_containers_df: DataFrame | None,
     container_event_cls: type,
+    secondary_grouping_key: str | None = None,
 ) -> dict:
     """Dispatch ``determine_events`` calls per type.
 
     Solvable event types receive ``solved_df``; ``ContainerEvent`` receives
-    ``query``/``solver``.
+    ``query``/``solver``. The optional secondary grouping key is forwarded only to
+    the solvable (channel-derived) event types; a ``ContainerEvent`` is
+    container-level and cannot carry it (its rows null-fill on union).
 
     Parameters
     ----------
@@ -267,6 +270,7 @@ def dispatch_events(
                 spark,
                 events,
                 solved_df=solved_df,
+                secondary_grouping_key=secondary_grouping_key,
             )
 
     return event_dfs
@@ -277,6 +281,7 @@ def dispatch_aggregations(
     aggs_by_type: dict[str, list],
     type_enum,
     solved_df: DataFrame | None,
+    secondary_grouping_key: str | None = None,
 ) -> dict:
     """Dispatch ``determine_aggregations`` calls per type.
 
@@ -286,6 +291,9 @@ def dispatch_aggregations(
     aggs_by_type : dict[str, list]
     type_enum : AggregationType enum
     solved_df : DataFrame | None
+    secondary_grouping_key : str | None
+        When set, the optional secondary grouping-key column carried through the
+        aggregation transforms so it becomes part of the fact rows.
 
     Returns
     -------
@@ -303,6 +311,7 @@ def dispatch_aggregations(
             spark,
             aggregations,
             solved_df=solved_df,
+            secondary_grouping_key=secondary_grouping_key,
         )
 
     return aggregation_dfs
@@ -313,6 +322,7 @@ def dispatch_calculated_channels(
     channels_by_type: dict[str, list],
     type_enum,
     solved_df: DataFrame | None,
+    secondary_grouping_key: str | None = None,
 ) -> dict:
     """Dispatch ``determine_calculated_channels`` calls per type.
 
@@ -342,7 +352,7 @@ def dispatch_calculated_channels(
             continue
         cls = type_enum[type_name].value
         channel_dfs[type_name] = cls.determine_calculated_channels(
-            spark, channels, solved_df=solved_df
+            spark, channels, solved_df=solved_df, secondary_grouping_key=secondary_grouping_key
         )
 
     return channel_dfs

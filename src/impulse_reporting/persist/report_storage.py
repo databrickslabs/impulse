@@ -315,7 +315,10 @@ class UnityCatalogSink(Sink):
             df.write.format("delta").option("overwriteSchema", overwrite_schema).saveAsTable(uri)
             return
 
-        merge_condition = " AND ".join([f"target.{k} = source.{k}" for k in merge_keys])
+        # Null-safe equality (``<=>``) so a merge key that is null for some rows
+        # (e.g. the secondary grouping key on container-level entities that cannot
+        # carry it) still matches null-to-null instead of never matching.
+        merge_condition = " AND ".join([f"target.{k} <=> source.{k}" for k in merge_keys])
 
         target = self._resolve_delta_table(df.sparkSession, uri)
         (
@@ -375,7 +378,10 @@ class UnityCatalogSink(Sink):
             df.write.format("delta").option("overwriteSchema", overwrite_schema).saveAsTable(uri)
             return
 
-        merge_condition = " AND ".join([f"target.{k} = source.{k}" for k in merge_keys])
+        # Null-safe equality (``<=>``) so a merge key that is null for some rows
+        # (e.g. the secondary grouping key on container-level entities that cannot
+        # carry it) still matches null-to-null instead of never matching.
+        merge_condition = " AND ".join([f"target.{k} <=> source.{k}" for k in merge_keys])
 
         target = self._resolve_delta_table(df.sparkSession, uri)
         builder = (
@@ -474,7 +480,12 @@ class ReportEntityTransformer:
             returns it unchanged.
         """
         if isinstance(dfs, list):
-            return reduce(lambda df1, df2: df1.union(df2), dfs)
+            # Union by name and allow missing columns so entity types that share a
+            # fact table but differ by the optional secondary grouping key (e.g. a
+            # channel-derived event carrying it alongside a container-level event
+            # that cannot) align: the missing column is null-filled with the other
+            # side's type.
+            return reduce(lambda df1, df2: df1.unionByName(df2, allowMissingColumns=True), dfs)
         else:
             return dfs
 
@@ -588,9 +599,15 @@ class DefaultReportEntityWriter(ReportEntityWriter):
         The transformer to apply to the data.
     """
 
-    def __init__(self, sink: Sink, transformer: ReportEntityTransformer):
+    def __init__(
+        self,
+        sink: Sink,
+        transformer: ReportEntityTransformer,
+        secondary_grouping_key: str | None = None,
+    ):
         self.sink = sink
         self.transformer = transformer
+        self.secondary_grouping_key = secondary_grouping_key
 
     def write(self, df: DataFrame | list[DataFrame], schema: StructType, uri: str):
         """
@@ -613,9 +630,15 @@ class DefaultReportEntityWriter(ReportEntityWriter):
         None
         """
         df_combined = self.transformer.concat_dataframes(df)
-        df_enriched = df_combined.transform(
-            self.transformer.select_relevant_columns(schema)
-        ).transform(self.transformer.add_meta_information)
+        # The static fact schemas omit the optional secondary grouping key; keep
+        # it in the projection when configured and present so it reaches gold.
+        field_names = list(schema.fieldNames())
+        sgk = self.secondary_grouping_key
+        if sgk and sgk in df_combined.columns and sgk not in field_names:
+            field_names.append(sgk)
+        df_enriched = df_combined.select(*field_names).transform(
+            self.transformer.add_meta_information
+        )
         self.sink.store(df_enriched, uri)
 
     def extract_fact_schema_and_output_uri(
@@ -735,10 +758,11 @@ class WriterFactory:
         The sink to use for created writers.
     """
 
-    def __init__(self, sink: Sink):
+    def __init__(self, sink: Sink, secondary_grouping_key: str | None = None):
         self.sink = sink
         self.sink_config: SinkConfig = sink.config
         self._default_transformer = ReportEntityTransformer()
+        self.secondary_grouping_key = secondary_grouping_key
 
     def create_writer(
         self, element: AggregationType | EventType | ChannelType
@@ -763,7 +787,9 @@ class WriterFactory:
 
         """
         if isinstance(element, (AggregationType, EventType, ChannelType)):
-            return DefaultReportEntityWriter(self.sink, self._default_transformer)
+            return DefaultReportEntityWriter(
+                self.sink, self._default_transformer, self.secondary_grouping_key
+            )
         else:
             error_msg = (
                 f"No writer found for element: {element}. Supported types are: "

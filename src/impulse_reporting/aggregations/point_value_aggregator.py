@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 
 import pyspark.sql.functions as f
 import zlib
@@ -22,7 +23,11 @@ from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
-from impulse_reporting.persist.fact_schema import STATS_AGGREGATOR_FACT_SCHEMA
+from impulse_reporting.persist.fact_schema import (
+    STATS_AGGREGATOR_FACT_SCHEMA,
+    fact_field_names,
+    group_id_columns,
+)
 
 
 class PointValueAggregator(Aggregation):
@@ -216,6 +221,7 @@ class PointValueAggregator(Aggregation):
         query: QueryBuilder = None,
         solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
+        secondary_grouping_key: str | None = None,
     ):
         """
         Determine and process aggregations for a list of PointValueAggregator visuals.
@@ -248,33 +254,34 @@ class PointValueAggregator(Aggregation):
 
         agg_names = [agg.get_name() for agg in aggregations]
 
-        result = solved_df.select("container_id", *agg_names)
+        result = solved_df.select(*group_id_columns(secondary_grouping_key), *agg_names)
 
         df = (
-            result.transform(cls._unpivot_measurement_info(agg_names))
+            result.transform(cls._unpivot_measurement_info(agg_names, secondary_grouping_key))
             .transform(cls._extract_point_info)
             .transform(StatsAggregator._add_event_id_column(aggregations))
             .transform(StatsAggregator._add_event_name_column(aggregations))
-            .transform(cls._explode_point_values)
+            .transform(cls._explode_point_values(secondary_grouping_key))
             .transform(StatsAggregator._add_channel_name_column(aggregations))
             .transform(StatsAggregator._add_event_instance_id_column(aggregations))
             .transform(StatsAggregator._add_visual_id_column(aggregations))
-            .select(STATS_AGGREGATOR_FACT_SCHEMA.fieldNames())
+            .select(*fact_field_names(STATS_AGGREGATOR_FACT_SCHEMA, secondary_grouping_key))
         )
         return df
 
     @staticmethod
-    def _unpivot_measurement_info(agg_names: list[str]):
+    def _unpivot_measurement_info(agg_names: list[str], secondary_grouping_key: str | None = None):
         """
         Unpivot the aggregation result columns into long format.
 
         The variable column is named ``stats_name`` so the shared StatsAggregator
         column helpers (event_id / event_name / channel_name / visual_id) can be reused.
         """
+        id_cols = [f.col(c) for c in group_id_columns(secondary_grouping_key)]
 
         def _(df: DataFrame) -> DataFrame:
             return df.unpivot(
-                f.col("container_id"),
+                id_cols,
                 agg_names,
                 variableColumnName="stats_name",
                 valueColumnName="value",
@@ -292,50 +299,58 @@ class PointValueAggregator(Aggregation):
         )
 
     @staticmethod
-    def _explode_point_values(df: DataFrame) -> DataFrame:
+    def _explode_point_values(
+        secondary_grouping_key: str | None = None,
+    ) -> Callable[..., DataFrame]:
         """
         Explode the per-series point arrays into one row per (signal, point).
 
         Each point becomes a zero-duration row (``start_ts == end_ts``) with the constant
         ``aggregation_label`` ``"value"`` and ``statistic_value`` set to the sampled value.
+        The optional secondary grouping key is carried through alongside ``container_id``.
         """
-        # Step 1: explode by signal index — point_timestamps and values are both
-        # indexed [signal][point]; zip and explode to get one row per signal.
-        df_with_signal = df.select(
-            "container_id",
-            "stats_name",
-            "event_id",
-            "event_name",
-            f.posexplode(f.arrays_zip(f.col("point_timestamps"), f.col("values"))).alias(
-                "signal_index", "signal_zip"
-            ),
-        )
+        id_cols = group_id_columns(secondary_grouping_key)
 
-        # Step 2: explode by point — zip this signal's timestamps with its values.
-        df_with_point = df_with_signal.select(
-            "container_id",
-            "stats_name",
-            "event_id",
-            "event_name",
-            "signal_index",
-            f.posexplode(
-                f.arrays_zip(f.col("signal_zip.point_timestamps"), f.col("signal_zip.values"))
-            ).alias("point_index", "point_zip"),
-        )
+        def _(df: DataFrame) -> DataFrame:
+            # Step 1: explode by signal index — point_timestamps and values are both
+            # indexed [signal][point]; zip and explode to get one row per signal.
+            df_with_signal = df.select(
+                *id_cols,
+                "stats_name",
+                "event_id",
+                "event_name",
+                f.posexplode(f.arrays_zip(f.col("point_timestamps"), f.col("values"))).alias(
+                    "signal_index", "signal_zip"
+                ),
+            )
 
-        # Step 3: a point is a zero-duration instance (start_ts == end_ts); the single
-        # value lands as statistic_value under the constant label "value".
-        return df_with_point.select(
-            "container_id",
-            "stats_name",
-            "event_name",
-            "event_id",
-            "signal_index",
-            f.col("point_zip.point_timestamps").alias("start_ts"),
-            f.col("point_zip.point_timestamps").alias("end_ts"),
-            f.lit("value").alias("aggregation_label"),
-            f.col("point_zip.values").alias("statistic_value"),
-        )
+            # Step 2: explode by point — zip this signal's timestamps with its values.
+            df_with_point = df_with_signal.select(
+                *id_cols,
+                "stats_name",
+                "event_id",
+                "event_name",
+                "signal_index",
+                f.posexplode(
+                    f.arrays_zip(f.col("signal_zip.point_timestamps"), f.col("signal_zip.values"))
+                ).alias("point_index", "point_zip"),
+            )
+
+            # Step 3: a point is a zero-duration instance (start_ts == end_ts); the single
+            # value lands as statistic_value under the constant label "value".
+            return df_with_point.select(
+                *id_cols,
+                "stats_name",
+                "event_name",
+                "event_id",
+                "signal_index",
+                f.col("point_zip.point_timestamps").alias("start_ts"),
+                f.col("point_zip.point_timestamps").alias("end_ts"),
+                f.lit("value").alias("aggregation_label"),
+                f.col("point_zip.values").alias("statistic_value"),
+            )
+
+        return _
 
     @classmethod
     def determine_metadata_df(

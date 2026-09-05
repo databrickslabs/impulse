@@ -32,7 +32,11 @@ from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
-from impulse_reporting.persist.fact_schema import STATS_AGGREGATOR_FACT_SCHEMA
+from impulse_reporting.persist.fact_schema import (
+    STATS_AGGREGATOR_FACT_SCHEMA,
+    fact_field_names,
+    group_id_columns,
+)
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
@@ -288,6 +292,7 @@ class StatsAggregator(Aggregation):
         query: QueryBuilder = None,
         solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
+        secondary_grouping_key: str | None = None,
     ):
         """
         Determine and process aggregations for a list of StatsAggregator visuals.
@@ -320,7 +325,7 @@ class StatsAggregator(Aggregation):
 
         stats_names = [stats_agg.get_name() for stats_agg in aggregations]
 
-        result = solved_df.select("container_id", *stats_names)
+        result = solved_df.select(*group_id_columns(secondary_grouping_key), *stats_names)
 
         # Single pass over the solved struct: per-channel and cross-channel stats
         # are exploded together (see _explode_stats_values), so ``result`` and the
@@ -329,21 +334,25 @@ class StatsAggregator(Aggregation):
         # >= 0 rows, then _add_cross_channel_name_column names the signal_index == -1
         # rows while preserving the per-channel names already set.
         df = (
-            result.transform(StatsAggregator._unpivot_measurement_info(stats_names))
+            result.transform(
+                StatsAggregator._unpivot_measurement_info(stats_names, secondary_grouping_key)
+            )
             .transform(StatsAggregator._extract_stats_info)
             .transform(StatsAggregator._add_event_id_column(aggregations))
             .transform(StatsAggregator._add_event_name_column(aggregations))
-            .transform(StatsAggregator._explode_stats_values)
+            .transform(StatsAggregator._explode_stats_values(secondary_grouping_key))
             .transform(StatsAggregator._add_channel_name_column(aggregations))
             .transform(StatsAggregator._add_cross_channel_name_column(aggregations))
             .transform(StatsAggregator._add_event_instance_id_column(aggregations))
             .transform(StatsAggregator._add_visual_id_column(aggregations))
-            .select(STATS_AGGREGATOR_FACT_SCHEMA.fieldNames())
+            .select(*fact_field_names(STATS_AGGREGATOR_FACT_SCHEMA, secondary_grouping_key))
         )
         return df
 
     @staticmethod
-    def _unpivot_measurement_info(stats_names: list[str]) -> Callable[..., DataFrame]:
+    def _unpivot_measurement_info(
+        stats_names: list[str], secondary_grouping_key: str | None = None
+    ) -> Callable[..., DataFrame]:
         """
         Unpivot the measurement info columns into long format.
 
@@ -351,16 +360,20 @@ class StatsAggregator(Aggregation):
         ----------
         stats_names : list of str
             List of statistics aggregation names to unpivot.
+        secondary_grouping_key : str, optional
+            Extra identity column to keep alongside ``container_id`` when a
+            secondary grouping key is configured.
 
         Returns
         -------
         function
             Function that unpivots the DataFrame columns into long format.
         """
+        id_cols = [f.col(c) for c in group_id_columns(secondary_grouping_key)]
 
         def _(df: DataFrame) -> DataFrame:
             return df.unpivot(
-                f.col("container_id"),
+                id_cols,
                 stats_names,
                 variableColumnName="stats_name",
                 valueColumnName="value",
@@ -462,7 +475,9 @@ class StatsAggregator(Aggregation):
         return _
 
     @staticmethod
-    def _explode_stats_values(df: DataFrame) -> DataFrame:
+    def _explode_stats_values(
+        secondary_grouping_key: str | None = None,
+    ) -> Callable[..., DataFrame]:
         """
         Explode per-channel and cross-channel statistics into one row per
         (signal, interval, statistic) in a single pass.
@@ -472,6 +487,9 @@ class StatsAggregator(Aggregation):
         exploded from a single combined signal axis so ``df`` (and the upstream
         solve) is traversed only once.
 
+        The optional secondary grouping key is carried through every intermediate
+        ``select`` alongside ``container_id`` so it survives to the fact rows.
+
         Parameters
         ----------
         df : pyspark.sql.DataFrame
@@ -480,68 +498,73 @@ class StatsAggregator(Aggregation):
 
         Returns
         -------
-        pyspark.sql.DataFrame
-            DataFrame with exploded statistics for each signal and interval.
+        function
+            Function that explodes statistics for each signal and interval.
         """
-        # Step 1: Explode by signal index to get one row per signal.
-        #
-        # Per-channel stats live in ``numeric_values`` (array<array<map>>, one inner
-        # list per signal). Cross-channel stats live in ``cross_channel_values``
-        # (array<map>, one map per interval) — exactly one signal's worth. Prepend
-        # them as the first entry of the signal axis so both explode in a single
-        # pass; ``signal_index = pos - 1`` then maps cross-channel to -1 and real
-        # signals to 0..N-1. This avoids forking ``df`` (which would re-run the
-        # upstream solve). An empty ``cross_channel_values`` prepends ``[[]]`` — a
-        # length-0 interval list that zips to zero rows, so no spurious -1 row.
-        all_signal_values = f.concat(
-            f.array(f.col("cross_channel_values")), f.col("numeric_values")
-        )
-        df_with_signal = df.select(
-            "container_id",
-            "stats_name",
-            "event_id",
-            "event_name",
-            "event_timestamps",
-            f.posexplode(all_signal_values).alias("pos", "signal_stats_per_interval"),
-        ).withColumn("signal_index", f.col("pos") - 1)
+        id_cols = group_id_columns(secondary_grouping_key)
 
-        # Step 2: Explode by interval - zip event_timestamps with signal_stats_per_interval.
-        # Both are aligned per interval (event_timestamps is canonical, one entry per
-        # interval), so the zip lines up 1:1.
-        df_with_interval = df_with_signal.select(
-            "container_id",
-            "stats_name",
-            "event_id",
-            "event_name",
-            "signal_index",
-            f.posexplode(
-                f.arrays_zip(f.col("event_timestamps"), f.col("signal_stats_per_interval"))
-            ).alias("interval_index", "zipped"),
-        )
+        def _(df: DataFrame) -> DataFrame:
+            # Step 1: Explode by signal index to get one row per signal.
+            #
+            # Per-channel stats live in ``numeric_values`` (array<array<map>>, one inner
+            # list per signal). Cross-channel stats live in ``cross_channel_values``
+            # (array<map>, one map per interval) — exactly one signal's worth. Prepend
+            # them as the first entry of the signal axis so both explode in a single
+            # pass; ``signal_index = pos - 1`` then maps cross-channel to -1 and real
+            # signals to 0..N-1. This avoids forking ``df`` (which would re-run the
+            # upstream solve). An empty ``cross_channel_values`` prepends ``[[]]`` — a
+            # length-0 interval list that zips to zero rows, so no spurious -1 row.
+            all_signal_values = f.concat(
+                f.array(f.col("cross_channel_values")), f.col("numeric_values")
+            )
+            df_with_signal = df.select(
+                *id_cols,
+                "stats_name",
+                "event_id",
+                "event_name",
+                "event_timestamps",
+                f.posexplode(all_signal_values).alias("pos", "signal_stats_per_interval"),
+            ).withColumn("signal_index", f.col("pos") - 1)
 
-        # Step 3: Extract start_ts, end_ts and statistics map from zipped struct
-        df_with_timestamps = df_with_interval.select(
-            "container_id",
-            "stats_name",
-            "event_id",
-            "event_name",
-            "signal_index",
-            f.col("zipped.event_timestamps").getItem(0).alias("start_ts"),
-            f.col("zipped.event_timestamps").getItem(1).alias("end_ts"),
-            f.col("zipped.signal_stats_per_interval").alias("statistics"),
-        )
+            # Step 2: Explode by interval - zip event_timestamps with signal_stats_per_interval.
+            # Both are aligned per interval (event_timestamps is canonical, one entry per
+            # interval), so the zip lines up 1:1.
+            df_with_interval = df_with_signal.select(
+                *id_cols,
+                "stats_name",
+                "event_id",
+                "event_name",
+                "signal_index",
+                f.posexplode(
+                    f.arrays_zip(f.col("event_timestamps"), f.col("signal_stats_per_interval"))
+                ).alias("interval_index", "zipped"),
+            )
 
-        # Step 4: Explode the statistics map into individual rows (aggregation_label, statistic_value)
-        return df_with_timestamps.select(
-            "container_id",
-            "stats_name",
-            "event_name",
-            "event_id",
-            "signal_index",
-            "start_ts",
-            "end_ts",
-            f.explode(f.col("statistics")).alias("aggregation_label", "statistic_value"),
-        )
+            # Step 3: Extract start_ts, end_ts and statistics map from zipped struct
+            df_with_timestamps = df_with_interval.select(
+                *id_cols,
+                "stats_name",
+                "event_id",
+                "event_name",
+                "signal_index",
+                f.col("zipped.event_timestamps").getItem(0).alias("start_ts"),
+                f.col("zipped.event_timestamps").getItem(1).alias("end_ts"),
+                f.col("zipped.signal_stats_per_interval").alias("statistics"),
+            )
+
+            # Step 4: Explode the statistics map into rows (aggregation_label, statistic_value)
+            return df_with_timestamps.select(
+                *id_cols,
+                "stats_name",
+                "event_name",
+                "event_id",
+                "signal_index",
+                "start_ts",
+                "end_ts",
+                f.explode(f.col("statistics")).alias("aggregation_label", "statistic_value"),
+            )
+
+        return _
 
     @staticmethod
     def _add_cross_channel_name_column(

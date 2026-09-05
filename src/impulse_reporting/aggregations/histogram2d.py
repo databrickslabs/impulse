@@ -18,7 +18,11 @@ from impulse_query_engine.model.series.sample_series import SampleSeries
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import HISTOGRAM2D_DIMENSION_SCHEMA
-from impulse_reporting.persist.fact_schema import HISTOGRAM2D_FACT_SCHEMA
+from impulse_reporting.persist.fact_schema import (
+    HISTOGRAM2D_FACT_SCHEMA,
+    fact_field_names,
+    group_id_columns,
+)
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
 
@@ -230,6 +234,7 @@ class Histogram2D(Aggregation, ABC):
         query: QueryBuilder = None,
         solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
+        secondary_grouping_key: str | None = None,
     ):
         """
         Determine and process aggregations for a list of Histogram2D visuals.
@@ -262,16 +267,18 @@ class Histogram2D(Aggregation, ABC):
 
         hist_names = [hist.get_name() for hist in aggregations]
 
-        result = solved_df.select("container_id", *hist_names)
+        result = solved_df.select(*group_id_columns(secondary_grouping_key), *hist_names)
 
         df = (
-            result.transform(Histogram2D._unpivot_measurement_info(hist_names))
+            result.transform(
+                Histogram2D._unpivot_measurement_info(hist_names, secondary_grouping_key)
+            )
             .transform(Histogram2D._extract_histogram2d_info)
             .transform(Histogram2D._add_event_id_column(aggregations))
-            .transform(Histogram2D._explode_histogram2d_values)
+            .transform(Histogram2D._explode_histogram2d_values(secondary_grouping_key))
             .transform(Histogram2D._extract_histogram2d_bin_info)
             .transform(Histogram2D._add_visual_id_column(aggregations))
-            .select(HISTOGRAM2D_FACT_SCHEMA.fieldNames())
+            .select(*fact_field_names(HISTOGRAM2D_FACT_SCHEMA, secondary_grouping_key))
         )
         return df
 
@@ -324,36 +331,43 @@ class Histogram2D(Aggregation, ABC):
         )
 
     @staticmethod
-    def _explode_histogram2d_values(df: DataFrame) -> DataFrame:
+    def _explode_histogram2d_values(
+        secondary_grouping_key: str | None = None,
+    ) -> Callable[..., DataFrame]:
         """
         Unnest the 2D histogram values into individual bin values.
 
         Parameters
         ----------
-        df : pyspark.sql.DataFrame
-            DataFrame containing nested histogram2d values.
+        secondary_grouping_key : str, optional
+            Extra identity column to carry through alongside ``container_id``.
 
         Returns
         -------
-        pyspark.sql.DataFrame
-            DataFrame with exploded histogram values for each bin.
+        function
+            Function that explodes histogram values for each bin.
         """
-        return df.select(
-            "container_id",
-            "hist_name",
-            "event_id",
-            "x_hist_bins",
-            "y_hist_bins",
-            f.posexplode(f.col("hist_values")).alias("x_bin_id", "y_hist_values"),
-        ).select(
-            "container_id",
-            "hist_name",
-            "event_id",
-            "x_hist_bins",
-            "y_hist_bins",
-            "x_bin_id",
-            f.posexplode(f.col("y_hist_values")).alias("y_bin_id", "hist_value"),
-        )
+        id_cols = group_id_columns(secondary_grouping_key)
+
+        def _(df: DataFrame) -> DataFrame:
+            return df.select(
+                *id_cols,
+                "hist_name",
+                "event_id",
+                "x_hist_bins",
+                "y_hist_bins",
+                f.posexplode(f.col("hist_values")).alias("x_bin_id", "y_hist_values"),
+            ).select(
+                *id_cols,
+                "hist_name",
+                "event_id",
+                "x_hist_bins",
+                "y_hist_bins",
+                "x_bin_id",
+                f.posexplode(f.col("y_hist_values")).alias("y_bin_id", "hist_value"),
+            )
+
+        return _
 
     @staticmethod
     def _add_event_id_column(
@@ -403,7 +417,9 @@ class Histogram2D(Aggregation, ABC):
         )
 
     @staticmethod
-    def _unpivot_measurement_info(hist_names: list[str]) -> Callable[..., DataFrame]:
+    def _unpivot_measurement_info(
+        hist_names: list[str], secondary_grouping_key: str | None = None
+    ) -> Callable[..., DataFrame]:
         """
         Unpivot the measurement info columns into long format.
 
@@ -411,16 +427,19 @@ class Histogram2D(Aggregation, ABC):
         ----------
         hist_names : list of str
             List of histogram names to unpivot.
+        secondary_grouping_key : str, optional
+            Extra identity column to keep alongside ``container_id``.
 
         Returns
         -------
         function
             Function that unpivots the DataFrame columns into long format.
         """
+        id_cols = [f.col(c) for c in group_id_columns(secondary_grouping_key)]
 
         def _(df: DataFrame) -> DataFrame:
             return df.unpivot(
-                f.col("container_id"),
+                id_cols,
                 hist_names,
                 variableColumnName="hist_name",
                 valueColumnName="value",

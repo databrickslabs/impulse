@@ -522,7 +522,7 @@ def test_explode_histogram2d_values(spark):
     ]
 
     df = spark.createDataFrame(data, schema=schema)
-    result = Histogram2DDuration._explode_histogram2d_values(df)
+    result = Histogram2DDuration._explode_histogram2d_values()(df)
     expected_result = [
         T.Row(
             container_id=1,

@@ -198,6 +198,7 @@ class Aggregation(ABC):
         query: QueryBuilder = None,
         solver: QuerySolver = None,
         pre_filtered_containers_df: DataFrame = None,
+        secondary_grouping_key: str | None = None,
     ):
         """
         Build a Spark DataFrame of aggregation facts.

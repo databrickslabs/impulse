@@ -15,9 +15,10 @@ properties on :class:`SolverConfig`.
 """
 
 import json
+from collections.abc import Callable
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class RawEncoder(StrEnum):
@@ -85,6 +86,55 @@ class JoinKey(BaseModel):
     metrics_col: str
 
 
+class SecondaryGroupingConfig(BaseModel):
+    """Optional secondary grouping key derived from the channel-data table.
+
+    When configured, the solver groups the ``solve`` stage by
+    ``(container_id, <name>)`` instead of by ``container_id`` alone. This bounds
+    the size of each grouped-map pandas frame (avoiding OOM for containers that
+    stream endlessly) and turns the key into a genuine output dimension: results
+    are reported per ``(container_id, secondary_grouping_key)`` and the key joins
+    the gold fact-table merge identity.
+
+    Exactly one of ``source_column`` or ``deriver`` must be set.
+
+    Attributes
+    ----------
+    name : str, default="secondary_grouping_key"
+        Output column name for the derived key. This is the internal column the
+        engine groups on and that flows through to the reporting layer and fact
+        tables.
+    source_column : str or None
+        Name of an existing column on the (post-``column_name_mapping``)
+        channel-data table to use directly as the key — e.g. a ``date`` column.
+        JSON-serializable, so it is usable from a file-based config.
+    deriver : Callable or None
+        A module-level importable function ``fn(channels_df: DataFrame) ->
+        Column`` that returns a Spark ``Column`` expression computed from the
+        channel-data frame (which carries ``container_id``, ``channel_id``,
+        ``tstart``, ``tend``, ``value``). Use for arbitrary logic such as a
+        wake-cycle id built from timestamp gaps
+        (``F.sum(...).over(Window.partitionBy(container_id).orderBy(tstart))``).
+        Not JSON-serializable — set it on a Python-constructed config. Never
+        capture Spark session objects in the closure.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    name: str = "secondary_grouping_key"
+    source_column: str | None = None
+    deriver: Callable | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "SecondaryGroupingConfig":
+        if (self.source_column is None) == (self.deriver is None):
+            raise ValueError(
+                "SecondaryGroupingConfig requires exactly one of 'source_column' "
+                "or 'deriver' to be set."
+            )
+        return self
+
+
 class ChannelMappingConfig(TableConfig):
     """``TableConfig`` plus an optional alias-resolution join-key spec.
 
@@ -133,6 +183,12 @@ class SolverConfig(BaseModel):
         Column mappings and filters for the channel data table.
     unit_conversion : TableConfig
         Column mappings and filters for the unit conversion table.
+    secondary_grouping : SecondaryGroupingConfig or None
+        Optional secondary grouping key derived from the channel-data table.
+        When set, the ``solve`` stage groups by ``(container_id, <name>)`` and
+        the key becomes an output dimension (see
+        :class:`SecondaryGroupingConfig`). ``None`` (the default) preserves the
+        legacy container-only grouping.
     """
 
     project_id: str | None = None
@@ -145,6 +201,7 @@ class SolverConfig(BaseModel):
     channels: TableConfig = TableConfig()
     poi_channels: TableConfig = TableConfig()
     unit_conversion: TableConfig = TableConfig()
+    secondary_grouping: SecondaryGroupingConfig | None = None
 
     # ------------------------------------------------------------------
     # Class methods
@@ -206,6 +263,16 @@ class SolverConfig(BaseModel):
     def channel_id_cols(self) -> list[str]:
         """Composite key ``[container_id, channel_id]``."""
         return [self.container_id_col, self.channel_id_col]
+
+    @property
+    def secondary_grouping_key_col(self) -> str | None:
+        """Internal column name for the optional secondary grouping key, or ``None``.
+
+        Returns the configured :attr:`SecondaryGroupingConfig.name` when a
+        secondary grouping key is configured, otherwise ``None`` (legacy
+        container-only grouping).
+        """
+        return self.secondary_grouping.name if self.secondary_grouping else None
 
     @property
     def tstart_col(self) -> str:

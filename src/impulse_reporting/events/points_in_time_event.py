@@ -15,7 +15,11 @@ from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.model.series.points_in_time import PointsInTime
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
-from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
+from impulse_reporting.persist.fact_schema import (
+    EVENT_INSTANCE_FACT_SCHEMA,
+    fact_field_names,
+    group_id_columns,
+)
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
@@ -166,6 +170,7 @@ class PointsInTimeEvent(Event):
         query: QueryBuilder = None,
         solver: QuerySolver = None,
         pre_filtered_containers_df=None,
+        secondary_grouping_key: str | None = None,
     ):
         """
         Extract the event fact table for the given list of PointsInTimeEvent objects.
@@ -202,17 +207,18 @@ class PointsInTimeEvent(Event):
             )
 
         event_names = [event.get_name() for event in events]
+        id_cols = group_id_columns(secondary_grouping_key)
 
         df = (
-            solved_df.select("container_id", *event_names)
+            solved_df.select(*id_cols, *event_names)
             .unpivot(
-                f.col("container_id"),
+                [f.col(c) for c in id_cols],
                 event_names,
                 variableColumnName="event_name",
                 valueColumnName="value",
             )
             .select(
-                "container_id",
+                *id_cols,
                 "event_name",
                 f.explode(f.col("value")).alias("ts"),
             )
@@ -226,7 +232,7 @@ class PointsInTimeEvent(Event):
                 "event_id",
                 ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
             )
-            .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
+            .select(*fact_field_names(EVENT_INSTANCE_FACT_SCHEMA, secondary_grouping_key))
         )
         return df
 

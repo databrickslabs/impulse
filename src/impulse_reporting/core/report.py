@@ -608,7 +608,9 @@ class Report:
         -------
         None
         """
-        storage_factory = WriterFactory(self.sink)
+        storage_factory = WriterFactory(
+            self.sink, secondary_grouping_key=self.solver.config.secondary_grouping_key_col
+        )
 
         # aggregation fact + dimension tables — grouped by output table so shared
         # tables (e.g. StatsAggregator + PointValueAggregator → stats_aggregator_fact)
@@ -712,7 +714,9 @@ class Report:
             self.sink,
             _transform,
             id_column="event_id",
-            merge_keys=["container_id", "event_id", "event_instance_id"],
+            merge_keys=self._append_secondary_grouping_key(
+                ["container_id", "event_id", "event_instance_id"]
+            ),
             changed_ids=changed_event_ids,
             has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
@@ -732,7 +736,9 @@ class Report:
             self.sink,
             _transform,
             id_column="channel_id",
-            merge_keys=["container_id", "channel_id", "tstart"],
+            merge_keys=self._append_secondary_grouping_key(
+                ["container_id", "channel_id", "tstart"]
+            ),
             changed_ids=changed_channel_ids,
             has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
@@ -810,10 +816,14 @@ class Report:
         DataFrame
             Transformed DataFrame ready for persistence.
         """
+        # The static fact schemas omit the optional secondary grouping key; keep
+        # it in the projection when configured and present so it reaches gold.
+        field_names = list(schema.fieldNames())
+        sgk = self.solver.config.secondary_grouping_key_col
+        if sgk and sgk in df.columns and sgk not in field_names:
+            field_names.append(sgk)
 
-        return df.transform(transformer.select_relevant_columns(schema)).transform(
-            transformer.add_meta_information
-        )
+        return df.select(*field_names).transform(transformer.add_meta_information)
 
     def _get_aggregation_merge_keys(self, agg_type: AggregationType) -> list[str]:
         """
@@ -852,7 +862,20 @@ class Report:
                 "channel_name",
             ],
         }
-        return merge_keys_map.get(agg_type, ["container_id", "visual_id"])
+        keys = merge_keys_map.get(agg_type, ["container_id", "visual_id"])
+        return self._append_secondary_grouping_key(keys)
+
+    def _append_secondary_grouping_key(self, keys: list[str]) -> list[str]:
+        """Append the secondary grouping key to *keys* when one is configured.
+
+        Facts are reported per ``(container_id, secondary_grouping_key)``, so the
+        key must be part of every fact table's merge identity to upsert the right
+        row. A no-op when no secondary grouping key is configured.
+        """
+        sgk = self.solver.config.secondary_grouping_key_col
+        if sgk and sgk not in keys:
+            return [*keys, sgk]
+        return keys
 
     def _cleanup_temp_tables(self) -> None:
         """Drop leftover ``__impulse_temp_*`` Delta tables from previous runs.
@@ -1008,6 +1031,7 @@ class Report:
         )
 
         # Dispatch events
+        secondary_grouping_key = self.solver.config.secondary_grouping_key_col
         changed_event_dfs = dispatch_events(
             self.spark,
             changed_events_by_type,
@@ -1017,6 +1041,7 @@ class Report:
             self.solver,
             None,
             ContainerEvent,
+            secondary_grouping_key=secondary_grouping_key,
         )
         unchanged_event_dfs = dispatch_events(
             self.spark,
@@ -1027,6 +1052,7 @@ class Report:
             self.solver,
             pre_filtered_containers_df,
             ContainerEvent,
+            secondary_grouping_key=secondary_grouping_key,
         )
 
         # Merge event results into {type: {"changed": df, "unchanged": df}} and
@@ -1034,18 +1060,20 @@ class Report:
         self.event_dfs = merge_changed_unchanged(changed_event_dfs, unchanged_event_dfs)
         self.event_metadata_dfs = build_metadata_dfs(events_by_type, EventType, self.spark)
 
-        # Dispatch aggregations
+        # Dispatch aggregations (secondary_grouping_key resolved above)
         changed_agg_dfs = dispatch_aggregations(
             self.spark,
             changed_aggs_by_type,
             AggregationType,
             changed_solved_df,
+            secondary_grouping_key=secondary_grouping_key,
         )
         unchanged_agg_dfs = dispatch_aggregations(
             self.spark,
             unchanged_aggs_by_type,
             AggregationType,
             unchanged_solved_df,
+            secondary_grouping_key=secondary_grouping_key,
         )
 
         # Merge aggregation results and build aggregation dimensions from all.
@@ -1089,12 +1117,14 @@ class Report:
             changed_channels_by_type,
             ChannelType,
             changed_channel_solved_df,
+            secondary_grouping_key=secondary_grouping_key,
         )
         unchanged_channel_dfs = dispatch_calculated_channels(
             self.spark,
             unchanged_channels_by_type,
             ChannelType,
             unchanged_channel_solved_df,
+            secondary_grouping_key=secondary_grouping_key,
         )
         self.calculated_channel_dfs = merge_changed_unchanged(
             changed_channel_dfs, unchanged_channel_dfs

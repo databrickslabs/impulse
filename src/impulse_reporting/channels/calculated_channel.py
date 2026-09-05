@@ -19,7 +19,10 @@ from impulse_reporting.channels.calculated_channel_kpis import (
     build_kpi_columns,
 )
 from impulse_reporting.persist.dimension_schema import CALCULATED_CHANNEL_DIMENSION_SCHEMA
-from impulse_reporting.persist.fact_schema import CALCULATED_CHANNEL_FACT_SCHEMA
+from impulse_reporting.persist.fact_schema import (
+    CALCULATED_CHANNEL_FACT_SCHEMA,
+    fact_field_names,
+)
 
 
 def _union_identity_keys(channels: list[CalculatedChannel]) -> list[str]:
@@ -178,6 +181,7 @@ class CalculatedChannel:
         channels: list[CalculatedChannel],
         *,
         solved_df: DataFrame = None,
+        secondary_grouping_key: str | None = None,
     ) -> DataFrame | None:
         """Shape the already-solved narrow rows into this type's fact rows.
 
@@ -210,7 +214,7 @@ class CalculatedChannel:
 
         channel_ids = [channel.get_id() for channel in channels]
         return solved_df.filter(F.col("channel_id").isin(channel_ids)).select(
-            *CALCULATED_CHANNEL_FACT_SCHEMA.fieldNames()
+            *fact_field_names(CALCULATED_CHANNEL_FACT_SCHEMA, secondary_grouping_key)
         )
 
     @classmethod

@@ -95,9 +95,26 @@ class QuerySolver(ABC):
                 channels.schema[self.config.container_id_col].dataType,
             )
         ]
+        sgk_field = self._secondary_grouping_field(channels)
+        if sgk_field is not None:
+            entries.append(sgk_field)
         for s, dtype in zip(selections, dtypes, strict=False):
             entries.append(T.StructField(s._alias, dtype))
         return T.StructType(entries)
+
+    def _secondary_grouping_field(self, channels: DataFrame) -> T.StructField | None:
+        """Return the ``StructField`` for the optional secondary grouping key, or ``None``.
+
+        The field type is derived from *channels* (the column-mapped channel-data
+        DataFrame, which already carries the derived/selected key column) so it
+        matches the actual data type instead of being hardcoded — mirroring the
+        dynamic ``container_id`` / ``channel_id`` typing used elsewhere. Returns
+        ``None`` when no secondary grouping key is configured.
+        """
+        sgk_col = self.config.secondary_grouping_key_col
+        if sgk_col is None:
+            return None
+        return T.StructField(sgk_col, channels.schema[sgk_col].dataType)
 
     def _build_calculated_channels_udf_schema(self, channels: DataFrame) -> T.StructType:
         """Build the grouped-map UDF return schema for calculated channels.
@@ -124,12 +141,17 @@ class QuerySolver(ABC):
         pyspark.sql.types.StructType
             ``[container_id, channel_id, tstart, tend, value]``.
         """
-        return T.StructType(
+        entries = [
+            T.StructField(
+                self.config.container_id_col,
+                channels.schema[self.config.container_id_col].dataType,
+            )
+        ]
+        sgk_field = self._secondary_grouping_field(channels)
+        if sgk_field is not None:
+            entries.append(sgk_field)
+        entries.extend(
             [
-                T.StructField(
-                    self.config.container_id_col,
-                    channels.schema[self.config.container_id_col].dataType,
-                ),
                 T.StructField(
                     self.config.channel_id_col,
                     channels.schema[self.config.channel_id_col].dataType,
@@ -145,6 +167,7 @@ class QuerySolver(ABC):
                 T.StructField(self.config.value_col, T.DoubleType()),
             ]
         )
+        return T.StructType(entries)
 
     def _empty_channel_match_df(self, spark, db: MeasurementDB) -> DataFrame:
         """Return an empty ``(container_id, channel_id, selector_ids)`` DataFrame.
