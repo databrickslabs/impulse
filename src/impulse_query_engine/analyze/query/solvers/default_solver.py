@@ -20,6 +20,7 @@ from impulse_query_engine.model.series.points_in_time_series import PointsInTime
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
+from .registry import register_solver
 from .series_cache import SeriesCache
 from .solver_config import RawEncoder, SolverConfig
 from .utils.interval_encoder import IntervalEncoder
@@ -27,6 +28,8 @@ from .utils.rle_encoder import RleEncoder
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
+
+    from .solver_context import SolverBuildContext
 
 
 class TimeSeriesCache(SeriesCache):
@@ -209,6 +212,7 @@ class TimeSeriesCache(SeriesCache):
         return {c: row[c] for c in cols if c in self.mdf.columns}
 
 
+@register_solver("DefaultSolver", aliases=("DeltaSolver", "KeyValueStoreSolver"))
 class DefaultSolver(QuerySolver):
     """
     The default query-engine solver.  Adapts to the shape of the silver layer.
@@ -271,6 +275,21 @@ class DefaultSolver(QuerySolver):
         self.drop_implausible_data: bool = drop_implausible_data
         self.raw_encoder: RawEncoder = raw_encoder
         self.channel_encoder: RleEncoder | IntervalEncoder = self._build_channel_encoder()
+
+    @classmethod
+    def from_config(cls, ctx: "SolverBuildContext") -> "DefaultSolver":
+        """Build a :class:`DefaultSolver` from a :class:`SolverBuildContext`.
+
+        Overrides the base hook to wire the SparkSession and the raw-data flags
+        that this solver requires beyond ``solver_config``.
+        """
+        return cls(
+            ctx.spark,
+            config=ctx.solver_config,
+            is_raw_data=ctx.is_raw_data,
+            drop_implausible_data=ctx.drop_implausible_data,
+            raw_encoder=ctx.raw_encoder,
+        )
 
     def _build_channel_encoder(self) -> RleEncoder | IntervalEncoder:
         """Construct the raw -> interval encoder selected by ``raw_encoder``.

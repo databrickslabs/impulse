@@ -12,6 +12,8 @@ from pyspark.sql.column import Column
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
 
+    from .solver_context import SolverBuildContext
+
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
@@ -34,6 +36,29 @@ class QuerySolver(ABC):
 
     def __init__(self, config: SolverConfig = None):
         self.config = config or SolverConfig()
+
+    @classmethod
+    def from_config(cls, ctx: "SolverBuildContext") -> "QuerySolver":
+        """Build a solver from a :class:`SolverBuildContext`.
+
+        This is the uniform instantiation hook used by the report factory so
+        that solvers with different constructor signatures can all be built the
+        same way.  The base implementation passes only ``solver_config`` (the
+        common case for a :class:`QuerySolver` subclass); solvers that need more
+        construction inputs — such as :class:`DefaultSolver`, which needs the
+        SparkSession and the raw-data flags — override this classmethod.
+
+        Parameters
+        ----------
+        ctx : SolverBuildContext
+            The construction inputs resolved from the report configuration.
+
+        Returns
+        -------
+        QuerySolver
+            A ready-to-use solver instance.
+        """
+        return cls(config=ctx.solver_config)
 
     @staticmethod
     def _apply_column_mapping(df: DataFrame, mapping: dict[str, str]) -> DataFrame:
