@@ -66,6 +66,9 @@ def _build_report(spark, config_dict=None):
         mock_db = MagicMock()
         mock_query = MagicMock()
         mock_solver = MagicMock()
+        # Default: no secondary grouping key (avoid a truthy MagicMock polluting
+        # merge keys / partition scoping).
+        mock_solver.config.secondary_grouping_key_col = None
         mock_sink = MagicMock()
         mock_sink.config = MagicMock()
 

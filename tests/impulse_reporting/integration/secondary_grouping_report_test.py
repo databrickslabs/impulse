@@ -26,22 +26,10 @@ from impulse_reporting.config.config_parser import (
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
-from tests.impulse_reporting.integration.test_helpers import (
-    clone_silver_with_shrunk_container,
-)
 
 CONFIG = ("tests", "data", "config", "config.json")
 
 _STATS_FACT = "spark_catalog.gold.evaluation_stats_aggregator_fact"
-_STATS_IDENTITY = [
-    "container_id",
-    "secondary_grouping_key",
-    "visual_id",
-    "aggregation_label",
-    "event_instance_id",
-    "channel_name",
-    "statistic_value",
-]
 
 
 def _config_path() -> str:
@@ -59,11 +47,22 @@ def _build_report(spark, name: str) -> Report:
     )
 
 
-# A time-localized key derived from the channel-data table: partition each
-# container's samples by parity of their start timestamp. Column-returning
-# derivers run on the driver, so a lambda is fine here.
+# A key derived from the channel-data table: partition each container's samples by
+# parity of their start timestamp. Guarantees >= 2 partitions without knowing the
+# tstart scale — used by the (non-incremental) subdivide/persist tests. Column-
+# returning derivers run on the driver, so a lambda is fine here.
 def _parity_deriver(df):
     return (F.col("tstart") % F.lit(2)).cast("long")
+
+
+# A monotonic, time-localized key: the day bucket of a microsecond-epoch tstart.
+# Used by the incremental tests, where the contract is a time-localized key so the
+# "latest partition" heuristic tracks the open partition.
+_MICROS_PER_DAY = 86_400_000_000
+
+
+def _day_deriver(df):
+    return F.floor(F.col("tstart") / F.lit(_MICROS_PER_DAY)).cast("long")
 
 
 def test_secondary_grouping_subdivides_aggregation_facts(spark):
@@ -197,14 +196,18 @@ def _sgk_config(cm_table: str, channels_table: str, incremental_enabled: bool) -
     )
 
 
-def _sgk_report(spark, name, cm_table, channels_table, incremental_enabled) -> Report:
+def _sgk_report(
+    spark, name, cm_table, channels_table, incremental_enabled, deriver=None
+) -> Report:
     report = Report(
         name=name,
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
         config=dict(_sgk_config(cm_table, channels_table, incremental_enabled)),
     )
-    report.solver.config.secondary_grouping = SecondaryGroupingConfig(deriver=_parity_deriver)
+    report.solver.config.secondary_grouping = SecondaryGroupingConfig(
+        deriver=deriver or _parity_deriver
+    )
     return report
 
 
@@ -227,86 +230,190 @@ def _add_rpm_stats(report):
     )
 
 
-def _combined_stats_df(report):
-    """Union the changed + unchanged STATS_AGGREGATOR frames a report produced."""
-    entry = report.aggregation_dfs["STATS_AGGREGATOR"]
-    parts = [entry[k] for k in ("changed", "unchanged") if entry.get(k) is not None]
-    df = parts[0]
-    for part in parts[1:]:
-        df = df.unionByName(part)
-    return df
+def _clone_cm_with_bumped_container(spark, cm_table, updated_container_id=1):
+    """Clone silver container_metrics, bumping only *updated_container_id*'s timestamp."""
+    spark.read.table("spark_catalog.silver.container_metrics").withColumn(
+        "timestamp",
+        F.when(F.col("container_id") == updated_container_id, F.current_timestamp()).otherwise(
+            F.lit("2020-01-01 00:00:00").cast("timestamp")
+        ),
+    ).write.format("delta").mode("overwrite").saveAsTable(cm_table)
 
 
-def _stats_identity_rows(df, container_id: int) -> set:
-    rows = df.filter(F.col("container_id") == container_id).select(*_STATS_IDENTITY).collect()
-    return {
-        (
-            r.container_id,
-            r.secondary_grouping_key,
-            r.visual_id,
-            r.aggregation_label,
-            r.event_instance_id,
-            r.channel_name,
-            round(r.statistic_value, 6),
-        )
-        for r in rows
-    }
+def _clone_channels_with_appended_day(spark, channels_table, container_id=1, channel_id=5):
+    """Clone silver channels and append a new, later day-bucket for one channel.
 
-
-def test_incremental_secondary_grouping_prunes_stale_partitions(spark):
-    """Incremental + SGK equals a full recompute of the reprocessed container.
-
-    A modified container is reprocessed under an unchanged definition; the gold
-    fact rows for it must exactly match a full (non-incremental) recompute on the
-    same silver — proving no stale ``(container, secondary_grouping_key)`` rows
-    survive and none are lost (process-and-correct via the SGK-keyed MERGE).
+    Returns the new day-bucket value. The appended samples sit ~30 days past the
+    container's current max ``tstart`` so they form a brand-new (and latest) day
+    partition, with values > 1000 so the ``rpm > 1000`` event fires there.
     """
-    # Run 1 (full): seed gold from the base silver (all containers).
+    base = spark.read.table("spark_catalog.silver.channels")
+    max_tstart = (
+        base.filter(F.col("container_id") == container_id)
+        .agg(F.max("tstart").alias("m"))
+        .collect()[0]["m"]
+    )
+    start = int(max_tstart) + 30 * _MICROS_PER_DAY
+    step = 10_000_000  # 10s
+    new_rows = [
+        (container_id, channel_id, start + i * step, start + (i + 1) * step, 1500 + i)
+        for i in range(4)
+    ]
+    # Match the silver channels schema exactly (value is an integer column).
+    new_df = spark.createDataFrame(new_rows, schema=base.schema)
+    base.unionByName(new_df).write.format("delta").mode("overwrite").saveAsTable(channels_table)
+    return start // _MICROS_PER_DAY
+
+
+def test_incremental_secondary_grouping_appends_new_partition_only(spark):
+    """Appending a new day partition reprocesses only it; settled days are untouched.
+
+    Endless-stream scenario: run 1 seeds several day partitions; run 2 appends a
+    brand-new later day. Only the new/latest partition is recomputed — a sentinel
+    written into a settled partition survives — while the new partition lands in
+    gold with correct values.
+    """
+    # Run 1 (full): seed gold from base silver using the monotonic day key.
     r1 = _sgk_report(
         spark,
-        "sgk_inc_report",
+        "sgk_append_report",
         "spark_catalog.silver.container_metrics",
         "spark_catalog.silver.channels",
         False,
+        deriver=_day_deriver,
     )
     _add_rpm_stats(r1)
     r1.determine_report()
     r1.persist_results()
-    gold_c1_run1 = _stats_identity_rows(spark.read.table(_STATS_FACT), 1)
-    assert gold_c1_run1, "expected container-1 stats rows after the seed run"
 
-    shrink_cm = "spark_catalog.silver.sgk_container_metrics_shrink"
-    shrink_channels = "spark_catalog.silver.sgk_channels_shrink"
+    days = sorted(
+        row.secondary_grouping_key
+        for row in spark.read.table(_STATS_FACT)
+        .filter(F.col("container_id") == 1)
+        .select("secondary_grouping_key")
+        .distinct()
+        .collect()
+    )
+    assert days, days
+    # Any run-1 day becomes settled once a strictly-later day is appended below.
+    settled_day = days[0]
+
+    # Tamper a settled day's gold value; if it were reprocessed it'd be overwritten.
+    spark.sql(
+        f"UPDATE {_STATS_FACT} SET statistic_value = -999.0 "
+        f"WHERE container_id = 1 AND secondary_grouping_key = {settled_day} "
+        f"AND aggregation_label = 'min'"
+    )
+
+    cm_table = "spark_catalog.silver.sgk_append_cm"
+    channels_table = "spark_catalog.silver.sgk_append_channels"
     try:
-        # Modified silver: container 1 updated (bumped timestamp), Engine RPM (ch 5)
-        # truncated to its first 5 samples; other containers keep the old timestamp.
-        clone_silver_with_shrunk_container(
-            spark,
-            updated_container_id=1,
-            shrink_channel_ids=[5],
-            keep_n=5,
-            cm_table=shrink_cm,
-            channels_table=shrink_channels,
-        )
+        _clone_cm_with_bumped_container(spark, cm_table, updated_container_id=1)
+        new_day = _clone_channels_with_appended_day(spark, channels_table, container_id=1)
+        assert new_day not in days, (new_day, days)
 
-        # Run 2 (incremental): unchanged definition → container 1 reprocessed.
-        r2 = _sgk_report(spark, "sgk_inc_report", shrink_cm, shrink_channels, True)
+        # Run 2 (incremental): only the new/latest day partition should be processed.
+        r2 = _sgk_report(spark, "sgk_append_report", cm_table, channels_table, True, _day_deriver)
         _add_rpm_stats(r2)
         r2.determine_report()
         r2.persist_results()
-        gold_c1_incremental = _stats_identity_rows(spark.read.table(_STATS_FACT), 1)
 
-        # Ground truth: a full recompute on the SAME shrunk silver.
-        r3 = _sgk_report(spark, "sgk_gt_report", shrink_cm, shrink_channels, False)
-        _add_rpm_stats(r3)
-        r3.determine_report()
-        full_recompute_c1 = _stats_identity_rows(_combined_stats_df(r3), 1)
+        fact = spark.read.table(_STATS_FACT).filter(F.col("container_id") == 1)
 
-        # Incremental gold for the reprocessed container == full recompute: no stale
-        # partitions left behind, none missing.
-        assert gold_c1_incremental == full_recompute_c1
-        # And it actually changed vs the seed run (the container was reprocessed).
-        assert gold_c1_incremental != gold_c1_run1
+        # The new day partition landed in gold with real (non-sentinel) values.
+        new_rows = fact.filter(F.col("secondary_grouping_key") == new_day).collect()
+        assert new_rows, "the appended day partition must be present in gold"
+        assert all(r.statistic_value != -999.0 for r in new_rows)
+
+        # The settled day was NOT reprocessed → its sentinel survived.
+        settled_min = fact.filter(
+            (F.col("secondary_grouping_key") == settled_day)
+            & (F.col("aggregation_label") == "min")
+        ).collect()
+        assert settled_min and all(r.statistic_value == -999.0 for r in settled_min), settled_min
     finally:
-        spark.sql(f"DROP TABLE IF EXISTS {shrink_cm}")
-        spark.sql(f"DROP TABLE IF EXISTS {shrink_channels}")
+        spark.sql(f"DROP TABLE IF EXISTS {cm_table}")
+        spark.sql(f"DROP TABLE IF EXISTS {channels_table}")
+
+
+def test_incremental_secondary_grouping_skips_settled_partitions(spark):
+    """Settled (non-latest, already-in-gold) partitions are NOT reprocessed.
+
+    A container is flagged as updated but its silver data is unchanged. We tamper a
+    settled partition's gold value; after the incremental run it must survive (the
+    partition was neither re-read nor recomputed), while the latest partition is
+    still refreshed. This is the point of key-level incremental: an endless stream
+    never reprocesses its whole history.
+    """
+    # Seed gold (full) from base silver. Parity guarantees >= 2 partitions so one
+    # is settled (non-latest) regardless of the container's time span.
+    r1 = _sgk_report(
+        spark,
+        "sgk_skip_report",
+        "spark_catalog.silver.container_metrics",
+        "spark_catalog.silver.channels",
+        False,
+        deriver=_parity_deriver,
+    )
+    _add_rpm_stats(r1)
+    r1.determine_report()
+    r1.persist_results()
+
+    # Container 1 must have >= 2 partitions so one is settled (non-latest).
+    keys = sorted(
+        row.secondary_grouping_key
+        for row in spark.read.table(_STATS_FACT)
+        .filter(F.col("container_id") == 1)
+        .select("secondary_grouping_key")
+        .distinct()
+        .collect()
+    )
+    assert len(keys) >= 2, keys
+    settled_key, latest_key = keys[0], keys[-1]
+
+    # Tamper a settled-partition gold value with a sentinel. If that partition were
+    # reprocessed, the recompute would overwrite it.
+    spark.sql(
+        f"UPDATE {_STATS_FACT} SET statistic_value = -999.0 "
+        f"WHERE container_id = 1 AND secondary_grouping_key = {settled_key} "
+        f"AND aggregation_label = 'min'"
+    )
+
+    cm_table = "spark_catalog.silver.sgk_skip_cm"
+    channels_table = "spark_catalog.silver.sgk_skip_channels"
+    try:
+        # Container 1 flagged updated (bumped timestamp), but silver data unchanged.
+        _clone_cm_with_bumped_container(spark, cm_table, updated_container_id=1)
+        spark.read.table("spark_catalog.silver.channels").write.format("delta").mode(
+            "overwrite"
+        ).saveAsTable(channels_table)
+        r2 = _sgk_report(spark, "sgk_skip_report", cm_table, channels_table, True, _parity_deriver)
+        _add_rpm_stats(r2)
+        r2.determine_report()
+        r2.persist_results()
+
+        fact = spark.read.table(_STATS_FACT).filter(F.col("container_id") == 1)
+        # Settled partition's sentinel survived → it was not reprocessed.
+        settled_min = (
+            fact.filter(
+                (F.col("secondary_grouping_key") == settled_key)
+                & (F.col("aggregation_label") == "min")
+            )
+            .select("statistic_value")
+            .collect()
+        )
+        assert settled_min, "settled partition rows must still exist"
+        assert all(r.statistic_value == -999.0 for r in settled_min), settled_min
+        # Latest partition was refreshed → its min is the real (non-sentinel) value.
+        latest_min = (
+            fact.filter(
+                (F.col("secondary_grouping_key") == latest_key)
+                & (F.col("aggregation_label") == "min")
+            )
+            .select("statistic_value")
+            .collect()
+        )
+        assert latest_min and all(r.statistic_value != -999.0 for r in latest_min)
+    finally:
+        spark.sql(f"DROP TABLE IF EXISTS {cm_table}")
+        spark.sql(f"DROP TABLE IF EXISTS {channels_table}")

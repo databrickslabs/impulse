@@ -1,5 +1,8 @@
 import json
 import zlib
+from functools import reduce
+
+import pyspark.sql.functions as F
 from typing import Any
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
@@ -677,7 +680,9 @@ class Report:
         changed_channel_ids = changed_channel_ids or {}
         has_processed_containers = getattr(self, "_has_processed_containers", False)
         updated_container_ids = getattr(self, "_updated_container_ids", [])
-        storage_factory = WriterFactory(self.sink)
+        secondary_grouping_key = self.solver.config.secondary_grouping_key_col
+        affected_partition_keys = getattr(self, "_affected_partition_keys", None)
+        storage_factory = WriterFactory(self.sink, secondary_grouping_key=secondary_grouping_key)
         transformer = ReportEntityTransformer()
 
         def _transform(df, schema):
@@ -696,6 +701,8 @@ class Report:
             changed_ids=changed_aggregation_ids,
             has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
+            secondary_grouping_key=secondary_grouping_key,
+            affected_partition_keys=affected_partition_keys,
         )
         persist_dimensions_incremental(
             self.aggregation_metadata_dfs,
@@ -720,6 +727,8 @@ class Report:
             changed_ids=changed_event_ids,
             has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
+            secondary_grouping_key=secondary_grouping_key,
+            affected_partition_keys=affected_partition_keys,
         )
         persist_dimensions_incremental(
             self.event_metadata_dfs,
@@ -742,6 +751,8 @@ class Report:
             changed_ids=changed_channel_ids,
             has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
+            secondary_grouping_key=secondary_grouping_key,
+            affected_partition_keys=affected_partition_keys,
         )
         persist_dimensions_incremental(
             self.calculated_channel_metadata_dfs,
@@ -895,6 +906,7 @@ class Report:
         self,
         expressions: list[TimeSeriesExpression],
         pre_filtered_containers_df: DataFrame = None,
+        pre_filtered_partitions_df: DataFrame = None,
     ) -> DataFrame | None:
         """Solve all expressions in configurable batches and return a joined wide DataFrame.
 
@@ -910,12 +922,14 @@ class Report:
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            pre_filtered_partitions_df=pre_filtered_partitions_df,
         )
 
     def _solve_calculated_channels_batched(
         self,
         qe_channels: list,
         pre_filtered_containers_df: DataFrame = None,
+        pre_filtered_partitions_df: DataFrame = None,
     ) -> DataFrame | None:
         """Solve calculated channels in configurable batches; return the unioned rows.
 
@@ -932,6 +946,7 @@ class Report:
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            pre_filtered_partitions_df=pre_filtered_partitions_df,
         )
 
     @telemetry_logger("report", "determine_report")
@@ -991,6 +1006,18 @@ class Report:
             self._detect_updated_containers() if self._is_incremental else None
         )
 
+        # Key-level incremental: restrict the reprocessed containers to only their
+        # affected (new + latest) partitions, so an endless stream never re-reads or
+        # recomputes settled partitions. ``None`` when no secondary grouping key is
+        # configured (falls back to whole-container reprocessing).
+        pre_filtered_partitions_df = self._detect_affected_partitions(pre_filtered_containers_df)
+        # Encoded ``"container|key"`` pairs of the affected partitions that belong to
+        # UPDATED containers — these scope the delete-by-source so only reprocessed
+        # partitions are pruned (new containers have no gold rows to delete).
+        self._affected_partition_keys = self._collect_affected_partition_keys(
+            pre_filtered_partitions_df
+        )
+
         hash_comparator = DefinitionHashComparator(self.spark)
 
         # Group events and aggregations by type
@@ -1027,7 +1054,9 @@ class Report:
             all_changed_expressions, pre_filtered_containers_df=None
         )
         unchanged_solved_df = self._solve_expressions_batched(
-            all_unchanged_expressions, pre_filtered_containers_df=pre_filtered_containers_df
+            all_unchanged_expressions,
+            pre_filtered_containers_df=pre_filtered_containers_df,
+            pre_filtered_partitions_df=pre_filtered_partitions_df,
         )
 
         # Dispatch events
@@ -1110,7 +1139,9 @@ class Report:
             changed_channel_exprs, pre_filtered_containers_df=None
         )
         unchanged_channel_solved_df = self._solve_calculated_channels_batched(
-            unchanged_channel_exprs, pre_filtered_containers_df=pre_filtered_containers_df
+            unchanged_channel_exprs,
+            pre_filtered_containers_df=pre_filtered_containers_df,
+            pre_filtered_partitions_df=pre_filtered_partitions_df,
         )
         changed_channel_dfs = dispatch_calculated_channels(
             self.spark,
@@ -1354,3 +1385,91 @@ class Report:
         if containers_df is None:
             return []
         return [row["container_id"] for row in containers_df.select("container_id").collect()]
+
+    def _read_gold_partitions(self, container_ids: list) -> DataFrame | None:
+        """Distinct ``(container_id, secondary_grouping_key)`` already present in gold.
+
+        Unions the pair across every existing gold fact table the report can write,
+        optionally scoped to *container_ids*. Returns ``None`` when there is no sink,
+        no secondary grouping key, or no fact table exists yet (first run).
+        """
+        sgk = self.solver.config.secondary_grouping_key_col
+        if sgk is None or not self._has_sink:
+            return None
+
+        seen_uris: set[str] = set()
+        parts: list[DataFrame] = []
+        for type_enum in (AggregationType, EventType, ChannelType):
+            for member in type_enum:
+                uri = self.sink.config.get_output_uri_fact_table(member)
+                if uri in seen_uris or not self.spark.catalog.tableExists(uri):
+                    seen_uris.add(uri)
+                    continue
+                seen_uris.add(uri)
+                table = self.spark.read.table(uri)
+                if sgk not in table.columns or "container_id" not in table.columns:
+                    continue
+                partitions = table.select("container_id", sgk)
+                if container_ids:
+                    partitions = partitions.filter(F.col("container_id").isin(container_ids))
+                parts.append(partitions.distinct())
+
+        if not parts:
+            return None
+        return reduce(lambda a, b: a.unionByName(b), parts).distinct()
+
+    def _detect_affected_partitions(
+        self, pre_filtered_containers_df: DataFrame | None
+    ) -> DataFrame | None:
+        """Return the ``(container_id, secondary_grouping_key)`` partitions to reprocess.
+
+        Key-level incremental: a container flagged for reprocessing is *not* solved
+        in full. Instead only its **affected** partitions are recomputed — those not
+        yet in gold (new) plus the latest partition per container (which may still be
+        growing, so it is corrected on each run). Settled partitions are neither
+        re-read nor recomputed. Returns ``None`` when no secondary grouping key is
+        configured or there are no containers to process.
+        """
+        sgk = self.solver.config.secondary_grouping_key_col
+        if sgk is None or pre_filtered_containers_df is None:
+            return None
+        container_ids = self._collect_container_ids(pre_filtered_containers_df)
+        if not container_ids:
+            return None
+
+        silver_parts = self.solver.secondary_grouping_partitions(self.query, container_ids)
+        if silver_parts is None:
+            return None
+
+        gold_parts = self._read_gold_partitions(container_ids)
+        if gold_parts is None:
+            # First run for these containers: process all their partitions.
+            return silver_parts
+
+        # New partitions (absent from gold) + the latest partition per container
+        # (the potentially still-open one) — process-and-correct.
+        new_parts = silver_parts.join(gold_parts, on=["container_id", sgk], how="left_anti")
+        latest = silver_parts.groupBy("container_id").agg(F.max(F.col(sgk)).alias(sgk))
+        return new_parts.unionByName(latest).distinct()
+
+    def _collect_affected_partition_keys(
+        self, affected_partitions_df: DataFrame | None
+    ) -> list[str] | None:
+        """Encoded ``"container_id|secondary_grouping_key"`` pairs for delete scoping.
+
+        Restricts the affected partitions to UPDATED containers (only they hold gold
+        rows that could go stale) and returns them as ``concat``-encoded strings for
+        a null-safe ``isin`` delete condition. Returns ``None`` when no secondary
+        grouping key is configured or there are no updated containers, so the delete
+        scope falls back to the container level.
+        """
+        sgk = self.solver.config.secondary_grouping_key_col
+        if sgk is None or affected_partitions_df is None or not self._updated_container_ids:
+            return None
+        updated = affected_partitions_df.filter(
+            F.col("container_id").isin(self._updated_container_ids)
+        )
+        return [
+            f"{row['container_id']}|{row[sgk]}"
+            for row in updated.select("container_id", sgk).collect()
+        ]

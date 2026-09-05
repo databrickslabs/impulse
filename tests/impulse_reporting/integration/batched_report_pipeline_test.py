@@ -182,6 +182,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
         query=None,
         solver=None,
         pre_filtered_containers_df=None,
+        secondary_grouping_key=None,
     ):
         instrumentation["basic_event_calls"].append(
             {
@@ -197,6 +198,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
             query=query,
             solver=solver,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            secondary_grouping_key=secondary_grouping_key,
         )
 
     def _histogram_wrapper(
@@ -208,6 +210,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
         query=None,
         solver=None,
         pre_filtered_containers_df=None,
+        secondary_grouping_key=None,
     ):
         instrumentation["histogram_calls"].append(
             {
@@ -223,6 +226,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
             query=query,
             solver=solver,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            secondary_grouping_key=secondary_grouping_key,
         )
 
     def _stats_wrapper(
@@ -234,6 +238,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
         query=None,
         solver=None,
         pre_filtered_containers_df=None,
+        secondary_grouping_key=None,
     ):
         instrumentation["stats_calls"].append(
             {
@@ -249,6 +254,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
             query=query,
             solver=solver,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            secondary_grouping_key=secondary_grouping_key,
         )
 
     monkeypatch.setattr(Report, "create_sink", staticmethod(_create_sink_wrapper))

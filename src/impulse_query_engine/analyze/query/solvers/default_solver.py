@@ -1225,12 +1225,50 @@ class DefaultSolver(QuerySolver):
             elif sgk_cfg.source_column != sgk_cfg.name:
                 q = q.withColumnRenamed(sgk_cfg.source_column, sgk_cfg.name)
 
+            # Key-level incremental: prune the channel data to only the affected
+            # (container_id, secondary_grouping_key) partitions so settled
+            # partitions of an endless stream are neither re-read nor recomputed.
+            partitions_df = getattr(query, "_pre_filtered_partitions_df", None)
+            if partitions_df is not None:
+                q = q.join(
+                    F.broadcast(partitions_df),
+                    on=[self.config.container_id_col, sgk_cfg.name],
+                    how="inner",
+                )
+
         joined_df = q.join(
             F.broadcast(channels_df),
             on=[self.config.container_id_col, self.config.channel_id_col],
         )
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         return q, joined_df, container_count
+
+    def secondary_grouping_partitions(self, query, container_ids=None) -> DataFrame | None:
+        """Distinct ``(container_id, secondary_grouping_key)`` over the channel data.
+
+        Applies the same column mapping, raw-encoding and secondary-key derivation
+        as :meth:`_prepare_channels_join`, optionally scoped to *container_ids*.
+        Used by the reporting layer to detect which partitions exist in silver so
+        key-level incremental runs can reprocess only the affected ones. Returns
+        ``None`` when no secondary grouping key is configured.
+        """
+        sgk_cfg = self.config.secondary_grouping
+        if sgk_cfg is None:
+            return None
+
+        q = query.db.channels(self.spark)
+        q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
+        if self.is_raw_data:
+            q = self.channel_encoder.prepare_channels_df(q)
+        if container_ids is not None:
+            q = q.filter(F.col(self.config.container_id_col).isin(list(container_ids)))
+
+        if sgk_cfg.deriver is not None:
+            q = q.withColumn(sgk_cfg.name, sgk_cfg.deriver(q))
+        elif sgk_cfg.source_column != sgk_cfg.name:
+            q = q.withColumnRenamed(sgk_cfg.source_column, sgk_cfg.name)
+
+        return q.select(self.config.container_id_col, sgk_cfg.name).distinct()
 
     @staticmethod
     def _query_contains_poi_selections(selections: Iterable[Any]) -> bool:

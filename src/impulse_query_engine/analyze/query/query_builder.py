@@ -259,6 +259,7 @@ class QueryBuilder:
         spark,
         solver: QuerySolver = BlobSolver(),
         pre_filtered_containers_df: DataFrame = None,
+        pre_filtered_partitions_df: DataFrame = None,
     ) -> DataFrame:
         """
         Execute the query using the specified solver and return a Spark DataFrame.
@@ -273,6 +274,12 @@ class QueryBuilder:
             Pre-filtered container metrics DataFrame for incremental processing.
             When provided, only these containers will be processed.
             When None, all containers matching query filters are processed (full mode).
+        pre_filtered_partitions_df : DataFrame, optional
+            ``(container_id, secondary_grouping_key)`` pairs to restrict the
+            channel-data read to (key-level incremental). When provided and a
+            secondary grouping key is configured, the solver reads and reprocesses
+            only these partitions instead of every partition of the selected
+            containers. Ignored when no secondary grouping key is configured.
 
         Returns
         -------
@@ -285,6 +292,10 @@ class QueryBuilder:
         ) = self._determine_result_objects_dtypes()
 
         channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
+
+        # Stash the partition filter so the solver's channel-data read can prune to
+        # the affected partitions (consumed in DefaultSolver._prepare_channels_join).
+        self._pre_filtered_partitions_df = pre_filtered_partitions_df
 
         return solver.solve(self, channel_metrics_df, self.selections, self.result_dtypes)
 
@@ -342,6 +353,7 @@ class QueryBuilder:
         spark,
         solver: QuerySolver = BlobSolver(),
         pre_filtered_containers_df: DataFrame = None,
+        pre_filtered_partitions_df: DataFrame = None,
     ) -> DataFrame:
         """
         Compute calculated channels and return a narrow silver-shaped DataFrame.
@@ -381,6 +393,8 @@ class QueryBuilder:
         self._validate_calculated_channels()
 
         channel_metrics_df = self._run_filter_pipeline(spark, solver, pre_filtered_containers_df)
+
+        self._pre_filtered_partitions_df = pre_filtered_partitions_df
 
         return solver.solve_calculated_channels(self, channel_metrics_df, self.selections)
 

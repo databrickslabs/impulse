@@ -94,7 +94,7 @@ class TestSecondaryGroupingKey:
         """A Column-returning deriver produces the same partitioning as the column mode."""
         cfg = SolverConfig(
             secondary_grouping=SecondaryGroupingConfig(
-                deriver=lambda df: (F.col("tstart") % F.lit(2)).cast("long")
+                deriver=lambda _df: (F.col("tstart") % F.lit(2)).cast("long")
             )
         )
         query = basic_narrow_db.query
@@ -124,15 +124,17 @@ class TestSecondaryGroupingKey:
     ):
         """container_id type is derived dynamically and preserved alongside the key."""
         tables = {
-            name: df.withColumn("container_id", F.col("container_id").cast(T.StringType()))
-            if "container_id" in df.columns
-            else df
+            name: (
+                df.withColumn("container_id", F.col("container_id").cast(T.StringType()))
+                if "container_id" in df.columns
+                else df
+            )
             for name, df in basic_narrow_db.config.debug_tables.items()
         }
         db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
         cfg = SolverConfig(
             secondary_grouping=SecondaryGroupingConfig(
-                deriver=lambda df: (F.col("tstart") % F.lit(2)).cast("long")
+                deriver=lambda _df: (F.col("tstart") % F.lit(2)).cast("long")
             )
         )
         query = db.query

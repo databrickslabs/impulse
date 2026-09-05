@@ -429,6 +429,7 @@ def solve_expressions_batched(
     catalog: str = None,
     schema: str = None,
     pre_filtered_containers_df: DataFrame = None,
+    pre_filtered_partitions_df: DataFrame = None,
 ) -> DataFrame | None:
     """Solve all expressions in configurable batches and return a joined wide DataFrame.
 
@@ -478,6 +479,7 @@ def solve_expressions_batched(
             spark=spark,
             solver=solver,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            pre_filtered_partitions_df=pre_filtered_partitions_df,
         )
 
         if has_sink:
@@ -490,12 +492,21 @@ def solve_expressions_batched(
             batch_df.createOrReplaceTempView(view_name)
             batch_names.append(view_name)
 
-    cid_col = solver.config.container_id_col
+    # Join batches on the container id plus the secondary grouping key (when
+    # configured), so a container split into partitions doesn't cross-join across
+    # its partitions.
+    join_cols = [solver.config.container_id_col]
+    sgk = solver.config.secondary_grouping_key_col
+    if sgk:
+        join_cols.append(sgk)
+    # Single-column joins pass the bare column name (unchanged legacy behavior);
+    # only the secondary-key case needs the composite list.
+    join_on = join_cols if len(join_cols) > 1 else join_cols[0]
     dfs = [spark.table(name) for name in batch_names]
 
     result = dfs[0]
     for i in range(1, len(dfs)):
-        result = result.join(dfs[i], on=cid_col, how="full_outer")
+        result = result.join(dfs[i], on=join_on, how="full_outer")
 
     return result
 
@@ -511,6 +522,7 @@ def solve_calculated_channels_batched(
     catalog: str = None,
     schema: str = None,
     pre_filtered_containers_df: DataFrame = None,
+    pre_filtered_partitions_df: DataFrame = None,
 ) -> DataFrame | None:
     """Solve calculated channels in configurable batches; return the unioned rows.
 
@@ -564,7 +576,7 @@ def solve_calculated_channels_batched(
     batch_names: list[str] = []
     for batch_idx, batch_channels in enumerate(batches):
         batch_df = query.select(*batch_channels).solve_calculated_channels(
-            spark, solver, pre_filtered_containers_df
+            spark, solver, pre_filtered_containers_df, pre_filtered_partitions_df
         )
 
         if has_sink:
@@ -824,6 +836,8 @@ def persist_facts_incremental(
     has_processed_containers: bool = False,
     updated_container_ids: list | None = None,
     container_id_col: str = "container_id",
+    secondary_grouping_key: str | None = None,
+    affected_partition_keys: list[str] | None = None,
 ) -> None:
     """Incremental persist of fact DataFrames in a single MERGE per output table.
 
@@ -905,7 +919,26 @@ def persist_facts_incremental(
         # Scope the delete-by-source: updated containers (only they can hold stale
         # rows — new ones have none) and changed-definition entities.
         delete_conditions = []
-        if updated_container_ids:
+        if secondary_grouping_key and affected_partition_keys is not None:
+            # Key-level incremental: the source holds only the reprocessed
+            # partitions, so prune stale rows ONLY within those affected
+            # ``(container, key)`` partitions — settled partitions must survive.
+            # Container-level rows (null key, e.g. container events) are pruned by
+            # updated container instead, since they are recomputed in full.
+            if affected_partition_keys:
+                delete_conditions.append(
+                    F.concat_ws(
+                        "|",
+                        F.col(f"target.{container_id_col}"),
+                        F.col(f"target.{secondary_grouping_key}"),
+                    ).isin(affected_partition_keys)
+                )
+            if updated_container_ids:
+                delete_conditions.append(
+                    F.col(f"target.{secondary_grouping_key}").isNull()
+                    & F.col(f"target.{container_id_col}").isin(updated_container_ids)
+                )
+        elif updated_container_ids:
             delete_conditions.append(
                 F.col(f"target.{container_id_col}").isin(updated_container_ids)
             )

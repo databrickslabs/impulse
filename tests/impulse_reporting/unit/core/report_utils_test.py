@@ -456,7 +456,7 @@ class TestDispatchEvents:
             container_event_cls=FakeContainerBase,
         )
 
-        assert received_kwargs == {"solved_df": mock_solved}
+        assert received_kwargs == {"solved_df": mock_solved, "secondary_grouping_key": None}
         assert event_dfs["BASIC_EVENT"] is mock_result
 
     def test_container_event_receives_query_and_solver(self):
@@ -721,6 +721,7 @@ def _build_report_for_solve(spark, config_dict):
 
     report.solver = MagicMock()
     report.solver.config.container_id_col = "container_id"
+    report.solver.config.secondary_grouping_key_col = None
     return report
 
 
