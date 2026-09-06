@@ -1189,6 +1189,16 @@ class DefaultSolver(QuerySolver):
         # on the channels table would otherwise cross Arrow into every group's
         # pandas frame.
         sgk_cfg = self.config.secondary_grouping
+        # POI + secondary grouping is not supported: POI rows are unioned in
+        # without the physical source column (null key) and are absent from the
+        # partition-detection read, so they would collapse into a null-key group
+        # (full mode) or be dropped by the partition prune (incremental). Fail
+        # fast rather than silently losing POI data.
+        if sgk_cfg is not None and DefaultSolver._query_contains_poi_selections(query.selections):
+            raise ValueError(
+                "A secondary grouping key is not supported together with POI (points-in-time) "
+                "channel selections. Remove the secondary_grouping config or the POI selectors."
+            )
         select_cols = [
             self.config.container_id_col,
             self.config.channel_id_col,

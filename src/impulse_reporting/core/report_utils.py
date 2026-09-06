@@ -837,7 +837,7 @@ def persist_facts_incremental(
     updated_container_ids: list | None = None,
     container_id_col: str = "container_id",
     secondary_grouping_key: str | None = None,
-    affected_partition_keys: list[str] | None = None,
+    affected_partition_pairs: list[tuple] | None = None,
 ) -> None:
     """Incremental persist of fact DataFrames in a single MERGE per output table.
 
@@ -880,6 +880,15 @@ def persist_facts_incremental(
         no gold rows to prune. Empty/None → no container-scoped delete.
     container_id_col : str, optional
         Gold fact-table container column, by default ``"container_id"``.
+    secondary_grouping_key : str, optional
+        Secondary grouping-key column name. When set together with
+        *affected_partition_pairs*, the delete-by-source is scoped to those
+        partitions (plus null-key container-level rows of updated containers)
+        instead of whole containers.
+    affected_partition_pairs : list of tuple, optional
+        ``(container_id, key)`` value pairs reprocessed this run (key-level
+        incremental). Only these partitions' stale rows are pruned, so settled
+        partitions survive.
     """
     from impulse_reporting.persist.report_storage import WriterFactory
 
@@ -919,20 +928,24 @@ def persist_facts_incremental(
         # Scope the delete-by-source: updated containers (only they can hold stale
         # rows — new ones have none) and changed-definition entities.
         delete_conditions = []
-        if secondary_grouping_key and affected_partition_keys is not None:
+        if secondary_grouping_key and affected_partition_pairs is not None:
             # Key-level incremental: the source holds only the reprocessed
             # partitions, so prune stale rows ONLY within those affected
             # ``(container, key)`` partitions — settled partitions must survive.
+            # Built from typed literals (not string encoding) so keys of any type,
+            # and container/key values containing separators, match exactly.
             # Container-level rows (null key, e.g. container events) are pruned by
             # updated container instead, since they are recomputed in full.
-            if affected_partition_keys:
-                delete_conditions.append(
-                    F.concat_ws(
-                        "|",
-                        F.col(f"target.{container_id_col}"),
-                        F.col(f"target.{secondary_grouping_key}"),
-                    ).isin(affected_partition_keys)
+            if affected_partition_pairs:
+                pair_cond = reduce(
+                    lambda a, b: a | b,
+                    (
+                        (F.col(f"target.{container_id_col}") == F.lit(cid))
+                        & (F.col(f"target.{secondary_grouping_key}") == F.lit(key))
+                        for cid, key in affected_partition_pairs
+                    ),
                 )
+                delete_conditions.append(pair_cond)
             if updated_container_ids:
                 delete_conditions.append(
                     F.col(f"target.{secondary_grouping_key}").isNull()

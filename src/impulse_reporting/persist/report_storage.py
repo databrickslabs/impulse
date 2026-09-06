@@ -10,6 +10,7 @@ from pyspark.sql.types import StructType
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.channels.channel_types import ChannelType
 from impulse_reporting.events.event_types import EventType
+from impulse_reporting.persist.fact_schema import fact_projection_columns
 
 
 @dataclass()
@@ -630,12 +631,9 @@ class DefaultReportEntityWriter(ReportEntityWriter):
         None
         """
         df_combined = self.transformer.concat_dataframes(df)
-        # The static fact schemas omit the optional secondary grouping key; keep
-        # it in the projection when configured and present so it reaches gold.
-        field_names = list(schema.fieldNames())
-        sgk = self.secondary_grouping_key
-        if sgk and sgk in df_combined.columns and sgk not in field_names:
-            field_names.append(sgk)
+        # The static fact schemas omit the optional secondary grouping key; keep it
+        # in the projection when configured and present so it reaches gold.
+        field_names = fact_projection_columns(df_combined, schema, self.secondary_grouping_key)
         df_enriched = df_combined.select(*field_names).transform(
             self.transformer.add_meta_information
         )

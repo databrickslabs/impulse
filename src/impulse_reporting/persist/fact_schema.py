@@ -36,6 +36,24 @@ def fact_field_names(schema: StructType, secondary_grouping_key: str | None = No
     return names
 
 
+def fact_projection_columns(df, schema: StructType, secondary_grouping_key: str | None = None):
+    """``schema.fieldNames()`` plus the secondary grouping key when set AND on *df*.
+
+    Presence-aware variant of :func:`fact_field_names` for the persistence
+    projection: the optional key is kept only when it is actually a column on the
+    frame being written (the static schema never lists it), so both the
+    incremental and full-write paths keep it via one shared rule.
+    """
+    names = list(schema.fieldNames())
+    if (
+        secondary_grouping_key
+        and secondary_grouping_key in df.columns
+        and secondary_grouping_key not in names
+    ):
+        names.append(secondary_grouping_key)
+    return names
+
+
 HISTOGRAM_FACT_SCHEMA = StructType(
     [
         StructField("container_id", IntegerType(), False),

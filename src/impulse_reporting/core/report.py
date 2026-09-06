@@ -53,6 +53,7 @@ from impulse_reporting.meta.container_dimensions import (
     ChannelMappingResolutionDimension,
     ContainerDimension,
 )
+from impulse_reporting.persist.fact_schema import fact_projection_columns
 from impulse_reporting.persist.report_storage import (
     ReportEntityTransformer,
     Sink,
@@ -681,7 +682,7 @@ class Report:
         has_processed_containers = getattr(self, "_has_processed_containers", False)
         updated_container_ids = getattr(self, "_updated_container_ids", [])
         secondary_grouping_key = self.solver.config.secondary_grouping_key_col
-        affected_partition_keys = getattr(self, "_affected_partition_keys", None)
+        affected_partition_pairs = getattr(self, "_affected_partition_pairs", None)
         storage_factory = WriterFactory(self.sink, secondary_grouping_key=secondary_grouping_key)
         transformer = ReportEntityTransformer()
 
@@ -702,7 +703,7 @@ class Report:
             has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
             secondary_grouping_key=secondary_grouping_key,
-            affected_partition_keys=affected_partition_keys,
+            affected_partition_pairs=affected_partition_pairs,
         )
         persist_dimensions_incremental(
             self.aggregation_metadata_dfs,
@@ -728,7 +729,7 @@ class Report:
             has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
             secondary_grouping_key=secondary_grouping_key,
-            affected_partition_keys=affected_partition_keys,
+            affected_partition_pairs=affected_partition_pairs,
         )
         persist_dimensions_incremental(
             self.event_metadata_dfs,
@@ -752,7 +753,7 @@ class Report:
             has_processed_containers=has_processed_containers,
             updated_container_ids=updated_container_ids,
             secondary_grouping_key=secondary_grouping_key,
-            affected_partition_keys=affected_partition_keys,
+            affected_partition_pairs=affected_partition_pairs,
         )
         persist_dimensions_incremental(
             self.calculated_channel_metadata_dfs,
@@ -829,11 +830,9 @@ class Report:
         """
         # The static fact schemas omit the optional secondary grouping key; keep
         # it in the projection when configured and present so it reaches gold.
-        field_names = list(schema.fieldNames())
-        sgk = self.solver.config.secondary_grouping_key_col
-        if sgk and sgk in df.columns and sgk not in field_names:
-            field_names.append(sgk)
-
+        field_names = fact_projection_columns(
+            df, schema, self.solver.config.secondary_grouping_key_col
+        )
         return df.select(*field_names).transform(transformer.add_meta_information)
 
     def _get_aggregation_merge_keys(self, agg_type: AggregationType) -> list[str]:
@@ -1011,10 +1010,10 @@ class Report:
         # recomputes settled partitions. ``None`` when no secondary grouping key is
         # configured (falls back to whole-container reprocessing).
         pre_filtered_partitions_df = self._detect_affected_partitions(pre_filtered_containers_df)
-        # Encoded ``"container|key"`` pairs of the affected partitions that belong to
+        # ``(container, key)`` value pairs of the affected partitions that belong to
         # UPDATED containers — these scope the delete-by-source so only reprocessed
         # partitions are pruned (new containers have no gold rows to delete).
-        self._affected_partition_keys = self._collect_affected_partition_keys(
+        self._affected_partition_pairs = self._collect_affected_partition_pairs(
             pre_filtered_partitions_df
         )
 
@@ -1428,7 +1427,12 @@ class Report:
         yet in gold (new) plus the latest partition per container (which may still be
         growing, so it is corrected on each run). Settled partitions are neither
         re-read nor recomputed. Returns ``None`` when no secondary grouping key is
-        configured or there are no containers to process.
+        configured, there are no containers to process, or there is no gold
+        partition baseline yet (first/migration run → whole-container reprocess).
+
+        The key is assumed time-localized / monotonic (the documented contract):
+        the "latest" partition is taken as ``max(key)``. A non-monotonic key would
+        mis-identify the open partition, so it is discouraged for incremental runs.
         """
         sgk = self.solver.config.secondary_grouping_key_col
         if sgk is None or pre_filtered_containers_df is None:
@@ -1443,25 +1447,32 @@ class Report:
 
         gold_parts = self._read_gold_partitions(container_ids)
         if gold_parts is None:
-            # First run for these containers: process all their partitions.
-            return silver_parts
+            # No gold partition baseline yet (true first run, or a migration where
+            # gold predates the key column). There is nothing to skip, so return
+            # None: the run falls back to whole-container reprocessing with a
+            # container-scoped delete, avoiding a full-history partition collect to
+            # the driver. Steady-state runs (below) get the partition pruning.
+            return None
 
-        # New partitions (absent from gold) + the latest partition per container
-        # (the potentially still-open one) — process-and-correct.
+        # New partitions (absent from gold) + the latest partition per container.
+        # ``F.max(key)`` treats the greatest key value as the still-open partition;
+        # this is exact for a time-localized / monotonic key (the documented
+        # contract) and is why a non-monotonic key is discouraged.
         new_parts = silver_parts.join(gold_parts, on=["container_id", sgk], how="left_anti")
         latest = silver_parts.groupBy("container_id").agg(F.max(F.col(sgk)).alias(sgk))
         return new_parts.unionByName(latest).distinct()
 
-    def _collect_affected_partition_keys(
+    def _collect_affected_partition_pairs(
         self, affected_partitions_df: DataFrame | None
-    ) -> list[str] | None:
-        """Encoded ``"container_id|secondary_grouping_key"`` pairs for delete scoping.
+    ) -> list[tuple] | None:
+        """``(container_id, secondary_grouping_key)`` value pairs for delete scoping.
 
         Restricts the affected partitions to UPDATED containers (only they hold gold
-        rows that could go stale) and returns them as ``concat``-encoded strings for
-        a null-safe ``isin`` delete condition. Returns ``None`` when no secondary
-        grouping key is configured or there are no updated containers, so the delete
-        scope falls back to the container level.
+        rows that could go stale) and returns the raw value pairs, so the delete
+        condition can be built from typed literals (no string encoding — avoids
+        type-cast and separator-collision hazards). Returns ``None`` when no
+        secondary grouping key is configured or there are no updated containers, so
+        the delete scope falls back to the container level.
         """
         sgk = self.solver.config.secondary_grouping_key_col
         if sgk is None or affected_partitions_df is None or not self._updated_container_ids:
@@ -1470,6 +1481,6 @@ class Report:
             F.col("container_id").isin(self._updated_container_ids)
         )
         return [
-            f"{row['container_id']}|{row[sgk]}"
+            (row["container_id"], row[sgk])
             for row in updated.select("container_id", sgk).collect()
         ]
