@@ -7,3 +7,11 @@ except PackageNotFoundError:
     from pathlib import Path
 
     __version__ = (Path(__file__).resolve().parents[2] / "VERSION").read_text().strip()
+
+try:
+    import databricks.sdk.useragent as _ua
+
+    _ua.with_product("databricks-impulse", __version__)
+    _ua.with_extra("databricks-impulse", __version__)
+except Exception:  # noqa: BLE001 - telemetry must never break import
+    pass

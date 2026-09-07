@@ -1,10 +1,19 @@
+import importlib
+from types import SimpleNamespace
 from unittest.mock import MagicMock, create_autospec, patch
 
 import pytest
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import DatabricksError
 
-from impulse_query_engine.telemetry import log_telemetry, telemetry_logger, verify_workspace_client
+import databricks.sdk.useragent as ua
+import impulse_query_engine
+from impulse_query_engine.telemetry import (
+    log_telemetry,
+    tag_spark_connect_user_agent,
+    telemetry_logger,
+    verify_workspace_client,
+)
 
 
 class TestLogTelemetry:
@@ -77,6 +86,43 @@ class TestTelemetryLogger:
         mock_log.assert_called_once_with(ws, "query", "to_pandas")
         assert result == "done"
 
+    def test_decorator_tags_spark_connect_session_when_spark_arg_present(self):
+        builder = SimpleNamespace(_params={"user_agent": "databricks-session"})
+
+        class QueryBuilder:
+            def __init__(self, ws):
+                self.ws = ws
+
+            @telemetry_logger("query", "solve")
+            def solve(self, spark):
+                return "result"
+
+        ws = create_autospec(WorkspaceClient)
+        spark = SimpleNamespace(_client=SimpleNamespace(_builder=builder))
+
+        with patch("impulse_query_engine.telemetry.log_telemetry"):
+            QueryBuilder(ws).solve(spark)
+
+        assert builder._params["user_agent"].startswith("databricks-impulse/")
+
+    def test_decorator_does_not_tag_when_no_spark_arg(self):
+        # Methods without a ``spark`` parameter must not raise or attempt tagging.
+        class QueryBuilder:
+            def __init__(self, ws):
+                self.ws = ws
+
+            @telemetry_logger("query", "solve")
+            def solve(self):
+                return "result"
+
+        ws = create_autospec(WorkspaceClient)
+        with (
+            patch("impulse_query_engine.telemetry.log_telemetry"),
+            patch("impulse_query_engine.telemetry.tag_spark_connect_user_agent") as mock_tag,
+        ):
+            QueryBuilder(ws).solve()
+        mock_tag.assert_not_called()
+
     def test_decorator_preserves_function_metadata(self):
         class QueryBuilder:
             def __init__(self):
@@ -125,3 +171,48 @@ class TestVerifyWorkspaceClient:
 
         with pytest.raises(DatabricksError):
             verify_workspace_client(ws, "mda", "0.0.4")
+
+
+class TestGlobalUserAgentRegistration:
+    """Importing the package registers impulse in the SDK's process-global user-agent."""
+
+    def test_import_registers_product_and_extra(self):
+        # Package import (at test-collection time) runs the registration block.
+        assert ua.product() == ("databricks-impulse", impulse_query_engine.__version__)
+        assert ("databricks-impulse", impulse_query_engine.__version__) in ua._extra
+
+    def test_registration_failure_does_not_break_import(self):
+        # A failure inside the registration block must never propagate out of import.
+        with patch.object(ua, "with_product", side_effect=ValueError("boom")):
+            importlib.reload(impulse_query_engine)  # must not raise
+        # Restore a clean registration for any subsequent assertions in the session.
+        importlib.reload(impulse_query_engine)
+        assert ua.product() == ("databricks-impulse", impulse_query_engine.__version__)
+
+
+class TestTagSparkConnectUserAgent:
+    @staticmethod
+    def _fake_connect_session(user_agent="databricks-session"):
+        builder = SimpleNamespace(_params={"user_agent": user_agent})
+        return SimpleNamespace(_client=SimpleNamespace(_builder=builder)), builder
+
+    def test_prepends_tag_to_connect_session(self):
+        spark, builder = self._fake_connect_session()
+        tag_spark_connect_user_agent(spark, "databricks-impulse", "0.6.1")
+        assert builder._params["user_agent"] == "databricks-impulse/0.6.1 databricks-session"
+
+    def test_is_idempotent(self):
+        spark, builder = self._fake_connect_session()
+        tag_spark_connect_user_agent(spark, "databricks-impulse", "0.6.1")
+        tag_spark_connect_user_agent(spark, "databricks-impulse", "0.6.1")
+        # Tag appears exactly once; the existing value is preserved.
+        assert builder._params["user_agent"] == "databricks-impulse/0.6.1 databricks-session"
+
+    def test_handles_empty_existing_user_agent(self):
+        spark, builder = self._fake_connect_session(user_agent="")
+        tag_spark_connect_user_agent(spark, "databricks-impulse", "0.6.1")
+        assert builder._params["user_agent"] == "databricks-impulse/0.6.1"
+
+    def test_classic_session_is_a_silent_no_op(self):
+        # A classic SparkSession has no ``_client`` — must not raise.
+        tag_spark_connect_user_agent(object(), "databricks-impulse", "0.6.1")
