@@ -500,6 +500,38 @@ class CalculatedChannels(BaseModel):
         return normalized
 
 
+class FullRecalculation(BaseModel):
+    """
+    Scoped full-recalculation request, by entity name.
+
+    Lists aggregations / events / calculated channels — identified by their
+    human-readable ``name`` — that should be fully recalculated on the next run,
+    regardless of whether their definition hash changed.
+
+    Only meaningful in incremental mode: listed entities recompute over **all**
+    containers and fully replace their gold rows (the same treatment a
+    definition-hash change already receives), while every other entity stays
+    incremental. In full mode this is a no-op, since everything recomputes over all
+    containers anyway.
+
+    Names that do not match any registered entity are rejected at the start of
+    ``Report.determine_report`` (fail fast on typos / stale names).
+
+    Attributes
+    ----------
+    aggregations : list of str, default=[]
+        Names of aggregations to fully recalculate.
+    events : list of str, default=[]
+        Names of events to fully recalculate.
+    calculated_channels : list of str, default=[]
+        Names of calculated channels to fully recalculate.
+    """
+
+    aggregations: list[str] = []
+    events: list[str] = []
+    calculated_channels: list[str] = []
+
+
 class ImpulseConfig(BaseModel):
     """
      Main configuration model.
@@ -519,6 +551,10 @@ class ImpulseConfig(BaseModel):
      calculated_channels : CalculatedChannels, optional
          Optional calculated-channel output configuration (e.g. opting in to the
          ``calculated_channel_metrics`` table). Defaults to CalculatedChannels().
+     full_recalculation : FullRecalculation, optional
+         Optional scoped full-recalculation request naming aggregations / events /
+         calculated channels to fully recompute on the next incremental run
+         regardless of definition-hash changes. Defaults to None (no override).
      measurement_dimensions : list of str, optional
          Column names to surface from ``container_metrics`` into the
          gold-layer ``measurement_dimension`` table. Names are matched
@@ -594,6 +630,7 @@ class ImpulseConfig(BaseModel):
     query_engine: QueryEngine = QueryEngine(solver=Solvers.DEFAULT_SOLVER)
     incremental: IncrementalConfig | None = None
     calculated_channels: CalculatedChannels = CalculatedChannels()
+    full_recalculation: FullRecalculation | None = None
 
     measurement_dimensions: list[str] = list(DEFAULT_MEASUREMENT_DIMENSIONS)
 

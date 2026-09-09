@@ -567,3 +567,64 @@ class TestValidateAggregationEvents:
         report.add_page(page)
 
         report._validate_aggregation_events()
+
+
+class TestValidateFullRecalculationScope:
+    """Tests for _validate_full_recalculation_scope method."""
+
+    @staticmethod
+    def _report_with_scope(scope: dict) -> Report:
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=dict(DUMMY_CONFIG, full_recalculation=scope),
+        )
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        event = BasicEvent(name="my_event", expr=ts_expr > 0)
+        report.add_event(event)
+
+        stats = StatsAggregator(
+            name="my_agg",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["min", "max"],
+            event=event,
+        )
+        page = Page(page_number=1)
+        page.add_aggregation(stats)
+        report.add_page(page)
+        return report
+
+    def test_no_full_recalculation_config_passes(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+        # No full_recalculation configured → nothing to validate.
+        report._validate_full_recalculation_scope()
+
+    def test_all_known_names_pass(self):
+        report = self._report_with_scope({"aggregations": ["my_agg"], "events": ["my_event"]})
+        report._validate_full_recalculation_scope()
+
+    def test_unknown_aggregation_name_raises(self):
+        report = self._report_with_scope({"aggregations": ["nope_agg"]})
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_full_recalculation_scope()
+        assert "nope_agg" in str(exc_info.value)
+        # Error lists the valid registered names.
+        assert "my_agg" in str(exc_info.value)
+
+    def test_unknown_event_name_raises(self):
+        report = self._report_with_scope({"events": ["nope_event"]})
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_full_recalculation_scope()
+        assert "nope_event" in str(exc_info.value)
+        assert "my_event" in str(exc_info.value)
+
+    def test_empty_scope_lists_pass(self):
+        report = self._report_with_scope({})
+        report._validate_full_recalculation_scope()

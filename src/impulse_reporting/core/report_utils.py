@@ -122,6 +122,7 @@ def split_by_hash_change(
     spark: SparkSession,
     hash_comparator: DefinitionHashComparator,
     kind: str = "event",
+    force_recalc_names: set[str] | None = None,
 ) -> tuple[dict[str, list], dict[str, list], dict[str, list[int]]]:
     """Split items into changed/unchanged using definition-hash comparison.
 
@@ -140,6 +141,11 @@ def split_by_hash_change(
     kind : str
         One of ``"event"``, ``"aggregation"``, or ``"channel"`` — selects which
         comparator method to use.
+    force_recalc_names : set[str] | None
+        Names (``item.get_name()``) of items to force into the "changed" bucket
+        regardless of their definition hash. Used for scoped full recalculation:
+        a forced item recomputes over all containers and fully replaces its gold
+        rows, exactly as a hash change would. ``None``/empty is a no-op.
 
     Returns
     -------
@@ -154,6 +160,8 @@ def split_by_hash_change(
     if kind not in comparators:
         raise ValueError(f"Unsupported kind '{kind}'; expected one of {sorted(comparators)}.")
     compare = comparators[kind]
+
+    forced_names = force_recalc_names or set()
 
     changed_by_type: dict[str, list] = {}
     unchanged_by_type: dict[str, list] = {}
@@ -171,6 +179,16 @@ def split_by_hash_change(
 
         dim_table = sink.config.get_output_uri_dimension_table(type_enum[type_name])
         changed, unchanged = compare(items, dim_table)
+
+        # Scoped full recalc: promote hash-unchanged items whose name is in scope
+        # into the changed bucket so they recompute over all containers.
+        if forced_names and unchanged:
+            forced, still_unchanged = [], []
+            for item in unchanged:
+                (forced if item.get_name() in forced_names else still_unchanged).append(item)
+            if forced:
+                changed = changed + forced
+                unchanged = still_unchanged
 
         if changed:
             changed_by_type[type_name] = changed

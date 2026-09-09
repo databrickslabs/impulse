@@ -3,6 +3,7 @@ from unittest.mock import create_autospec
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from databricks.sdk import WorkspaceClient
+from pyspark.sql import Window
 
 from impulse_reporting.aggregations.histogram import (
     HistogramDuration,
@@ -11,6 +12,7 @@ from impulse_reporting.aggregations.point_value_aggregator import PointValueAggr
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
 from impulse_reporting.config.config_parser import (
+    FullRecalculation,
     IncrementalConfig,
     ImpulseConfig,
     Source,
@@ -469,6 +471,122 @@ def test_incremental_in_report_case_5(spark):
 
     assert agg_pre_count == 12  # 3 aggregations x 2 files
     assert agg_post_count == 27  # 9 aggregations x 3 files
+
+
+def test_incremental_scoped_full_recalculation(spark):
+    """Scoped full recalculation forces a hash-unchanged aggregation to recompute
+    over ALL containers (replacing its gold rows), while a non-listed unchanged
+    aggregation sharing the same fact table is left untouched.
+
+    Setup that isolates the feature from ordinary incremental triggers: container
+    2's channel data is shrunk in silver, but every container's ``timestamp`` is
+    set to the past so container-update detection flags nothing. Without the
+    scope, nothing would be recomputed. With ``rpm_hist_p1`` in
+    ``full_recalculation``, only that histogram is recomputed for all containers.
+    """
+    # --- Run 1 (full): populate gold from the standard 2-container silver ---
+    report_1: Report = Report(
+        name="my_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(set_config("container_metrics_inc_1_2", False)),
+    )
+    add_aggs_to_report(report_1)
+    report_1.determine_report()
+    report_1.persist_results()
+
+    hist_dim = spark.read.table("spark_catalog.gold.evaluation_histogram_dimension")
+    rpm_vid = hist_dim.where(F.col("name") == "rpm_hist_p1").select("visual_id").collect()[0][0]
+    speed_vid = (
+        hist_dim.where(F.col("name") == "speed_hist_p1").select("visual_id").collect()[0][0]
+    )
+
+    hist_fact_pre = spark.read.table("spark_catalog.gold.evaluation_histogram_fact")
+
+    def _rpm_sum(df, container_id):
+        return (
+            df.where((F.col("visual_id") == rpm_vid) & (F.col("container_id") == container_id))
+            .agg(F.sum("hist_value"))
+            .collect()[0][0]
+        )
+
+    rpm_c1_sum_pre = _rpm_sum(hist_fact_pre, 1)
+    rpm_c2_sum_pre = _rpm_sum(hist_fact_pre, 2)
+    speed_c2_rows_pre = (
+        hist_fact_pre.where((F.col("visual_id") == speed_vid) & (F.col("container_id") == 2))
+        .orderBy("bin_id")
+        .collect()
+    )
+    assert rpm_c2_sum_pre > 0
+    assert len(speed_c2_rows_pre) > 0
+
+    # --- Build scratch silver: shrink container 2's channels, no container flagged updated ---
+    cm_scratch = "spark_catalog.silver.container_metrics_scoped_recalc"
+    ch_scratch = "spark_catalog.silver.channels_scoped_recalc"
+
+    # Every timestamp is in the past -> silver older than gold _created_at -> no updates detected.
+    spark.read.table("spark_catalog.silver.container_metrics_inc_1_2").withColumn(
+        "timestamp", F.lit("2020-01-01 00:00:00").cast("timestamp")
+    ).write.format("delta").mode("overwrite").saveAsTable(cm_scratch)
+
+    # Keep only the earliest 5 samples per channel for container 2; all other rows unchanged.
+    rn = F.row_number().over(Window.partitionBy("container_id", "channel_id").orderBy("tstart"))
+    spark.read.table("spark_catalog.silver.channels").withColumn("_rn", rn).filter(
+        (F.col("container_id") != 2) | (F.col("_rn") <= 5)
+    ).drop("_rn").write.format("delta").mode("overwrite").saveAsTable(ch_scratch)
+
+    # --- Run 2 (incremental) with scoped full recalc of rpm_hist_p1 only ---
+    config_2 = ImpulseConfig(
+        source=Source(
+            container_metrics_table=cm_scratch,
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri=ch_scratch,
+        ),
+        unity_sink=UnitySink(
+            catalog="spark_catalog",
+            schema="gold",
+            table_prefix="evaluation",
+        ),
+        incremental=IncrementalConfig(
+            enabled=True,
+            silver_last_modified_column="timestamp",
+            gold_last_modified_column="_created_at",
+        ),
+        full_recalculation=FullRecalculation(aggregations=["rpm_hist_p1"]),
+    )
+    report_2: Report = Report(
+        name="my_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(config_2),
+    )
+    add_aggs_to_report(report_2)
+    report_2.determine_report()
+    report_2.persist_results()
+
+    hist_fact_post = spark.read.table("spark_catalog.gold.evaluation_histogram_fact")
+
+    rpm_c1_sum_post = _rpm_sum(hist_fact_post, 1)
+    rpm_c2_sum_post = _rpm_sum(hist_fact_post, 2)
+    speed_c2_rows_post = (
+        hist_fact_post.where((F.col("visual_id") == speed_vid) & (F.col("container_id") == 2))
+        .orderBy("bin_id")
+        .collect()
+    )
+
+    # rpm_hist_p1 was recomputed over ALL containers using the shrunk channels:
+    # container 2's shrunk data yields a smaller (but still positive) total duration.
+    assert rpm_c2_sum_post > 0
+    assert rpm_c2_sum_post < rpm_c2_sum_pre, (
+        "Forced full recalc must recompute rpm_hist_p1 for container 2 (unmodified "
+        "timestamp) against the shrunk silver data"
+    )
+    # container 1's data is unchanged, so its recomputed values match.
+    assert rpm_c1_sum_post == rpm_c1_sum_pre
+
+    # speed_hist_p1 is neither listed nor on an updated container -> its gold rows
+    # are preserved untouched, even though it shares the histogram_fact table.
+    assert speed_c2_rows_post == speed_c2_rows_pre
 
 
 def add_aggs_to_report(my_report):

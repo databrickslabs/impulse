@@ -7,6 +7,7 @@ from impulse_reporting.config.config_parser import (
     Comparator,
     ContainerFilters,
     DataType,
+    FullRecalculation,
     IncrementalConfig,
     ImpulseConfig,
     MetricFilter,
@@ -74,6 +75,37 @@ def test_impulse_config_from_dict():
         "start_ts",
         "stop_ts",
     ]
+
+
+def test_impulse_config_full_recalculation_defaults_to_none():
+    """full_recalculation is optional and absent by default."""
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    assert config.full_recalculation is None
+
+
+def test_impulse_config_full_recalculation_parsed():
+    """full_recalculation parses into a FullRecalculation with per-kind name lists."""
+    config_json = impulse_config_JSON.copy()
+    config_json["full_recalculation"] = {
+        "aggregations": ["Temperature Histogram"],
+        "events": ["Overspeed"],
+        "calculated_channels": ["Power"],
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert isinstance(config.full_recalculation, FullRecalculation)
+    assert config.full_recalculation.aggregations == ["Temperature Histogram"]
+    assert config.full_recalculation.events == ["Overspeed"]
+    assert config.full_recalculation.calculated_channels == ["Power"]
+
+
+def test_impulse_config_full_recalculation_partial_kinds_default_empty():
+    """Kinds omitted from full_recalculation default to empty lists."""
+    config_json = impulse_config_JSON.copy()
+    config_json["full_recalculation"] = {"aggregations": ["A"]}
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.full_recalculation.aggregations == ["A"]
+    assert config.full_recalculation.events == []
+    assert config.full_recalculation.calculated_channels == []
 
 
 def test_impulse_config_data_format_defaults_to_rle():
