@@ -259,7 +259,6 @@ def registered_names_by_kind(
 def validate_full_recalculation_scope(
     config: ImpulseConfig,
     registered_names: dict[str, list[str]],
-    kinds: list[str],
 ) -> None:
     """Reject full-recalculation names that match no registered entity.
 
@@ -272,9 +271,7 @@ def validate_full_recalculation_scope(
         The report config carrying the optional ``full_recalculation`` scope.
     registered_names : dict[str, list[str]]
         ``{kind: [names]}`` of the entities registered on the report, as produced
-        by :func:`registered_names_by_kind`.
-    kinds : list[str]
-        The entity kinds to validate (e.g. ``["aggregation", "event", "channel"]``);
+        by :func:`registered_names_by_kind`. Its keys are the kinds validated —
         each must be one of those accepted by :func:`split_by_hash_change`.
 
     Raises
@@ -286,9 +283,9 @@ def validate_full_recalculation_scope(
         return
 
     problems: list[str] = []
-    for kind in kinds:
+    for kind, registered_for_kind in registered_names.items():
         requested = full_recalc_names(config, kind)
-        registered = set(registered_names.get(kind, []))
+        registered = set(registered_for_kind)
         unknown = sorted(requested - registered)
         if unknown:
             valid = ", ".join(sorted(registered)) or "(none registered)"

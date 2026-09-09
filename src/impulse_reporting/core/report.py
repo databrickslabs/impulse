@@ -572,7 +572,6 @@ class Report:
                 [agg for page in self.pages for agg in page.aggregations],
                 self.get_calculated_channels(),
             ),
-            ["aggregation", "event", "channel"],
         )
 
     @telemetry_logger("report", "persist_results")
