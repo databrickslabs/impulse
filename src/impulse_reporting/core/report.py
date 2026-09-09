@@ -937,6 +937,11 @@ class Report:
         # Validate that every aggregation references a registered event
         self._validate_aggregation_events()
 
+        # Pin one consistent Delta snapshot of every configured silver input for
+        # the whole run so mid-run table changes cannot leak across lazy stages
+        # (issue #87).
+        self.db.pin_versions(self.spark)
+
         # TODO: port unit-consistency sanity check from MDA Framework
         # (`mda_reporting/util/unit_sanity_check.py`). When a
         # `unit_conversion_table` is configured, walk all aggregation /
