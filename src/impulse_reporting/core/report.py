@@ -36,7 +36,6 @@ from impulse_reporting.core.report_utils import (
     persist_dimensions_incremental,
     persist_facts_full,
     persist_facts_incremental,
-    registered_names_by_kind,
     solve_calculated_channels_batched,
     solve_expressions_batched,
     split_by_hash_change,
@@ -567,11 +566,11 @@ class Report:
         """
         validate_full_recalculation_scope(
             self.config,
-            registered_names_by_kind(
-                self.get_events(),
-                [agg for page in self.pages for agg in page.aggregations],
-                self.get_calculated_channels(),
-            ),
+            {
+                "events": self.get_events(),
+                "aggregations": [agg for page in self.pages for agg in page.aggregations],
+                "calculated_channels": self.get_calculated_channels(),
+            },
         )
 
     @telemetry_logger("report", "persist_results")
@@ -1016,7 +1015,7 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="event",
-                force_recalc_names=full_recalc_names(self.config, "event"),
+                force_recalc_names=full_recalc_names(self.config, "events"),
             )
         )
         changed_aggs_by_type, unchanged_aggs_by_type, self._changed_aggregation_ids = (
@@ -1027,7 +1026,7 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="aggregation",
-                force_recalc_names=full_recalc_names(self.config, "aggregation"),
+                force_recalc_names=full_recalc_names(self.config, "aggregations"),
             )
         )
 
@@ -1108,7 +1107,7 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="channel",
-                force_recalc_names=full_recalc_names(self.config, "channel"),
+                force_recalc_names=full_recalc_names(self.config, "calculated_channels"),
             )
         )
         # Collect the query-engine channel expressions across types for the batched

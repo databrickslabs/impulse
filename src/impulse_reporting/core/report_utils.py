@@ -209,7 +209,8 @@ def full_recalc_names(config: ImpulseConfig, kind: str) -> set[str]:
         The report config; its optional ``full_recalculation`` field holds the
         per-kind name lists.
     kind : str
-        One of ``"event"``, ``"aggregation"``, or ``"channel"``.
+        The ``FullRecalculation`` field to read — one of ``"events"``,
+        ``"aggregations"``, or ``"calculated_channels"``.
 
     Returns
     -------
@@ -220,59 +221,30 @@ def full_recalc_names(config: ImpulseConfig, kind: str) -> set[str]:
     cfg = config.full_recalculation
     if cfg is None:
         return set()
-    by_kind = {
-        "event": cfg.events,
-        "aggregation": cfg.aggregations,
-        "channel": cfg.calculated_channels,
-    }
-    return set(by_kind[kind])
-
-
-def registered_names_by_kind(
-    events: list,
-    aggregations: list,
-    calculated_channels: list,
-) -> dict[str, list[str]]:
-    """Map each scoped-recalc kind to the ``get_name()`` of its registered entities.
-
-    Parameters
-    ----------
-    events : list
-        Registered events.
-    aggregations : list
-        Registered aggregations (already flattened across pages).
-    calculated_channels : list
-        Registered calculated channels.
-
-    Returns
-    -------
-    dict[str, list[str]]
-        ``{"event": [...], "aggregation": [...], "channel": [...]}``.
-    """
-    return {
-        "event": [event.get_name() for event in events],
-        "aggregation": [agg.get_name() for agg in aggregations],
-        "channel": [channel.get_name() for channel in calculated_channels],
-    }
+    return set(getattr(cfg, kind))
 
 
 def validate_full_recalculation_scope(
     config: ImpulseConfig,
-    registered_names: dict[str, list[str]],
+    registered_entities: dict[str, list],
 ) -> None:
     """Reject full-recalculation names that match no registered entity.
 
     Fails fast so typos or stale names surface immediately rather than silently
     recomputing nothing. A no-op when no ``full_recalculation`` config is present.
 
+    Kind-agnostic: the caller owns the set of kinds and their entity lists, so the
+    valid kinds live in one place (the call site) rather than being hardcoded here.
+
     Parameters
     ----------
     config : ImpulseConfig
         The report config carrying the optional ``full_recalculation`` scope.
-    registered_names : dict[str, list[str]]
-        ``{kind: [names]}`` of the entities registered on the report, as produced
-        by :func:`registered_names_by_kind`. Its keys are the kinds validated —
-        each must be one of those accepted by :func:`split_by_hash_change`.
+    registered_entities : dict[str, list]
+        ``{kind: [entities]}`` registered on the report; each entity must expose
+        ``get_name()``. The keys are the kinds validated and must be
+        ``FullRecalculation`` field names (``"events"``, ``"aggregations"``,
+        ``"calculated_channels"``), so :func:`full_recalc_names` can read them.
 
     Raises
     ------
@@ -283,9 +255,9 @@ def validate_full_recalculation_scope(
         return
 
     problems: list[str] = []
-    for kind, registered_for_kind in registered_names.items():
+    for kind, entities in registered_entities.items():
         requested = full_recalc_names(config, kind)
-        registered = set(registered_for_kind)
+        registered = {entity.get_name() for entity in entities}
         unknown = sorted(requested - registered)
         if unknown:
             valid = ", ".join(sorted(registered)) or "(none registered)"
