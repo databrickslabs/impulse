@@ -43,22 +43,6 @@ def log_telemetry(ws: WorkspaceClient, key: str, value: str) -> None:
 def tag_spark_connect_user_agent(spark, product: str, version: str) -> None:
     """Best-effort: tag a Spark Connect session's per-request user-agent.
 
-    For an **external Spark Connect / Databricks Connect** client, ``import impulse``
-    runs off the Databricks compute, so library-import detection never sees impulse and
-    the compute is not attributable. The SDK's global user-agent (set at package import)
-    only tags REST traffic, never the Spark Connect gRPC channel.
-
-    The Connect user-agent, however, is not frozen into the gRPC channel: every request
-    carries it as ``client_type``, read live from a mutable params dict on the channel
-    builder. Prepending ``<product>/<version>`` there makes all subsequent compute
-    requests attributable — without the caller having to build their session with
-    ``DatabricksSession.builder.userAgent(...)``.
-
-    This reaches into **private** pyspark internals (``spark._client._builder._params``),
-    which are not a stable API, so it is strictly best-effort: it is a no-op for classic
-    (non-Connect) sessions and never raises. Callers running in a Databricks notebook/job
-    are already attributed via import detection and are unaffected.
-
     Parameters
     ----------
     spark : SparkSession
