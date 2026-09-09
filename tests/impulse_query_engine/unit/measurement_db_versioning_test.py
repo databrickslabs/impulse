@@ -32,18 +32,21 @@ def pin_schema(spark):  # noqa: F811
 
 def test_pin_versions_freezes_snapshot(spark, pin_schema):  # noqa: F811
     table = f"{pin_schema}.container_metrics"
+    # Build up two committed versions BEFORE pinning: v0 (3 rows) then v1 (5 rows).
     spark.range(3).toDF("container_id").write.format("delta").mode("overwrite").saveAsTable(table)
+    spark.range(3, 5).toDF("container_id").write.format("delta").mode("append").saveAsTable(table)
 
     cfg = MeasurementDBConfig(container_metrics_table=table, table_locations="unity_catalog")
     db = _db(cfg)
     db.pin_versions(spark)
-    assert cfg.pinned_versions == {table: 0}
+    # Must pin to the CURRENT (latest) version, not the oldest — v1, not v0.
+    assert cfg.pinned_versions == {table: 1}
 
     # Mutate the table AFTER pinning but BEFORE the (lazy) read materializes.
-    spark.range(3, 10).toDF("container_id").write.format("delta").mode("append").saveAsTable(table)
+    spark.range(5, 10).toDF("container_id").write.format("delta").mode("append").saveAsTable(table)
 
-    # The read still reflects the pinned snapshot, not the 10-row mutated table.
-    assert db.container_metrics(spark).count() == 3
+    # The read reflects the pinned v1 snapshot: not v0's 3 rows, not the mutated 10.
+    assert db.container_metrics(spark).count() == 5
 
     # Without a pin, the same read sees the latest snapshot.
     cfg.pinned_versions = {}
@@ -54,16 +57,19 @@ def test_pin_versions_freezes_snapshot_path_mode(spark, tmp_path):  # noqa: F811
     # Path mode (``external_locations``): reads and version resolution go through
     # the filesystem path rather than a catalog name.
     path = str(tmp_path / "container_metrics")
+    # Build up two committed versions BEFORE pinning: v0 (3 rows) then v1 (5 rows).
     spark.range(3).toDF("container_id").write.format("delta").mode("overwrite").save(path)
+    spark.range(3, 5).toDF("container_id").write.format("delta").mode("append").save(path)
 
     cfg = MeasurementDBConfig(container_metrics_table=path, table_locations="external_locations")
     db = _db(cfg)
     db.pin_versions(spark)
-    assert cfg.pinned_versions == {path: 0}
+    # Must pin to the CURRENT (latest) version, not the oldest — v1, not v0.
+    assert cfg.pinned_versions == {path: 1}
 
-    # Mutate after pinning; the pinned read must still see the original snapshot.
-    spark.range(3, 10).toDF("container_id").write.format("delta").mode("append").save(path)
-    assert db.container_metrics(spark).count() == 3
+    # Mutate after pinning; the pinned read must still see the v1 snapshot.
+    spark.range(5, 10).toDF("container_id").write.format("delta").mode("append").save(path)
+    assert db.container_metrics(spark).count() == 5
 
     cfg.pinned_versions = {}
     assert db.container_metrics(spark).count() == 10
