@@ -82,6 +82,23 @@ class MeasurementDBConfig:
         cfg.debug_tables = debug_tables
         return cfg
 
+    def configured_table_uris(self) -> list[str]:
+        """Return the URIs of every configured (non-``None``) silver table."""
+        return [
+            uri
+            for uri in (
+                self.container_tags_table,
+                self.container_metrics_table,
+                self.channel_tags_table,
+                self.channel_metrics_table,
+                self.channels_uri,
+                self.poi_channels_uri,
+                self.channel_mapping_table,
+                self.unit_conversion_table,
+            )
+            if uri is not None
+        ]
+
 
 class MeasurementDB:
     def __init__(self, config: MeasurementDBConfig, ws: WorkspaceClient):
@@ -91,23 +108,6 @@ class MeasurementDB:
     @property
     def query(self):
         return QueryBuilder(db=self)
-
-    def _configured_table_uris(self) -> list[str]:
-        """Return the URIs of every configured (non-``None``) silver table."""
-        return [
-            uri
-            for uri in (
-                self.config.container_tags_table,
-                self.config.container_metrics_table,
-                self.config.channel_tags_table,
-                self.config.channel_metrics_table,
-                self.config.channels_uri,
-                self.config.poi_channels_uri,
-                self.config.channel_mapping_table,
-                self.config.unit_conversion_table,
-            )
-            if uri is not None
-        ]
 
     @staticmethod
     def _current_delta_version(spark, table_locations: str, uri: str) -> int:
@@ -152,7 +152,7 @@ class MeasurementDB:
         if self.config.table_locations == "debug":
             return
         pinned: dict[str, int] = {}
-        for uri in self._configured_table_uris():
+        for uri in self.config.configured_table_uris():
             try:
                 pinned[uri] = self._current_delta_version(spark, self.config.table_locations, uri)
             except Exception as exc:  # noqa: BLE001 - graceful degradation per table
