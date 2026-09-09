@@ -135,6 +135,19 @@ class MeasurementDB:
         materialize (issue #87). Debug mode is exempt. Tables that cannot be
         time-traveled (views, non-Delta, unresolvable) are skipped with a
         warning and continue to read the latest version.
+
+        **Opt-in for direct query-engine use.** This is *not* called
+        automatically when you query a ``MeasurementDB`` directly — reads
+        return the latest version unless you call this first. Call it when you
+        want a fan-out of lazy reads to see a stable snapshot even if the silver
+        tables change mid-analysis. The reporting layer (``Report``) calls it
+        for you at the start of every run, so snapshot consistency there is
+        automatic.
+
+        The pin is stored on the config and **persists until cleared** — a
+        long-lived ``MeasurementDB`` will keep reading the pinned snapshot (and
+        never see newer data) until you re-pin (call again) or unpin
+        (``db.config.pinned_versions = {}``).
         """
         if self.config.table_locations == "debug":
             return
