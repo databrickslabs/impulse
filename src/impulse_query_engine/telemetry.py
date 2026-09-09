@@ -78,7 +78,10 @@ def tag_spark_connect_user_agent(spark, product: str, version: str) -> None:
         builder = spark._client._builder  # SparkConnectClient -> ChannelBuilder
         tag = f"{product}/{version}"
         existing = builder._params.get(user_agent_key, "")
-        if tag not in existing:  # idempotent: don't stack the tag on repeated calls
+        # Idempotent: skip if this product already tags the session (match on the
+        # ``<product>/`` prefix, not the full tag, so a version substring such as
+        # 0.6.1 vs 0.6.10 can't false-match and versions don't stack on re-tag).
+        if f"{product}/" not in existing:
             builder._params[user_agent_key] = f"{tag} {existing}".strip()
             logger.debug(f"Tagged Spark Connect user-agent with {tag}")
     except Exception as e:  # noqa: BLE001 - classic session or internals changed
@@ -117,7 +120,12 @@ def telemetry_logger(key: str, value: str, workspace_client_attr: str = "ws") ->
                 )
             # If the wrapped method received a Spark session, tag it so external
             # Spark Connect compute is attributable (best-effort; no-op otherwise).
-            spark = sig.bind_partial(self, *args, **kwargs).arguments.get("spark")
+            # Guarded like every other telemetry step here: a binding hiccup must
+            # never break the wrapped business call.
+            try:
+                spark = sig.bind_partial(self, *args, **kwargs).arguments.get("spark")
+            except TypeError:
+                spark = None
             if spark is not None:
                 tag_spark_connect_user_agent(spark, PRODUCT_NAME, __version__)
             return func(self, *args, **kwargs)

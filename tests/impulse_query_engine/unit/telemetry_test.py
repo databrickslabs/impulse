@@ -177,7 +177,9 @@ class TestGlobalUserAgentRegistration:
     """Importing the package registers impulse in the SDK's process-global user-agent."""
 
     def test_import_registers_product_and_extra(self):
-        # Package import (at test-collection time) runs the registration block.
+        # Re-run the registration in-body (rather than relying on collection-time
+        # global state) so the assertion is independent of suite ordering.
+        importlib.reload(impulse_query_engine)
         assert ua.product() == ("databricks-impulse", impulse_query_engine.__version__)
         assert ("databricks-impulse", impulse_query_engine.__version__) in ua._extra
 
