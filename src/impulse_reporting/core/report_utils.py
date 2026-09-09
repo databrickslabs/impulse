@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     )
     from impulse_query_engine.analyze.query.query_builder import QueryBuilder
     from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+    from impulse_reporting.config.config_parser import ImpulseConfig
     from impulse_reporting.incremental.definition_hash_comparator import (
         DefinitionHashComparator,
     )
@@ -197,6 +198,109 @@ def split_by_hash_change(
             unchanged_by_type[type_name] = unchanged
 
     return changed_by_type, unchanged_by_type, changed_ids
+
+
+def full_recalc_names(config: ImpulseConfig, kind: str) -> set[str]:
+    """Names configured for scoped full recalculation for *kind*.
+
+    Parameters
+    ----------
+    config : ImpulseConfig
+        The report config; its optional ``full_recalculation`` field holds the
+        per-kind name lists.
+    kind : str
+        One of ``"event"``, ``"aggregation"``, or ``"channel"``.
+
+    Returns
+    -------
+    set[str]
+        The configured names, or an empty set when no ``full_recalculation``
+        config is present.
+    """
+    cfg = getattr(config, "full_recalculation", None)
+    if cfg is None:
+        return set()
+    by_kind = {
+        "event": cfg.events,
+        "aggregation": cfg.aggregations,
+        "channel": cfg.calculated_channels,
+    }
+    return set(by_kind[kind])
+
+
+def registered_names_by_kind(
+    events: list,
+    aggregations: list,
+    calculated_channels: list,
+) -> dict[str, list[str]]:
+    """Map each scoped-recalc kind to the ``get_name()`` of its registered entities.
+
+    Parameters
+    ----------
+    events : list
+        Registered events.
+    aggregations : list
+        Registered aggregations (already flattened across pages).
+    calculated_channels : list
+        Registered calculated channels.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        ``{"event": [...], "aggregation": [...], "channel": [...]}``.
+    """
+    return {
+        "event": [event.get_name() for event in events],
+        "aggregation": [agg.get_name() for agg in aggregations],
+        "channel": [channel.get_name() for channel in calculated_channels],
+    }
+
+
+def validate_full_recalculation_scope(
+    config: ImpulseConfig,
+    registered_names: dict[str, list[str]],
+    kinds: list[str],
+) -> None:
+    """Reject full-recalculation names that match no registered entity.
+
+    Fails fast so typos or stale names surface immediately rather than silently
+    recomputing nothing. A no-op when no ``full_recalculation`` config is present.
+
+    Parameters
+    ----------
+    config : ImpulseConfig
+        The report config carrying the optional ``full_recalculation`` scope.
+    registered_names : dict[str, list[str]]
+        ``{kind: [names]}`` of the entities registered on the report, as produced
+        by :func:`registered_names_by_kind`.
+    kinds : list[str]
+        The entity kinds to validate (e.g. ``["aggregation", "event", "channel"]``);
+        each must be one of those accepted by :func:`split_by_hash_change`.
+
+    Raises
+    ------
+    ValueError
+        If any configured name does not match a registered entity of its kind.
+    """
+    if getattr(config, "full_recalculation", None) is None:
+        return
+
+    problems: list[str] = []
+    for kind in kinds:
+        requested = full_recalc_names(config, kind)
+        registered = set(registered_names.get(kind, []))
+        unknown = sorted(requested - registered)
+        if unknown:
+            valid = ", ".join(sorted(registered)) or "(none registered)"
+            problems.append(
+                f"{kind}: {unknown} not registered on the report. Valid names: {valid}."
+            )
+
+    if problems:
+        raise ValueError(
+            "full_recalculation names must match registered entities:\n"
+            + "\n".join(f"  - {msg}" for msg in problems)
+        )
 
 
 def collect_solvable_expressions(

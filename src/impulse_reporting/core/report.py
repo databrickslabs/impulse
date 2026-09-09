@@ -28,6 +28,7 @@ from impulse_reporting.core.report_utils import (
     dispatch_calculated_channel_metrics,
     dispatch_calculated_channels,
     dispatch_events,
+    full_recalc_names,
     group_selectables_by_type,
     merge_changed_unchanged,
     persist_channel_metrics,
@@ -35,9 +36,11 @@ from impulse_reporting.core.report_utils import (
     persist_dimensions_incremental,
     persist_facts_full,
     persist_facts_incremental,
+    registered_names_by_kind,
     solve_calculated_channels_batched,
     solve_expressions_batched,
     split_by_hash_change,
+    validate_full_recalculation_scope,
 )
 from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.event import Event
@@ -549,66 +552,28 @@ class Report:
             )
             raise ValueError(error_message)
 
-    def _registered_names(self, kind: str) -> list[str]:
-        """Names of registered entities of *kind* (``"event"``/``"aggregation"``/``"channel"``)."""
-        if kind == "event":
-            return [event.get_name() for event in self.events]
-        if kind == "aggregation":
-            return [agg.get_name() for page in self.pages for agg in page.aggregations]
-        if kind == "channel":
-            return [channel.get_name() for channel in self.calculated_channels]
-        raise ValueError(f"Unsupported kind '{kind}'.")
-
-    def _full_recalc_names(self, kind: str) -> set[str]:
-        """Names configured for scoped full recalculation for *kind*.
-
-        Returns an empty set when no ``full_recalculation`` config is present.
-        """
-        cfg = getattr(self.config, "full_recalculation", None) if hasattr(self, "config") else None
-        if cfg is None:
-            return set()
-        by_kind = {
-            "event": cfg.events,
-            "aggregation": cfg.aggregations,
-            "channel": cfg.calculated_channels,
-        }
-        return set(by_kind[kind])
-
     def _validate_full_recalculation_scope(self) -> None:
         """Reject full-recalculation names that match no registered entity.
 
-        Fails fast (mirroring :meth:`_validate_aggregation_events`) so typos or
-        stale names surface immediately rather than silently recomputing nothing.
+        Thin wrapper delegating to :func:`report_utils.validate_full_recalculation_scope`;
+        supplies the report's registered entity names. Fails fast (mirroring
+        :meth:`_validate_aggregation_events`) so typos or stale names surface
+        immediately rather than silently recomputing nothing.
 
         Raises
         ------
         ValueError
             If any configured name does not match a registered entity of its kind.
         """
-        cfg = getattr(self.config, "full_recalculation", None) if hasattr(self, "config") else None
-        if cfg is None:
-            return
-
-        problems: list[str] = []
-        for kind, label in (
-            ("aggregation", "aggregations"),
-            ("event", "events"),
-            ("channel", "calculated channels"),
-        ):
-            requested = self._full_recalc_names(kind)
-            registered = set(self._registered_names(kind))
-            unknown = sorted(requested - registered)
-            if unknown:
-                valid = ", ".join(sorted(registered)) or "(none registered)"
-                problems.append(
-                    f"{label}: {unknown} not registered on the report. Valid names: {valid}."
-                )
-
-        if problems:
-            raise ValueError(
-                "full_recalculation names must match registered entities:\n"
-                + "\n".join(f"  - {msg}" for msg in problems)
-            )
+        validate_full_recalculation_scope(
+            self.config,
+            registered_names_by_kind(
+                self.get_events(),
+                [agg for page in self.pages for agg in page.aggregations],
+                self.get_calculated_channels(),
+            ),
+            ["aggregation", "event", "channel"],
+        )
 
     @telemetry_logger("report", "persist_results")
     def persist_results(self, cleanup_temp_tables: bool | None = None):
@@ -1052,7 +1017,7 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="event",
-                force_recalc_names=self._full_recalc_names("event"),
+                force_recalc_names=full_recalc_names(self.config, "event"),
             )
         )
         changed_aggs_by_type, unchanged_aggs_by_type, self._changed_aggregation_ids = (
@@ -1063,7 +1028,7 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="aggregation",
-                force_recalc_names=self._full_recalc_names("aggregation"),
+                force_recalc_names=full_recalc_names(self.config, "aggregation"),
             )
         )
 
@@ -1144,7 +1109,7 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="channel",
-                force_recalc_names=self._full_recalc_names("channel"),
+                force_recalc_names=full_recalc_names(self.config, "channel"),
             )
         )
         # Collect the query-engine channel expressions across types for the batched
