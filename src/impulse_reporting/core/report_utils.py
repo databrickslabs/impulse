@@ -217,7 +217,7 @@ def full_recalc_names(config: ImpulseConfig, kind: str) -> set[str]:
         The configured names, or an empty set when no ``full_recalculation``
         config is present.
     """
-    cfg = getattr(config, "full_recalculation", None)
+    cfg = config.full_recalculation
     if cfg is None:
         return set()
     by_kind = {
@@ -279,7 +279,7 @@ def validate_full_recalculation_scope(
     ValueError
         If any configured name does not match a registered entity of its kind.
     """
-    if getattr(config, "full_recalculation", None) is None:
+    if config.full_recalculation is None:
         return
 
     problems: list[str] = []
