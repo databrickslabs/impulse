@@ -6,7 +6,7 @@ description: >
   "configure an Impulse report", set the source/sink tables, filter which containers are processed,
   choose RLE vs RAW, turn on incremental processing, run without writing (sinkless), remap column
   names, or scope by project. Covers source, unity_sink, container_filters, query_engine, solver_config,
-  incremental, measurement_dimensions, and calculated_channels, all validated by Pydantic.
+  incremental, full_recalculation, measurement_dimensions, and calculated_channels, all validated by Pydantic.
 ---
 
 # Impulse — configuration
@@ -40,6 +40,7 @@ config = {
         ],
     },
     "incremental": {"enabled": True},
+    "full_recalculation": {"aggregations": ["rpm_hist_p1"]},  # optional
     "measurement_dimensions": ["container_id", "vehicle_key", "start_ts", "stop_ts"],
     "calculated_channels": {"emit_channel_metrics": True, "attribute_columns": ["unit"]},  # optional
 }
@@ -167,6 +168,22 @@ Reuses prior results for unchanged definitions and reprocesses only new/updated 
 | `enabled`                     | `false`         | Turn incremental processing on.                 |
 | `silver_last_modified_column` | `"timestamp"`   | Silver column used to detect container updates. |
 | `gold_last_modified_column`   | `"_created_at"` | Gold column used to detect prior-run freshness. |
+
+## full_recalculation (optional)
+
+Forces a full recalculation of specific entities on an **incremental** run: the listed aggregations,
+events, and/or calculated channels recompute over **all** matching containers and have their gold rows
+fully replaced, even when their `definition_hash` is unchanged (the same treatment a definition change
+already receives, applied on demand). Use it to backfill after fixing a persistence bug or correcting
+upstream data, without a full-mode rerun of everything. In full mode it is a no-op — everything already
+recomputes. Entities are named by their human-readable `name`; a name matching no registered entity
+fails the run fast with a `ValueError`, so typos surface immediately.
+
+| Field                 | Default | Description                                    |
+|-----------------------|---------|------------------------------------------------|
+| `aggregations`        | `[]`    | Names of aggregations to fully recompute.      |
+| `events`              | `[]`    | Names of events to fully recompute.            |
+| `calculated_channels` | `[]`    | Names of calculated channels to fully recompute. |
 
 ## measurement_dimensions (optional)
 

@@ -354,6 +354,42 @@ mode-resolution rules and what counts as a definition change.
 
 ---
 
+## full_recalculation (optional)
+
+Forces a full recalculation of specific entities on an **incremental** run: the listed
+aggregations, events, and/or calculated channels recompute over **all** matching containers and
+have their gold rows fully replaced, regardless of whether their `definition_hash` changed. This is
+the same treatment a definition change already receives, applied on demand — useful to backfill
+after fixing a persistence bug or correcting upstream data, without rerunning everything in full
+mode. In full mode it is a no-op, since every entity already recomputes over all containers.
+
+Entities are identified by their human-readable `name`. A name that matches no registered entity
+fails the run fast with a `ValueError`, so typos surface immediately rather than silently doing
+nothing.
+
+| Field                 | Type        | Default | Description                                      |
+|-----------------------|-------------|---------|--------------------------------------------------|
+| `aggregations`        | `list[str]` | `[]`    | Names of aggregations to fully recompute.        |
+| `events`              | `list[str]` | `[]`    | Names of events to fully recompute.              |
+| `calculated_channels` | `list[str]` | `[]`    | Names of calculated channels to fully recompute. |
+
+```json
+{
+  "full_recalculation": {
+    "aggregations": ["rpm_hist_p1"],
+    "events": ["overspeed"],
+    "calculated_channels": ["power_kw"]
+  }
+}
+```
+
+:::note Incremental only
+`full_recalculation` only has an effect when the run is incremental. A first run, or any full run,
+already recomputes every entity over all containers, so the scope is ignored.
+:::
+
+---
+
 ## calculated_channels (optional)
 
 Controls the optional `calculated_channel_metrics` output. By default a report

@@ -122,6 +122,12 @@ definitions reprocess only new/updated containers (persisted via Delta `MERGE` o
 changed or brand-new definitions reprocess all matching containers (replaced atomically via
 `replaceWhere` on `visual_id`/`event_id`/`channel_id`). A single run can mix both per entity.
 
+**Forcing a full recalculation.** To recompute specific *unchanged* entities over all containers — e.g.
+to backfill after a persistence fix or corrected upstream data — list their names under
+`full_recalculation` in config (see `impulse-config`). Those aggregations/events/calculated channels are
+treated as changed for that run regardless of their hash; everything else stays incremental. A no-op in
+full mode, and a name matching no registered entity fails fast.
+
 **What counts as a definition change** — only the hashed attributes; renames, descriptions, and units
 are cosmetic and do not trigger reprocessing:
 
