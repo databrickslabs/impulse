@@ -145,6 +145,30 @@ def test_impulse_config_drop_implausible_data_enabled():
     assert config.query_engine.drop_implausible_data is True
 
 
+def test_impulse_config_max_containers_per_run_defaults_to_none():
+    """The container cap is off by default (no cap => current behavior)."""
+    config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
+    assert config.query_engine.max_containers_per_run is None
+
+
+def test_impulse_config_max_containers_per_run_parsed():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 50},
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_containers_per_run == 50
+
+
+def test_impulse_config_max_containers_per_run_rejects_non_positive():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 0},
+    }
+    with pytest.raises(ValidationError, match="max_containers_per_run must be >= 1"):
+        ImpulseConfig.model_validate(config_json)
+
+
 # ---------------------------------------------------------------------------
 # Source.poi_channels_uri — must survive parsing AND reach the MeasurementDB.
 # Regression: the field was missing from the Source model, so pydantic silently

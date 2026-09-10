@@ -399,6 +399,17 @@ class QueryEngine(BaseModel):
     raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
     batch_size: int = 500
+    max_containers_per_run: int | None = None
+
+    @field_validator("max_containers_per_run", mode="after")
+    @classmethod
+    def _validate_max_containers_per_run(cls, value: int | None) -> int | None:
+        """Cap on containers per incremental run; ``None`` disables it."""
+        if value is not None and value < 1:
+            raise ValueError(
+                "max_containers_per_run must be >= 1 when set (None disables the cap)."
+            )
+        return value
 
     @model_validator(mode="after")
     def validate_drop_implausible_data_requires_raw(self):
