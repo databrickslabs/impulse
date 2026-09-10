@@ -404,7 +404,7 @@ class QueryEngine(BaseModel):
     @field_validator("max_containers_per_run", mode="after")
     @classmethod
     def _validate_max_containers_per_run(cls, value: int | None) -> int | None:
-        """Cap on containers per incremental run; ``None`` disables it (see issue #88)."""
+        """Cap on containers per incremental run; ``None`` disables it."""
         if value is not None and value < 1:
             raise ValueError(
                 "max_containers_per_run must be >= 1 when set (None disables the cap)."

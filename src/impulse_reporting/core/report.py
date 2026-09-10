@@ -944,25 +944,36 @@ class Report:
         persist_results: bool = True,
         cleanup_temp_tables: bool | None = None,
     ):
-        """Determine and (optionally) persist a report in one call.
+        """Determine and persist a report, draining all container batches.
 
-        Convenience wrapper over :meth:`determine_report` + :meth:`persist_results`
-        (both remain usable standalone). With ``max_containers_per_run`` set, each
-        incremental ``run()`` commits at most that many containers; call it repeatedly
-        to advance through the population (issue #88).
+        Wraps :meth:`determine_report` + :meth:`persist_results` (both remain usable
+        standalone). With ``max_containers_per_run`` set on an incremental run, ``run()``
+        loops: each iteration commits at most that many upserted containers, and the loop
+        continues until a run observes at most that many remaining (the last batch clears
+        the rest). After the first iteration all definition hashes are current, so later
+        iterations recompute only unchanged entities over the next batch of new containers.
+        Without a cap (or in full mode) it is a single determine+persist pass.
 
         Parameters
         ----------
         is_incremental : bool, optional
             Forwarded to :meth:`determine_report` (config still overrides it).
         persist_results : bool, optional
-            When True (default), persist after determining; False runs determine only.
+            When True (default), persist after determining and drain the batches. When
+            False, run :meth:`determine_report` once without persisting (no iteration —
+            nothing commits, so the batch cannot advance).
         cleanup_temp_tables : bool | None, optional
             Forwarded to :meth:`persist_results`.
         """
-        self.determine_report(is_incremental)
-        if persist_results:
+        while True:
+            self.determine_report(is_incremental)
+            if not persist_results:
+                return
             self.persist_results(cleanup_temp_tables)
+            # Stop once a run processed the remainder (uncapped upserted <= cap); also
+            # covers no cap / full mode, where the flag stays False.
+            if not self._more_batches_pending:
+                return
 
     @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
@@ -1012,15 +1023,22 @@ class Report:
         self._is_incremental = self._resolve_is_incremental(is_incremental)
 
         # Detect containers to process (incremental mode only): new + updated.
+        # ``_more_batches_pending`` tells run()'s batch loop whether more than one batch
+        # of upserted containers remains; reset each call so it never carries stale state.
         pre_filtered_containers_df = None
+        self._more_batches_pending = False
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
-            # Cap containers per run (issue #88): committed containers get a fresh
+            # Cap containers per run: committed containers get a fresh
             # measurement_dimension timestamp and drop out of the next run's detection,
             # so successive runs advance through the population. Order by container_id
             # for deterministic batches and forward progress.
             max_containers = self.config.query_engine.max_containers_per_run
             if max_containers is not None and pre_filtered_containers_df is not None:
+                # Probe with limit(N+1).count() (bounded) before capping.
+                self._more_batches_pending = (
+                    pre_filtered_containers_df.limit(max_containers + 1).count() > max_containers
+                )
                 pre_filtered_containers_df = pre_filtered_containers_df.orderBy(
                     "container_id"
                 ).limit(max_containers)
@@ -1044,7 +1062,7 @@ class Report:
         # Container scope for CHANGED entities: without a cap, None (all containers).
         # Under a cap, all historical (gold) containers plus the capped new ones, so a
         # definition change is re-applied to existing containers while new containers
-        # beyond the cap are deferred (issue #88).
+        # beyond the cap are deferred.
         changed_pre_filtered_containers_df = self._changed_scope(pre_filtered_containers_df)
 
         hash_comparator = DefinitionHashComparator(self.spark)
@@ -1363,7 +1381,7 @@ class Report:
         return _detector.updated_within(containers_df, measurement_dim_table)
 
     def _changed_scope(self, capped_upserted_df: DataFrame | None) -> DataFrame | None:
-        """Container scope for CHANGED entities under a cap (issue #88).
+        """Container scope for CHANGED entities under a cap.
 
         All historical (gold) containers plus the capped upserted set, so a definition
         change is re-applied to existing containers while new containers beyond the cap

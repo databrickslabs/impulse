@@ -104,7 +104,7 @@ class ContainerUpsertDetector:
         candidate_containers_df: DataFrame,
         gold_measurement_dim_table: str,
     ) -> DataFrame:
-        """Restrict upserted candidates to their UPDATED containers (issue #88).
+        """Restrict upserted candidates to their UPDATED containers.
 
         The updated containers are those whose ``container_id`` already exists in the
         gold ``measurement_dimension`` — new ones don't, and have no stale rows to

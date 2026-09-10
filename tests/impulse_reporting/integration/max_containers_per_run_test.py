@@ -1,4 +1,4 @@
-"""Integration tests for ``query_engine.max_containers_per_run`` (issue #88).
+"""Integration tests for ``query_engine.max_containers_per_run``.
 
 The cap bounds upserted containers per incremental run; committed containers drop out of
 the next run's detection, so repeated runs iterate the population and the final gold
@@ -43,8 +43,9 @@ def _config(silver_table, prefix, *, max_containers_per_run=None):
     )
 
 
-def _run(spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=add_aggs_to_report):
-    """Build a fresh report and run one determine+persist pass via ``run()``."""
+def _make_report(
+    spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=add_aggs_to_report
+):
     report = Report(
         name="cap_report",
         spark=spark,
@@ -52,7 +53,20 @@ def _run(spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=a
         config=dict(_config(silver_table, prefix, max_containers_per_run=max_containers_per_run)),
     )
     add_aggs(report)
-    report.run()  # determine_report() + persist_results()
+    return report
+
+
+def _run(spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=add_aggs_to_report):
+    """Run ONE determine+persist pass (single batch) — the granular API, no run() loop."""
+    report = _make_report(
+        spark,
+        silver_table,
+        prefix,
+        max_containers_per_run=max_containers_per_run,
+        add_aggs=add_aggs,
+    )
+    report.determine_report()
+    report.persist_results()
 
 
 def _container_ids(spark, prefix):
@@ -221,3 +235,54 @@ def test_changed_entity_capped_defers_beyond_cap_new_and_matches_uncapped(spark)
         assert _rows_without_meta(capped) == _rows_without_meta(
             uncapped
         ), f"{table}: capped changed-entity iteration must match the uncapped run"
+
+
+def test_run_drains_all_batches_in_one_call(spark):
+    """A single run() call loops determine+persist until the population is drained."""
+    # Seed gold with container 1.
+    _run(spark, "container_metrics_inc_1", "loop")
+    assert _container_ids(spark, "loop") == [1]
+
+    # New containers {2, 3}; cap=1. One run() call loops: {2} (more pending) then {3}.
+    _make_report(spark, "container_metrics", "loop", max_containers_per_run=1).run()
+    assert _container_ids(spark, "loop") == [1, 2, 3], "run() must drain every batch"
+
+    # Matches an uncapped single incremental run.
+    _run(spark, "container_metrics_inc_1", "loopbase")
+    _run(spark, "container_metrics", "loopbase")
+    for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
+        looped = spark.read.table(f"spark_catalog.gold.loop_{table}")
+        uncapped = spark.read.table(f"spark_catalog.gold.loopbase_{table}")
+        assert _rows_without_meta(looped) == _rows_without_meta(uncapped), table
+
+
+def test_run_loop_with_changed_definition(spark):
+    """run() drains batches when a definition changed: iter 1 recomputes, rest unchanged."""
+    _run(spark, "container_metrics_inc_1", "loopchg")  # D1 on container 1
+
+    # Changed definition (D2) + new {2,3}, cap=1, single run() call.
+    _make_report(
+        spark,
+        "container_metrics",
+        "loopchg",
+        max_containers_per_run=1,
+        add_aggs=add_aggs_to_report_changed_bins,
+    ).run()
+    assert _container_ids(spark, "loopchg") == [1, 2, 3]
+
+    # Uncapped D2 reference.
+    _run(spark, "container_metrics_inc_1", "loopchgbase")
+    _run(spark, "container_metrics", "loopchgbase", add_aggs=add_aggs_to_report_changed_bins)
+    for table in ("histogram_fact", "stats_aggregator_fact"):
+        looped = spark.read.table(f"spark_catalog.gold.loopchg_{table}")
+        uncapped = spark.read.table(f"spark_catalog.gold.loopchgbase_{table}")
+        assert _rows_without_meta(looped) == _rows_without_meta(uncapped), table
+
+
+def test_run_without_persist_does_not_loop(spark):
+    """run(persist_results=False) runs determine once and does not iterate."""
+    _run(spark, "container_metrics_inc_1", "nopersist")
+    report = _make_report(spark, "container_metrics", "nopersist", max_containers_per_run=1)
+    report.run(persist_results=False)
+    # Nothing was persisted beyond the seed, so gold still holds only container 1.
+    assert _container_ids(spark, "nopersist") == [1]

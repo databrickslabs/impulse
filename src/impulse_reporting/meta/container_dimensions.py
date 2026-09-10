@@ -237,7 +237,7 @@ class ChannelMappingResolutionDimension:
         pre_filtered_containers_df : DataFrame, optional
             Pre-filtered containers for the unchanged (incremental) scope.
         changed_pre_filtered_containers_df : DataFrame, optional
-            Container scope for changed aliases (issue #88); None = all containers.
+            Container scope for changed aliases; None = all containers.
 
         Returns
         -------

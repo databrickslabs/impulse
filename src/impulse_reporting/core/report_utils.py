@@ -591,7 +591,7 @@ def solve_expressions_batched(
     pre_filtered_containers_df : DataFrame, optional
         Pre-filtered containers for incremental processing.
     max_containers_per_run : int, optional
-        Max containers per solve chunk (issue #88); ``None`` disables container chunking.
+        Max containers per solve chunk; ``None`` disables container chunking.
 
     Returns
     -------
@@ -669,7 +669,7 @@ def solve_calculated_channels_batched(
     ``max_containers_per_run`` chunks the effective container set (the
     ``pre_filtered_containers_df`` if given, else the full ``container_metrics``) into
     chunks of at most that many containers, combining chunks with ``unionByName`` too; the
-    result content is identical to an unchunked solve (issue #88). ``None`` disables it.
+    result content is identical to an unchunked solve. ``None`` disables it.
 
     Parameters
     ----------
@@ -693,7 +693,7 @@ def solve_calculated_channels_batched(
     pre_filtered_containers_df : DataFrame, optional
         Pre-filtered containers for incremental processing.
     max_containers_per_run : int, optional
-        Max containers per solve chunk (issue #88); ``None`` disables container chunking.
+        Max containers per solve chunk; ``None`` disables container chunking.
 
     Returns
     -------
