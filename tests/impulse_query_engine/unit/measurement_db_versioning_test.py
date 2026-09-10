@@ -4,8 +4,9 @@
 ``pin_versions`` resolves each configured silver table's current Delta version
 once at run start; ``_read_table`` then reads with ``versionAsOf`` so every
 lazy op in the run observes the same snapshot even if the table changes
-mid-run. Debug mode is exempt; non-Delta / unresolvable tables are skipped
-with a warning and continue to read the latest version.
+mid-run. Debug mode is exempt. Views are detected via catalog metadata (so no
+Delta command hits them) and skipped with a warning; non-Delta / unresolvable
+tables are also skipped with a warning. Skipped tables read the latest version.
 """
 
 from unittest.mock import create_autospec
@@ -94,3 +95,25 @@ def test_pin_versions_skips_non_delta_and_warns(spark):  # noqa: F811
         db.pin_versions(spark)
     # Unresolvable table is skipped, leaving the pin map empty (reads latest).
     assert cfg.pinned_versions == {}
+
+
+def test_pin_versions_skips_view_and_warns(spark, pin_schema):  # noqa: F811
+    # A view has no Delta history and cannot be time-traveled. It must be
+    # detected via catalog metadata (tableType == "VIEW") and skipped WITHOUT
+    # running a Delta history op against it -- that op is what makes serverless
+    # compute log an [DELTA_MISSING_DELTA_TABLE] ERROR. The skip emits a plain
+    # warning naming the view, not that internal error.
+    table = f"{pin_schema}.container_metrics_base"
+    view = f"{pin_schema}.container_metrics_view"
+    spark.range(4).toDF("container_id").write.format("delta").mode("overwrite").saveAsTable(table)
+    spark.sql(f"CREATE VIEW {view} AS SELECT * FROM {table}")
+
+    cfg = MeasurementDBConfig(container_metrics_table=view, table_locations="unity_catalog")
+    db = _db(cfg)
+    with pytest.warns(UserWarning, match="is a view"):
+        db.pin_versions(spark)
+
+    # The view is skipped: nothing pinned, and the read returns the view's rows
+    # at the latest version.
+    assert cfg.pinned_versions == {}
+    assert db.container_metrics(spark).count() == 4

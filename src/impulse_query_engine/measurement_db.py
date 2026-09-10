@@ -109,32 +109,43 @@ class MeasurementDB:
     def query(self):
         return QueryBuilder(db=self)
 
-    @staticmethod
-    def _current_delta_version(spark, table_locations: str, uri: str) -> int:
-        """Resolve the latest committed Delta version of ``uri``.
+    def _current_delta_version(self, spark, uri: str) -> int | None:
+        """Latest committed Delta version of ``uri``, or ``None`` if unpinnable.
 
-        Handles UC (``catalog.schema.table``, resolved by ``forName`` with the
-        full name) and path modes. Read-only: if the reference cannot be
-        resolved (view, non-Delta, unknown table), the error propagates to
-        :meth:`pin_versions`, which skips pinning that table so it keeps reading
-        the latest version — never a wrong one.
+        Read-only and never raises. Views are detected via catalog metadata
+        (before any Delta command runs, so serverless logs no
+        ``[DELTA_MISSING_DELTA_TABLE]`` ERROR) and non-Delta / unresolvable
+        tables via the caught exception; both warn and return ``None`` so
+        :meth:`pin_versions` skips them and they keep reading the latest version.
         """
         from delta.tables import DeltaTable
 
-        if table_locations == "unity_catalog":
-            dt = DeltaTable.forName(spark, uri)
-        else:  # path mode
-            dt = DeltaTable.forPath(spark, uri)
-        return int(dt.history(1).select("version").first()[0])
+        try:
+            if self.config.table_locations == "unity_catalog":
+                if spark.catalog.getTable(uri).tableType == "VIEW":
+                    warnings.warn(
+                        f"'{uri}' is a view, not a Delta table; reading the latest "
+                        f"version (a view has no Delta history to pin a snapshot to).",
+                        stacklevel=2,
+                    )
+                    return None
+                dt = DeltaTable.forName(spark, uri)
+            else:  # path mode
+                dt = DeltaTable.forPath(spark, uri)
+            return int(dt.history(1).select("version").first()[0])
+        except Exception as exc:  # noqa: BLE001 - graceful degradation per table
+            warnings.warn(f"Could not pin Delta version for '{uri}': {exc}", stacklevel=2)
+            return None
 
     def pin_versions(self, spark) -> None:
         """Pin every configured silver table to its current Delta version.
 
         Resolves each table's latest version once so that all lazily-evaluated
         reads in a run observe the same snapshot regardless of when they
-        materialize (issue #87). Debug mode is exempt. Tables that cannot be
-        time-traveled (views, non-Delta, unresolvable) are skipped with a
-        warning and continue to read the latest version.
+        materialize (issue #87). Debug mode is exempt. Anything that cannot be
+        time-traveled is skipped, warns, and continues to read the latest
+        version: views (no Delta history) and non-Delta / unresolvable tables.
+        See :meth:`_current_delta_version`.
 
         **Opt-in for direct query-engine use.** This is *not* called
         automatically when you query a ``MeasurementDB`` directly — reads
@@ -153,10 +164,9 @@ class MeasurementDB:
             return
         pinned: dict[str, int] = {}
         for uri in self.config.configured_table_uris():
-            try:
-                pinned[uri] = self._current_delta_version(spark, self.config.table_locations, uri)
-            except Exception as exc:  # noqa: BLE001 - graceful degradation per table
-                warnings.warn(f"Could not pin Delta version for '{uri}': {exc}", stacklevel=2)
+            version = self._current_delta_version(spark, uri)
+            if version is not None:
+                pinned[uri] = version
         self.config.pinned_versions = pinned
 
     def _read_table(self, spark, table_name):
