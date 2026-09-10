@@ -911,6 +911,7 @@ class Report:
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            max_containers_per_run=self.config.query_engine.max_containers_per_run,
         )
 
     def _solve_calculated_channels_batched(
@@ -933,6 +934,7 @@ class Report:
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            max_containers_per_run=self.config.query_engine.max_containers_per_run,
         )
 
     @telemetry_logger("report", "run")
@@ -1039,6 +1041,12 @@ class Report:
             else None
         )
 
+        # Container scope for CHANGED entities: without a cap, None (all containers).
+        # Under a cap, all historical (gold) containers plus the capped new ones, so a
+        # definition change is re-applied to existing containers while new containers
+        # beyond the cap are deferred (issue #88).
+        changed_pre_filtered_containers_df = self._changed_scope(pre_filtered_containers_df)
+
         hash_comparator = DefinitionHashComparator(self.spark)
 
         # Group events and aggregations by type
@@ -1079,7 +1087,8 @@ class Report:
 
         # Centralized solve
         changed_solved_df = self._solve_expressions_batched(
-            all_changed_expressions, pre_filtered_containers_df=None
+            all_changed_expressions,
+            pre_filtered_containers_df=changed_pre_filtered_containers_df,
         )
         unchanged_solved_df = self._solve_expressions_batched(
             all_unchanged_expressions, pre_filtered_containers_df=pre_filtered_containers_df
@@ -1093,7 +1102,7 @@ class Report:
             changed_solved_df,
             self.query,
             self.solver,
-            None,
+            changed_pre_filtered_containers_df,
             ContainerEvent,
         )
         unchanged_event_dfs = dispatch_events(
@@ -1134,8 +1143,9 @@ class Report:
 
         # Calculated channels: own narrow batched solve driven here (mirrors the
         # wide expression solve above), producing a narrow ``solved_df`` that each
-        # channel type then shapes. Changed definitions recompute over all
-        # containers; unchanged ones over the incrementally-detected subset.
+        # channel type then shapes. Changed definitions recompute over the changed
+        # scope (all containers, or gold+capped under a cap); unchanged ones over the
+        # incrementally-detected subset.
         self._validate_unique_calculated_channels()
         channels_by_type = group_selectables_by_type(self.calculated_channels, ChannelType)
         changed_channels_by_type, unchanged_channels_by_type, self._changed_channel_ids = (
@@ -1158,7 +1168,7 @@ class Report:
             c.expression for cs in unchanged_channels_by_type.values() for c in cs
         ]
         changed_channel_solved_df = self._solve_calculated_channels_batched(
-            changed_channel_exprs, pre_filtered_containers_df=None
+            changed_channel_exprs, pre_filtered_containers_df=changed_pre_filtered_containers_df
         )
         unchanged_channel_solved_df = self._solve_calculated_channels_batched(
             unchanged_channel_exprs, pre_filtered_containers_df=pre_filtered_containers_df
@@ -1223,9 +1233,9 @@ class Report:
         )
 
         # Determine channel mapping resolution dimension.
-        # Mirror the fact split: aliases from changed definitions resolve
-        # over all containers, aliases only in unchanged definitions stay
-        # scoped to the incrementally-detected containers.
+        # Mirror the fact split: aliases from changed definitions resolve over the
+        # changed scope (all containers, or gold+capped under a cap), aliases only in
+        # unchanged definitions stay scoped to the incrementally-detected containers.
         changed_aliased_selectors = TimeSeriesExpression.collect_selectors(
             all_changed_expressions,
             uses_alias=True,
@@ -1242,6 +1252,7 @@ class Report:
                 changed_aliased_selectors=changed_aliased_selectors,
                 unchanged_aliased_selectors=unchanged_aliased_selectors,
                 pre_filtered_containers_df=pre_filtered_containers_df,
+                changed_pre_filtered_containers_df=changed_pre_filtered_containers_df,
             )
         )
 
@@ -1350,6 +1361,25 @@ class Report:
             return None
         _detector, _silver_containers, measurement_dim_table, _silver_col, _gold_col = args
         return _detector.updated_within(containers_df, measurement_dim_table)
+
+    def _changed_scope(self, capped_upserted_df: DataFrame | None) -> DataFrame | None:
+        """Container scope for CHANGED entities under a cap (issue #88).
+
+        All historical (gold) containers plus the capped upserted set, so a definition
+        change is re-applied to existing containers while new containers beyond the cap
+        are deferred (they have no gold rows, so the global changed-entity delete cannot
+        orphan them). Returns None (all containers, today's behavior) when no cap is set
+        or the run is not incremental.
+        """
+        if self.config.query_engine.max_containers_per_run is None or capped_upserted_df is None:
+            return None
+        args = self._container_detection_args()
+        if args is None:
+            return None
+        _detector, silver_containers, measurement_dim_table, _silver_col, _gold_col = args
+        gold_ids = self.spark.read.table(measurement_dim_table).select("container_id")
+        allowed = gold_ids.unionByName(capped_upserted_df.select("container_id")).distinct()
+        return silver_containers.join(allowed, on="container_id", how="inner")
 
     def _container_detection_args(self):
         """Shared inputs for container detection, or None in sinkless mode.

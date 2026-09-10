@@ -20,7 +20,10 @@ from impulse_reporting.config.config_parser import (
 )
 from impulse_reporting.core.report import Report
 from tests.conftest import spark
-from tests.impulse_reporting.integration.incremental_report_test import add_aggs_to_report
+from tests.impulse_reporting.integration.incremental_report_test import (
+    add_aggs_to_report,
+    add_aggs_to_report_changed_bins,
+)
 
 
 def _config(silver_table, prefix, *, max_containers_per_run=None):
@@ -40,7 +43,7 @@ def _config(silver_table, prefix, *, max_containers_per_run=None):
     )
 
 
-def _run(spark, silver_table, prefix, *, max_containers_per_run=None):
+def _run(spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=add_aggs_to_report):
     """Build a fresh report and run one determine+persist pass via ``run()``."""
     report = Report(
         name="cap_report",
@@ -48,7 +51,7 @@ def _run(spark, silver_table, prefix, *, max_containers_per_run=None):
         workspace_client=create_autospec(WorkspaceClient),
         config=dict(_config(silver_table, prefix, max_containers_per_run=max_containers_per_run)),
     )
-    add_aggs_to_report(report)
+    add_aggs(report)
     report.run()  # determine_report() + persist_results()
 
 
@@ -152,3 +155,69 @@ def test_capped_run_does_not_prune_out_of_batch_updated_container(spark):
         meas_post.where(F.col("container_id") == 2).select("_created_at").collect()[0][0]
     )
     assert container2_created_at_pre == container2_created_at_post, "container 2 must be untouched"
+
+
+def _hist_container_ids(spark, prefix):
+    return {
+        r.container_id
+        for r in spark.read.table(f"spark_catalog.gold.{prefix}_histogram_fact")
+        .select("container_id")
+        .distinct()
+        .collect()
+    }
+
+
+def test_full_mode_container_chunked_solve_matches_uncapped(spark):
+    """Full-mode solve chunked by the cap (pre_filter=None) yields identical gold."""
+    # Full run over all 3 containers, uncapped vs cap=1 (solve chunked into 3 batches).
+    _run(spark, "container_metrics", "fullbase")
+    _run(spark, "container_metrics", "fullcap", max_containers_per_run=1)
+
+    assert _container_ids(spark, "fullbase") == [1, 2, 3]
+    assert _container_ids(spark, "fullcap") == [1, 2, 3]
+    for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
+        capped = spark.read.table(f"spark_catalog.gold.fullcap_{table}")
+        uncapped = spark.read.table(f"spark_catalog.gold.fullbase_{table}")
+        assert _rows_without_meta(capped) == _rows_without_meta(
+            uncapped
+        ), f"{table}: chunked full-mode solve must match the uncapped solve"
+
+
+def test_changed_entity_capped_defers_beyond_cap_new_and_matches_uncapped(spark):
+    """A changed definition recomputes historical + capped-new; new-beyond-cap deferred."""
+    # Seed gold with container 1 under definition D1.
+    _run(spark, "container_metrics_inc_1", "chg")
+    assert _container_ids(spark, "chg") == [1]
+
+    # Change the definition (D2) and add containers 2,3; incremental, cap=1.
+    # Run 1: changed entity computed for historical {1} + capped new {2}; 3 deferred.
+    _run(
+        spark,
+        "container_metrics",
+        "chg",
+        max_containers_per_run=1,
+        add_aggs=add_aggs_to_report_changed_bins,
+    )
+    assert _container_ids(spark, "chg") == [1, 2], "beyond-cap new container 3 must be deferred"
+    assert _hist_container_ids(spark, "chg") == {1, 2}, "no facts for the deferred container"
+
+    # Run 2 advances to container 3 (definition now unchanged -> unchanged path).
+    _run(
+        spark,
+        "container_metrics",
+        "chg",
+        max_containers_per_run=1,
+        add_aggs=add_aggs_to_report_changed_bins,
+    )
+    assert _container_ids(spark, "chg") == [1, 2, 3]
+
+    # Uncapped reference: D1 on container 1, then D2 over all containers in one run.
+    _run(spark, "container_metrics_inc_1", "chgbase")
+    _run(spark, "container_metrics", "chgbase", add_aggs=add_aggs_to_report_changed_bins)
+
+    for table in ("histogram_fact", "stats_aggregator_fact"):
+        capped = spark.read.table(f"spark_catalog.gold.chg_{table}")
+        uncapped = spark.read.table(f"spark_catalog.gold.chgbase_{table}")
+        assert _rows_without_meta(capped) == _rows_without_meta(
+            uncapped
+        ), f"{table}: capped changed-entity iteration must match the uncapped run"
