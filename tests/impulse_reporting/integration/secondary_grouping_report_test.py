@@ -265,18 +265,23 @@ def _clone_channels_with_appended_day(spark, channels_table, container_id=1, cha
     return start // _MICROS_PER_DAY
 
 
-def test_incremental_secondary_grouping_appends_new_partition_only(spark):
-    """Appending a new day partition reprocesses only it; settled days are untouched.
+def test_incremental_secondary_grouping_reprocesses_grown_open_partition(spark):
+    """A newly-opened partition is processed AND the previously-open one is corrected.
 
-    Endless-stream scenario: run 1 seeds several day partitions; run 2 appends a
-    brand-new later day. Only the new/latest partition is recomputed — a sentinel
-    written into a settled partition survives — while the new partition lands in
-    gold with correct values.
+    Endless-stream scenario. The partition open at run 1 is gold's ``max(key)``.
+    Between runs it can still receive late rows *while* a strictly-later partition
+    opens. Anchoring the reprocess window on gold's max (not silver's) means both
+    are handled on the incremental run: the new partition lands in gold, and the
+    previously-open partition — now no longer the silver max — is still corrected.
+    A sentinel written into it must be overwritten (finding #3); under the old
+    silver-max heuristic it would have survived (stale gold). Settled partitions
+    strictly below the gold max are still skipped — see
+    ``test_incremental_secondary_grouping_skips_settled_partitions``.
     """
-    # Run 1 (full): seed gold from base silver using the monotonic day key.
+    # Run 1 (full): seed gold with several monotonic day partitions.
     r1 = _sgk_report(
         spark,
-        "sgk_append_report",
+        "sgk_grow_report",
         "spark_catalog.silver.container_metrics",
         "spark_catalog.silver.channels",
         False,
@@ -295,25 +300,25 @@ def test_incremental_secondary_grouping_appends_new_partition_only(spark):
         .collect()
     )
     assert days, days
-    # Any run-1 day becomes settled once a strictly-later day is appended below.
-    settled_day = days[0]
+    prev_open_day = days[-1]  # gold's max key == the partition open at run 1
 
-    # Tamper a settled day's gold value; if it were reprocessed it'd be overwritten.
+    # Tamper the previously-open partition's gold value. If it is reprocessed on the
+    # incremental run the recompute overwrites the sentinel; if not, it survives.
     spark.sql(
         f"UPDATE {_STATS_FACT} SET statistic_value = -999.0 "
-        f"WHERE container_id = 1 AND secondary_grouping_key = {settled_day} "
+        f"WHERE container_id = 1 AND secondary_grouping_key = {prev_open_day} "
         f"AND aggregation_label = 'min'"
     )
 
-    cm_table = "spark_catalog.silver.sgk_append_cm"
-    channels_table = "spark_catalog.silver.sgk_append_channels"
+    cm_table = "spark_catalog.silver.sgk_grow_cm"
+    channels_table = "spark_catalog.silver.sgk_grow_channels"
     try:
         _clone_cm_with_bumped_container(spark, cm_table, updated_container_id=1)
+        # Open a strictly-later day so prev_open_day is no longer the silver max.
         new_day = _clone_channels_with_appended_day(spark, channels_table, container_id=1)
-        assert new_day not in days, (new_day, days)
+        assert new_day > prev_open_day, (new_day, prev_open_day)
 
-        # Run 2 (incremental): only the new/latest day partition should be processed.
-        r2 = _sgk_report(spark, "sgk_append_report", cm_table, channels_table, True, _day_deriver)
+        r2 = _sgk_report(spark, "sgk_grow_report", cm_table, channels_table, True, _day_deriver)
         _add_rpm_stats(r2)
         r2.determine_report()
         r2.persist_results()
@@ -325,12 +330,12 @@ def test_incremental_secondary_grouping_appends_new_partition_only(spark):
         assert new_rows, "the appended day partition must be present in gold"
         assert all(r.statistic_value != -999.0 for r in new_rows)
 
-        # The settled day was NOT reprocessed → its sentinel survived.
-        settled_min = fact.filter(
-            (F.col("secondary_grouping_key") == settled_day)
+        # The previously-open partition was reprocessed → sentinel overwritten.
+        prev_min = fact.filter(
+            (F.col("secondary_grouping_key") == prev_open_day)
             & (F.col("aggregation_label") == "min")
         ).collect()
-        assert settled_min and all(r.statistic_value == -999.0 for r in settled_min), settled_min
+        assert prev_min and all(r.statistic_value != -999.0 for r in prev_min), prev_min
     finally:
         spark.sql(f"DROP TABLE IF EXISTS {cm_table}")
         spark.sql(f"DROP TABLE IF EXISTS {channels_table}")

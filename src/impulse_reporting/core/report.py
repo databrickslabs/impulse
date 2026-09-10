@@ -1424,15 +1424,19 @@ class Report:
 
         Key-level incremental: a container flagged for reprocessing is *not* solved
         in full. Instead only its **affected** partitions are recomputed — those not
-        yet in gold (new) plus the latest partition per container (which may still be
-        growing, so it is corrected on each run). Settled partitions are neither
-        re-read nor recomputed. Returns ``None`` when no secondary grouping key is
-        configured, there are no containers to process, or there is no gold
-        partition baseline yet (first/migration run → whole-container reprocess).
+        yet in gold (new) plus every partition at or above the container's current
+        gold ``max(key)``. The partition that was open when gold was last written may
+        have received late rows since, so it (and anything above it) is corrected on
+        each run. Settled partitions (strictly below the gold max) are neither re-read
+        nor recomputed. Returns ``None`` when no secondary grouping key is configured,
+        there are no containers to process, or there is no gold partition baseline yet
+        (first/migration run → whole-container reprocess).
 
-        The key is assumed time-localized / monotonic (the documented contract):
-        the "latest" partition is taken as ``max(key)``. A non-monotonic key would
-        mis-identify the open partition, so it is discouraged for incremental runs.
+        The key is assumed time-localized / monotonic (the documented contract): the
+        open partition is anchored to gold's ``max(key)`` per container, so late rows
+        landing in the previously-open partition between runs are reprocessed. A
+        non-monotonic key would mis-anchor the open partition, so it is discouraged
+        for incremental runs.
         """
         sgk = self.solver.config.secondary_grouping_key_col
         if sgk is None or pre_filtered_containers_df is None:
@@ -1454,13 +1458,21 @@ class Report:
             # the driver. Steady-state runs (below) get the partition pruning.
             return None
 
-        # New partitions (absent from gold) + the latest partition per container.
-        # ``F.max(key)`` treats the greatest key value as the still-open partition;
-        # this is exact for a time-localized / monotonic key (the documented
-        # contract) and is why a non-monotonic key is discouraged.
+        # New partitions (absent from gold) + every silver partition at or above the
+        # container's gold ``max(key)``. Anchoring the open partition on *gold's* max
+        # (not silver's) means the partition that was open at the previous run — which
+        # may have received late rows since — is reprocessed, together with any newer
+        # partitions above it. Exact for a time-localized / monotonic key (the
+        # documented contract); ``new_parts`` also covers brand-new containers that
+        # have no gold max yet. A non-monotonic key would mis-anchor the open partition.
         new_parts = silver_parts.join(gold_parts, on=["container_id", sgk], how="left_anti")
-        latest = silver_parts.groupBy("container_id").agg(F.max(F.col(sgk)).alias(sgk))
-        return new_parts.unionByName(latest).distinct()
+        gold_max = gold_parts.groupBy("container_id").agg(F.max(F.col(sgk)).alias("_gold_max"))
+        reopened = (
+            silver_parts.join(gold_max, on="container_id", how="inner")
+            .filter(F.col(sgk) >= F.col("_gold_max"))
+            .select("container_id", sgk)
+        )
+        return new_parts.unionByName(reopened).distinct()
 
     def _collect_affected_partition_pairs(
         self, affected_partitions_df: DataFrame | None
