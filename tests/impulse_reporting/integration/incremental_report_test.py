@@ -524,69 +524,75 @@ def test_incremental_scoped_full_recalculation(spark):
     cm_scratch = "spark_catalog.silver.container_metrics_scoped_recalc"
     ch_scratch = "spark_catalog.silver.channels_scoped_recalc"
 
-    # Every timestamp is in the past -> silver older than gold _created_at -> no updates detected.
-    spark.read.table("spark_catalog.silver.container_metrics_inc_1_2").withColumn(
-        "timestamp", F.lit("2020-01-01 00:00:00").cast("timestamp")
-    ).write.format("delta").mode("overwrite").saveAsTable(cm_scratch)
+    try:
+        # Every timestamp is in the past -> silver older than gold _created_at -> no updates.
+        spark.read.table("spark_catalog.silver.container_metrics_inc_1_2").withColumn(
+            "timestamp", F.lit("2020-01-01 00:00:00").cast("timestamp")
+        ).write.format("delta").mode("overwrite").saveAsTable(cm_scratch)
 
-    # Keep only the earliest 5 samples per channel for container 2; all other rows unchanged.
-    rn = F.row_number().over(Window.partitionBy("container_id", "channel_id").orderBy("tstart"))
-    spark.read.table("spark_catalog.silver.channels").withColumn("_rn", rn).filter(
-        (F.col("container_id") != 2) | (F.col("_rn") <= 5)
-    ).drop("_rn").write.format("delta").mode("overwrite").saveAsTable(ch_scratch)
+        # Keep only the earliest 5 samples per channel for container 2; all other rows unchanged.
+        rn = F.row_number().over(
+            Window.partitionBy("container_id", "channel_id").orderBy("tstart")
+        )
+        spark.read.table("spark_catalog.silver.channels").withColumn("_rn", rn).filter(
+            (F.col("container_id") != 2) | (F.col("_rn") <= 5)
+        ).drop("_rn").write.format("delta").mode("overwrite").saveAsTable(ch_scratch)
 
-    # --- Run 2 (incremental) with scoped full recalc of rpm_hist_p1 only ---
-    config_2 = ImpulseConfig(
-        source=Source(
-            container_metrics_table=cm_scratch,
-            channel_metrics_table="spark_catalog.silver.channel_metrics",
-            channels_uri=ch_scratch,
-        ),
-        unity_sink=UnitySink(
-            catalog="spark_catalog",
-            schema="gold",
-            table_prefix="evaluation",
-        ),
-        incremental=IncrementalConfig(
-            enabled=True,
-            silver_last_modified_column="timestamp",
-            gold_last_modified_column="_created_at",
-        ),
-        full_recalculation=FullRecalculation(aggregations=["rpm_hist_p1"]),
-    )
-    report_2: Report = Report(
-        name="my_report",
-        spark=spark,
-        workspace_client=create_autospec(WorkspaceClient),
-        config=dict(config_2),
-    )
-    add_aggs_to_report(report_2)
-    report_2.determine_report()
-    report_2.persist_results()
+        # --- Run 2 (incremental) with scoped full recalc of rpm_hist_p1 only ---
+        config_2 = ImpulseConfig(
+            source=Source(
+                container_metrics_table=cm_scratch,
+                channel_metrics_table="spark_catalog.silver.channel_metrics",
+                channels_uri=ch_scratch,
+            ),
+            unity_sink=UnitySink(
+                catalog="spark_catalog",
+                schema="gold",
+                table_prefix="evaluation",
+            ),
+            incremental=IncrementalConfig(
+                enabled=True,
+                silver_last_modified_column="timestamp",
+                gold_last_modified_column="_created_at",
+            ),
+            full_recalculation=FullRecalculation(aggregations=["rpm_hist_p1"]),
+        )
+        report_2: Report = Report(
+            name="my_report",
+            spark=spark,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=dict(config_2),
+        )
+        add_aggs_to_report(report_2)
+        report_2.determine_report()
+        report_2.persist_results()
 
-    hist_fact_post = spark.read.table("spark_catalog.gold.evaluation_histogram_fact")
+        hist_fact_post = spark.read.table("spark_catalog.gold.evaluation_histogram_fact")
 
-    rpm_c1_sum_post = _rpm_sum(hist_fact_post, 1)
-    rpm_c2_sum_post = _rpm_sum(hist_fact_post, 2)
-    speed_c2_rows_post = (
-        hist_fact_post.where((F.col("visual_id") == speed_vid) & (F.col("container_id") == 2))
-        .orderBy("bin_id")
-        .collect()
-    )
+        rpm_c1_sum_post = _rpm_sum(hist_fact_post, 1)
+        rpm_c2_sum_post = _rpm_sum(hist_fact_post, 2)
+        speed_c2_rows_post = (
+            hist_fact_post.where((F.col("visual_id") == speed_vid) & (F.col("container_id") == 2))
+            .orderBy("bin_id")
+            .collect()
+        )
 
-    # rpm_hist_p1 was recomputed over ALL containers using the shrunk channels:
-    # container 2's shrunk data yields a smaller (but still positive) total duration.
-    assert rpm_c2_sum_post > 0
-    assert rpm_c2_sum_post < rpm_c2_sum_pre, (
-        "Forced full recalc must recompute rpm_hist_p1 for container 2 (unmodified "
-        "timestamp) against the shrunk silver data"
-    )
-    # container 1's data is unchanged, so its recomputed values match.
-    assert rpm_c1_sum_post == rpm_c1_sum_pre
+        # rpm_hist_p1 was recomputed over ALL containers using the shrunk channels:
+        # container 2's shrunk data yields a smaller (but still positive) total duration.
+        assert rpm_c2_sum_post > 0
+        assert rpm_c2_sum_post < rpm_c2_sum_pre, (
+            "Forced full recalc must recompute rpm_hist_p1 for container 2 (unmodified "
+            "timestamp) against the shrunk silver data"
+        )
+        # container 1's data is unchanged, so its recomputed values match.
+        assert rpm_c1_sum_post == rpm_c1_sum_pre
 
-    # speed_hist_p1 is neither listed nor on an updated container -> its gold rows
-    # are preserved untouched, even though it shares the histogram_fact table.
-    assert speed_c2_rows_post == speed_c2_rows_pre
+        # speed_hist_p1 is neither listed nor on an updated container -> its gold rows
+        # are preserved untouched, even though it shares the histogram_fact table.
+        assert speed_c2_rows_post == speed_c2_rows_pre
+    finally:
+        spark.sql(f"DROP TABLE IF EXISTS {cm_scratch}")
+        spark.sql(f"DROP TABLE IF EXISTS {ch_scratch}")
 
 
 def add_aggs_to_report(my_report):
