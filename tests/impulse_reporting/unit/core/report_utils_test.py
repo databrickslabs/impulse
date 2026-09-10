@@ -367,6 +367,81 @@ class TestSplitByHashChange:
                 kind="bogus",
             )
 
+    def test_force_recalc_promotes_unchanged_item_to_changed(self):
+        """A hash-unchanged item named in force_recalc_names moves to changed."""
+        forced, kept = MagicMock(), MagicMock()
+        forced.get_id.return_value = 7
+        forced.get_name.return_value = "Force Me"
+        kept.get_id.return_value = 8
+        kept.get_name.return_value = "Leave Me"
+
+        mock_sink = MagicMock()
+        mock_sink.config.get_output_uri_dimension_table.return_value = "catalog.gold.dim"
+
+        mock_comparator = MagicMock()
+        # Both start out unchanged by hash.
+        mock_comparator.group_aggregations_by_hash_change.return_value = ([], [forced, kept])
+
+        changed, unchanged, changed_ids = split_by_hash_change(
+            items_by_type={"HISTOGRAM": [forced, kept]},
+            type_enum=MagicMock(),
+            sink=mock_sink,
+            spark=MagicMock(),
+            hash_comparator=mock_comparator,
+            kind="aggregation",
+            force_recalc_names={"Force Me"},
+        )
+
+        assert changed == {"HISTOGRAM": [forced]}
+        assert unchanged == {"HISTOGRAM": [kept]}
+        assert changed_ids == {"HISTOGRAM": [7]}
+
+    def test_force_recalc_name_not_present_is_noop(self):
+        """A forced name matching no unchanged item leaves the split untouched."""
+        item = MagicMock()
+        item.get_id.return_value = 5
+        item.get_name.return_value = "Real Name"
+
+        mock_sink = MagicMock()
+        mock_sink.config.get_output_uri_dimension_table.return_value = "catalog.gold.dim"
+
+        mock_comparator = MagicMock()
+        mock_comparator.group_events_by_hash_change.return_value = ([], [item])
+
+        changed, unchanged, changed_ids = split_by_hash_change(
+            items_by_type={"BASIC_EVENT": [item]},
+            type_enum=MagicMock(),
+            sink=mock_sink,
+            spark=MagicMock(),
+            hash_comparator=mock_comparator,
+            kind="event",
+            force_recalc_names={"Some Typo"},
+        )
+
+        assert changed == {}
+        assert unchanged == {"BASIC_EVENT": [item]}
+        assert changed_ids == {}
+
+    def test_force_recalc_ignored_in_sinkless_mode(self):
+        """Sinkless mode already treats everything as changed; the param is a no-op."""
+        item = MagicMock()
+        item.get_id.return_value = 1
+        item.get_name.return_value = "Anything"
+
+        changed, unchanged, changed_ids = split_by_hash_change(
+            items_by_type={"BASIC_EVENT": [item]},
+            type_enum=MagicMock(),
+            sink=None,
+            spark=MagicMock(),
+            hash_comparator=MagicMock(),
+            kind="event",
+            force_recalc_names={"Anything"},
+        )
+
+        assert changed == {"BASIC_EVENT": [item]}
+        assert unchanged == {}
+        assert changed_ids == {"BASIC_EVENT": [1]}
+
 
 # ============================================================================
 # Tests: dispatch_events

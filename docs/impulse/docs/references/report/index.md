@@ -119,6 +119,10 @@ Only the hashed attributes matter. Anything else is cosmetic and won't trigger r
 
 Renaming an aggregation, tweaking the description, or changing units keeps the hash stable. No reprocessing. `channel_names` (and a cross-channel statistic's `channel_name`) **do** affect the hash for `StatsAggregator` / `PointValueAggregator`, because they are the fact table's `channel_name` merge key — renaming forces a recompute so old-name rows are pruned rather than left stale.
 
+#### Forcing a full recalculation
+
+To recompute specific entities over all containers even when their `definition_hash` is unchanged, list their names under [`full_recalculation`](../../config/configuration.md#full_recalculation-optional) in config. The listed aggregations, events, and calculated channels are treated as **changed** for that run — they recompute over all matching containers and their gold rows are fully replaced — while every other entity stays incremental. This is meant for backfills after a persistence fix or corrected upstream data. In full mode it is a no-op, and a name that matches no registered entity fails the run fast.
+
 #### Container-update detection
 
 `ContainerUpsertDetector.detect_upserted_containers` finds two things and unions them:

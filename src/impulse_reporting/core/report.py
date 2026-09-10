@@ -28,6 +28,7 @@ from impulse_reporting.core.report_utils import (
     dispatch_calculated_channel_metrics,
     dispatch_calculated_channels,
     dispatch_events,
+    full_recalc_names,
     group_selectables_by_type,
     merge_changed_unchanged,
     persist_channel_metrics,
@@ -38,6 +39,7 @@ from impulse_reporting.core.report_utils import (
     solve_calculated_channels_batched,
     solve_expressions_batched,
     split_by_hash_change,
+    validate_full_recalculation_scope,
 )
 from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.event import Event
@@ -549,6 +551,28 @@ class Report:
             )
             raise ValueError(error_message)
 
+    def _validate_full_recalculation_scope(self) -> None:
+        """Reject full-recalculation names that match no registered entity.
+
+        Thin wrapper delegating to :func:`report_utils.validate_full_recalculation_scope`;
+        supplies the report's registered entity names. Fails fast (mirroring
+        :meth:`_validate_aggregation_events`) so typos or stale names surface
+        immediately rather than silently recomputing nothing.
+
+        Raises
+        ------
+        ValueError
+            If any configured name does not match a registered entity of its kind.
+        """
+        validate_full_recalculation_scope(
+            self.config,
+            {
+                "events": self.get_events(),
+                "aggregations": [agg for page in self.pages for agg in page.aggregations],
+                "calculated_channels": self.get_calculated_channels(),
+            },
+        )
+
     @telemetry_logger("report", "persist_results")
     def persist_results(self, cleanup_temp_tables: bool | None = None):
         """
@@ -937,6 +961,9 @@ class Report:
         # Validate that every aggregation references a registered event
         self._validate_aggregation_events()
 
+        # Validate that any scoped full-recalculation names match registered entities
+        self._validate_full_recalculation_scope()
+
         # Pin one consistent Delta snapshot of every configured silver input for
         # the whole run so mid-run table changes cannot leak across lazy stages
         # (issue #87).
@@ -982,7 +1009,13 @@ class Report:
         # Split changed/unchanged definitions
         changed_events_by_type, unchanged_events_by_type, self._changed_event_ids = (
             split_by_hash_change(
-                events_by_type, EventType, self.sink, self.spark, hash_comparator, kind="event"
+                events_by_type,
+                EventType,
+                self.sink,
+                self.spark,
+                hash_comparator,
+                kind="event",
+                force_recalc_names=full_recalc_names(self.config, "events"),
             )
         )
         changed_aggs_by_type, unchanged_aggs_by_type, self._changed_aggregation_ids = (
@@ -993,6 +1026,7 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="aggregation",
+                force_recalc_names=full_recalc_names(self.config, "aggregations"),
             )
         )
 
@@ -1073,6 +1107,7 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="channel",
+                force_recalc_names=full_recalc_names(self.config, "calculated_channels"),
             )
         )
         # Collect the query-engine channel expressions across types for the batched
