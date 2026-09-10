@@ -935,6 +935,33 @@ class Report:
             pre_filtered_containers_df=pre_filtered_containers_df,
         )
 
+    @telemetry_logger("report", "run")
+    def run(
+        self,
+        is_incremental: bool = None,
+        persist_results: bool = True,
+        cleanup_temp_tables: bool | None = None,
+    ):
+        """Determine and (optionally) persist a report in one call.
+
+        Convenience wrapper over :meth:`determine_report` + :meth:`persist_results`
+        (both remain usable standalone). With ``max_containers_per_run`` set, each
+        incremental ``run()`` commits at most that many containers; call it repeatedly
+        to advance through the population (issue #88).
+
+        Parameters
+        ----------
+        is_incremental : bool, optional
+            Forwarded to :meth:`determine_report` (config still overrides it).
+        persist_results : bool, optional
+            When True (default), persist after determining; False runs determine only.
+        cleanup_temp_tables : bool | None, optional
+            Forwarded to :meth:`persist_results`.
+        """
+        self.determine_report(is_incremental)
+        if persist_results:
+            self.persist_results(cleanup_temp_tables)
+
     @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
         """
@@ -986,18 +1013,30 @@ class Report:
         pre_filtered_containers_df = None
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
+            # Cap containers per run (issue #88): committed containers get a fresh
+            # measurement_dimension timestamp and drop out of the next run's detection,
+            # so successive runs advance through the population. Order by container_id
+            # for deterministic batches and forward progress.
+            max_containers = self.config.query_engine.max_containers_per_run
+            if max_containers is not None and pre_filtered_containers_df is not None:
+                pre_filtered_containers_df = pre_filtered_containers_df.orderBy(
+                    "container_id"
+                ).limit(max_containers)
 
         # Two signals for persistence:
         # - has_processed_containers (new + updated): gates whether a fact table is
         #   written (new containers must be inserted). Only a bool is needed, so
         #   probe emptiness with isEmpty() rather than collecting the whole id list.
-        # - updated container ids: scopes the delete-by-source, since only
-        #   containers that already have gold rows can have stale rows to prune.
+        # - updated container ids: scopes the delete-by-source; derived from the
+        #   (capped) upserted set (see _updated_containers_within), so a capped run
+        #   never prunes containers it did not reprocess.
         self._has_processed_containers = (
             pre_filtered_containers_df is not None and not pre_filtered_containers_df.isEmpty()
         )
         self._updated_container_ids = self._collect_container_ids(
-            self._detect_updated_containers() if self._is_incremental else None
+            self._updated_containers_within(pre_filtered_containers_df)
+            if self._is_incremental
+            else None
         )
 
         hash_comparator = DefinitionHashComparator(self.spark)
@@ -1298,29 +1337,19 @@ class Report:
             gold_last_modified_col=gold_col,
         )
 
-    def _detect_updated_containers(self) -> DataFrame | None:
-        """Detect only UPDATED containers (present in gold, newer silver timestamp).
+    def _updated_containers_within(self, containers_df: DataFrame | None) -> DataFrame | None:
+        """Updated containers within the run's (capped) upserted set, for delete scoping.
 
-        Excludes new containers — see
-        ``ContainerUpsertDetector.detect_updated_containers``. Used to scope the
-        incremental delete-by-source. Returns None in sinkless mode or when the
-        gold table doesn't exist.
-
-        Returns
-        -------
-        DataFrame | None
-            Updated containers, or None.
+        Delegates to ``ContainerUpsertDetector.updated_within``. Returns None in
+        sinkless mode or when ``containers_df`` is None.
         """
+        if containers_df is None:
+            return None
         args = self._container_detection_args()
         if args is None:
             return None
-        detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
-        return detector.detect_updated_containers(
-            silver_containers,
-            measurement_dim_table,
-            silver_last_modified_col=silver_col,
-            gold_last_modified_col=gold_col,
-        )
+        _detector, _silver_containers, measurement_dim_table, _silver_col, _gold_col = args
+        return _detector.updated_within(containers_df, measurement_dim_table)
 
     def _container_detection_args(self):
         """Shared inputs for container detection, or None in sinkless mode.

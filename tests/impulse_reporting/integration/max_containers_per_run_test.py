@@ -1,0 +1,154 @@
+"""Integration tests for ``query_engine.max_containers_per_run`` (issue #88).
+
+The cap bounds upserted containers per incremental run; committed containers drop out of
+the next run's detection, so repeated runs iterate the population and the final gold
+matches an uncapped run. The cap needs gold to exist, so the tests seed gold with a
+subset first, then run capped passes over the full silver table (containers 1, 2, 3).
+"""
+
+from unittest.mock import create_autospec
+
+import pyspark.sql.functions as F
+from databricks.sdk import WorkspaceClient
+
+from impulse_reporting.config.config_parser import (
+    IncrementalConfig,
+    ImpulseConfig,
+    QueryEngine,
+    Source,
+    UnitySink,
+)
+from impulse_reporting.core.report import Report
+from tests.conftest import spark
+from tests.impulse_reporting.integration.incremental_report_test import add_aggs_to_report
+
+
+def _config(silver_table, prefix, *, max_containers_per_run=None):
+    return ImpulseConfig(
+        source=Source(
+            container_metrics_table=f"spark_catalog.silver.{silver_table}",
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri="spark_catalog.silver.channels",
+        ),
+        unity_sink=UnitySink(catalog="spark_catalog", schema="gold", table_prefix=prefix),
+        incremental=IncrementalConfig(
+            enabled=True,
+            silver_last_modified_column="timestamp",
+            gold_last_modified_column="_created_at",
+        ),
+        query_engine=QueryEngine(max_containers_per_run=max_containers_per_run),
+    )
+
+
+def _run(spark, silver_table, prefix, *, max_containers_per_run=None):
+    """Build a fresh report and run one determine+persist pass via ``run()``."""
+    report = Report(
+        name="cap_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config(silver_table, prefix, max_containers_per_run=max_containers_per_run)),
+    )
+    add_aggs_to_report(report)
+    report.run()  # determine_report() + persist_results()
+
+
+def _container_ids(spark, prefix):
+    return sorted(
+        r.container_id
+        for r in spark.read.table(f"spark_catalog.gold.{prefix}_measurement_dimension").collect()
+    )
+
+
+def _rows_without_meta(df):
+    """Deterministic row set, dropping run-dependent columns.
+
+    Excludes ``_``-prefixed meta (e.g. ``_created_at``) and ``config_hash`` (a hash of
+    the full config, which intentionally differs between the capped/uncapped configs).
+    """
+    cols = [c for c in df.columns if not c.startswith("_") and c != "config_hash"]
+    return sorted(tuple(r) for r in df.select(*cols).collect())
+
+
+def test_max_containers_per_run_iterates_and_matches_uncapped(spark):
+    # --- Uncapped baseline (prefix "uncapped") ---------------------------------
+    # Seed gold with container 1 (initial full load), then one uncapped incremental
+    # run over the full silver table processes the remaining new containers {2, 3}.
+    _run(spark, "container_metrics_inc_1", "uncapped")
+    assert _container_ids(spark, "uncapped") == [1]
+    _run(spark, "container_metrics", "uncapped")  # cap=None
+    assert _container_ids(spark, "uncapped") == [1, 2, 3]
+
+    # --- Capped runs (prefix "capped", N=1) ------------------------------------
+    _run(spark, "container_metrics_inc_1", "capped")  # initial full load -> {1}
+    assert _container_ids(spark, "capped") == [1]
+
+    # First capped incremental run: {2, 3} are new; cap=1 processes the lowest (2).
+    _run(spark, "container_metrics", "capped", max_containers_per_run=1)
+    assert _container_ids(spark, "capped") == [1, 2], "cap must limit the run to one new container"
+
+    # Second capped run advances to container 3 (2 already committed, drops out).
+    _run(spark, "container_metrics", "capped", max_containers_per_run=1)
+    assert _container_ids(spark, "capped") == [1, 2, 3]
+
+    # Third capped run is a no-op: everything is already processed.
+    _run(spark, "container_metrics", "capped", max_containers_per_run=1)
+    assert _container_ids(spark, "capped") == [1, 2, 3]
+
+    # --- Gold from the capped iteration matches the uncapped run ----------------
+    for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
+        capped = spark.read.table(f"spark_catalog.gold.capped_{table}")
+        uncapped = spark.read.table(f"spark_catalog.gold.uncapped_{table}")
+        assert _rows_without_meta(capped) == _rows_without_meta(
+            uncapped
+        ), f"{table}: capped iteration must reproduce the uncapped gold"
+
+    # Real-value sanity check: the histogram carries positive accumulated duration.
+    total = (
+        spark.read.table("spark_catalog.gold.capped_histogram_fact")
+        .agg(F.sum("hist_value").alias("s"))
+        .collect()[0]["s"]
+    )
+    assert total is not None and total > 0
+
+
+def test_capped_run_does_not_prune_out_of_batch_updated_container(spark):
+    """A capped run must not prune gold rows for updated containers outside the cap."""
+    # Seed gold with containers 1 and 2 (initial full load).
+    _run(spark, "container_metrics_inc_1_2", "prune")
+    assert _container_ids(spark, "prune") == [1, 2]
+
+    hist_pre = spark.read.table("spark_catalog.gold.prune_histogram_fact")
+    container2_hist_pre = (
+        hist_pre.where(F.col("container_id") == 2).orderBy("visual_id", "bin_id").collect()
+    )
+    assert container2_hist_pre, "container 2 must have histogram rows after the initial load"
+    meas_pre = spark.read.table("spark_catalog.gold.prune_measurement_dimension")
+    container2_created_at_pre = (
+        meas_pre.where(F.col("container_id") == 2).select("_created_at").collect()[0][0]
+    )
+
+    # Mark BOTH containers as updated in silver (timestamp newer than gold _created_at).
+    modified = spark.read.table("spark_catalog.silver.container_metrics_inc_1_2").withColumn(
+        "timestamp", F.current_timestamp()
+    )
+    modified.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver.container_metrics_prune_modified"
+    )
+
+    # Incremental run with cap=1: only container 1 (lowest id) is reprocessed;
+    # container 2 is updated but OUTSIDE the cap.
+    _run(spark, "container_metrics_prune_modified", "prune", max_containers_per_run=1)
+
+    assert _container_ids(spark, "prune") == [1, 2], "no container may be dropped"
+
+    hist_post = spark.read.table("spark_catalog.gold.prune_histogram_fact")
+    container2_hist_post = (
+        hist_post.where(F.col("container_id") == 2).orderBy("visual_id", "bin_id").collect()
+    )
+    # Container 2 was NOT in the cap -> its gold rows must be untouched (not pruned).
+    assert container2_hist_post == container2_hist_pre
+    meas_post = spark.read.table("spark_catalog.gold.prune_measurement_dimension")
+    container2_created_at_post = (
+        meas_post.where(F.col("container_id") == 2).select("_created_at").collect()[0][0]
+    )
+    assert container2_created_at_pre == container2_created_at_post, "container 2 must be untouched"
