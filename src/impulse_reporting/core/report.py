@@ -1,9 +1,9 @@
 import json
 import zlib
 from functools import reduce
+from typing import Any
 
 import pyspark.sql.functions as F
-from typing import Any
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import StructType
