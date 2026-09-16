@@ -247,7 +247,7 @@ def test_pre_filtered_containers_scopes_metric_injection(
     """The metric read for injection honors ``pre_filtered_containers_df``.
 
     ``attach_container_metadata`` builds the metadata from
-    ``_scoped_container_metrics(pre_filtered_containers_df)``, so a subset
+    ``scoped_container_metrics(pre_filtered_containers_df)``, so a subset
     restricted to a single container (a) processes only that container and
     (b) still injects its metric value correctly.
     """

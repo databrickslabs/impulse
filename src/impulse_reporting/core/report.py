@@ -1335,7 +1335,11 @@ class Report:
         if not self._has_sink:
             return None
         detector = ContainerUpsertDetector(self.spark)
-        silver_containers = self.db.container_metrics(self.spark)
+        # Read container_metrics exactly as the solver processes it (column_name_mapping,
+        # project_id, and per-table filters applied), so detection joins on the internal
+        # ``container_id`` and sees the same container universe as the solve. Reading the raw
+        # table here would break configs that remap the physical container-id column (#99).
+        silver_containers = self.solver.scoped_container_metrics(self.spark, self.query)
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
 
         silver_col = "last_modified"

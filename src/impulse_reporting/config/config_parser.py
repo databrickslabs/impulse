@@ -432,7 +432,12 @@ class IncrementalConfig(BaseModel):
     enabled : bool, default=False
         Whether incremental processing is enabled.
     silver_last_modified_column : str, default="timestamp"
-        Column name in the silver layer used for freshness comparison.
+        Column name in the silver layer used for freshness comparison. This is
+        the **internal** name, i.e. the name **after**
+        ``query_engine.solver_config.container_metrics.column_name_mapping`` is
+        applied (container detection reads ``container_metrics`` through the same
+        scoped read the solver uses). If a physical column is remapped, list its
+        internal name here; unmapped columns keep their physical name.
     gold_last_modified_column : str, default="last_modified"
         Column name in the gold layer used for freshness comparison.
     Notes
