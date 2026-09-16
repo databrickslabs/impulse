@@ -443,7 +443,9 @@ class IncrementalConfig(BaseModel):
     enabled : bool, default=False
         Whether incremental processing is enabled.
     silver_last_modified_column : str, default="timestamp"
-        Column name in the silver layer used for freshness comparison.
+        Column name in the silver layer used for freshness comparison. This is
+        the name after ``column_name_mapping`` is applied (the physical name
+        unless you remap that column).
     gold_last_modified_column : str, default="last_modified"
         Column name in the gold layer used for freshness comparison.
     Notes
