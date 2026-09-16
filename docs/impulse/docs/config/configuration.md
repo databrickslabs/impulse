@@ -349,7 +349,7 @@ mode-resolution rules and what counts as a definition change.
 | Field                         | Type   | Default         | Description                                                            |
 |-------------------------------|--------|-----------------|------------------------------------------------------------------------|
 | `enabled`                     | `bool` | `false`         | Turns incremental processing on.                                       |
-| `silver_last_modified_column` | `str`  | `"timestamp"`   | Silver column used to detect container updates. Use the **internal (post-mapping)** name. |
+| `silver_last_modified_column` | `str`  | `"timestamp"`   | Silver column used to detect container updates. Name after `column_name_mapping` is applied (the physical name unless you remap that column). |
 | `gold_last_modified_column`   | `str`  | `"_created_at"` | Gold-side column used to detect prior-run freshness.                   |
 
 ---

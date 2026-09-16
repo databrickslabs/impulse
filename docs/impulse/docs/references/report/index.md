@@ -130,7 +130,7 @@ To recompute specific entities over all containers even when their `definition_h
 - **New containers**: silver rows that don't exist in gold (left anti-join on `container_id`).
 - **Updated containers**: silver rows where `silver_last_modified_column` is newer than the matching gold `gold_last_modified_column`. If either column is missing from its side, update detection is silently skipped and only new containers get picked up.
 
-Detection reads `container_metrics` with `column_name_mapping` applied, so `container_id` and `silver_last_modified_column` are **internal (post-mapping)** names. A remapped container-id column therefore works in incremental mode.
+Detection reads `container_metrics` with `column_name_mapping` applied, so `container_id` and `silver_last_modified_column` are matched against the post-mapping frame (the physical names unless you remap those columns). A remapped container-id column therefore works in incremental mode.
 
 #### Operational notes
 
