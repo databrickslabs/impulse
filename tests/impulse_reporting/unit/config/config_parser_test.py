@@ -155,6 +155,7 @@ def test_impulse_config_max_containers_per_run_parsed():
     config_json = {
         **impulse_config_JSON,
         "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 50},
+        "incremental": {"enabled": True},
     }
     config = ImpulseConfig.model_validate(config_json)
     assert config.query_engine.max_containers_per_run == 50
@@ -164,8 +165,41 @@ def test_impulse_config_max_containers_per_run_rejects_non_positive():
     config_json = {
         **impulse_config_JSON,
         "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 0},
+        "incremental": {"enabled": True},
     }
     with pytest.raises(ValidationError, match="max_containers_per_run must be >= 1"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_impulse_config_cap_requires_incremental_enabled():
+    """A cap is incremental-only: it must be paired with incremental.enabled=True."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 10},
+        "incremental": {"enabled": True},
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_containers_per_run == 10
+
+
+def test_impulse_config_cap_without_incremental_rejected():
+    """A cap with no incremental config is a full-mode config and must be rejected."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 10},
+    }
+    with pytest.raises(ValidationError, match="only valid with incremental.enabled=True"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_impulse_config_cap_with_incremental_disabled_rejected():
+    """A cap with incremental.enabled=False is full mode and must be rejected."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 10},
+        "incremental": {"enabled": False},
+    }
+    with pytest.raises(ValidationError, match="only valid with incremental.enabled=True"):
         ImpulseConfig.model_validate(config_json)
 
 

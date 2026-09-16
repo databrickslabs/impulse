@@ -1296,9 +1296,18 @@ class Report:
         bool
             True for incremental processing, False for full processing.
         """
-        # Rule 1: No gold layer → always FULL (nothing to compare against)
+        # Rule 1: No gold layer → FULL, EXCEPT the bootstrap of a capped incremental
+        # config. With a cap, the first run must process at most N containers and defer
+        # the rest, so it runs incrementally over all containers as "new" (see
+        # ``_detect_upserted_containers``) rather than computing the whole population.
+        # A non-capped incremental config still bootstraps in full mode (nothing to batch).
         if not self._gold_layer_exists():
-            return False
+            return bool(
+                hasattr(self, "config")
+                and getattr(self.config, "incremental", None) is not None
+                and self.config.incremental.enabled
+                and self.config.query_engine.max_containers_per_run is not None
+            )
 
         if not hasattr(self, "config") and is_incremental is not None:
             return is_incremental
@@ -1359,6 +1368,13 @@ class Report:
         if args is None:
             return None
         detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
+        # Bootstrap of a capped incremental config (this method is only reached with
+        # ``_is_incremental`` True, and Rule 1 only makes that True on no gold when a cap
+        # is set): gold doesn't exist yet, so every silver container is "new". Return them
+        # all so the cap can slice the first batch; the detector would otherwise signal
+        # full processing by returning None on a missing gold table.
+        if not self._gold_layer_exists():
+            return silver_containers
         return detector.detect_upserted_containers(
             silver_containers,
             measurement_dim_table,
@@ -1395,6 +1411,11 @@ class Report:
         if args is None:
             return None
         _detector, silver_containers, measurement_dim_table, _silver_col, _gold_col = args
+        # Bootstrap: no gold table yet, so there are no historical containers to fold in —
+        # the changed scope is exactly the capped new set. (Also avoids reading a table
+        # that does not exist.)
+        if not self._gold_layer_exists():
+            return capped_upserted_df
         gold_ids = self.spark.read.table(measurement_dim_table).select("container_id")
         allowed = gold_ids.unionByName(capped_upserted_df.select("container_id")).distinct()
         return silver_containers.join(allowed, on="container_id", how="inner")

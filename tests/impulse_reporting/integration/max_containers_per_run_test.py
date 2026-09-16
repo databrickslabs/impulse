@@ -2,8 +2,10 @@
 
 The cap bounds upserted containers per incremental run; committed containers drop out of
 the next run's detection, so repeated runs iterate the population and the final gold
-matches an uncapped run. The cap needs gold to exist, so the tests seed gold with a
-subset first, then run capped passes over the full silver table (containers 1, 2, 3).
+matches an uncapped run. The cap is incremental-only (rejected in full mode): the FIRST
+run of a capped config treats every container as "new" and caps-and-defers even before
+gold exists, so successive runs drain the full silver table (containers 1, 2, 3). Some
+tests still seed gold with a subset first to exercise the updated/changed-definition paths.
 """
 
 from unittest.mock import create_autospec
@@ -181,20 +183,56 @@ def _hist_container_ids(spark, prefix):
     }
 
 
-def test_full_mode_container_chunked_solve_matches_uncapped(spark):
-    """Full-mode solve chunked by the cap (pre_filter=None) yields identical gold."""
-    # Full run over all 3 containers, uncapped vs cap=1 (solve chunked into 3 batches).
-    _run(spark, "container_metrics", "fullbase")
-    _run(spark, "container_metrics", "fullcap", max_containers_per_run=1)
+def test_bootstrap_capped_run_defers_beyond_cap_and_matches_uncapped(spark):
+    """The FIRST run of a capped incremental config (no gold yet) caps-and-defers.
 
-    assert _container_ids(spark, "fullbase") == [1, 2, 3]
-    assert _container_ids(spark, "fullcap") == [1, 2, 3]
+    Rather than computing the whole population in one pass, the bootstrap run treats every
+    container as "new", processes at most the cap, and defers the rest to later runs.
+    """
+    # Uncapped baseline: a single run over the full silver table processes all 3.
+    _run(spark, "container_metrics", "bootbase")
+    assert _container_ids(spark, "bootbase") == [1, 2, 3]
+
+    # Capped bootstrap (no gold): first run must process only the lowest container.
+    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    assert _container_ids(spark, "bootcap") == [1], "bootstrap must cap the first run to one"
+
+    # Successive runs drain the population (committed containers drop out of detection).
+    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    assert _container_ids(spark, "bootcap") == [1, 2]
+    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    assert _container_ids(spark, "bootcap") == [1, 2, 3]
+
+    # Draining from an empty gold reproduces the uncapped gold exactly.
     for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
-        capped = spark.read.table(f"spark_catalog.gold.fullcap_{table}")
-        uncapped = spark.read.table(f"spark_catalog.gold.fullbase_{table}")
+        capped = spark.read.table(f"spark_catalog.gold.bootcap_{table}")
+        uncapped = spark.read.table(f"spark_catalog.gold.bootbase_{table}")
         assert _rows_without_meta(capped) == _rows_without_meta(
             uncapped
-        ), f"{table}: chunked full-mode solve must match the uncapped solve"
+        ), f"{table}: capped bootstrap iteration must reproduce the uncapped gold"
+
+    # Real-value sanity check: the histogram carries positive accumulated duration.
+    total = (
+        spark.read.table("spark_catalog.gold.bootcap_histogram_fact")
+        .agg(F.sum("hist_value").alias("s"))
+        .collect()[0]["s"]
+    )
+    assert total is not None and total > 0
+
+
+def test_bootstrap_capped_run_drains_in_one_run_call(spark):
+    """A single ``run()`` call drains the whole population from an empty gold."""
+    _run(spark, "container_metrics", "bootbase2")
+    assert _container_ids(spark, "bootbase2") == [1, 2, 3]
+
+    report = _make_report(spark, "container_metrics", "bootrun", max_containers_per_run=1)
+    report.run()
+    assert _container_ids(spark, "bootrun") == [1, 2, 3]
+
+    for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
+        capped = spark.read.table(f"spark_catalog.gold.bootrun_{table}")
+        uncapped = spark.read.table(f"spark_catalog.gold.bootbase2_{table}")
+        assert _rows_without_meta(capped) == _rows_without_meta(uncapped), f"{table}: mismatch"
 
 
 def test_changed_entity_capped_defers_beyond_cap_new_and_matches_uncapped(spark):

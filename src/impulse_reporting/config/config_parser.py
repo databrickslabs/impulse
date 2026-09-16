@@ -656,3 +656,22 @@ class ImpulseConfig(BaseModel):
                 seen.add(name)
                 normalized.append(name)
         return normalized
+
+    @model_validator(mode="after")
+    def _cap_requires_incremental(self):
+        """``max_containers_per_run`` is an incremental-only cap.
+
+        The cap bounds how many containers an incremental run processes and defers the
+        rest to later runs (committed containers drop out of the next detection). It has
+        no meaning in full mode, so a full-mode config must leave it unset — including the
+        first run of a capped pipeline, which runs incrementally over all containers as
+        "new" rather than in full mode.
+        """
+        if self.query_engine.max_containers_per_run is not None and not (
+            self.incremental is not None and self.incremental.enabled
+        ):
+            raise ValueError(
+                "query_engine.max_containers_per_run is only valid with "
+                "incremental.enabled=True; full-mode configs must leave it unset (None)."
+            )
+        return self

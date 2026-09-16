@@ -562,13 +562,16 @@ def solve_expressions_batched(
     materialized to a temp Delta table/view, then joined on ``container_id`` with a full
     outer join.
 
-    When ``max_containers_per_run`` is set, the effective container set (the
-    ``pre_filtered_containers_df`` if given, else the full ``container_metrics``) is also
-    sliced into chunks of at most that many containers; each chunk runs the selector
-    batching above and the chunks are ``unionByName``-combined (disjoint containers → row
-    append). This bounds per-chunk solve memory while returning the exact same content as
-    an unchunked solve. A set already ≤ the cap is a single chunk; an unset cap is the
-    original single-pass behavior.
+    When ``max_containers_per_run`` is set *and* a ``pre_filtered_containers_df`` is given
+    (incremental mode, including the bootstrap first run where every container is "new"),
+    that container set is also sliced into chunks of at most that many containers; each
+    chunk runs the selector batching above and the chunks are ``unionByName``-combined
+    (disjoint containers → row append). This bounds per-chunk solve memory while returning
+    the exact same content as an unchunked solve. A set already ≤ the cap is a single
+    chunk. With no cap, or no pre-filter (a genuine full solve, or sinkless mode), the
+    original single-pass behavior applies. The cap is never applied to the raw
+    ``container_metrics`` table — chunking only runs over a detection-derived set, whose
+    ``container_id`` is the internal column name the chunker expects.
 
     Parameters
     ----------
@@ -625,18 +628,22 @@ def solve_expressions_batched(
             result = result.join(df, on=cid_col, how="full_outer")
         return result
 
-    if max_containers_per_run is None:
+    # Chunking only applies to an explicit, detection-derived container set (which carries
+    # the internal ``container_id``). With no cap, or with no pre-filter (e.g. a genuine
+    # full solve, or sinkless mode where detection yields nothing), solve unchunked.
+    if max_containers_per_run is None or pre_filtered_containers_df is None:
         return _solve_selector_batches(pre_filtered_containers_df)
 
-    effective = (
-        pre_filtered_containers_df
-        if pre_filtered_containers_df is not None
-        else query.db.container_metrics(spark)
-    )
     parts = [
         _solve_selector_batches(chunk)
         for chunk in _container_chunks(
-            spark, effective, max_containers_per_run, has_sink, catalog, schema, cid_col
+            spark,
+            pre_filtered_containers_df,
+            max_containers_per_run,
+            has_sink,
+            catalog,
+            schema,
+            cid_col,
         )
     ]
     # No chunks => empty container set; fall back to a single solve so the result matches
@@ -666,10 +673,11 @@ def solve_calculated_channels_batched(
     materialized to a temp Delta table/view, and batches are combined with
     ``unionByName`` (narrow output — many rows per container, different ``channel_id``s).
 
-    ``max_containers_per_run`` chunks the effective container set (the
-    ``pre_filtered_containers_df`` if given, else the full ``container_metrics``) into
-    chunks of at most that many containers, combining chunks with ``unionByName`` too; the
-    result content is identical to an unchunked solve. ``None`` disables it.
+    ``max_containers_per_run`` chunks the ``pre_filtered_containers_df`` (a
+    detection-derived set, present in incremental mode including the bootstrap first run)
+    into chunks of at most that many containers, combining chunks with ``unionByName`` too;
+    the result content is identical to an unchunked solve. ``None``, or no pre-filter,
+    disables it — the cap is never applied to the raw ``container_metrics`` table.
 
     Parameters
     ----------
@@ -725,18 +733,22 @@ def solve_calculated_channels_batched(
             result = result.unionByName(df)
         return result
 
-    if max_containers_per_run is None:
+    # Chunking only applies to an explicit, detection-derived container set (which carries
+    # the internal ``container_id``). With no cap, or with no pre-filter (e.g. a genuine
+    # full solve, or sinkless mode where detection yields nothing), solve unchunked.
+    if max_containers_per_run is None or pre_filtered_containers_df is None:
         return _solve_selector_batches(pre_filtered_containers_df)
 
-    effective = (
-        pre_filtered_containers_df
-        if pre_filtered_containers_df is not None
-        else query.db.container_metrics(spark)
-    )
     parts = [
         _solve_selector_batches(chunk)
         for chunk in _container_chunks(
-            spark, effective, max_containers_per_run, has_sink, catalog, schema, cid_col
+            spark,
+            pre_filtered_containers_df,
+            max_containers_per_run,
+            has_sink,
+            catalog,
+            schema,
+            cid_col,
         )
     ]
     # No chunks => empty container set; fall back to a single solve so the result matches
