@@ -241,7 +241,9 @@ Configuration for incremental processing behavior.
 **Arguments**:
 
 - `enabled` (`bool, default=False`): Whether incremental processing is enabled.
-- `silver_last_modified_column` (`str, default="timestamp"`): Column name in the silver layer used for freshness comparison.
+- `silver_last_modified_column` (`str, default="timestamp"`): Column name in the silver layer used for freshness comparison. Use the
+internal name (after ``column_name_mapping`` is applied); unmapped
+columns keep their physical name.
 - `gold_last_modified_column` (`str, default="last_modified"`): Column name in the gold layer used for freshness comparison.
 
 ## CalculatedChannels

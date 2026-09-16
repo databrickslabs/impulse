@@ -130,6 +130,8 @@ To recompute specific entities over all containers even when their `definition_h
 - **New containers**: silver rows that don't exist in gold (left anti-join on `container_id`).
 - **Updated containers**: silver rows where `silver_last_modified_column` is newer than the matching gold `gold_last_modified_column`. If either column is missing from its side, update detection is silently skipped and only new containers get picked up.
 
+Detection reads `container_metrics` with `column_name_mapping` applied, so `container_id` and `silver_last_modified_column` are **internal (post-mapping)** names. A remapped container-id column therefore works in incremental mode.
+
 #### Operational notes
 
 - A single run can be partly incremental: one event is changed (full reprocess), another is unchanged (upserted containers only), a newly added aggregation is brand new (also full reprocess). Each entity walks its own path, but all of an entity's rows land in **one** `MERGE` per fact table (entity types that share a fact table are combined), so there is no intermediate inconsistent state.

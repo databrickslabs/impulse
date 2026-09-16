@@ -166,7 +166,7 @@ Reuses prior results for unchanged definitions and reprocesses only new/updated 
 | Field                         | Default         | Description                                     |
 |-------------------------------|-----------------|-------------------------------------------------|
 | `enabled`                     | `false`         | Turn incremental processing on.                 |
-| `silver_last_modified_column` | `"timestamp"`   | Silver column used to detect container updates. |
+| `silver_last_modified_column` | `"timestamp"`   | Silver column used to detect container updates; **internal (post-mapping)** name. |
 | `gold_last_modified_column`   | `"_created_at"` | Gold column used to detect prior-run freshness. |
 
 ## full_recalculation (optional)
