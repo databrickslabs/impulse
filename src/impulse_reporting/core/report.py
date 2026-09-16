@@ -1,4 +1,5 @@
 import json
+import warnings
 import zlib
 from typing import Any
 from databricks.sdk import WorkspaceClient
@@ -964,7 +965,17 @@ class Report:
             nothing commits, so the batch cannot advance).
         cleanup_temp_tables : bool | None, optional
             Forwarded to :meth:`persist_results`.
+
+        Notes
+        -----
+        If a batch is detected again unchanged after being persisted (no forward
+        progress, e.g. a misconfigured ``gold_last_modified_column`` or containers
+        excluded by ``container_filters`` that never yield a gold row), the loop would
+        otherwise spin forever. ``run()`` detects the repeated batch, emits a
+        ``UserWarning`` naming the stuck containers, and stops (partial completion)
+        rather than hanging.
         """
+        previous_batch_ids = None
         while True:
             self.determine_report(is_incremental)
             if not persist_results:
@@ -974,6 +985,23 @@ class Report:
             # covers no cap / full mode, where the flag stays False.
             if not self._more_batches_pending:
                 return
+            # Forward-progress guard: each iteration commits a deterministic batch (the
+            # lowest ``cap`` container ids). If the just-persisted batch is detected again
+            # unchanged, the persist removed nothing from detection, so the drain has
+            # stalled and the loop would never terminate. Stop instead of hanging.
+            current_batch_ids = frozenset(self._processed_container_ids or [])
+            if current_batch_ids == previous_batch_ids:
+                warnings.warn(
+                    f"Incremental run stopped early: the {len(current_batch_ids)} containers "
+                    f"{sorted(current_batch_ids)} were detected again after being persisted, so "
+                    "the run made no forward progress. Likely causes: a misconfigured "
+                    "gold_last_modified_column, container_filters excluding these containers, or "
+                    "containers that produce no measurement_dimension row. Remaining containers "
+                    "were not processed.",
+                    stacklevel=2,
+                )
+                return
+            previous_batch_ids = current_batch_ids
 
     @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
@@ -1027,6 +1055,10 @@ class Report:
         # of upserted containers remains; reset each call so it never carries stale state.
         pre_filtered_containers_df = None
         self._more_batches_pending = False
+        # Ids of the capped batch this run processes; used by run()'s loop to detect a
+        # stalled drain (the same batch recurring => no forward progress). Only populated
+        # on capped incremental runs, the only runs where run() iterates.
+        self._processed_container_ids = None
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
             # Cap containers per run: committed containers get a fresh
@@ -1042,6 +1074,9 @@ class Report:
                 pre_filtered_containers_df = pre_filtered_containers_df.orderBy(
                     "container_id"
                 ).limit(max_containers)
+                self._processed_container_ids = self._collect_container_ids(
+                    pre_filtered_containers_df
+                )
 
         # Two signals for persistence:
         # - has_processed_containers (new + updated): gates whether a fact table is

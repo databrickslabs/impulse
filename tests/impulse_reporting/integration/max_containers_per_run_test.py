@@ -11,6 +11,7 @@ tests still seed gold with a subset first to exercise the updated/changed-defini
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
+import pytest
 from databricks.sdk import WorkspaceClient
 
 from impulse_reporting.config.config_parser import (
@@ -324,3 +325,27 @@ def test_run_without_persist_does_not_loop(spark):
     report.run(persist_results=False)
     # Nothing was persisted beyond the seed, so gold still holds only container 1.
     assert _container_ids(spark, "nopersist") == [1]
+
+
+def test_run_stops_when_drain_makes_no_progress(spark):
+    """A stalled drain must stop with a warning instead of looping forever.
+
+    Every container's freshness ``timestamp`` is set far in the future, so a persisted
+    container is always re-detected as updated and never drops out. With cap=1 the lowest
+    container (1) is selected every iteration and blocks the drain. run() must detect the
+    repeated batch, warn, and return rather than hang.
+    """
+    spark.read.table("spark_catalog.silver.container_metrics").withColumn(
+        "timestamp", F.lit("2999-01-01 00:00:00").cast("timestamp")
+    ).write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver.container_metrics_future"
+    )
+    try:
+        report = _make_report(spark, "container_metrics_future", "stuck", max_containers_per_run=1)
+        with pytest.warns(UserWarning, match="no forward progress"):
+            report.run()
+        # Only the first batch (container 1) was ever committed; the drain stalled on it,
+        # so the remaining containers were left unprocessed rather than looped on.
+        assert _container_ids(spark, "stuck") == [1]
+    finally:
+        spark.sql("DROP TABLE IF EXISTS spark_catalog.silver.container_metrics_future")
