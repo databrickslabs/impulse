@@ -4,6 +4,7 @@ import zlib
 from typing import Any
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 from pyspark.sql.types import StructType
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -1059,24 +1060,25 @@ class Report:
         # stalled drain (the same batch recurring => no forward progress). Only populated
         # on capped incremental runs, the only runs where run() iterates.
         self._processed_container_ids = None
+        # Whether this run has containers to process (gates whether fact tables are
+        # written). Set from the collected batch under a cap, else probed with isEmpty();
+        # defaults False (full mode without a cap / sinkless).
+        self._has_processed_containers = False
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
             # Cap containers per run: committed containers get a fresh
             # measurement_dimension timestamp and drop out of the next run's detection,
-            # so successive runs advance through the population. Order by container_id
-            # for deterministic batches and forward progress.
+            # so successive runs advance through the population.
             max_containers = self.config.query_engine.max_containers_per_batch
             if max_containers is not None and pre_filtered_containers_df is not None:
-                # Probe with limit(N+1).count() (bounded) before capping.
-                self._more_batches_pending = (
-                    pre_filtered_containers_df.limit(max_containers + 1).count() > max_containers
-                )
-                pre_filtered_containers_df = pre_filtered_containers_df.orderBy(
-                    "container_id"
-                ).limit(max_containers)
-                self._processed_container_ids = self._collect_container_ids(
-                    pre_filtered_containers_df
-                )
+                (
+                    pre_filtered_containers_df,
+                    self._processed_container_ids,
+                    self._more_batches_pending,
+                ) = self._cap_upserted_batch(pre_filtered_containers_df, max_containers)
+                self._has_processed_containers = bool(self._processed_container_ids)
+            elif pre_filtered_containers_df is not None:
+                self._has_processed_containers = not pre_filtered_containers_df.isEmpty()
         elif self.config.query_engine.max_containers_per_batch is not None:
             # Full mode with a cap: solve the full scoped population in one pass, chunked by
             # the cap for memory. Supplying the frame here lets the batched solve chunk it;
@@ -1084,17 +1086,11 @@ class Report:
             pre_filtered_containers_df = self.solver.scoped_container_metrics(
                 self.spark, self.query
             )
+            self._has_processed_containers = not pre_filtered_containers_df.isEmpty()
 
-        # Two signals for persistence:
-        # - has_processed_containers (new + updated): gates whether a fact table is
-        #   written (new containers must be inserted). Only a bool is needed, so
-        #   probe emptiness with isEmpty() rather than collecting the whole id list.
-        # - updated container ids: scopes the delete-by-source; derived from the
-        #   (capped) upserted set (see _updated_containers_within), so a capped run
-        #   never prunes containers it did not reprocess.
-        self._has_processed_containers = (
-            pre_filtered_containers_df is not None and not pre_filtered_containers_df.isEmpty()
-        )
+        # Updated container ids scope the delete-by-source; derived from the (capped)
+        # upserted set (see _updated_containers_within), so a capped run never prunes
+        # containers it did not reprocess.
         self._updated_container_ids = self._collect_container_ids(
             self._updated_containers_within(pre_filtered_containers_df)
             if self._is_incremental
@@ -1393,6 +1389,37 @@ class Report:
             return False
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
         return self.spark.catalog.tableExists(measurement_dim_table)
+
+    def _cap_upserted_batch(
+        self, upserted_df: DataFrame, max_containers: int
+    ) -> tuple[DataFrame, list, bool]:
+        """Take at most ``max_containers`` containers (lowest ids) from the upserted set.
+
+        Orders by ``container_id`` (deterministic batches, forward progress) and collects
+        one id past the cap in a single pass, so the detection joins run once and the same
+        pass answers both which containers this batch commits and whether more remain. The
+        capped frame is rebuilt as a plain id filter on the scoped silver rows (no re-run
+        of the detection joins), matching the id-filter pattern in ``_container_chunks``.
+
+        Returns
+        -------
+        tuple[DataFrame, list, bool]
+            ``(capped_containers_df, batch_ids, more_pending)`` — the batch's
+            ``container_metrics`` rows, its ordered ids, and whether more remain.
+        """
+        batch_ids = [
+            row["container_id"]
+            for row in upserted_df.orderBy("container_id")
+            .select("container_id")
+            .limit(max_containers + 1)
+            .collect()
+        ]
+        more_pending = len(batch_ids) > max_containers
+        batch_ids = batch_ids[:max_containers]
+        capped_df = self.solver.scoped_container_metrics(self.spark, self.query).where(
+            F.col("container_id").isin(batch_ids)
+        )
+        return capped_df, batch_ids, more_pending
 
     def _detect_upserted_containers(self) -> DataFrame | None:
         """
