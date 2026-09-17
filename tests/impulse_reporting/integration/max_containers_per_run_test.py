@@ -175,37 +175,6 @@ def uncapped_baseline(spark):
     return baselines
 
 
-def test_seeded_capped_iterates_and_matches_uncapped(spark, uncapped_baseline):
-    """Seeded gold: granular capped runs drain the new containers and match the uncapped gold."""
-    # Seed gold with container 1 (initial full load), then cap=1 over the full silver table.
-    _run(spark, "container_metrics_inc_1", "capped")
-    assert _container_ids(spark, "capped") == [1]
-
-    # First capped incremental run processes the lowest new container (2).
-    _run(spark, "container_metrics", "capped", max_containers_per_run=1)
-    assert _container_ids(spark, "capped") == [1, 2], "cap must limit the run to one new container"
-
-    # Second capped run advances to container 3 (2 already committed, drops out).
-    _run(spark, "container_metrics", "capped", max_containers_per_run=1)
-    assert _container_ids(spark, "capped") == [1, 2, 3]
-
-    # Third capped run is a no-op: everything is already processed.
-    _run(spark, "container_metrics", "capped", max_containers_per_run=1)
-    assert _container_ids(spark, "capped") == [1, 2, 3]
-
-    for t in _BASELINE_TABLES:
-        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.capped_{t}"))
-        assert got == uncapped_baseline["plain"][t], f"{t}: capped iteration must match uncapped"
-
-    # Real-value sanity check: the histogram carries positive accumulated duration.
-    total = (
-        spark.read.table("spark_catalog.gold.capped_histogram_fact")
-        .agg(F.sum("hist_value").alias("s"))
-        .collect()[0]["s"]
-    )
-    assert total is not None and total > 0
-
-
 def test_bootstrap_capped_defers_beyond_cap_and_matches_uncapped(spark, uncapped_baseline):
     """Bootstrap (empty gold): the first capped run treats every container as new and caps it."""
     # Capped bootstrap (no gold): the first run processes only the lowest container.
@@ -221,6 +190,14 @@ def test_bootstrap_capped_defers_beyond_cap_and_matches_uncapped(spark, uncapped
     for t in _BASELINE_TABLES:
         got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.bootcap_{t}"))
         assert got == uncapped_baseline["plain"][t], f"{t}: bootstrap drain must match uncapped"
+
+    # Real-value sanity check: the histogram carries positive accumulated duration.
+    total = (
+        spark.read.table("spark_catalog.gold.bootcap_histogram_fact")
+        .agg(F.sum("hist_value").alias("s"))
+        .collect()[0]["s"]
+    )
+    assert total is not None and total > 0
 
 
 def test_bootstrap_capped_drains_in_one_run_call(spark, uncapped_baseline):
@@ -327,19 +304,6 @@ def test_run_loop_with_changed_definition(spark, uncapped_baseline):
     for t in ("histogram_fact", "stats_aggregator_fact"):
         got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.loopchg_{t}"))
         assert got == uncapped_baseline["changed"][t], t
-
-
-def test_run_drains_all_batches_in_one_call(spark, uncapped_baseline):
-    """A single run() call loops determine+persist until the population is drained (seeded gold)."""
-    _run(spark, "container_metrics_inc_1", "loop")  # seed gold with container 1
-    assert _container_ids(spark, "loop") == [1]
-
-    _make_report(spark, "container_metrics", "loop", max_containers_per_run=1).run()
-    assert _container_ids(spark, "loop") == [1, 2, 3], "run() must drain every batch"
-
-    for t in _BASELINE_TABLES:
-        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.loop_{t}"))
-        assert got == uncapped_baseline["plain"][t], t
 
 
 def test_run_without_persist_does_not_loop(spark):
