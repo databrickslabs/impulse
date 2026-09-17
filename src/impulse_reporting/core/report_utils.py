@@ -540,7 +540,7 @@ def solve_expressions_batched(
     catalog: str = None,
     schema: str = None,
     pre_filtered_containers_df: DataFrame = None,
-    max_containers_per_run: int = None,
+    max_containers_per_batch: int = None,
 ) -> DataFrame | None:
     """Solve all expressions in configurable batches and return a joined wide DataFrame.
 
@@ -548,7 +548,7 @@ def solve_expressions_batched(
     materialized to a temp Delta table/view, then joined on ``container_id`` with a full
     outer join.
 
-    When ``max_containers_per_run`` is set *and* a ``pre_filtered_containers_df`` is given
+    When ``max_containers_per_batch`` is set *and* a ``pre_filtered_containers_df`` is given
     (incremental mode, including the bootstrap first run where every container is "new"),
     that container set is also sliced into chunks of at most that many containers; each
     chunk runs the selector batching above and the chunks are ``unionByName``-combined
@@ -579,7 +579,7 @@ def solve_expressions_batched(
         Unity Catalog schema name (required when *has_sink* is ``True``).
     pre_filtered_containers_df : DataFrame, optional
         Pre-filtered containers for incremental processing.
-    max_containers_per_run : int, optional
+    max_containers_per_batch : int, optional
         Max containers per solve chunk; ``None`` disables container chunking.
 
     Returns
@@ -617,12 +617,14 @@ def solve_expressions_batched(
     # Chunking only applies to an explicit, detection-derived container set (which carries
     # the internal ``container_id``). With no cap, or with no pre-filter (e.g. a genuine
     # full solve, or sinkless mode where detection yields nothing), solve unchunked.
-    if max_containers_per_run is None or pre_filtered_containers_df is None:
+    if max_containers_per_batch is None or pre_filtered_containers_df is None:
         return _solve_selector_batches(pre_filtered_containers_df)
 
     parts = [
         _solve_selector_batches(chunk)
-        for chunk in _container_chunks(pre_filtered_containers_df, max_containers_per_run, cid_col)
+        for chunk in _container_chunks(
+            pre_filtered_containers_df, max_containers_per_batch, cid_col
+        )
     ]
     # No chunks => empty container set; fall back to a single solve so the result matches
     # the non-chunked path (an empty-rows DataFrame, not None).
@@ -642,7 +644,7 @@ def solve_calculated_channels_batched(
     catalog: str = None,
     schema: str = None,
     pre_filtered_containers_df: DataFrame = None,
-    max_containers_per_run: int = None,
+    max_containers_per_batch: int = None,
 ) -> DataFrame | None:
     """Solve calculated channels in configurable batches; return the unioned rows.
 
@@ -651,7 +653,7 @@ def solve_calculated_channels_batched(
     materialized to a temp Delta table/view, and batches are combined with
     ``unionByName`` (narrow output — many rows per container, different ``channel_id``s).
 
-    ``max_containers_per_run`` chunks the ``pre_filtered_containers_df`` (a
+    ``max_containers_per_batch`` chunks the ``pre_filtered_containers_df`` (a
     detection-derived set, present in incremental mode including the bootstrap first run)
     into chunks of at most that many containers, combining chunks with ``unionByName`` too;
     the result content is identical to an unchunked solve. ``None``, or no pre-filter,
@@ -678,7 +680,7 @@ def solve_calculated_channels_batched(
         Unity Catalog schema name (required when *has_sink* is ``True``).
     pre_filtered_containers_df : DataFrame, optional
         Pre-filtered containers for incremental processing.
-    max_containers_per_run : int, optional
+    max_containers_per_batch : int, optional
         Max containers per solve chunk; ``None`` disables container chunking.
 
     Returns
@@ -714,12 +716,14 @@ def solve_calculated_channels_batched(
     # Chunking only applies to an explicit, detection-derived container set (which carries
     # the internal ``container_id``). With no cap, or with no pre-filter (e.g. a genuine
     # full solve, or sinkless mode where detection yields nothing), solve unchunked.
-    if max_containers_per_run is None or pre_filtered_containers_df is None:
+    if max_containers_per_batch is None or pre_filtered_containers_df is None:
         return _solve_selector_batches(pre_filtered_containers_df)
 
     parts = [
         _solve_selector_batches(chunk)
-        for chunk in _container_chunks(pre_filtered_containers_df, max_containers_per_run, cid_col)
+        for chunk in _container_chunks(
+            pre_filtered_containers_df, max_containers_per_batch, cid_col
+        )
     ]
     # No chunks => empty container set; fall back to a single solve so the result matches
     # the non-chunked path (an empty-rows DataFrame, not None).

@@ -331,7 +331,7 @@ def run(is_incremental: bool = None,
 Determine and persist a report, draining all container batches.
 
 Wraps :meth:`determine_report` + :meth:`persist_results` (both remain usable
-standalone). With ``max_containers_per_run`` set on an incremental run, ``run()``
+standalone). With ``max_containers_per_batch`` set on an incremental run, ``run()``
 loops: each iteration commits at most that many upserted containers, and the loop
 continues until a run observes at most that many remaining (the last batch clears
 the rest). After the first iteration all definition hashes are current, so later

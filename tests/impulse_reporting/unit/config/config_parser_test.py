@@ -145,29 +145,29 @@ def test_impulse_config_drop_implausible_data_enabled():
     assert config.query_engine.drop_implausible_data is True
 
 
-def test_impulse_config_max_containers_per_run_defaults_to_none():
+def test_impulse_config_max_containers_per_batch_defaults_to_none():
     """The container cap is off by default (no cap => current behavior)."""
     config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
-    assert config.query_engine.max_containers_per_run is None
+    assert config.query_engine.max_containers_per_batch is None
 
 
-def test_impulse_config_max_containers_per_run_parsed():
+def test_impulse_config_max_containers_per_batch_parsed():
     config_json = {
         **impulse_config_JSON,
-        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 50},
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 50},
         "incremental": {"enabled": True},
     }
     config = ImpulseConfig.model_validate(config_json)
-    assert config.query_engine.max_containers_per_run == 50
+    assert config.query_engine.max_containers_per_batch == 50
 
 
-def test_impulse_config_max_containers_per_run_rejects_non_positive():
+def test_impulse_config_max_containers_per_batch_rejects_non_positive():
     config_json = {
         **impulse_config_JSON,
-        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 0},
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 0},
         "incremental": {"enabled": True},
     }
-    with pytest.raises(ValidationError, match="max_containers_per_run must be >= 1"):
+    with pytest.raises(ValidationError, match="max_containers_per_batch must be >= 1"):
         ImpulseConfig.model_validate(config_json)
 
 
@@ -175,10 +175,10 @@ def test_impulse_config_cap_allowed_in_full_mode():
     """A cap is valid without an incremental config: full mode chunks the solve by the cap."""
     config_json = {
         **impulse_config_JSON,
-        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 10},
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 10},
     }
     config = ImpulseConfig.model_validate(config_json)
-    assert config.query_engine.max_containers_per_run == 10
+    assert config.query_engine.max_containers_per_batch == 10
     assert config.incremental is None
 
 
@@ -186,11 +186,11 @@ def test_impulse_config_cap_allowed_with_incremental_disabled():
     """A cap is valid with incremental.enabled=False (full mode)."""
     config_json = {
         **impulse_config_JSON,
-        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_run": 10},
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 10},
         "incremental": {"enabled": False},
     }
     config = ImpulseConfig.model_validate(config_json)
-    assert config.query_engine.max_containers_per_run == 10
+    assert config.query_engine.max_containers_per_batch == 10
 
 
 # ---------------------------------------------------------------------------

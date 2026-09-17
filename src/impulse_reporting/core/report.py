@@ -912,7 +912,7 @@ class Report:
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
-            max_containers_per_run=self.config.query_engine.max_containers_per_run,
+            max_containers_per_batch=self.config.query_engine.max_containers_per_batch,
         )
 
     def _solve_calculated_channels_batched(
@@ -935,7 +935,7 @@ class Report:
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
-            max_containers_per_run=self.config.query_engine.max_containers_per_run,
+            max_containers_per_batch=self.config.query_engine.max_containers_per_batch,
         )
 
     @telemetry_logger("report", "run")
@@ -948,7 +948,7 @@ class Report:
         """Determine and persist a report, draining all container batches.
 
         Wraps :meth:`determine_report` + :meth:`persist_results` (both remain usable
-        standalone). With ``max_containers_per_run`` set on an incremental run, ``run()``
+        standalone). With ``max_containers_per_batch`` set on an incremental run, ``run()``
         loops: each iteration commits at most that many upserted containers, and the loop
         continues until a run observes at most that many remaining (the last batch clears
         the rest). After the first iteration all definition hashes are current, so later
@@ -1065,7 +1065,7 @@ class Report:
             # measurement_dimension timestamp and drop out of the next run's detection,
             # so successive runs advance through the population. Order by container_id
             # for deterministic batches and forward progress.
-            max_containers = self.config.query_engine.max_containers_per_run
+            max_containers = self.config.query_engine.max_containers_per_batch
             if max_containers is not None and pre_filtered_containers_df is not None:
                 # Probe with limit(N+1).count() (bounded) before capping.
                 self._more_batches_pending = (
@@ -1077,7 +1077,7 @@ class Report:
                 self._processed_container_ids = self._collect_container_ids(
                     pre_filtered_containers_df
                 )
-        elif self.config.query_engine.max_containers_per_run is not None:
+        elif self.config.query_engine.max_containers_per_batch is not None:
             # Full mode with a cap: solve the full scoped population in one pass, chunked by
             # the cap for memory. Supplying the frame here lets the batched solve chunk it;
             # there is no cross-run deferral (``_more_batches_pending`` stays False).
@@ -1354,7 +1354,7 @@ class Report:
                 hasattr(self, "config")
                 and getattr(self.config, "incremental", None) is not None
                 and self.config.incremental.enabled
-                and self.config.query_engine.max_containers_per_run is not None
+                and self.config.query_engine.max_containers_per_batch is not None
             )
 
         if not hasattr(self, "config") and is_incremental is not None:
@@ -1455,7 +1455,7 @@ class Report:
         orphan them). Returns None (all containers, today's behavior) when no cap is set
         or the run is not incremental.
         """
-        if self.config.query_engine.max_containers_per_run is None or capped_upserted_df is None:
+        if self.config.query_engine.max_containers_per_batch is None or capped_upserted_df is None:
             return None
         args = self._container_detection_args()
         if args is None:

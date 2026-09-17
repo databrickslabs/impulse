@@ -1,4 +1,4 @@
-"""Integration tests for ``query_engine.max_containers_per_run``.
+"""Integration tests for ``query_engine.max_containers_per_batch``.
 
 The cap bounds upserted containers per incremental run; committed containers drop out of
 the next run's detection, so repeated runs iterate the population and the final gold matches
@@ -81,7 +81,7 @@ def _add_light_aggs_changed(report):
     _add_light_aggs(report, rpm_bins=[float(i) for i in range(0, 8000, 1000)])
 
 
-def _config(silver_table, prefix, *, max_containers_per_run=None):
+def _config(silver_table, prefix, *, max_containers_per_batch=None):
     return ImpulseConfig(
         source=Source(
             container_metrics_table=f"spark_catalog.silver.{silver_table}",
@@ -94,30 +94,32 @@ def _config(silver_table, prefix, *, max_containers_per_run=None):
             silver_last_modified_column="timestamp",
             gold_last_modified_column="_created_at",
         ),
-        query_engine=QueryEngine(max_containers_per_run=max_containers_per_run),
+        query_engine=QueryEngine(max_containers_per_batch=max_containers_per_batch),
     )
 
 
 def _make_report(
-    spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=_add_light_aggs
+    spark, silver_table, prefix, *, max_containers_per_batch=None, add_aggs=_add_light_aggs
 ):
     report = Report(
         name="cap_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
-        config=dict(_config(silver_table, prefix, max_containers_per_run=max_containers_per_run)),
+        config=dict(
+            _config(silver_table, prefix, max_containers_per_batch=max_containers_per_batch)
+        ),
     )
     add_aggs(report)
     return report
 
 
-def _run(spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=_add_light_aggs):
+def _run(spark, silver_table, prefix, *, max_containers_per_batch=None, add_aggs=_add_light_aggs):
     """Run ONE determine+persist pass (single batch) — the granular API, no run() loop."""
     report = _make_report(
         spark,
         silver_table,
         prefix,
-        max_containers_per_run=max_containers_per_run,
+        max_containers_per_batch=max_containers_per_batch,
         add_aggs=add_aggs,
     )
     report.determine_report()
@@ -178,13 +180,13 @@ def uncapped_baseline(spark):
 def test_bootstrap_capped_defers_beyond_cap_and_matches_uncapped(spark, uncapped_baseline):
     """Bootstrap (empty gold): the first capped run treats every container as new and caps it."""
     # Capped bootstrap (no gold): the first run processes only the lowest container.
-    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    _run(spark, "container_metrics", "bootcap", max_containers_per_batch=1)
     assert _container_ids(spark, "bootcap") == [1], "bootstrap must cap the first run to one"
 
     # Successive runs drain the population (committed containers drop out of detection).
-    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    _run(spark, "container_metrics", "bootcap", max_containers_per_batch=1)
     assert _container_ids(spark, "bootcap") == [1, 2]
-    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    _run(spark, "container_metrics", "bootcap", max_containers_per_batch=1)
     assert _container_ids(spark, "bootcap") == [1, 2, 3]
 
     for t in _BASELINE_TABLES:
@@ -202,7 +204,7 @@ def test_bootstrap_capped_defers_beyond_cap_and_matches_uncapped(spark, uncapped
 
 def test_bootstrap_capped_drains_in_one_run_call(spark, uncapped_baseline):
     """A single run() call drains the whole population from an empty gold."""
-    _make_report(spark, "container_metrics", "bootrun", max_containers_per_run=1).run()
+    _make_report(spark, "container_metrics", "bootrun", max_containers_per_batch=1).run()
     assert _container_ids(spark, "bootrun") == [1, 2, 3]
     for t in _BASELINE_TABLES:
         got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.bootrun_{t}"))
@@ -222,7 +224,7 @@ def test_full_mode_container_chunked_solve_matches_uncapped(spark, uncapped_base
         ),
         unity_sink=UnitySink(catalog="spark_catalog", schema="gold", table_prefix="fullcap"),
         # No incremental config -> full mode; cap chunks the single full pass.
-        query_engine=QueryEngine(max_containers_per_run=1),
+        query_engine=QueryEngine(max_containers_per_batch=1),
     )
     report = Report(
         name="cap_report",
@@ -270,7 +272,7 @@ def test_capped_run_does_not_prune_out_of_batch_updated_container(spark):
 
     # Incremental run with cap=1: only container 1 (lowest id) is reprocessed;
     # container 2 is updated but OUTSIDE the cap.
-    _run(spark, "container_metrics_prune_modified", "prune", max_containers_per_run=1)
+    _run(spark, "container_metrics_prune_modified", "prune", max_containers_per_batch=1)
 
     assert _container_ids(spark, "prune") == [1, 2], "no container may be dropped"
 
@@ -299,7 +301,7 @@ def test_changed_entity_capped_defers_beyond_cap_new(spark, uncapped_baseline):
         spark,
         "container_metrics",
         "chg",
-        max_containers_per_run=1,
+        max_containers_per_batch=1,
         add_aggs=_add_light_aggs_changed,
     )
     assert _container_ids(spark, "chg") == [1, 2], "beyond-cap new container 3 must be deferred"
@@ -310,7 +312,7 @@ def test_changed_entity_capped_defers_beyond_cap_new(spark, uncapped_baseline):
         spark,
         "container_metrics",
         "chg",
-        max_containers_per_run=1,
+        max_containers_per_batch=1,
         add_aggs=_add_light_aggs_changed,
     )
     assert _container_ids(spark, "chg") == [1, 2, 3]
@@ -331,7 +333,7 @@ def test_run_loop_with_changed_definition(spark, uncapped_baseline):
         spark,
         "container_metrics",
         "loopchg",
-        max_containers_per_run=1,
+        max_containers_per_batch=1,
         add_aggs=_add_light_aggs_changed,
     ).run()
     assert _container_ids(spark, "loopchg") == [1, 2, 3]
@@ -344,7 +346,7 @@ def test_run_loop_with_changed_definition(spark, uncapped_baseline):
 def test_run_without_persist_does_not_loop(spark):
     """run(persist_results=False) runs determine once and does not iterate."""
     _run(spark, "container_metrics_inc_1", "nopersist")
-    report = _make_report(spark, "container_metrics", "nopersist", max_containers_per_run=1)
+    report = _make_report(spark, "container_metrics", "nopersist", max_containers_per_batch=1)
     report.run(persist_results=False)
     # Nothing was persisted beyond the seed, so gold still holds only container 1.
     assert _container_ids(spark, "nopersist") == [1]
@@ -364,7 +366,9 @@ def test_run_stops_when_drain_makes_no_progress(spark):
         "spark_catalog.silver.container_metrics_future"
     )
     try:
-        report = _make_report(spark, "container_metrics_future", "stuck", max_containers_per_run=1)
+        report = _make_report(
+            spark, "container_metrics_future", "stuck", max_containers_per_batch=1
+        )
         with pytest.warns(UserWarning, match="no forward progress"):
             report.run()
         # Only the first batch (container 1) was ever committed; the drain stalled on it,
