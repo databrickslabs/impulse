@@ -1082,9 +1082,7 @@ class Report:
             # Full mode with a cap: solve the full scoped population in one pass, chunked by
             # the cap for memory. Supplying the frame here lets the batched solve chunk it;
             # there is no cross-run deferral (``_more_batches_pending`` stays False).
-            pre_filtered_containers_df = self.solver.scoped_container_metrics(
-                self.spark, self.query
-            )
+            pre_filtered_containers_df = self._filtered_container_metrics()
             self._has_processed_containers = not pre_filtered_containers_df.isEmpty()
 
         # Updated container ids scope the delete-by-source; derived from the (capped)
@@ -1405,10 +1403,7 @@ class Report:
             ``(capped_containers_df, batch_ids, more_pending)``.
         """
         container_id_col = self.solver.config.container_id_col
-        container_tags_df = self.solver.filter_container_tags(self.spark, self.query)
-        eligible_df = self.solver.filter_container_metrics(
-            self.spark, self.query, container_tags_df, upserted_df
-        )
+        eligible_df = self._filtered_container_metrics(upserted_df)
         batch_ids = [
             row[container_id_col]
             for row in eligible_df.select(container_id_col)
@@ -1421,6 +1416,13 @@ class Report:
         batch_ids = batch_ids[:max_containers]
         capped_df = eligible_df.where(F.col(container_id_col).isin(batch_ids))
         return capped_df, batch_ids, more_pending
+
+    def _filtered_container_metrics(self, pre_filtered_containers_df: DataFrame = None) -> DataFrame:
+        """Resolve container metrics through the public solver container pipeline."""
+        container_tags_df = self.solver.filter_container_tags(self.spark, self.query)
+        return self.solver.filter_container_metrics(
+            self.spark, self.query, container_tags_df, pre_filtered_containers_df
+        )
 
     def _detect_upserted_containers(self) -> DataFrame | None:
         """
@@ -1514,11 +1516,11 @@ class Report:
         if not self._has_sink:
             return None
         detector = ContainerUpsertDetector(self.spark)
-        # Read container_metrics exactly as the solver processes it (column_name_mapping,
-        # project_id, and per-table filters applied), so detection joins on the internal
-        # ``container_id`` and sees the same container universe as the solve. Reading the raw
-        # table here would break configs that remap the physical container-id column (#99).
-        silver_containers = self.solver.scoped_container_metrics(self.spark, self.query)
+        # Read container_metrics through the solver's public container pipeline, so
+        # detection joins on the internal ``container_id`` and sees the same report-eligible
+        # container universe as the solve. Reading the raw table here would break configs
+        # that remap the physical container-id column (#99).
+        silver_containers = self._filtered_container_metrics()
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
 
         silver_col = "last_modified"

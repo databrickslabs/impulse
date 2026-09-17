@@ -318,6 +318,41 @@ class DefaultSolver(QuerySolver):
             tags = tags.where(F.col(col_name) == value)
         return tags
 
+    def _scoped_container_metrics(self, query, pre_filtered_containers_df=None) -> DataFrame:
+        """Read ``container_metrics`` scoped to the solver config.
+
+        Source is *pre_filtered_containers_df* when provided (the incremental
+        container subset), otherwise the full ``container_metrics`` table.
+        Applies the per-table ``column_name_mapping``, the top-level
+        ``project_id`` filter, and the per-table ``container_metrics.filters``.
+        Query-level ``MetricExpression`` filters are **not** applied here —
+        callers add those on top when needed.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (database + config).
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental subset to read instead of the full table.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            The scoped, column-mapped ``container_metrics`` frame.
+        """
+        if pre_filtered_containers_df is not None:
+            metrics = pre_filtered_containers_df
+        else:
+            metrics = query.db.container_metrics(self.spark)
+        metrics = self._apply_column_mapping(
+            metrics, self.config.container_metrics.column_name_mapping
+        )
+        if self.config.project_id is not None:
+            metrics = metrics.where(F.col(self.config.project_id_col) == self.config.project_id)
+        for col_name, value in self.config.container_metrics.filters.items():
+            metrics = metrics.where(F.col(col_name) == value)
+        return metrics
+
     def _pivot_container_tags(self, tags_df, keys) -> DataFrame:
         """Pivot scoped ``container_tags`` rows to one column per key in *keys*.
 
@@ -433,7 +468,7 @@ class DefaultSolver(QuerySolver):
 
         metric_filters = [filt for filt in query.filters if isinstance(filt, MetricExpression)]
 
-        metrics = self.scoped_container_metrics(self.spark, query, pre_filtered_containers_df)
+        metrics = self._scoped_container_metrics(query, pre_filtered_containers_df)
 
         if len(metric_filters) > 0:
             metrics = metrics.where(self._build_expr(metric_filters))
@@ -1294,7 +1329,7 @@ class DefaultSolver(QuerySolver):
         meta_df = None
 
         if metric_cols:
-            metrics = self.scoped_container_metrics(self.spark, query, pre_filtered_containers_df)
+            metrics = self._scoped_container_metrics(query, pre_filtered_containers_df)
             missing = [c for c in metric_cols if c not in metrics.columns]
             if missing:
                 raise ValueError(
@@ -1317,7 +1352,7 @@ class DefaultSolver(QuerySolver):
                 # Scope the EAV rows to the incremental container subset before
                 # the pivot so only relevant containers are read and grouped.
                 scoped_ids = (
-                    self.scoped_container_metrics(self.spark, query, pre_filtered_containers_df)
+                    self._scoped_container_metrics(query, pre_filtered_containers_df)
                     .select(container_id_col)
                     .distinct()
                 )
