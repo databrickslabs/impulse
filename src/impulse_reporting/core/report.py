@@ -1077,6 +1077,13 @@ class Report:
                 self._processed_container_ids = self._collect_container_ids(
                     pre_filtered_containers_df
                 )
+        elif self.config.query_engine.max_containers_per_run is not None:
+            # Full mode with a cap: solve the full scoped population in one pass, chunked by
+            # the cap for memory. Supplying the frame here lets the batched solve chunk it;
+            # there is no cross-run deferral (``_more_batches_pending`` stays False).
+            pre_filtered_containers_df = self.solver.scoped_container_metrics(
+                self.spark, self.query
+            )
 
         # Two signals for persistence:
         # - has_processed_containers (new + updated): gates whether a fact table is
@@ -1094,11 +1101,17 @@ class Report:
             else None
         )
 
-        # Container scope for CHANGED entities: without a cap, None (all containers).
-        # Under a cap, all historical (gold) containers plus the capped new ones, so a
-        # definition change is re-applied to existing containers while new containers
-        # beyond the cap are deferred.
-        changed_pre_filtered_containers_df = self._changed_scope(pre_filtered_containers_df)
+        # Container scope for CHANGED entities. Incremental: without a cap, None (all
+        # containers); under a cap, all historical (gold) containers plus the capped new
+        # ones (``_changed_scope``), so a definition change is re-applied to existing
+        # containers while new containers beyond the cap are deferred. Full mode: the same
+        # full frame as the unchanged solve (``_changed_scope`` is an incremental-cap
+        # concept and must not run here).
+        changed_pre_filtered_containers_df = (
+            self._changed_scope(pre_filtered_containers_df)
+            if self._is_incremental
+            else pre_filtered_containers_df
+        )
 
         hash_comparator = DefinitionHashComparator(self.spark)
 

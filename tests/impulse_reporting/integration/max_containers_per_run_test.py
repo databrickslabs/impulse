@@ -209,6 +209,41 @@ def test_bootstrap_capped_drains_in_one_run_call(spark, uncapped_baseline):
         assert got == uncapped_baseline["plain"][t], f"{t}: run() drain must match uncapped"
 
 
+def test_full_mode_container_chunked_solve_matches_uncapped(spark, uncapped_baseline):
+    """Full mode (no incremental) + cap: the solve is chunked by the cap in a single pass.
+
+    Chunking is a memory split, not a content change, so gold must equal the uncapped run.
+    """
+    config = ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver.container_metrics",
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri="spark_catalog.silver.channels",
+        ),
+        unity_sink=UnitySink(catalog="spark_catalog", schema="gold", table_prefix="fullcap"),
+        # No incremental config -> full mode; cap chunks the single full pass.
+        query_engine=QueryEngine(max_containers_per_run=1),
+    )
+    report = Report(
+        name="cap_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(config),
+    )
+    _add_light_aggs(report)
+    report.determine_report()
+    report.persist_results()
+
+    assert _container_ids(spark, "fullcap") == [
+        1,
+        2,
+        3,
+    ], "full-mode solve processes all containers"
+    for t in _BASELINE_TABLES:
+        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.fullcap_{t}"))
+        assert got == uncapped_baseline["plain"][t], f"{t}: chunked full solve must match uncapped"
+
+
 def test_capped_run_does_not_prune_out_of_batch_updated_container(spark):
     """A capped run must not prune gold rows for updated containers outside the cap."""
     # Seed gold with containers 1 and 2 (initial full load).
