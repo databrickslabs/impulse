@@ -11,7 +11,7 @@ from functools import reduce
 from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as F
-from pyspark.sql import DataFrame, SparkSession, Window
+from pyspark.sql import DataFrame, SparkSession
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -515,32 +515,18 @@ def _materialize_temp(df: DataFrame, run_id: str, idx, has_sink: bool, catalog, 
     return name
 
 
-def _container_chunks(spark, effective_df, max_n, has_sink, catalog, schema, cid_col):
+def _container_chunks(effective_df, max_n, cid_col):
     """Yield ``effective_df`` sliced into chunks of at most ``max_n`` containers.
 
-    Numbers the distinct container ids by ``floor(row_number()/max_n)`` over an ordered
-    window and materializes that mapping once (no ``cache()``; sort once) so chunk
-    membership is deterministic and reproducible across runs. Each chunk is
-    ``effective_df`` inner-joined to its batch's ids — no ids are collected to the driver.
+    Collects the distinct container ids to the driver once (a single narrow column),
+    orders them, and slices them into ``max_n``-sized batches in Python; each chunk is
+    ``effective_df`` filtered to its batch's ids. Ordering makes chunk membership
+    deterministic and reproducible across runs. Only the ids are collected — each chunk's
+    solve still processes at most ``max_n`` containers, so the per-batch memory bound holds.
     """
-    run_id = uuid.uuid4().hex[:8]
-    numbered = (
-        effective_df.select(cid_col)
-        .distinct()
-        .withColumn(
-            "_batch",
-            ((F.row_number().over(Window.orderBy(cid_col)) - F.lit(1)) / F.lit(max_n)).cast(
-                "long"
-            ),
-        )
-    )
-    name = _materialize_temp(numbered, run_id, "containers", has_sink, catalog, schema)
-    num_batches = spark.table(name).agg(F.max("_batch")).first()[0]
-    if num_batches is None:
-        return
-    for b in range(int(num_batches) + 1):
-        batch_ids = spark.table(name).where(F.col("_batch") == b).select(cid_col)
-        yield effective_df.join(batch_ids, on=cid_col, how="inner")
+    ids = sorted(row[cid_col] for row in effective_df.select(cid_col).distinct().collect())
+    for start in range(0, len(ids), max_n):
+        yield effective_df.where(F.col(cid_col).isin(ids[start : start + max_n]))
 
 
 def solve_expressions_batched(
@@ -636,15 +622,7 @@ def solve_expressions_batched(
 
     parts = [
         _solve_selector_batches(chunk)
-        for chunk in _container_chunks(
-            spark,
-            pre_filtered_containers_df,
-            max_containers_per_run,
-            has_sink,
-            catalog,
-            schema,
-            cid_col,
-        )
+        for chunk in _container_chunks(pre_filtered_containers_df, max_containers_per_run, cid_col)
     ]
     # No chunks => empty container set; fall back to a single solve so the result matches
     # the non-chunked path (an empty-rows DataFrame, not None).
@@ -741,15 +719,7 @@ def solve_calculated_channels_batched(
 
     parts = [
         _solve_selector_batches(chunk)
-        for chunk in _container_chunks(
-            spark,
-            pre_filtered_containers_df,
-            max_containers_per_run,
-            has_sink,
-            catalog,
-            schema,
-            cid_col,
-        )
+        for chunk in _container_chunks(pre_filtered_containers_df, max_containers_per_run, cid_col)
     ]
     # No chunks => empty container set; fall back to a single solve so the result matches
     # the non-chunked path (an empty-rows DataFrame, not None).
