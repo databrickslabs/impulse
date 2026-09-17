@@ -1390,12 +1390,11 @@ class Report:
     def _cap_upserted_batch(
         self, upserted_df: DataFrame, max_containers: int
     ) -> tuple[DataFrame, list, bool]:
-        """Take at most ``max_containers`` report-eligible upserted containers.
+        """Take at most ``max_containers`` upserted containers.
 
-        Runs the detected upserted set through the solver's container filter pipeline first,
-        then orders by ``container_id`` and collects one id past the cap in a single pass.
-        This answers both which containers this batch commits and whether more eligible
-        containers remain without letting report-filtered containers consume batch slots.
+        ``upserted_df`` is already produced from the solver's report-eligible container
+        pipeline. Ordering by ``container_id`` and collecting one id past the cap answers
+        both which containers this batch commits and whether more eligible containers remain.
 
         Returns
         -------
@@ -1403,10 +1402,9 @@ class Report:
             ``(capped_containers_df, batch_ids, more_pending)``.
         """
         container_id_col = self.solver.config.container_id_col
-        eligible_df = self._filtered_container_metrics(upserted_df)
         batch_ids = [
             row[container_id_col]
-            for row in eligible_df.select(container_id_col)
+            for row in upserted_df.select(container_id_col)
             .distinct()
             .orderBy(container_id_col)
             .limit(max_containers + 1)
@@ -1414,7 +1412,7 @@ class Report:
         ]
         more_pending = len(batch_ids) > max_containers
         batch_ids = batch_ids[:max_containers]
-        capped_df = eligible_df.where(F.col(container_id_col).isin(batch_ids))
+        capped_df = upserted_df.where(F.col(container_id_col).isin(batch_ids))
         return capped_df, batch_ids, more_pending
 
     def _filtered_container_metrics(self, pre_filtered_containers_df: DataFrame = None) -> DataFrame:
