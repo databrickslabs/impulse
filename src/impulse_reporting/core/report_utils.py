@@ -529,6 +529,33 @@ def _container_chunks(effective_df, max_n, cid_col):
         yield effective_df.where(F.col(cid_col).isin(ids[start : start + max_n]))
 
 
+def _combine_container_chunks(
+    spark: SparkSession,
+    parts: list[DataFrame],
+    has_sink: bool,
+    catalog: str,
+    schema: str,
+) -> DataFrame:
+    """Combine per-chunk solve results (disjoint containers, so a row append).
+
+    With a sink, append each chunk into one ``__impulse_temp_*`` Delta table and read it
+    back once, avoiding a deep ``unionByName`` tree and materializing one chunk at a time.
+    Without a sink, register each chunk as a temp view and ``unionByName`` them.
+    """
+    run_id = uuid.uuid4().hex[:8]
+    if not has_sink:
+        views = []
+        for idx, part in enumerate(parts):
+            name = f"__impulse_temp_{run_id}_chunk_{idx}"
+            part.createOrReplaceTempView(name)
+            views.append(spark.table(name))
+        return reduce(lambda a, b: a.unionByName(b), views)
+    fq_name = f"`{catalog}`.`{schema}`.`__impulse_temp_{run_id}_chunks`"
+    for idx, part in enumerate(parts):
+        part.write.format("delta").mode("overwrite" if idx == 0 else "append").saveAsTable(fq_name)
+    return spark.table(fq_name)
+
+
 def solve_expressions_batched(
     spark: SparkSession,
     expressions: list[TimeSeriesExpression],
@@ -630,7 +657,11 @@ def solve_expressions_batched(
     # the non-chunked path (an empty-rows DataFrame, not None).
     if not parts:
         return _solve_selector_batches(pre_filtered_containers_df)
-    return reduce(lambda a, b: a.unionByName(b), parts)
+    # One chunk (e.g. incremental unchanged path, population <= cap): return it directly,
+    # no extra Delta round-trip.
+    if len(parts) == 1:
+        return parts[0]
+    return _combine_container_chunks(spark, parts, has_sink, catalog, schema)
 
 
 def solve_calculated_channels_batched(
@@ -729,7 +760,11 @@ def solve_calculated_channels_batched(
     # the non-chunked path (an empty-rows DataFrame, not None).
     if not parts:
         return _solve_selector_batches(pre_filtered_containers_df)
-    return reduce(lambda a, b: a.unionByName(b), parts)
+    # One chunk (e.g. incremental unchanged path, population <= cap): return it directly,
+    # no extra Delta round-trip.
+    if len(parts) == 1:
+        return parts[0]
+    return _combine_container_chunks(spark, parts, has_sink, catalog, schema)
 
 
 def cleanup_temp_tables(spark: SparkSession, catalog: str, schema: str) -> None:

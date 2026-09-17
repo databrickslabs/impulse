@@ -1395,17 +1395,15 @@ class Report:
     ) -> tuple[DataFrame, list, bool]:
         """Take at most ``max_containers`` containers (lowest ids) from the upserted set.
 
-        Orders by ``container_id`` (deterministic batches, forward progress) and collects
-        one id past the cap in a single pass, so the detection joins run once and the same
-        pass answers both which containers this batch commits and whether more remain. The
-        capped frame is rebuilt as a plain id filter on the scoped silver rows (no re-run
-        of the detection joins), matching the id-filter pattern in ``_container_chunks``.
+        Orders by ``container_id`` and collects one id past the cap in a single pass, so the
+        detection joins run once and answer both which containers this batch commits and
+        whether more remain. The capped frame is rebuilt as a plain id filter on the scoped
+        silver rows, not a re-run of the detection joins.
 
         Returns
         -------
         tuple[DataFrame, list, bool]
-            ``(capped_containers_df, batch_ids, more_pending)`` — the batch's
-            ``container_metrics`` rows, its ordered ids, and whether more remain.
+            ``(capped_containers_df, batch_ids, more_pending)``.
         """
         batch_ids = [
             row["container_id"]
