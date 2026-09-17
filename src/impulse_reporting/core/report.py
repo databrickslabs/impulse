@@ -1415,7 +1415,9 @@ class Report:
         capped_df = upserted_df.where(F.col(container_id_col).isin(batch_ids))
         return capped_df, batch_ids, more_pending
 
-    def _filtered_container_metrics(self, pre_filtered_containers_df: DataFrame = None) -> DataFrame:
+    def _filtered_container_metrics(
+        self, pre_filtered_containers_df: DataFrame = None
+    ) -> DataFrame:
         """Resolve container metrics through the public solver container pipeline."""
         container_tags_df = self.solver.filter_container_tags(self.spark, self.query)
         return self.solver.filter_container_metrics(
