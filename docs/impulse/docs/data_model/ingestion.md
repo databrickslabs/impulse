@@ -233,7 +233,8 @@ computed-column joins, JSON-encoded values, multi-column composite keys
 that need pre-processing, etc. — you can implement a custom solver by
 subclassing
 [`QuerySolver`](../references/api/impulse_query_engine/analyze/query/solvers/query_solver.md)
-(or one of the existing solvers) and registering it in your report config.
+(or one of the existing solvers, usually `DefaultSolver`) and selecting it
+by name in your report config.
 
 This is significantly more invested than the `SolverConfig` path: you take
 on responsibility for the four solver pipeline stages
@@ -244,6 +245,110 @@ synthesises Impulse-shaped views via SQL CTEs at query time. If you find
 yourself heading down this path, it is usually worth first asking whether
 a one-time ETL job to produce the standard silver-layer shape would be
 cheaper.
+
+#### Registering a custom solver
+
+Decorate your subclass with `@register_solver(name)`. The report config then
+selects it by that name via the existing `query_engine.solver` field — the
+same field used for the built-in `DefaultSolver`.
+
+```python
+from impulse_query_engine.analyze.query.solvers import (
+    register_solver,
+    SolverConfig,
+)
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+
+
+class CustomSolverConfig(SolverConfig):
+    raw_signal_table: str            # required — validated when the config is parsed
+    position_signal_name: str = "POSITION"  # optional, with a default
+
+
+@register_solver("CustomSolver", CustomSolverConfig)
+class CustomSolver(DefaultSolver):
+    """Reshapes a custom raw table into the Impulse silver schema."""
+    ...
+```
+
+```json
+{
+  "query_engine": {
+    "solver": "CustomSolver",
+    "solver_config": {
+      "raw_signal_table": "my_catalog.my_schema.raw_signals",
+      "channels": { "column_name_mapping": { "signal_value": "value" } }
+    }
+  }
+}
+```
+
+Passing `CustomSolverConfig` to `register_solver` makes Impulse validate the
+`solver_config` block through that subclass, so its extra fields are checked
+at config-load time: a missing required `raw_signal_table`, or a mistyped
+key, raises a `ValidationError` up front rather than being silently dropped.
+Inside the solver you read them with normal typed attribute access
+(`self.config.raw_signal_table`).
+
+**Loading the solver.** `@register_solver` runs only when its module is
+imported, so import your solver package once in the driver before building
+the report — that import is what registers the name:
+
+```python
+import sys
+sys.path.append("/Workspace/Repos/me/my_solvers_root")  # dir containing my_solvers/
+
+import my_solvers.custom_solver       # runs @register_solver("CustomSolver")
+
+from impulse_reporting.core.report import Report
+
+report = Report(name="my_report", spark=spark, workspace_client=ws,
+                config_path="report_config.json")
+report.determine_report()
+```
+
+If the name is not registered when the config is parsed, Impulse raises an
+error listing the known names — a quick signal that the import is missing or
+misspelled. (For an installed wheel the `sys.path` line is unnecessary; the
+`import` alone suffices. In a notebook you can also just define the solver in
+a cell — running that cell registers it.)
+
+Selection is by registered name only: a report config can never, on its own,
+cause Impulse to import an arbitrary class. Which solvers exist is governed
+entirely by what the driver imports.
+
+#### Example: a column-redaction solver
+
+A solver override plus one config field gives a config-switched masking layer:
+
+```python
+import pyspark.sql.functions as F
+from impulse_query_engine.analyze.query.solvers import register_solver, SolverConfig
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+
+
+class RedactConfig(SolverConfig):
+    redact_columns: list[str] = []
+
+
+@register_solver("RedactingSolver", RedactConfig)
+class RedactingSolver(DefaultSolver):
+    def solve(self, query, channels_df, selections, dtypes):
+        df = super().solve(query, channels_df, selections, dtypes)
+        for col in self.config.redact_columns:
+            if col in df.columns:
+                df = df.withColumn(col, F.lit(None).cast(df.schema[col].dataType))
+        return df
+```
+
+```json
+{
+  "query_engine": {
+    "solver": "RedactingSolver",
+    "solver_config": { "redact_columns": ["vin", "gps_lat", "gps_lon"] }
+  }
+}
+```
 
 The general rule: **`SolverConfig` for naming differences, custom solver
 for structural differences, ETL into the standard shape for everything

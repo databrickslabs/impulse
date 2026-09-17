@@ -5,6 +5,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
+from impulse_query_engine.analyze.query.solvers.registry import resolve_registration
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
 from impulse_reporting.channels.calculated_channel_kpis import DEFAULT_KPIS, KPI_BUILDERS
 
@@ -85,14 +86,19 @@ class DataType(StrEnum):
     RLE = "RLE"
 
 
-class Solvers(Enum):
+class Solvers(StrEnum):
     """
-    Enumeration of available solver types for the query engine.
+    Names of the built-in solver types for the query engine.
 
     ``DEFAULT_SOLVER`` is the single, unified solver. ``DELTA_SOLVER`` and
     ``KEY_VALUE_STORE_SOLVER`` are **deprecated aliases** kept so that existing
     report configs continue to deserialize; both now resolve to the same
     ``DefaultSolver``. They will be removed in a future release.
+
+    This is a :class:`~enum.StrEnum`: each member *is* its string value, so the
+    ``query_engine.solver`` field is a plain ``str`` (accepting any registered
+    solver name, including customer solvers) while existing comparisons against
+    these members — ``qe.solver == Solvers.DEFAULT_SOLVER`` — keep working.
 
     Attributes
     ----------
@@ -393,12 +399,44 @@ class QueryEngine(BaseModel):
     - RAW channel data must contain 'container_id', 'channel_id', 'timestamp', 'value' columns
     """
 
-    solver: Solvers = Solvers.DEFAULT_SOLVER
+    solver: str = Solvers.DEFAULT_SOLVER
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
     batch_size: int = 500
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_solver_config_for_solver(cls, data):
+        """Validate ``solver_config`` through the selected solver's config class.
+
+        A custom solver registered with a :class:`SolverConfig` subclass (via
+        ``register_solver(name, MyConfig)``) can carry extra config fields.  By
+        default Pydantic would parse ``solver_config`` as the base
+        :class:`SolverConfig` and silently drop those fields.  Here we resolve
+        the registered ``config_cls`` for ``solver`` and re-validate the raw
+        ``solver_config`` dict through it, so extra/required fields are enforced
+        at parse time and the subclass instance is preserved on the field.
+
+        The solver must be registered when the config is parsed — i.e. the
+        driver imported the customer's package before building the report.  An
+        unknown name is rejected here (as a ``ValidationError`` listing the
+        registered names), which surfaces a missing import early instead of
+        silently accepting an unusable config.
+        """
+        if not isinstance(data, dict):
+            return data
+        name = str(data.get("solver", Solvers.DEFAULT_SOLVER))
+        try:
+            config_cls = resolve_registration(name).config_cls
+        except KeyError as exc:
+            # Re-raise as ValueError so Pydantic surfaces it as a ValidationError.
+            raise ValueError(str(exc)) from exc
+        raw_config = data.get("solver_config")
+        if isinstance(raw_config, dict):
+            data["solver_config"] = config_cls.model_validate(raw_config)
+        return data
 
     @model_validator(mode="after")
     def validate_drop_implausible_data_requires_raw(self):
