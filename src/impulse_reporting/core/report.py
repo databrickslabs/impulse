@@ -992,9 +992,9 @@ class Report:
             current_batch_ids = frozenset(self._processed_container_ids or [])
             if current_batch_ids == previous_batch_ids:
                 warnings.warn(
-                    f"Incremental run stopped early: the {len(current_batch_ids)} containers "
-                    f"{sorted(current_batch_ids)} were detected again after being persisted, so "
-                    "the run made no forward progress. Likely causes: a misconfigured "
+                    f"Incremental run stopped early: {len(current_batch_ids)} containers were "
+                    "detected again after being persisted, so the run made no forward progress. "
+                    f"First ids: {sorted(current_batch_ids)[:10]}. Likely causes: a misconfigured "
                     "gold_last_modified_column, container_filters excluding these containers, or "
                     "containers that produce no measurement_dimension row. Remaining containers "
                     "were not processed.",
@@ -1390,14 +1390,16 @@ class Report:
         used for freshness comparison.  Falls back to ``"last_modified"``
         when no incremental config is present.
 
-        Returns None if gold layer doesn't exist (triggers full processing)
-        or if no sink is configured (sinkless mode).
+        When the gold layer does not exist yet, every silver container is "new",
+        so all of them are returned (the capped-incremental bootstrap; this method
+        is only reached in incremental mode). Returns None only in sinkless mode
+        (no sink configured).
 
         Returns
         -------
         DataFrame | None
-            DataFrame containing containers to process, or None if gold table
-            doesn't exist (indicating full processing is needed).
+            Containers to process (new + updated, or all silver containers on the
+            bootstrap first run), or None in sinkless mode.
         """
         args = self._container_detection_args()
         if args is None:
@@ -1453,6 +1455,9 @@ class Report:
             return capped_upserted_df
         gold_ids = self.spark.read.table(measurement_dim_table).select("container_id")
         allowed = gold_ids.unionByName(capped_upserted_df.select("container_id")).distinct()
+        # Full container_metrics rows for the allowed ids, not just the ids: downstream uses this
+        # frame as the container_metrics source, so it needs all columns. ``allowed`` has only
+        # ``container_id``.
         return silver_containers.join(allowed, on="container_id", how="inner")
 
     def _container_detection_args(self):
