@@ -19,8 +19,11 @@ from databricks.sdk import WorkspaceClient
 from impulse_reporting.aggregations.histogram import HistogramDuration
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.config.config_parser import (
+    Comparator,
+    ContainerFilters,
     IncrementalConfig,
     ImpulseConfig,
+    MetricFilter,
     QueryEngine,
     Source,
     UnitySink,
@@ -81,7 +84,7 @@ def _add_light_aggs_changed(report):
     _add_light_aggs(report, rpm_bins=[float(i) for i in range(0, 8000, 1000)])
 
 
-def _config(silver_table, prefix, *, max_containers_per_batch=None):
+def _config(silver_table, prefix, *, max_containers_per_batch=None, container_filters=None):
     return ImpulseConfig(
         source=Source(
             container_metrics_table=f"spark_catalog.silver.{silver_table}",
@@ -94,19 +97,31 @@ def _config(silver_table, prefix, *, max_containers_per_batch=None):
             silver_last_modified_column="timestamp",
             gold_last_modified_column="_created_at",
         ),
+        container_filters=container_filters,
         query_engine=QueryEngine(max_containers_per_batch=max_containers_per_batch),
     )
 
 
 def _make_report(
-    spark, silver_table, prefix, *, max_containers_per_batch=None, add_aggs=_add_light_aggs
+    spark,
+    silver_table,
+    prefix,
+    *,
+    max_containers_per_batch=None,
+    add_aggs=_add_light_aggs,
+    container_filters=None,
 ):
     report = Report(
         name="cap_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
         config=dict(
-            _config(silver_table, prefix, max_containers_per_batch=max_containers_per_batch)
+            _config(
+                silver_table,
+                prefix,
+                max_containers_per_batch=max_containers_per_batch,
+                container_filters=container_filters,
+            )
         ),
     )
     add_aggs(report)
@@ -209,6 +224,26 @@ def test_bootstrap_capped_drains_in_one_run_call(spark, uncapped_baseline):
     for t in _BASELINE_TABLES:
         got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.bootrun_{t}"))
         assert got == uncapped_baseline["plain"][t], f"{t}: run() drain must match uncapped"
+
+
+def test_capped_run_caps_after_metric_container_filters(spark):
+    """Filtered-out low ids must not consume capped incremental batch slots."""
+    filters = ContainerFilters(
+        metric_filters=[
+            [MetricFilter(column_name="container_id", comparator=Comparator.GT, value=1)]
+        ]
+    )
+    report = _make_report(
+        spark,
+        "container_metrics",
+        "filtercap",
+        max_containers_per_batch=1,
+        container_filters=filters,
+    )
+
+    report.run()
+
+    assert _container_ids(spark, "filtercap") == [2, 3]
 
 
 def test_full_mode_container_chunked_solve_matches_uncapped(spark, uncapped_baseline):

@@ -996,9 +996,8 @@ class Report:
                     f"Incremental run stopped early: {len(current_batch_ids)} containers were "
                     "detected again after being persisted, so the run made no forward progress. "
                     f"First ids: {sorted(current_batch_ids)[:10]}. Likely causes: a misconfigured "
-                    "gold_last_modified_column, container_filters excluding these containers, or "
-                    "containers that produce no measurement_dimension row. Remaining containers "
-                    "were not processed.",
+                    "gold_last_modified_column or containers that produce no measurement_dimension "
+                    "row. Remaining containers were not processed.",
                     stacklevel=2,
                 )
                 return
@@ -1393,30 +1392,34 @@ class Report:
     def _cap_upserted_batch(
         self, upserted_df: DataFrame, max_containers: int
     ) -> tuple[DataFrame, list, bool]:
-        """Take at most ``max_containers`` containers (lowest ids) from the upserted set.
+        """Take at most ``max_containers`` report-eligible upserted containers.
 
-        Orders by ``container_id`` and collects one id past the cap in a single pass, so the
-        detection joins run once and answer both which containers this batch commits and
-        whether more remain. The capped frame is rebuilt as a plain id filter on the scoped
-        silver rows, not a re-run of the detection joins.
+        Runs the detected upserted set through the solver's container filter pipeline first,
+        then orders by ``container_id`` and collects one id past the cap in a single pass.
+        This answers both which containers this batch commits and whether more eligible
+        containers remain without letting report-filtered containers consume batch slots.
 
         Returns
         -------
         tuple[DataFrame, list, bool]
             ``(capped_containers_df, batch_ids, more_pending)``.
         """
+        container_id_col = self.solver.config.container_id_col
+        container_tags_df = self.solver.filter_container_tags(self.spark, self.query)
+        eligible_df = self.solver.filter_container_metrics(
+            self.spark, self.query, container_tags_df, upserted_df
+        )
         batch_ids = [
-            row["container_id"]
-            for row in upserted_df.orderBy("container_id")
-            .select("container_id")
+            row[container_id_col]
+            for row in eligible_df.select(container_id_col)
+            .distinct()
+            .orderBy(container_id_col)
             .limit(max_containers + 1)
             .collect()
         ]
         more_pending = len(batch_ids) > max_containers
         batch_ids = batch_ids[:max_containers]
-        capped_df = self.solver.scoped_container_metrics(self.spark, self.query).where(
-            F.col("container_id").isin(batch_ids)
-        )
+        capped_df = eligible_df.where(F.col(container_id_col).isin(batch_ids))
         return capped_df, batch_ids, more_pending
 
     def _detect_upserted_containers(self) -> DataFrame | None:
