@@ -1,11 +1,13 @@
 """Integration tests for ``query_engine.max_containers_per_run``.
 
 The cap bounds upserted containers per incremental run; committed containers drop out of
-the next run's detection, so repeated runs iterate the population and the final gold
-matches an uncapped run. The cap is incremental-only (rejected in full mode): the FIRST
-run of a capped config treats every container as "new" and caps-and-defers even before
-gold exists, so successive runs drain the full silver table (containers 1, 2, 3). Some
-tests still seed gold with a subset first to exercise the updated/changed-definition paths.
+the next run's detection, so repeated runs iterate the population and the final gold matches
+an uncapped run. The cap is incremental-only: the FIRST run of a capped config treats every
+container as "new" and caps-and-defers even before gold exists, so successive runs drain the
+full silver table (containers 1, 2, 3).
+
+These tests use lightweight aggregations (few histogram bins) and share a single uncapped
+baseline (computed once) so each determine+persist cycle stays cheap.
 """
 
 from unittest.mock import create_autospec
@@ -14,6 +16,8 @@ import pyspark.sql.functions as F
 import pytest
 from databricks.sdk import WorkspaceClient
 
+from impulse_reporting.aggregations.histogram import HistogramDuration
+from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.config.config_parser import (
     IncrementalConfig,
     ImpulseConfig,
@@ -21,12 +25,60 @@ from impulse_reporting.config.config_parser import (
     Source,
     UnitySink,
 )
+from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
+from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.container_event import ContainerEvent
 from tests.conftest import spark
-from tests.impulse_reporting.integration.incremental_report_test import (
-    add_aggs_to_report,
-    add_aggs_to_report_changed_bins,
-)
+
+
+def _add_light_aggs(report, *, rpm_bins=None):
+    """Register a small event/aggregation set on the report.
+
+    Mirrors the entity mix used across the reporting tests (two histograms, a basic event, an
+    event-scoped stats aggregator, a container event + its stats aggregator) but with tiny
+    histogram bins so each determine+persist cycle stays cheap. ``rpm_bins`` lets a caller flip
+    the rpm-histogram definition (its hash) to exercise the changed-definition path.
+    """
+    rpm_bins = rpm_bins if rpm_bins is not None else [float(i) for i in range(0, 8000, 2000)]
+    query = report.get_db().query
+    c1 = query.channel(channel_name="Engine RPM")
+    c2 = query.channel(channel_name="Vehicle Speed Sensor")
+    page = Page(page_number=1)
+    report.add_page(page)
+    page.add_aggregation(HistogramDuration("rpm_hist_p1", base_expr=c1, bins=rpm_bins))
+    page.add_aggregation(
+        HistogramDuration(
+            "speed_hist_p1", base_expr=c2, bins=[float(i) for i in range(0, 300, 100)]
+        )
+    )
+    rpm_event = BasicEvent(name="rpm_event", expr=c1 > 0, desc="engine speed > 0 rpm")
+    report.add_event(rpm_event)
+    page.add_aggregation(
+        StatsAggregator(
+            name="stats_agg",
+            input_expressions=[c1],
+            channel_names=["Engine RPM"],
+            event=rpm_event,
+            statistics=["start", "end", "mean"],
+        )
+    )
+    container_event = ContainerEvent("Measurement Event")
+    report.add_event(container_event)
+    page.add_aggregation(
+        StatsAggregator(
+            name="stats_agg_container",
+            input_expressions=[c1],
+            channel_names=["Engine RPM"],
+            event=container_event,
+            statistics=["start", "end", "mean"],
+        )
+    )
+
+
+def _add_light_aggs_changed(report):
+    """Same as :func:`_add_light_aggs` but with different rpm bins (a changed definition hash)."""
+    _add_light_aggs(report, rpm_bins=[float(i) for i in range(0, 8000, 1000)])
 
 
 def _config(silver_table, prefix, *, max_containers_per_run=None):
@@ -47,7 +99,7 @@ def _config(silver_table, prefix, *, max_containers_per_run=None):
 
 
 def _make_report(
-    spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=add_aggs_to_report
+    spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=_add_light_aggs
 ):
     report = Report(
         name="cap_report",
@@ -59,7 +111,7 @@ def _make_report(
     return report
 
 
-def _run(spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=add_aggs_to_report):
+def _run(spark, silver_table, prefix, *, max_containers_per_run=None, add_aggs=_add_light_aggs):
     """Run ONE determine+persist pass (single batch) — the granular API, no run() loop."""
     report = _make_report(
         spark,
@@ -79,30 +131,57 @@ def _container_ids(spark, prefix):
     )
 
 
+def _hist_container_ids(spark, prefix):
+    return {
+        r.container_id
+        for r in spark.read.table(f"spark_catalog.gold.{prefix}_histogram_fact")
+        .select("container_id")
+        .distinct()
+        .collect()
+    }
+
+
 def _rows_without_meta(df):
     """Deterministic row set, dropping run-dependent columns.
 
-    Excludes ``_``-prefixed meta (e.g. ``_created_at``) and ``config_hash`` (a hash of
-    the full config, which intentionally differs between the capped/uncapped configs).
+    Excludes ``_``-prefixed meta (e.g. ``_created_at``) and ``config_hash`` (a hash of the
+    full config, which intentionally differs between the capped/uncapped configs).
     """
     cols = [c for c in df.columns if not c.startswith("_") and c != "config_hash"]
     return sorted(tuple(r) for r in df.select(*cols).collect())
 
 
-def test_max_containers_per_run_iterates_and_matches_uncapped(spark):
-    # --- Uncapped baseline (prefix "uncapped") ---------------------------------
-    # Seed gold with container 1 (initial full load), then one uncapped incremental
-    # run over the full silver table processes the remaining new containers {2, 3}.
-    _run(spark, "container_metrics_inc_1", "uncapped")
-    assert _container_ids(spark, "uncapped") == [1]
-    _run(spark, "container_metrics", "uncapped")  # cap=None
-    assert _container_ids(spark, "uncapped") == [1, 2, 3]
+_BASELINE_TABLES = ("histogram_fact", "stats_aggregator_fact", "measurement_dimension")
 
-    # --- Capped runs (prefix "capped", N=1) ------------------------------------
-    _run(spark, "container_metrics_inc_1", "capped")  # initial full load -> {1}
+
+@pytest.fixture(scope="module")
+def uncapped_baseline(spark):
+    """Uncapped gold for the light aggs, computed once and reused as snapshots.
+
+    Returns ``{"plain": {table: rows}, "changed": {table: rows}}`` where rows are the
+    ``_rows_without_meta`` snapshots of each gold fact table from a single uncapped full run.
+    Collected eagerly so the snapshots survive the per-test ``cleanup_gold`` teardown.
+    """
+    baselines = {}
+    for key, add_aggs, prefix in (
+        ("plain", _add_light_aggs, "plainbase"),
+        ("changed", _add_light_aggs_changed, "changedbase"),
+    ):
+        _run(spark, "container_metrics", prefix, add_aggs=add_aggs)
+        baselines[key] = {
+            t: _rows_without_meta(spark.read.table(f"spark_catalog.gold.{prefix}_{t}"))
+            for t in _BASELINE_TABLES
+        }
+    return baselines
+
+
+def test_seeded_capped_iterates_and_matches_uncapped(spark, uncapped_baseline):
+    """Seeded gold: granular capped runs drain the new containers and match the uncapped gold."""
+    # Seed gold with container 1 (initial full load), then cap=1 over the full silver table.
+    _run(spark, "container_metrics_inc_1", "capped")
     assert _container_ids(spark, "capped") == [1]
 
-    # First capped incremental run: {2, 3} are new; cap=1 processes the lowest (2).
+    # First capped incremental run processes the lowest new container (2).
     _run(spark, "container_metrics", "capped", max_containers_per_run=1)
     assert _container_ids(spark, "capped") == [1, 2], "cap must limit the run to one new container"
 
@@ -114,13 +193,9 @@ def test_max_containers_per_run_iterates_and_matches_uncapped(spark):
     _run(spark, "container_metrics", "capped", max_containers_per_run=1)
     assert _container_ids(spark, "capped") == [1, 2, 3]
 
-    # --- Gold from the capped iteration matches the uncapped run ----------------
-    for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
-        capped = spark.read.table(f"spark_catalog.gold.capped_{table}")
-        uncapped = spark.read.table(f"spark_catalog.gold.uncapped_{table}")
-        assert _rows_without_meta(capped) == _rows_without_meta(
-            uncapped
-        ), f"{table}: capped iteration must reproduce the uncapped gold"
+    for t in _BASELINE_TABLES:
+        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.capped_{t}"))
+        assert got == uncapped_baseline["plain"][t], f"{t}: capped iteration must match uncapped"
 
     # Real-value sanity check: the histogram carries positive accumulated duration.
     total = (
@@ -129,6 +204,32 @@ def test_max_containers_per_run_iterates_and_matches_uncapped(spark):
         .collect()[0]["s"]
     )
     assert total is not None and total > 0
+
+
+def test_bootstrap_capped_defers_beyond_cap_and_matches_uncapped(spark, uncapped_baseline):
+    """Bootstrap (empty gold): the first capped run treats every container as new and caps it."""
+    # Capped bootstrap (no gold): the first run processes only the lowest container.
+    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    assert _container_ids(spark, "bootcap") == [1], "bootstrap must cap the first run to one"
+
+    # Successive runs drain the population (committed containers drop out of detection).
+    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    assert _container_ids(spark, "bootcap") == [1, 2]
+    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
+    assert _container_ids(spark, "bootcap") == [1, 2, 3]
+
+    for t in _BASELINE_TABLES:
+        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.bootcap_{t}"))
+        assert got == uncapped_baseline["plain"][t], f"{t}: bootstrap drain must match uncapped"
+
+
+def test_bootstrap_capped_drains_in_one_run_call(spark, uncapped_baseline):
+    """A single run() call drains the whole population from an empty gold."""
+    _make_report(spark, "container_metrics", "bootrun", max_containers_per_run=1).run()
+    assert _container_ids(spark, "bootrun") == [1, 2, 3]
+    for t in _BASELINE_TABLES:
+        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.bootrun_{t}"))
+        assert got == uncapped_baseline["plain"][t], f"{t}: run() drain must match uncapped"
 
 
 def test_capped_run_does_not_prune_out_of_batch_updated_container(spark):
@@ -174,82 +275,20 @@ def test_capped_run_does_not_prune_out_of_batch_updated_container(spark):
     assert container2_created_at_pre == container2_created_at_post, "container 2 must be untouched"
 
 
-def _hist_container_ids(spark, prefix):
-    return {
-        r.container_id
-        for r in spark.read.table(f"spark_catalog.gold.{prefix}_histogram_fact")
-        .select("container_id")
-        .distinct()
-        .collect()
-    }
-
-
-def test_bootstrap_capped_run_defers_beyond_cap_and_matches_uncapped(spark):
-    """The FIRST run of a capped incremental config (no gold yet) caps-and-defers.
-
-    Rather than computing the whole population in one pass, the bootstrap run treats every
-    container as "new", processes at most the cap, and defers the rest to later runs.
-    """
-    # Uncapped baseline: a single run over the full silver table processes all 3.
-    _run(spark, "container_metrics", "bootbase")
-    assert _container_ids(spark, "bootbase") == [1, 2, 3]
-
-    # Capped bootstrap (no gold): first run must process only the lowest container.
-    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
-    assert _container_ids(spark, "bootcap") == [1], "bootstrap must cap the first run to one"
-
-    # Successive runs drain the population (committed containers drop out of detection).
-    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
-    assert _container_ids(spark, "bootcap") == [1, 2]
-    _run(spark, "container_metrics", "bootcap", max_containers_per_run=1)
-    assert _container_ids(spark, "bootcap") == [1, 2, 3]
-
-    # Draining from an empty gold reproduces the uncapped gold exactly.
-    for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
-        capped = spark.read.table(f"spark_catalog.gold.bootcap_{table}")
-        uncapped = spark.read.table(f"spark_catalog.gold.bootbase_{table}")
-        assert _rows_without_meta(capped) == _rows_without_meta(
-            uncapped
-        ), f"{table}: capped bootstrap iteration must reproduce the uncapped gold"
-
-    # Real-value sanity check: the histogram carries positive accumulated duration.
-    total = (
-        spark.read.table("spark_catalog.gold.bootcap_histogram_fact")
-        .agg(F.sum("hist_value").alias("s"))
-        .collect()[0]["s"]
-    )
-    assert total is not None and total > 0
-
-
-def test_bootstrap_capped_run_drains_in_one_run_call(spark):
-    """A single ``run()`` call drains the whole population from an empty gold."""
-    _run(spark, "container_metrics", "bootbase2")
-    assert _container_ids(spark, "bootbase2") == [1, 2, 3]
-
-    report = _make_report(spark, "container_metrics", "bootrun", max_containers_per_run=1)
-    report.run()
-    assert _container_ids(spark, "bootrun") == [1, 2, 3]
-
-    for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
-        capped = spark.read.table(f"spark_catalog.gold.bootrun_{table}")
-        uncapped = spark.read.table(f"spark_catalog.gold.bootbase2_{table}")
-        assert _rows_without_meta(capped) == _rows_without_meta(uncapped), f"{table}: mismatch"
-
-
-def test_changed_entity_capped_defers_beyond_cap_new_and_matches_uncapped(spark):
-    """A changed definition recomputes historical + capped-new; new-beyond-cap deferred."""
+def test_changed_entity_capped_defers_beyond_cap_new(spark, uncapped_baseline):
+    """A changed definition recomputes historical + capped-new; new-beyond-cap is deferred."""
     # Seed gold with container 1 under definition D1.
     _run(spark, "container_metrics_inc_1", "chg")
     assert _container_ids(spark, "chg") == [1]
 
-    # Change the definition (D2) and add containers 2,3; incremental, cap=1.
-    # Run 1: changed entity computed for historical {1} + capped new {2}; 3 deferred.
+    # Change the definition (D2) and add containers 2, 3; incremental, cap=1.
+    # Run 1: changed entity computed for historical {1} + capped new {2}; container 3 deferred.
     _run(
         spark,
         "container_metrics",
         "chg",
         max_containers_per_run=1,
-        add_aggs=add_aggs_to_report_changed_bins,
+        add_aggs=_add_light_aggs_changed,
     )
     assert _container_ids(spark, "chg") == [1, 2], "beyond-cap new container 3 must be deferred"
     assert _hist_container_ids(spark, "chg") == {1, 2}, "no facts for the deferred container"
@@ -260,62 +299,47 @@ def test_changed_entity_capped_defers_beyond_cap_new_and_matches_uncapped(spark)
         "container_metrics",
         "chg",
         max_containers_per_run=1,
-        add_aggs=add_aggs_to_report_changed_bins,
+        add_aggs=_add_light_aggs_changed,
     )
     assert _container_ids(spark, "chg") == [1, 2, 3]
 
-    # Uncapped reference: D1 on container 1, then D2 over all containers in one run.
-    _run(spark, "container_metrics_inc_1", "chgbase")
-    _run(spark, "container_metrics", "chgbase", add_aggs=add_aggs_to_report_changed_bins)
-
-    for table in ("histogram_fact", "stats_aggregator_fact"):
-        capped = spark.read.table(f"spark_catalog.gold.chg_{table}")
-        uncapped = spark.read.table(f"spark_catalog.gold.chgbase_{table}")
-        assert _rows_without_meta(capped) == _rows_without_meta(
-            uncapped
-        ), f"{table}: capped changed-entity iteration must match the uncapped run"
+    for t in ("histogram_fact", "stats_aggregator_fact"):
+        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.chg_{t}"))
+        assert (
+            got == uncapped_baseline["changed"][t]
+        ), f"{t}: changed iteration must match uncapped"
 
 
-def test_run_drains_all_batches_in_one_call(spark):
-    """A single run() call loops determine+persist until the population is drained."""
-    # Seed gold with container 1.
-    _run(spark, "container_metrics_inc_1", "loop")
-    assert _container_ids(spark, "loop") == [1]
-
-    # New containers {2, 3}; cap=1. One run() call loops: {2} (more pending) then {3}.
-    _make_report(spark, "container_metrics", "loop", max_containers_per_run=1).run()
-    assert _container_ids(spark, "loop") == [1, 2, 3], "run() must drain every batch"
-
-    # Matches an uncapped single incremental run.
-    _run(spark, "container_metrics_inc_1", "loopbase")
-    _run(spark, "container_metrics", "loopbase")
-    for table in ("histogram_fact", "stats_aggregator_fact", "measurement_dimension"):
-        looped = spark.read.table(f"spark_catalog.gold.loop_{table}")
-        uncapped = spark.read.table(f"spark_catalog.gold.loopbase_{table}")
-        assert _rows_without_meta(looped) == _rows_without_meta(uncapped), table
-
-
-def test_run_loop_with_changed_definition(spark):
-    """run() drains batches when a definition changed: iter 1 recomputes, rest unchanged."""
+def test_run_loop_with_changed_definition(spark, uncapped_baseline):
+    """run() drains batches when a definition changed: iter 1 recomputes, the rest are unchanged."""
     _run(spark, "container_metrics_inc_1", "loopchg")  # D1 on container 1
 
-    # Changed definition (D2) + new {2,3}, cap=1, single run() call.
+    # Changed definition (D2) + new {2, 3}, cap=1, single run() call drains everything.
     _make_report(
         spark,
         "container_metrics",
         "loopchg",
         max_containers_per_run=1,
-        add_aggs=add_aggs_to_report_changed_bins,
+        add_aggs=_add_light_aggs_changed,
     ).run()
     assert _container_ids(spark, "loopchg") == [1, 2, 3]
 
-    # Uncapped D2 reference.
-    _run(spark, "container_metrics_inc_1", "loopchgbase")
-    _run(spark, "container_metrics", "loopchgbase", add_aggs=add_aggs_to_report_changed_bins)
-    for table in ("histogram_fact", "stats_aggregator_fact"):
-        looped = spark.read.table(f"spark_catalog.gold.loopchg_{table}")
-        uncapped = spark.read.table(f"spark_catalog.gold.loopchgbase_{table}")
-        assert _rows_without_meta(looped) == _rows_without_meta(uncapped), table
+    for t in ("histogram_fact", "stats_aggregator_fact"):
+        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.loopchg_{t}"))
+        assert got == uncapped_baseline["changed"][t], t
+
+
+def test_run_drains_all_batches_in_one_call(spark, uncapped_baseline):
+    """A single run() call loops determine+persist until the population is drained (seeded gold)."""
+    _run(spark, "container_metrics_inc_1", "loop")  # seed gold with container 1
+    assert _container_ids(spark, "loop") == [1]
+
+    _make_report(spark, "container_metrics", "loop", max_containers_per_run=1).run()
+    assert _container_ids(spark, "loop") == [1, 2, 3], "run() must drain every batch"
+
+    for t in _BASELINE_TABLES:
+        got = _rows_without_meta(spark.read.table(f"spark_catalog.gold.loop_{t}"))
+        assert got == uncapped_baseline["plain"][t], t
 
 
 def test_run_without_persist_does_not_loop(spark):
