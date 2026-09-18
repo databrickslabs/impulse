@@ -380,12 +380,14 @@ class QueryEngine(BaseModel):
         When omitted, all default column names are used and no
         project/toolbox filtering is applied.
     max_selectors_per_batch : int, default=500
-        Maximum number of unique ``TimeSeriesSelector`` instances solved per
-        batch.  Expressions are packed into batches under this cap to bound the
-        breadth of each solve.  ``batch_size`` is a **deprecated alias** for this
-        field, kept so existing configs keep working; it emits a
-        ``DeprecationWarning`` and will be removed in a future release.  Setting
-        both ``max_selectors_per_batch`` and ``batch_size`` is rejected.
+        Maximum number of unique ``TimeSeriesSelector`` instances (distinct
+        channel selections) per solve batch.  Expressions are packed into
+        batches under this cap, bounding the breadth of each solve pass across
+        all containers in the pass (``max_containers_per_batch`` bounds the
+        containers).  ``batch_size`` is a **deprecated alias** for this field,
+        kept so existing configs keep working; it emits a ``DeprecationWarning``
+        and will be removed in a future release.  Setting both
+        ``max_selectors_per_batch`` and ``batch_size`` is rejected.
     max_containers_per_batch : int, optional, default=None
         Caps how many containers are solved per chunk to bound per-solve memory.
         ``None`` disables the cap; when set it must be ``>= 1``.
