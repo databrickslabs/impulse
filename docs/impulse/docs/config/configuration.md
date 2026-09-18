@@ -140,6 +140,7 @@ Two independent filter families:
 | `raw_encoder`           | `str`          | `null` (resolves to `"RLE"` when `data_type = "RAW"`) | How RAW point data is converted to intervals. `"RLE"` (the default) run-length encodes on the fly to reduce memory consumption: consecutive samples with the same value collapse into a single `[tstart, tend)` interval per run. `"INTERVAL"` keeps every original sample, only deriving `tend` from the next sample's timestamp and dropping exact duplicate points — use it when downstream analysis needs all original timestamps. Only takes effect with `data_type = "RAW"`; ignored for `"RLE"` input. See [How Impulse interprets intervals](../data_model/silver_layer_schema.md#raw-format) for validity semantics and what counts as a duplicate point. |
 | `drop_implausible_data` | `bool`         | `false`                  | When `true`, drops `channels` rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
 | `batch_size`            | `int`          | `500`                    | Maximum number of selectors solved per batch. Applies to events, aggregations, and calculated channels.                     |
+| `max_containers_per_batch` | `int`       | `null`                   | Caps how many containers are solved at once, to bound per-solve memory. `null` disables the cap; when set it must be `>= 1`. On an **incremental** run, `Report.run()` commits at most this many upserted containers per iteration and loops until the population is drained (see [incremental](#incremental-optional)). On a **full** run, and when a changed definition recomputes over all containers, the population is split into chunks of about this size and solved chunk by chunk. Chunk sizes are approximate (the cap is a memory heuristic, not an exact bound). |
 | `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` to scope reads by project — it is applied to `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured), so it works in both narrow EAV and wide-only data models. Omit it when you don't need project scoping. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
 
 If `query_engine` is omitted, the default is `DefaultSolver` with
@@ -351,6 +352,15 @@ mode-resolution rules and what counts as a definition change.
 | `enabled`                     | `bool` | `false`         | Turns incremental processing on.                                       |
 | `silver_last_modified_column` | `str`  | `"timestamp"`   | Silver column used to detect container updates. Name after `column_name_mapping` is applied (the physical name unless you remap that column). |
 | `gold_last_modified_column`   | `str`  | `"_created_at"` | Gold-side column used to detect prior-run freshness.                   |
+
+:::note Draining a capped incremental run
+When [`query_engine.max_containers_per_batch`](#query_engine-optional) is set, a single
+`Report.run()` commits at most that many upserted containers per iteration and loops until the
+population is drained, so no one solve holds the whole population in memory. If a batch is detected
+again unchanged after being persisted (no forward progress, e.g. a misconfigured
+`gold_last_modified_column`), `run()` logs a warning and stops with partial completion rather than
+looping forever.
+:::
 
 ---
 
