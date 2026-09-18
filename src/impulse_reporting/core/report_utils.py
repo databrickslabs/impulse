@@ -6,6 +6,7 @@ and reduce its size.
 
 from __future__ import annotations
 
+import math
 import uuid
 from functools import reduce
 from typing import TYPE_CHECKING
@@ -516,17 +517,26 @@ def _materialize_temp(df: DataFrame, run_id: str, idx, has_sink: bool, catalog, 
 
 
 def _container_chunks(effective_df, max_n, cid_col):
-    """Yield ``effective_df`` sliced into chunks of at most ``max_n`` containers.
+    """Yield ``effective_df`` partitioned into chunks of ~``max_n`` containers.
 
-    Collects the distinct container ids to the driver once (a single narrow column),
-    orders them, and slices them into ``max_n``-sized batches in Python; each chunk is
-    ``effective_df`` filtered to its batch's ids. Ordering makes chunk membership
-    deterministic and reproducible across runs. Only the ids are collected — each chunk's
-    solve still processes at most ``max_n`` containers, so the per-batch memory bound holds.
+    Buckets containers by ``pmod(hash(container_id), num_chunks)`` (with ``num_chunks``
+    sized so each bucket holds ~``max_n``) and yields ``effective_df`` filtered per bucket.
+    Only a ``count`` reaches the driver, never the id list, so a multi-million-container
+    full or changed-definition solve stays driver-bounded. Buckets are disjoint and cover
+    every container, so the union is the full population; the deterministic hash keeps
+    membership reproducible and works for any ``container_id`` type. Chunk sizes are
+    approximate — the cap is a per-solve memory heuristic, not an exact bound.
     """
-    ids = sorted(row[cid_col] for row in effective_df.select(cid_col).distinct().collect())
-    for start in range(0, len(ids), max_n):
-        yield effective_df.where(F.col(cid_col).isin(ids[start : start + max_n]))
+    num_containers = effective_df.select(cid_col).distinct().count()
+    if num_containers == 0:
+        return
+    num_chunks = math.ceil(num_containers / max_n)
+    if num_chunks == 1:
+        yield effective_df
+        return
+    bucket = F.pmod(F.hash(F.col(cid_col)), F.lit(num_chunks))
+    for i in range(num_chunks):
+        yield effective_df.where(bucket == i)
 
 
 def _combine_container_chunks(
