@@ -18,9 +18,10 @@ TEST_PATH ?= tests/
 
 # Extra args passed to pytest, primarily xdist parallelism. Each worker starts its own
 # Spark JVM (see the worker-isolated `spark` fixture in tests/conftest.py), so `-n auto`
-# is capped to bound memory on many-core machines. Override with
+# is capped to bound memory on many-core machines. `worksteal` lets idle workers pull
+# queued tests off busy ones, shortening the slow-test tail. Override with
 # `make test PYTEST_XARGS=-n0` to run serially in-process for debugging.
-PYTEST_XARGS ?= -n auto --maxprocesses=8
+PYTEST_XARGS ?= -n auto --maxprocesses=4 --dist worksteal
 
 clean:
 	rm -fr .venv htmlcov .pytest_cache .ruff_cache .coverage coverage.xml test-results.xml
