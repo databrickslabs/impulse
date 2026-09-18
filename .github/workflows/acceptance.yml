@@ -58,8 +58,8 @@ jobs:
   test:
     name: Testing (${{ matrix.component }})
     runs-on:
-      group: databrickslabs-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: larger-runners
+      labels: larger
     needs: [ not-a-fork, lint ]
     permissions:
       id-token: write

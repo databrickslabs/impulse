@@ -194,18 +194,19 @@ class ChannelMappingResolutionDimension:
         changed_aliased_selectors: list[TimeSeriesSelector],
         unchanged_aliased_selectors: list[TimeSeriesSelector],
         pre_filtered_containers_df: DataFrame = None,
+        changed_pre_filtered_containers_df: DataFrame = None,
     ) -> DataFrame | None:
         """
         Compute the channel mapping resolution dimension honoring the
         report's changed/unchanged definition split.
 
         Mirrors the scoping the fact pipeline uses: aliases referenced by
-        *changed* definitions are resolved over **all** containers
-        (``pre_filtered_containers_df=None``), while aliases referenced
-        only by *unchanged* definitions stay scoped to
-        ``pre_filtered_containers_df``. This keeps incremental runs cheap
-        without leaving older containers unresolved when a new alias is
-        introduced by a changed definition.
+        *changed* definitions are resolved over the changed scope
+        (``changed_pre_filtered_containers_df`` — all containers when None,
+        or gold+capped under a cap), while aliases referenced only by
+        *unchanged* definitions stay scoped to ``pre_filtered_containers_df``.
+        This keeps incremental runs cheap without leaving older containers
+        unresolved when a new alias is introduced by a changed definition.
 
         In full (non-incremental) mode ``pre_filtered_containers_df`` is
         ``None``, so both scopes resolve over all containers and the union
@@ -234,7 +235,9 @@ class ChannelMappingResolutionDimension:
             Aliased selectors from unchanged definitions (resolved over
             ``pre_filtered_containers_df``). May be empty.
         pre_filtered_containers_df : DataFrame, optional
-            Pre-filtered containers for incremental processing.
+            Pre-filtered containers for the unchanged (incremental) scope.
+        changed_pre_filtered_containers_df : DataFrame, optional
+            Container scope for changed aliases; None = all containers.
 
         Returns
         -------
@@ -254,7 +257,7 @@ class ChannelMappingResolutionDimension:
             query=query,
             solver=solver,
             aliased_selectors=changed_aliased_selectors,
-            pre_filtered_containers_df=None,
+            pre_filtered_containers_df=changed_pre_filtered_containers_df,
         )
         unchanged_df = ChannelMappingResolutionDimension.get_dimension(
             spark=spark,

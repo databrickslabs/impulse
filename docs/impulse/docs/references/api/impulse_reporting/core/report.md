@@ -320,6 +320,32 @@ sink schema after persistence completes successfully.
 
 `None`: 
 
+#### run
+
+```python
+def run(is_incremental: bool = None,
+        persist_results: bool = True,
+        cleanup_temp_tables: bool | None = None)
+```
+
+Determine and persist a report, draining all container batches.
+
+Wraps :meth:`determine_report` + :meth:`persist_results` (both remain usable
+standalone). With ``max_containers_per_batch`` set on an incremental run, ``run()``
+loops: each iteration commits at most that many upserted containers, and the loop
+continues until a run observes at most that many remaining (the last batch clears
+the rest). After the first iteration all definition hashes are current, so later
+iterations recompute only unchanged entities over the next batch of new containers.
+Without a cap (or in full mode) it is a single determine+persist pass.
+
+**Arguments**:
+
+- `is_incremental` (`bool`): Forwarded to :meth:`determine_report` (config still overrides it).
+- `persist_results` (`bool`): When True (default), persist after determining and drain the batches. When
+False, run :meth:`determine_report` once without persisting (no iteration —
+nothing commits, so the batch cannot advance).
+- `cleanup_temp_tables` (`bool | None`): Forwarded to :meth:`persist_results`.
+
 #### determine\_report
 
 ```python

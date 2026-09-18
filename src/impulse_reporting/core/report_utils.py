@@ -6,6 +6,7 @@ and reduce its size.
 
 from __future__ import annotations
 
+import math
 import uuid
 from functools import reduce
 from typing import TYPE_CHECKING
@@ -499,6 +500,67 @@ def dispatch_calculated_channel_metrics(
     return metrics_dfs
 
 
+def _materialize_temp(df: DataFrame, run_id: str, idx, has_sink: bool, catalog, schema) -> str:
+    """Persist an intermediate ``df`` as a ``__impulse_temp_*`` Delta table (or temp view).
+
+    Returns the name to ``spark.table(...)`` it back with. Delta when a sink is
+    configured, a Spark temp view otherwise; the shared ``__impulse_temp_`` prefix means
+    :func:`cleanup_temp_tables` covers both.
+    """
+    name = f"__impulse_temp_{run_id}_{idx}"
+    if has_sink:
+        fq_name = f"`{catalog}`.`{schema}`.`{name}`"
+        df.write.format("delta").mode("overwrite").saveAsTable(fq_name)
+        return fq_name
+    df.createOrReplaceTempView(name)
+    return name
+
+
+def _container_chunks(effective_df, max_n, cid_col):
+    """Yield ``effective_df`` partitioned into chunks of ~``max_n`` containers.
+
+    Buckets containers by ``pmod(hash(container_id), num_chunks)`` (with ``num_chunks``
+    sized so each bucket holds ~``max_n``) and yields ``effective_df`` filtered per bucket.
+    Only a ``count`` reaches the driver, never the id list, so a multi-million-container
+    full or changed-definition solve stays driver-bounded. Buckets are disjoint and cover
+    every container, so the union is the full population; the deterministic hash keeps
+    membership reproducible and works for any ``container_id`` type. Chunk sizes are
+    approximate — the cap is a per-solve memory heuristic, not an exact bound.
+    """
+    num_containers = effective_df.select(cid_col).distinct().count()
+    if num_containers == 0:
+        return
+    num_chunks = math.ceil(num_containers / max_n)
+    if num_chunks == 1:
+        yield effective_df
+        return
+    bucket = F.pmod(F.hash(F.col(cid_col)), F.lit(num_chunks))
+    for i in range(num_chunks):
+        yield effective_df.where(bucket == i)
+
+
+def _combine_container_chunks(
+    spark: SparkSession,
+    parts: list[DataFrame],
+    has_sink: bool,
+    catalog: str,
+    schema: str,
+) -> DataFrame:
+    """Combine per-chunk solve results (disjoint containers, so a row append).
+
+    With a sink, append each chunk into one ``__impulse_temp_*`` Delta table and read it
+    back once, avoiding a deep ``unionByName`` tree and materializing one chunk at a time.
+    Without a sink, ``unionByName`` the chunks directly
+    """
+    if not has_sink:
+        return reduce(lambda a, b: a.unionByName(b), parts)
+    run_id = uuid.uuid4().hex[:8]
+    fq_name = f"`{catalog}`.`{schema}`.`__impulse_temp_{run_id}_chunks`"
+    for idx, part in enumerate(parts):
+        part.write.format("delta").mode("overwrite" if idx == 0 else "append").saveAsTable(fq_name)
+    return spark.table(fq_name)
+
+
 def solve_expressions_batched(
     spark: SparkSession,
     expressions: list[TimeSeriesExpression],
@@ -510,14 +572,15 @@ def solve_expressions_batched(
     catalog: str = None,
     schema: str = None,
     pre_filtered_containers_df: DataFrame = None,
+    max_containers_per_batch: int = None,
 ) -> DataFrame | None:
-    """Solve all expressions in configurable batches and return a joined wide DataFrame.
+    """Solve ``expressions`` in selector batches; return a wide DataFrame joined on ``container_id``.
 
-    Each batch is solved independently via ``query.select(*batch_exprs).solve(...)``.
-    When a sink is configured the intermediate result is persisted as a temporary
-    Delta table (``__impulse_temp_<run_id>_<batch_idx>``); otherwise a Spark temp view
-    is used.  After all batches are solved the per-batch DataFrames are joined on
-    ``container_id`` with a full outer join.
+    Each batch is solved via ``query.select(*batch).solve(...)``, materialized to a temp Delta
+    table/view, then combined with a full-outer join. When both ``max_containers_per_batch`` and
+    ``pre_filtered_containers_df`` are given, that set is chunked into ~that many containers per
+    solve and the chunks are row-appended (disjoint containers), bounding memory with a result
+    identical to an unchunked solve. With no cap or no pre-filter, a single pass runs.
 
     Parameters
     ----------
@@ -539,6 +602,8 @@ def solve_expressions_batched(
         Unity Catalog schema name (required when *has_sink* is ``True``).
     pre_filtered_containers_df : DataFrame, optional
         Pre-filtered containers for incremental processing.
+    max_containers_per_batch : int, optional
+        Max containers per solve chunk; ``None`` disables container chunking.
 
     Returns
     -------
@@ -549,36 +614,50 @@ def solve_expressions_batched(
     if not expressions:
         return None
 
-    run_id = uuid.uuid4().hex[:8]
-    batches = build_batches(expressions, batch_size)
-
-    batch_names: list[str] = []
-    for batch_idx, batch_exprs in enumerate(batches):
-        batch_query = query.select(*batch_exprs)
-        batch_df = batch_query.solve(
-            spark=spark,
-            solver=solver,
-            pre_filtered_containers_df=pre_filtered_containers_df,
-        )
-
-        if has_sink:
-            table_name = f"__impulse_temp_{run_id}_{batch_idx}"
-            fq_name = f"`{catalog}`.`{schema}`.`{table_name}`"
-            batch_df.write.format("delta").mode("overwrite").saveAsTable(fq_name)
-            batch_names.append(fq_name)
-        else:
-            view_name = f"__impulse_temp_{run_id}_{batch_idx}"
-            batch_df.createOrReplaceTempView(view_name)
-            batch_names.append(view_name)
-
     cid_col = solver.config.container_id_col
-    dfs = [spark.table(name) for name in batch_names]
 
-    result = dfs[0]
-    for i in range(1, len(dfs)):
-        result = result.join(dfs[i], on=cid_col, how="full_outer")
+    def _solve_selector_batches(pre_filter: DataFrame | None) -> DataFrame:
+        run_id = uuid.uuid4().hex[:8]
+        batch_names = [
+            _materialize_temp(
+                query.select(*batch_exprs).solve(
+                    spark=spark, solver=solver, pre_filtered_containers_df=pre_filter
+                ),
+                run_id,
+                batch_idx,
+                has_sink,
+                catalog,
+                schema,
+            )
+            for batch_idx, batch_exprs in enumerate(build_batches(expressions, batch_size))
+        ]
+        dfs = [spark.table(name) for name in batch_names]
+        result = dfs[0]
+        for df in dfs[1:]:
+            result = result.join(df, on=cid_col, how="full_outer")
+        return result
 
-    return result
+    # Chunking only applies to an explicit, detection-derived container set (which carries
+    # the internal ``container_id``). With no cap, or with no pre-filter (e.g. a genuine
+    # full solve, or sinkless mode where detection yields nothing), solve unchunked.
+    if max_containers_per_batch is None or pre_filtered_containers_df is None:
+        return _solve_selector_batches(pre_filtered_containers_df)
+
+    parts = [
+        _solve_selector_batches(chunk)
+        for chunk in _container_chunks(
+            pre_filtered_containers_df, max_containers_per_batch, cid_col
+        )
+    ]
+    # No chunks => empty container set; fall back to a single solve so the result matches
+    # the non-chunked path (an empty-rows DataFrame, not None).
+    if not parts:
+        return _solve_selector_batches(pre_filtered_containers_df)
+    # One chunk (e.g. incremental unchanged path, population <= cap): return it directly,
+    # no extra Delta round-trip.
+    if len(parts) == 1:
+        return parts[0]
+    return _combine_container_chunks(spark, parts, has_sink, catalog, schema)
 
 
 def solve_calculated_channels_batched(
@@ -592,21 +671,16 @@ def solve_calculated_channels_batched(
     catalog: str = None,
     schema: str = None,
     pre_filtered_containers_df: DataFrame = None,
+    max_containers_per_batch: int = None,
 ) -> DataFrame | None:
-    """Solve calculated channels in configurable batches; return the unioned rows.
+    """Solve calculated channels in selector batches; return the ``unionByName``-appended rows.
 
-    The narrow, row-append counterpart to :func:`solve_expressions_batched`. Each
-    batch is solved independently via
-    ``query.select(*batch).solve_calculated_channels(...)`` and persisted as a
-    temporary Delta table (``__impulse_temp_<run_id>_<batch_idx>``) when a sink is
-    configured, or a Spark temp view otherwise — the same convention (and shared
-    ``__impulse_temp_*`` prefix, so :func:`cleanup_temp_tables` covers it).
-
-    Unlike ``solve_expressions_batched`` (wide, one row per container → batches
-    combined with a full-outer join on ``container_id``), calculated-channel output
-    is narrow (``container_id, channel_id, tstart, tend, value, identity``; many
-    rows per container, batches hold different ``channel_id``s), so batches are
-    combined with **``unionByName``** (row append).
+    Narrow, row-append counterpart to :func:`solve_expressions_batched`: each batch is solved via
+    ``query.select(*batch).solve_calculated_channels(...)``, materialized to a temp Delta
+    table/view, then combined with ``unionByName`` (many rows per container). When both
+    ``max_containers_per_batch`` and ``pre_filtered_containers_df`` are given, that set is chunked
+    into ~that many containers per solve and the chunks are appended too, with a result identical
+    to an unchunked solve. With no cap or no pre-filter, a single pass runs.
 
     Parameters
     ----------
@@ -629,6 +703,8 @@ def solve_calculated_channels_batched(
         Unity Catalog schema name (required when *has_sink* is ``True``).
     pre_filtered_containers_df : DataFrame, optional
         Pre-filtered containers for incremental processing.
+    max_containers_per_batch : int, optional
+        Max containers per solve chunk; ``None`` disables container chunking.
 
     Returns
     -------
@@ -639,32 +715,48 @@ def solve_calculated_channels_batched(
     if not qe_channels:
         return None
 
-    run_id = uuid.uuid4().hex[:8]
-    batches = build_batches(qe_channels, batch_size)
+    cid_col = solver.config.container_id_col
 
-    batch_names: list[str] = []
-    for batch_idx, batch_channels in enumerate(batches):
-        batch_df = query.select(*batch_channels).solve_calculated_channels(
-            spark, solver, pre_filtered_containers_df
+    def _solve_selector_batches(pre_filter: DataFrame | None) -> DataFrame:
+        run_id = uuid.uuid4().hex[:8]
+        batch_names = [
+            _materialize_temp(
+                query.select(*batch_channels).solve_calculated_channels(spark, solver, pre_filter),
+                run_id,
+                batch_idx,
+                has_sink,
+                catalog,
+                schema,
+            )
+            for batch_idx, batch_channels in enumerate(build_batches(qe_channels, batch_size))
+        ]
+        dfs = [spark.table(name) for name in batch_names]
+        result = dfs[0]
+        for df in dfs[1:]:
+            result = result.unionByName(df)
+        return result
+
+    # Chunking only applies to an explicit, detection-derived container set (which carries
+    # the internal ``container_id``). With no cap, or with no pre-filter (e.g. a genuine
+    # full solve, or sinkless mode where detection yields nothing), solve unchunked.
+    if max_containers_per_batch is None or pre_filtered_containers_df is None:
+        return _solve_selector_batches(pre_filtered_containers_df)
+
+    parts = [
+        _solve_selector_batches(chunk)
+        for chunk in _container_chunks(
+            pre_filtered_containers_df, max_containers_per_batch, cid_col
         )
-
-        if has_sink:
-            table_name = f"__impulse_temp_{run_id}_{batch_idx}"
-            fq_name = f"`{catalog}`.`{schema}`.`{table_name}`"
-            batch_df.write.format("delta").mode("overwrite").saveAsTable(fq_name)
-            batch_names.append(fq_name)
-        else:
-            view_name = f"__impulse_temp_{run_id}_{batch_idx}"
-            batch_df.createOrReplaceTempView(view_name)
-            batch_names.append(view_name)
-
-    dfs = [spark.table(name) for name in batch_names]
-
-    result = dfs[0]
-    for df in dfs[1:]:
-        result = result.unionByName(df)
-
-    return result
+    ]
+    # No chunks => empty container set; fall back to a single solve so the result matches
+    # the non-chunked path (an empty-rows DataFrame, not None).
+    if not parts:
+        return _solve_selector_batches(pre_filtered_containers_df)
+    # One chunk (e.g. incremental unchanged path, population <= cap): return it directly,
+    # no extra Delta round-trip.
+    if len(parts) == 1:
+        return parts[0]
+    return _combine_container_chunks(spark, parts, has_sink, catalog, schema)
 
 
 def cleanup_temp_tables(spark: SparkSession, catalog: str, schema: str) -> None:

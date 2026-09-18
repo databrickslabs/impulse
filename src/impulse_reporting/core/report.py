@@ -1,8 +1,10 @@
 import json
+import logging
 import zlib
 from typing import Any
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 from pyspark.sql.types import StructType
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -62,6 +64,8 @@ from impulse_reporting.persist.report_storage import (
 )
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 from impulse_query_engine.telemetry import log_telemetry, telemetry_logger
+
+logger = logging.getLogger(__name__)
 
 
 class Report:
@@ -911,6 +915,7 @@ class Report:
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            max_containers_per_batch=self.config.query_engine.max_containers_per_batch,
         )
 
     def _solve_calculated_channels_batched(
@@ -933,7 +938,71 @@ class Report:
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            max_containers_per_batch=self.config.query_engine.max_containers_per_batch,
         )
+
+    @telemetry_logger("report", "run")
+    def run(
+        self,
+        is_incremental: bool = None,
+        persist_results: bool = True,
+        cleanup_temp_tables: bool | None = None,
+    ):
+        """Determine and persist a report, draining all container batches.
+
+        Wraps :meth:`determine_report` + :meth:`persist_results` (both remain usable
+        standalone). With ``max_containers_per_batch`` set on an incremental run, ``run()``
+        loops: each iteration commits at most that many upserted containers, and the loop
+        continues until a run observes at most that many remaining (the last batch clears
+        the rest). After the first iteration all definition hashes are current, so later
+        iterations recompute only unchanged entities over the next batch of new containers.
+        Without a cap (or in full mode) it is a single determine+persist pass.
+
+        Parameters
+        ----------
+        is_incremental : bool, optional
+            Forwarded to :meth:`determine_report` (config still overrides it).
+        persist_results : bool, optional
+            When True (default), persist after determining and drain the batches. When
+            False, run :meth:`determine_report` once without persisting (no iteration —
+            nothing commits, so the batch cannot advance).
+        cleanup_temp_tables : bool | None, optional
+            Forwarded to :meth:`persist_results`.
+
+        Notes
+        -----
+        If a batch is detected again unchanged after being persisted (no forward
+        progress, e.g. a misconfigured ``gold_last_modified_column`` or containers
+        excluded by ``container_filters`` that never yield a gold row), the loop would
+        otherwise spin forever. ``run()`` detects the repeated batch, logs a warning
+        naming the stuck containers, and stops (partial completion) rather than hanging.
+        """
+        previous_batch_ids = None
+        while True:
+            self.determine_report(is_incremental)
+            if not persist_results:
+                return
+            self.persist_results(cleanup_temp_tables)
+            # Stop once a run processed the remainder (uncapped upserted <= cap); also
+            # covers no cap / full mode, where the flag stays False.
+            if not self._more_batches_pending:
+                return
+            # Forward-progress guard: each iteration commits a deterministic batch (the
+            # lowest ``cap`` container ids). If the just-persisted batch is detected again
+            # unchanged, the persist removed nothing from detection, so the drain has
+            # stalled and the loop would never terminate. Stop instead of hanging.
+            current_batch_ids = frozenset(self._processed_container_ids or [])
+            if current_batch_ids == previous_batch_ids:
+                logger.warning(
+                    "Incremental run stopped early: %d containers were detected again after "
+                    "being persisted, so the run made no forward progress. First ids: %s. "
+                    "Likely causes: a misconfigured gold_last_modified_column or containers that "
+                    "produce no measurement_dimension row. Remaining containers were not processed.",
+                    len(current_batch_ids),
+                    sorted(current_batch_ids)[:10],
+                )
+                return
+            previous_batch_ids = current_batch_ids
 
     @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
@@ -983,21 +1052,59 @@ class Report:
         self._is_incremental = self._resolve_is_incremental(is_incremental)
 
         # Detect containers to process (incremental mode only): new + updated.
+        # ``_more_batches_pending`` tells run()'s batch loop whether more than one batch
+        # of upserted containers remains; reset each call so it never carries stale state.
         pre_filtered_containers_df = None
+        self._more_batches_pending = False
+        # Ids of the capped batch this run processes; used by run()'s loop to detect a
+        # stalled drain (the same batch recurring => no forward progress). Only populated
+        # on capped incremental runs, the only runs where run() iterates.
+        self._processed_container_ids = None
+        # Whether this run has containers to process (gates whether fact tables are
+        # written). Set from the collected batch under a cap, else probed with isEmpty();
+        # defaults False (full mode without a cap / sinkless).
+        self._has_processed_containers = False
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
+            # Cap containers per run: committed containers get a fresh
+            # measurement_dimension timestamp and drop out of the next run's detection,
+            # so successive runs advance through the population.
+            max_containers = self.config.query_engine.max_containers_per_batch
+            if max_containers is not None and pre_filtered_containers_df is not None:
+                (
+                    pre_filtered_containers_df,
+                    self._processed_container_ids,
+                    self._more_batches_pending,
+                ) = self._cap_upserted_batch(pre_filtered_containers_df, max_containers)
+                self._has_processed_containers = bool(self._processed_container_ids)
+            elif pre_filtered_containers_df is not None:
+                self._has_processed_containers = not pre_filtered_containers_df.isEmpty()
+        elif self.config.query_engine.max_containers_per_batch is not None:
+            # Full mode with a cap: solve the full scoped population in one pass, chunked by
+            # the cap for memory. Supplying the frame here lets the batched solve chunk it;
+            # there is no cross-run deferral (``_more_batches_pending`` stays False).
+            pre_filtered_containers_df = self._filtered_container_metrics()
+            self._has_processed_containers = not pre_filtered_containers_df.isEmpty()
 
-        # Two signals for persistence:
-        # - has_processed_containers (new + updated): gates whether a fact table is
-        #   written (new containers must be inserted). Only a bool is needed, so
-        #   probe emptiness with isEmpty() rather than collecting the whole id list.
-        # - updated container ids: scopes the delete-by-source, since only
-        #   containers that already have gold rows can have stale rows to prune.
-        self._has_processed_containers = (
-            pre_filtered_containers_df is not None and not pre_filtered_containers_df.isEmpty()
-        )
+        # Updated container ids scope the delete-by-source; derived from the (capped)
+        # upserted set (see _updated_containers_within), so a capped run never prunes
+        # containers it did not reprocess.
         self._updated_container_ids = self._collect_container_ids(
-            self._detect_updated_containers() if self._is_incremental else None
+            self._updated_containers_within(pre_filtered_containers_df)
+            if self._is_incremental
+            else None
+        )
+
+        # Container scope for CHANGED entities. Incremental: without a cap, None (all
+        # containers); under a cap, all historical (gold) containers plus the capped new
+        # ones (``_changed_scope``), so a definition change is re-applied to existing
+        # containers while new containers beyond the cap are deferred. Full mode: the same
+        # full frame as the unchanged solve (``_changed_scope`` is an incremental-cap
+        # concept and must not run here).
+        changed_pre_filtered_containers_df = (
+            self._changed_scope(pre_filtered_containers_df)
+            if self._is_incremental
+            else pre_filtered_containers_df
         )
 
         hash_comparator = DefinitionHashComparator(self.spark)
@@ -1040,7 +1147,8 @@ class Report:
 
         # Centralized solve
         changed_solved_df = self._solve_expressions_batched(
-            all_changed_expressions, pre_filtered_containers_df=None
+            all_changed_expressions,
+            pre_filtered_containers_df=changed_pre_filtered_containers_df,
         )
         unchanged_solved_df = self._solve_expressions_batched(
             all_unchanged_expressions, pre_filtered_containers_df=pre_filtered_containers_df
@@ -1054,7 +1162,7 @@ class Report:
             changed_solved_df,
             self.query,
             self.solver,
-            None,
+            changed_pre_filtered_containers_df,
             ContainerEvent,
         )
         unchanged_event_dfs = dispatch_events(
@@ -1095,8 +1203,9 @@ class Report:
 
         # Calculated channels: own narrow batched solve driven here (mirrors the
         # wide expression solve above), producing a narrow ``solved_df`` that each
-        # channel type then shapes. Changed definitions recompute over all
-        # containers; unchanged ones over the incrementally-detected subset.
+        # channel type then shapes. Changed definitions recompute over the changed
+        # scope (all containers, or gold+capped under a cap); unchanged ones over the
+        # incrementally-detected subset.
         self._validate_unique_calculated_channels()
         channels_by_type = group_selectables_by_type(self.calculated_channels, ChannelType)
         changed_channels_by_type, unchanged_channels_by_type, self._changed_channel_ids = (
@@ -1119,7 +1228,7 @@ class Report:
             c.expression for cs in unchanged_channels_by_type.values() for c in cs
         ]
         changed_channel_solved_df = self._solve_calculated_channels_batched(
-            changed_channel_exprs, pre_filtered_containers_df=None
+            changed_channel_exprs, pre_filtered_containers_df=changed_pre_filtered_containers_df
         )
         unchanged_channel_solved_df = self._solve_calculated_channels_batched(
             unchanged_channel_exprs, pre_filtered_containers_df=pre_filtered_containers_df
@@ -1184,9 +1293,9 @@ class Report:
         )
 
         # Determine channel mapping resolution dimension.
-        # Mirror the fact split: aliases from changed definitions resolve
-        # over all containers, aliases only in unchanged definitions stay
-        # scoped to the incrementally-detected containers.
+        # Mirror the fact split: aliases from changed definitions resolve over the
+        # changed scope (all containers, or gold+capped under a cap), aliases only in
+        # unchanged definitions stay scoped to the incrementally-detected containers.
         changed_aliased_selectors = TimeSeriesExpression.collect_selectors(
             all_changed_expressions,
             uses_alias=True,
@@ -1203,6 +1312,7 @@ class Report:
                 changed_aliased_selectors=changed_aliased_selectors,
                 unchanged_aliased_selectors=unchanged_aliased_selectors,
                 pre_filtered_containers_df=pre_filtered_containers_df,
+                changed_pre_filtered_containers_df=changed_pre_filtered_containers_df,
             )
         )
 
@@ -1228,9 +1338,18 @@ class Report:
         bool
             True for incremental processing, False for full processing.
         """
-        # Rule 1: No gold layer → always FULL (nothing to compare against)
+        # Rule 1: No gold layer → FULL, EXCEPT the bootstrap of a capped incremental
+        # config. With a cap, the first run must process at most N containers and defer
+        # the rest, so it runs incrementally over all containers as "new" (see
+        # ``_detect_upserted_containers``) rather than computing the whole population.
+        # A non-capped incremental config still bootstraps in full mode (nothing to batch).
         if not self._gold_layer_exists():
-            return False
+            return bool(
+                hasattr(self, "config")
+                and getattr(self.config, "incremental", None) is not None
+                and self.config.incremental.enabled
+                and self.config.query_engine.max_containers_per_batch is not None
+            )
 
         if not hasattr(self, "config") and is_incremental is not None:
             return is_incremental
@@ -1269,6 +1388,43 @@ class Report:
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
         return self.spark.catalog.tableExists(measurement_dim_table)
 
+    def _cap_upserted_batch(
+        self, upserted_df: DataFrame, max_containers: int
+    ) -> tuple[DataFrame, list, bool]:
+        """Take at most ``max_containers`` upserted containers.
+
+        ``upserted_df`` is already produced from the solver's report-eligible container
+        pipeline. Ordering by ``container_id`` and collecting one id past the cap answers
+        both which containers this batch commits and whether more eligible containers remain.
+
+        Returns
+        -------
+        tuple[DataFrame, list, bool]
+            ``(capped_containers_df, batch_ids, more_pending)``.
+        """
+        container_id_col = self.solver.config.container_id_col
+        batch_ids = [
+            row[container_id_col]
+            for row in upserted_df.select(container_id_col)
+            .distinct()
+            .orderBy(container_id_col)
+            .limit(max_containers + 1)
+            .collect()
+        ]
+        more_pending = len(batch_ids) > max_containers
+        batch_ids = batch_ids[:max_containers]
+        capped_df = upserted_df.where(F.col(container_id_col).isin(batch_ids))
+        return capped_df, batch_ids, more_pending
+
+    def _filtered_container_metrics(
+        self, pre_filtered_containers_df: DataFrame = None
+    ) -> DataFrame:
+        """Resolve container metrics through the public solver container pipeline."""
+        container_tags_df = self.solver.filter_container_tags(self.spark, self.query)
+        return self.solver.filter_container_metrics(
+            self.spark, self.query, container_tags_df, pre_filtered_containers_df
+        )
+
     def _detect_upserted_containers(self) -> DataFrame | None:
         """
         Detect new and updated containers for incremental processing.
@@ -1278,19 +1434,28 @@ class Report:
         used for freshness comparison.  Falls back to ``"last_modified"``
         when no incremental config is present.
 
-        Returns None if gold layer doesn't exist (triggers full processing)
-        or if no sink is configured (sinkless mode).
+        When the gold layer does not exist yet, every silver container is "new",
+        so all of them are returned (the capped-incremental bootstrap; this method
+        is only reached in incremental mode). Returns None only in sinkless mode
+        (no sink configured).
 
         Returns
         -------
         DataFrame | None
-            DataFrame containing containers to process, or None if gold table
-            doesn't exist (indicating full processing is needed).
+            Containers to process (new + updated, or all silver containers on the
+            bootstrap first run), or None in sinkless mode.
         """
         args = self._container_detection_args()
         if args is None:
             return None
         detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
+        # Bootstrap of a capped incremental config (this method is only reached with
+        # ``_is_incremental`` True, and Rule 1 only makes that True on no gold when a cap
+        # is set): gold doesn't exist yet, so every silver container is "new". Return them
+        # all so the cap can slice the first batch; the detector would otherwise signal
+        # full processing by returning None on a missing gold table.
+        if not self._gold_layer_exists():
+            return silver_containers
         return detector.detect_upserted_containers(
             silver_containers,
             measurement_dim_table,
@@ -1298,29 +1463,46 @@ class Report:
             gold_last_modified_col=gold_col,
         )
 
-    def _detect_updated_containers(self) -> DataFrame | None:
-        """Detect only UPDATED containers (present in gold, newer silver timestamp).
+    def _updated_containers_within(self, containers_df: DataFrame | None) -> DataFrame | None:
+        """Updated containers within the run's (capped) upserted set, for delete scoping.
 
-        Excludes new containers — see
-        ``ContainerUpsertDetector.detect_updated_containers``. Used to scope the
-        incremental delete-by-source. Returns None in sinkless mode or when the
-        gold table doesn't exist.
-
-        Returns
-        -------
-        DataFrame | None
-            Updated containers, or None.
+        Delegates to ``ContainerUpsertDetector.updated_within``. Returns None in
+        sinkless mode or when ``containers_df`` is None.
         """
+        if containers_df is None:
+            return None
         args = self._container_detection_args()
         if args is None:
             return None
-        detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
-        return detector.detect_updated_containers(
-            silver_containers,
-            measurement_dim_table,
-            silver_last_modified_col=silver_col,
-            gold_last_modified_col=gold_col,
-        )
+        _detector, _silver_containers, measurement_dim_table, _silver_col, _gold_col = args
+        return _detector.updated_within(containers_df, measurement_dim_table)
+
+    def _changed_scope(self, capped_upserted_df: DataFrame | None) -> DataFrame | None:
+        """Container scope for CHANGED entities under a cap.
+
+        All historical (gold) containers plus the capped upserted set, so a definition
+        change is re-applied to existing containers while new containers beyond the cap
+        are deferred (they have no gold rows, so the global changed-entity delete cannot
+        orphan them). Returns None (all containers, today's behavior) when no cap is set
+        or the run is not incremental.
+        """
+        if self.config.query_engine.max_containers_per_batch is None or capped_upserted_df is None:
+            return None
+        args = self._container_detection_args()
+        if args is None:
+            return None
+        _detector, silver_containers, measurement_dim_table, _silver_col, _gold_col = args
+        # Bootstrap: no gold table yet, so there are no historical containers to fold in —
+        # the changed scope is exactly the capped new set. (Also avoids reading a table
+        # that does not exist.)
+        if not self._gold_layer_exists():
+            return capped_upserted_df
+        gold_ids = self.spark.read.table(measurement_dim_table).select("container_id")
+        allowed = gold_ids.unionByName(capped_upserted_df.select("container_id")).distinct()
+        # Full container_metrics rows for the allowed ids, not just the ids: downstream uses this
+        # frame as the container_metrics source, so it needs all columns. ``allowed`` has only
+        # ``container_id``.
+        return silver_containers.join(allowed, on="container_id", how="inner")
 
     def _container_detection_args(self):
         """Shared inputs for container detection, or None in sinkless mode.
@@ -1335,11 +1517,11 @@ class Report:
         if not self._has_sink:
             return None
         detector = ContainerUpsertDetector(self.spark)
-        # Read container_metrics exactly as the solver processes it (column_name_mapping,
-        # project_id, and per-table filters applied), so detection joins on the internal
-        # ``container_id`` and sees the same container universe as the solve. Reading the raw
-        # table here would break configs that remap the physical container-id column (#99).
-        silver_containers = self.solver.scoped_container_metrics(self.spark, self.query)
+        # Read container_metrics through the solver's public container pipeline, so
+        # detection joins on the internal ``container_id`` and sees the same report-eligible
+        # container universe as the solve. Reading the raw table here would break configs
+        # that remap the physical container-id column (#99).
+        silver_containers = self._filtered_container_metrics()
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
 
         silver_col = "last_modified"
