@@ -540,16 +540,12 @@ def _combine_container_chunks(
 
     With a sink, append each chunk into one ``__impulse_temp_*`` Delta table and read it
     back once, avoiding a deep ``unionByName`` tree and materializing one chunk at a time.
-    Without a sink, register each chunk as a temp view and ``unionByName`` them.
+    Without a sink, ``unionByName`` the chunks directly: a temp view is lazy, so wrapping
+    each chunk in one would neither materialize it nor cut lineage — only add catalog churn.
     """
-    run_id = uuid.uuid4().hex[:8]
     if not has_sink:
-        views = []
-        for idx, part in enumerate(parts):
-            name = f"__impulse_temp_{run_id}_chunk_{idx}"
-            part.createOrReplaceTempView(name)
-            views.append(spark.table(name))
-        return reduce(lambda a, b: a.unionByName(b), views)
+        return reduce(lambda a, b: a.unionByName(b), parts)
+    run_id = uuid.uuid4().hex[:8]
     fq_name = f"`{catalog}`.`{schema}`.`__impulse_temp_{run_id}_chunks`"
     for idx, part in enumerate(parts):
         part.write.format("delta").mode("overwrite" if idx == 0 else "append").saveAsTable(fq_name)
