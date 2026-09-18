@@ -574,22 +574,13 @@ def solve_expressions_batched(
     pre_filtered_containers_df: DataFrame = None,
     max_containers_per_batch: int = None,
 ) -> DataFrame | None:
-    """Solve all expressions in configurable batches and return a joined wide DataFrame.
+    """Solve ``expressions`` in selector batches; return a wide DataFrame joined on ``container_id``.
 
-    Each selector batch is solved via ``query.select(*batch_exprs).solve(...)``,
-    materialized to a temp Delta table/view, then joined on ``container_id`` with a full
-    outer join.
-
-    When ``max_containers_per_batch`` is set *and* a ``pre_filtered_containers_df`` is given
-    (incremental mode, including the bootstrap first run where every container is "new"),
-    that container set is also sliced into chunks of at most that many containers; each
-    chunk runs the selector batching above and the chunks are ``unionByName``-combined
-    (disjoint containers → row append). This bounds per-chunk solve memory while returning
-    the exact same content as an unchunked solve. A set already ≤ the cap is a single
-    chunk. With no cap, or no pre-filter (a genuine full solve, or sinkless mode), the
-    original single-pass behavior applies. The cap is never applied to the raw
-    ``container_metrics`` table — chunking only runs over a detection-derived set, whose
-    ``container_id`` is the internal column name the chunker expects.
+    Each batch is solved via ``query.select(*batch).solve(...)``, materialized to a temp Delta
+    table/view, then combined with a full-outer join. When both ``max_containers_per_batch`` and
+    ``pre_filtered_containers_df`` are given, that set is chunked into ~that many containers per
+    solve and the chunks are row-appended (disjoint containers), bounding memory with a result
+    identical to an unchunked solve. With no cap or no pre-filter, a single pass runs.
 
     Parameters
     ----------
@@ -682,18 +673,14 @@ def solve_calculated_channels_batched(
     pre_filtered_containers_df: DataFrame = None,
     max_containers_per_batch: int = None,
 ) -> DataFrame | None:
-    """Solve calculated channels in configurable batches; return the unioned rows.
+    """Solve calculated channels in selector batches; return the ``unionByName``-appended rows.
 
-    Narrow, row-append counterpart to :func:`solve_expressions_batched`: each selector
-    batch is solved via ``query.select(*batch).solve_calculated_channels(...)``,
-    materialized to a temp Delta table/view, and batches are combined with
-    ``unionByName`` (narrow output — many rows per container, different ``channel_id``s).
-
-    ``max_containers_per_batch`` chunks the ``pre_filtered_containers_df`` (a
-    detection-derived set, present in incremental mode including the bootstrap first run)
-    into chunks of at most that many containers, combining chunks with ``unionByName`` too;
-    the result content is identical to an unchunked solve. ``None``, or no pre-filter,
-    disables it — the cap is never applied to the raw ``container_metrics`` table.
+    Narrow, row-append counterpart to :func:`solve_expressions_batched`: each batch is solved via
+    ``query.select(*batch).solve_calculated_channels(...)``, materialized to a temp Delta
+    table/view, then combined with ``unionByName`` (many rows per container). When both
+    ``max_containers_per_batch`` and ``pre_filtered_containers_df`` are given, that set is chunked
+    into ~that many containers per solve and the chunks are appended too, with a result identical
+    to an unchunked solve. With no cap or no pre-filter, a single pass runs.
 
     Parameters
     ----------

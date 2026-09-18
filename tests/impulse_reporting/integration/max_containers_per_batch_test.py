@@ -282,6 +282,45 @@ def test_full_mode_container_chunked_solve_matches_uncapped(spark, uncapped_base
         assert got == uncapped_baseline["plain"][t], f"{t}: chunked full solve must match uncapped"
 
 
+def _sinkless_hist(spark, *, max_containers_per_batch):
+    """Sinkless full-mode report over the basic silver DB; return its HISTOGRAM fact."""
+    report = Report(
+        name="cap_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(
+            ImpulseConfig(
+                source=Source(
+                    container_metrics_table="spark_catalog.silver.container_metrics",
+                    channel_metrics_table="spark_catalog.silver.channel_metrics",
+                    channels_uri="spark_catalog.silver.channels",
+                ),
+                # No unity_sink -> sinkless (has_sink=False), so the chunked solve combines
+                # via the reduce(unionByName) branch of _combine_container_chunks.
+                query_engine=QueryEngine(max_containers_per_batch=max_containers_per_batch),
+            )
+        ),
+    )
+    _add_light_aggs(report)
+    report.determine_report()
+    return report.aggregation_dfs["HISTOGRAM"]["changed"]
+
+
+def test_sinkless_capped_chunked_solve_matches_uncapped(spark):
+    """Sinkless + cap: chunks are unioned via _combine_container_chunks(has_sink=False).
+
+    cap=1 over the multi-container silver DB forces multiple chunks; the sinkless union must
+    reassemble them into the same histogram as an uncapped sinkless run.
+    """
+    capped = _sinkless_hist(spark, max_containers_per_batch=1)
+    uncapped = _sinkless_hist(spark, max_containers_per_batch=None)
+
+    cap_ids = {r.container_id for r in capped.select("container_id").distinct().collect()}
+    assert len(cap_ids) > 1, "cap=1 must produce multiple chunks to exercise the union"
+    assert capped.filter(F.col("hist_value") > 0).count() > 0
+    assert _rows_without_meta(capped) == _rows_without_meta(uncapped)
+
+
 def test_capped_run_does_not_prune_out_of_batch_updated_container(spark):
     """A capped run must not prune gold rows for updated containers outside the cap."""
     # Seed gold with containers 1 and 2 (initial full load).
