@@ -1,3 +1,4 @@
+import fcntl
 import os
 from unittest.mock import create_autospec
 
@@ -22,7 +23,7 @@ def spark(tmp_path_factory, worker_id) -> SparkSession:
     base = tmp_path_factory.getbasetemp()
     warehouse_dir = base / "spark-warehouse"
     metastore_dir = base / "metastore_db"
-    spark = configure_spark_with_delta_pip(
+    builder = configure_spark_with_delta_pip(
         SparkSession.builder.master("local")
         .appName(f"impulse-tests-{worker_id}")
         .config("spark.sql.warehouse.dir", str(warehouse_dir))
@@ -37,7 +38,18 @@ def spark(tmp_path_factory, worker_id) -> SparkSession:
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
         .config("spark.databricks.delta.retentionDurationCheck.enabled ", "false")
         .config("spark.shuffle.partitions", 1)
-    ).getOrCreate()
+    )
+    # configure_spark_with_delta_pip resolves the Delta jars via ivy at JVM launch. Under
+    # xdist, workers sharing the default ~/.ivy2 race on a cold cache and some fail with
+    # JAVA_GATEWAY_EXITED / unresolved dependency. Serialize session startup across workers
+    # with a cross-run file lock (base.parent is shared by all workers of a run): the first
+    # worker populates the shared cache, the rest reuse it. Cheap once the cache is warm.
+    with open(base.parent / "impulse-spark-startup.lock", "w") as lock_fh:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX)
+        try:
+            spark = builder.getOrCreate()
+        finally:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver")
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver_narrow_db")
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver_key_value_store")
