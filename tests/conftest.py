@@ -37,11 +37,10 @@ def spark(tmp_path_factory, worker_id) -> SparkSession:
         )
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
         .config("spark.databricks.delta.retentionDurationCheck.enabled", "false")
-        # Local tuning for tiny test data: avoid 200-way shuffles, skip AQE planning and
-        # the Spark UI so per-worker sessions start fast and stay lean.
+        # Local tuning for tiny test data: avoid 200-way shuffles and skip the Spark UI
+        # so per-worker sessions start fast and stay lean.
         .config("spark.sql.shuffle.partitions", 1)
         .config("spark.default.parallelism", 1)
-        .config("spark.sql.adaptive.enabled", "false")
         .config("spark.ui.enabled", "false")
     )
     # configure_spark_with_delta_pip resolves the Delta jars via ivy at JVM launch. Under
