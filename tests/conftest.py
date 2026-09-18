@@ -14,9 +14,22 @@ from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConf
 
 
 @pytest.fixture(scope="session")
-def spark() -> SparkSession:
+def spark(tmp_path_factory, worker_id) -> SparkSession:
+    # Isolate the warehouse + Derby metastore per pytest-xdist worker. Each worker is a
+    # separate process with its own SparkSession/JVM, and a Derby-backed metastore cannot
+    # be shared across processes. ``getbasetemp()`` is already per-worker under xdist, and
+    # ``worker_id`` is "master" in serial runs, so this is a safe no-op without ``-n``.
+    base = tmp_path_factory.getbasetemp()
+    warehouse_dir = base / "spark-warehouse"
+    metastore_dir = base / "metastore_db"
     spark = configure_spark_with_delta_pip(
         SparkSession.builder.master("local")
+        .appName(f"impulse-tests-{worker_id}")
+        .config("spark.sql.warehouse.dir", str(warehouse_dir))
+        .config(
+            "spark.hadoop.javax.jdo.option.ConnectionURL",
+            f"jdbc:derby:;databaseName={metastore_dir};create=true",
+        )
         .config(
             "spark.sql.catalog.spark_catalog",
             "org.apache.spark.sql.delta.catalog.DeltaCatalog",

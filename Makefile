@@ -16,6 +16,12 @@ UV_RUN := uv run --exact --all-extras
 # single component's tests in parallel, e.g. `make test TEST_PATH=tests/impulse_query_engine`.
 TEST_PATH ?= tests/
 
+# Extra args passed to pytest, primarily xdist parallelism. Each worker starts its own
+# Spark JVM (see the worker-isolated `spark` fixture in tests/conftest.py), so `-n auto`
+# is capped to bound memory on many-core machines. Override with
+# `make test PYTEST_XARGS=-n0` to run serially in-process for debugging.
+PYTEST_XARGS ?= -n auto --maxprocesses=4
+
 clean:
 	rm -fr .venv htmlcov .pytest_cache .ruff_cache .coverage coverage.xml test-results.xml
 	find . -name '__pycache__' -print0 | xargs -0 rm -fr
@@ -32,7 +38,7 @@ fmt:
 	$(UV_RUN) ruff check src/ tests/ --fix
 
 test:
-	$(UV_RUN) pytest $(TEST_PATH) --cov=src --cov-branch --cov-report=xml
+	$(UV_RUN) pytest $(TEST_PATH) $(PYTEST_XARGS) --cov=src --cov-branch --cov-report=xml
 
 coverage:
 	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=html
