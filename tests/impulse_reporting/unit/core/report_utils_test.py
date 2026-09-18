@@ -10,6 +10,8 @@ from pyspark.sql import DataFrame
 
 from impulse_reporting.core.report import Report
 from impulse_reporting.core.report_utils import (
+    _combine_container_chunks,
+    _container_chunks,
     build_batches,
     build_metadata_dfs,
     dispatch_calculated_channel_metrics,
@@ -753,6 +755,48 @@ class TestGroupDfsByTable:
 
 
 # ============================================================================
+# Tests: _container_chunks / _combine_container_chunks
+# ============================================================================
+class TestContainerChunks:
+    """Tests for hash-bucketed container chunking (driver-bounded, approximate sizes)."""
+
+    def test_empty_population_yields_no_chunks(self, spark):
+        """Zero containers => no chunks (caller then falls back to a single solve)."""
+        df = spark.createDataFrame([], "container_id long, v long")
+        assert list(_container_chunks(df, 2, "container_id")) == []
+
+    def test_population_within_cap_yields_the_frame_unchunked(self, spark):
+        """<= cap containers => one chunk, the frame itself (no filter added)."""
+        df = spark.createDataFrame([(1, 10), (2, 20)], "container_id long, v long")
+        chunks = list(_container_chunks(df, 5, "container_id"))
+        assert len(chunks) == 1
+        assert chunks[0] is df
+
+    def test_population_over_cap_partitions_disjointly_and_covers_all(self, spark):
+        """> cap containers => ceil(n/cap) buckets that are disjoint and cover everyone."""
+        rows = [(i, i * 10) for i in range(1, 6)]  # 5 containers, cap 2 => 3 chunks
+        df = spark.createDataFrame(rows, "container_id long, v long")
+        chunks = list(_container_chunks(df, 2, "container_id"))
+        assert len(chunks) == 3
+        per_chunk = [{r["container_id"] for r in c.collect()} for c in chunks]
+        assert set().union(*per_chunk) == {1, 2, 3, 4, 5}  # covers all
+        assert sum(len(s) for s in per_chunk) == 5  # disjoint (no id in two chunks)
+
+
+class TestCombineContainerChunks:
+    """Tests for combining per-chunk solve results."""
+
+    def test_sinkless_unions_parts_by_name(self, spark):
+        """Without a sink, chunks are ``unionByName``-appended directly into one frame."""
+        a = spark.createDataFrame([(1, 10)], "container_id long, v long")
+        b = spark.createDataFrame([(2, 20), (3, 30)], "container_id long, v long")
+        result = _combine_container_chunks(
+            spark, [a, b], has_sink=False, catalog=None, schema=None
+        )
+        assert {r["container_id"] for r in result.collect()} == {1, 2, 3}
+
+
+# ============================================================================
 # Tests: Report._solve_expressions_batched
 # ============================================================================
 _SINK_CONFIG = {
@@ -776,6 +820,16 @@ _SINKLESS_CONFIG = {
         "channels_uri": "spark_catalog.silver.channels",
     },
     "query_engine": {"solver": "KeyValueStoreSolver"},
+}
+
+# Sinkless, but with a container cap so the batched solves take the chunked path.
+_CHUNKED_SINKLESS_CONFIG = {
+    "source": {
+        "container_metrics_table": "spark_catalog.silver.container_metrics",
+        "channel_metrics_table": "spark_catalog.silver.channel_metrics",
+        "channels_uri": "spark_catalog.silver.channels",
+    },
+    "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 2},
 }
 
 
@@ -933,6 +987,28 @@ class TestSolveExpressionsBatched:
         report.query.select.assert_called_once_with(expr)
         report.query.select.return_value.solve.assert_called_once()
 
+    def test_capped_empty_chunks_falls_back_to_single_solve(self, spark):
+        """Cap set but the chunker yields nothing (empty set) => one solve over the frame."""
+        report = _build_report_for_solve(spark, _CHUNKED_SINKLESS_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = mock_table_df
+
+        expr = MagicMock()
+        expr.get_selectors.return_value = [MagicMock()]
+        pre_filtered = MagicMock(spec=DataFrame)
+
+        with patch("impulse_reporting.core.report_utils._container_chunks", return_value=iter([])):
+            result = report._solve_expressions_batched(
+                [expr], pre_filtered_containers_df=pre_filtered
+            )
+
+        assert result is mock_table_df
+
 
 class TestSolveCalculatedChannelsBatched:
     """Tests for Report._solve_calculated_channels_batched() (narrow / append)."""
@@ -1039,6 +1115,85 @@ class TestSolveCalculatedChannelsBatched:
 
         report.query.select.assert_called_once_with(ch)
         report.query.select.return_value.solve_calculated_channels.assert_called_once()
+
+    def _capped_report(self, spark):
+        report = _build_report_for_solve(spark, _CHUNKED_SINKLESS_CONFIG)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = MagicMock(
+            spec=DataFrame
+        )
+        report.spark = MagicMock()
+        return report
+
+    def test_capped_multiple_chunks_combined_via_helper(self, spark):
+        """>1 chunk => each chunk solved, then combined via _combine_container_chunks."""
+        report = self._capped_report(spark)
+        report.spark.table.return_value = MagicMock(spec=DataFrame)
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+        pre_filtered = MagicMock(spec=DataFrame)
+        chunk_a, chunk_b = MagicMock(spec=DataFrame), MagicMock(spec=DataFrame)
+        combined = MagicMock(spec=DataFrame)
+
+        with (
+            patch(
+                "impulse_reporting.core.report_utils._container_chunks",
+                return_value=[chunk_a, chunk_b],
+            ),
+            patch(
+                "impulse_reporting.core.report_utils._combine_container_chunks",
+                return_value=combined,
+            ) as mock_combine,
+        ):
+            result = report._solve_calculated_channels_batched(
+                [ch], pre_filtered_containers_df=pre_filtered
+            )
+
+        assert result is combined
+        mock_combine.assert_called_once()
+        assert len(mock_combine.call_args[0][1]) == 2  # one solved part per chunk
+
+    def test_capped_single_chunk_returned_directly(self, spark):
+        """Exactly one chunk => that chunk's solve is returned, no combine round-trip."""
+        report = self._capped_report(spark)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+        pre_filtered = MagicMock(spec=DataFrame)
+
+        with (
+            patch(
+                "impulse_reporting.core.report_utils._container_chunks",
+                return_value=[MagicMock(spec=DataFrame)],
+            ),
+            patch("impulse_reporting.core.report_utils._combine_container_chunks") as mock_combine,
+        ):
+            result = report._solve_calculated_channels_batched(
+                [ch], pre_filtered_containers_df=pre_filtered
+            )
+
+        assert result is mock_table_df
+        mock_combine.assert_not_called()
+
+    def test_capped_empty_chunks_falls_back_to_single_solve(self, spark):
+        """Cap set but no chunks (empty set) => single solve over the frame."""
+        report = self._capped_report(spark)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+        pre_filtered = MagicMock(spec=DataFrame)
+
+        with patch("impulse_reporting.core.report_utils._container_chunks", return_value=iter([])):
+            result = report._solve_calculated_channels_batched(
+                [ch], pre_filtered_containers_df=pre_filtered
+            )
+
+        assert result is mock_table_df
 
 
 # ============================================================================
