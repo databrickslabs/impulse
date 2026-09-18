@@ -1,4 +1,5 @@
 import re
+import warnings
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated
@@ -378,6 +379,16 @@ class QueryEngine(BaseModel):
 
         When omitted, all default column names are used and no
         project/toolbox filtering is applied.
+    max_selectors_per_batch : int, default=500
+        Maximum number of unique ``TimeSeriesSelector`` instances solved per
+        batch.  Expressions are packed into batches under this cap to bound the
+        breadth of each solve.  ``batch_size`` is a **deprecated alias** for this
+        field, kept so existing configs keep working; it emits a
+        ``DeprecationWarning`` and will be removed in a future release.  Setting
+        both ``max_selectors_per_batch`` and ``batch_size`` is rejected.
+    max_containers_per_batch : int, optional, default=None
+        Caps how many containers are solved per chunk to bound per-solve memory.
+        ``None`` disables the cap; when set it must be ``>= 1``.
 
     Notes
     -----
@@ -398,8 +409,34 @@ class QueryEngine(BaseModel):
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
-    batch_size: int = 500
+    max_selectors_per_batch: int = 500
     max_containers_per_batch: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_batch_size_alias(cls, data):
+        """Resolve the deprecated ``batch_size`` alias to ``max_selectors_per_batch``.
+
+        ``batch_size`` is kept so existing report configs continue to deserialize; it
+        will be removed in a future release.  Emits a ``DeprecationWarning`` when used,
+        and rejects configs that set both the old and new name.
+        """
+        if not isinstance(data, dict) or "batch_size" not in data:
+            return data
+        if "max_selectors_per_batch" in data:
+            raise ValueError(
+                "Set only one of 'max_selectors_per_batch' or the deprecated "
+                "'batch_size' (an alias for it), not both."
+            )
+        warnings.warn(
+            "query_engine.batch_size is deprecated in favour of "
+            "max_selectors_per_batch and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        data = dict(data)
+        data["max_selectors_per_batch"] = data.pop("batch_size")
+        return data
 
     @field_validator("max_containers_per_batch", mode="after")
     @classmethod

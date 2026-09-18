@@ -21,7 +21,7 @@ Structurally parallels :class:`BasicEvent` (holds an aliased expression,
 name-derived id, SHA-256 definition hash). Like the other entity types, its
 narrow solve is batched from :class:`Report` (see
 ``Report._solve_calculated_channels_batched``): the channels are partitioned by
-``batch_size``, each batch solved via ``QueryBuilder.solve_calculated_channels``
+``max_selectors_per_batch``, each batch solved via ``QueryBuilder.solve_calculated_channels``
 and persisted as a temp table, then the batches are unioned into a narrow
 ``solved_df``. :meth:`determine_calculated_channels` shapes that already-solved
 df, mirroring ``determine_aggregations`` / ``determine_events``.

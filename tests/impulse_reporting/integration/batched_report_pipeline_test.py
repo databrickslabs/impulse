@@ -40,7 +40,7 @@ def _build_batched_report(spark: SparkSession) -> tuple[Report, dict[str, object
         ),
         query_engine=QueryEngine(
             solver=Solvers.KEY_VALUE_STORE_SOLVER,
-            batch_size=1,
+            max_selectors_per_batch=1,
         ),
     )
 
@@ -139,11 +139,11 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
         instrumentation["cleanup_calls"] += 1
         return original_cleanup_temp_tables(self)
 
-    def _build_batches_wrapper(expressions, batch_size):
-        batches = original_build_batches(expressions, batch_size)
+    def _build_batches_wrapper(expressions, max_selectors_per_batch):
+        batches = original_build_batches(expressions, max_selectors_per_batch)
         instrumentation["build_batches"].append(
             {
-                "batch_size": batch_size,
+                "max_selectors_per_batch": max_selectors_per_batch,
                 "expression_count": len(expressions),
                 "batch_count": len(batches),
                 "batch_aliases": [
@@ -287,7 +287,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
     assert temp_tables
 
     assert instrumentation["build_batches"]
-    assert instrumentation["build_batches"][0]["batch_size"] == 1
+    assert instrumentation["build_batches"][0]["max_selectors_per_batch"] == 1
     assert instrumentation["build_batches"][0]["batch_count"] >= 2
 
     assert len(instrumentation["solve_calls"]) == 2
@@ -370,7 +370,7 @@ def test_persist_results_param_overrides_config_flag(spark, cleanup_gold):
             table_prefix="evaluation",
             cleanup_temp_tables=True,
         ),
-        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER, batch_size=1),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER, max_selectors_per_batch=1),
     )
     report, _ = _build_batched_report(spark)
     report.config = config
@@ -395,7 +395,7 @@ def test_persist_results_config_flag_cleans_temp_tables(spark, cleanup_gold):
             table_prefix="evaluation",
             cleanup_temp_tables=True,
         ),
-        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER, batch_size=1),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER, max_selectors_per_batch=1),
     )
     report, _ = _build_batched_report(spark)
     report.config = config

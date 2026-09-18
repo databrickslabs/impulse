@@ -193,6 +193,46 @@ def test_impulse_config_cap_allowed_with_incremental_disabled():
     assert config.query_engine.max_containers_per_batch == 10
 
 
+def test_impulse_config_max_selectors_per_batch_defaults_to_500():
+    """The selector cap defaults to 500."""
+    config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
+    assert config.query_engine.max_selectors_per_batch == 500
+
+
+def test_impulse_config_max_selectors_per_batch_parsed():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_selectors_per_batch": 42},
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_selectors_per_batch == 42
+
+
+def test_impulse_config_batch_size_alias_resolves_and_warns():
+    """The deprecated ``batch_size`` alias maps to ``max_selectors_per_batch`` with a warning."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "batch_size": 42},
+    }
+    with pytest.warns(DeprecationWarning, match="batch_size is deprecated"):
+        config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_selectors_per_batch == 42
+
+
+def test_impulse_config_batch_size_and_max_selectors_per_batch_conflict():
+    """Setting both the old and new name is rejected."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "batch_size": 42,
+            "max_selectors_per_batch": 99,
+        },
+    }
+    with pytest.raises(ValidationError, match="only one of"):
+        ImpulseConfig.model_validate(config_json)
+
+
 # ---------------------------------------------------------------------------
 # Source.poi_channels_uri — must survive parsing AND reach the MeasurementDB.
 # Regression: the field was missing from the Source model, so pydantic silently

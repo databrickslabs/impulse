@@ -33,7 +33,7 @@ class TestBuildBatches:
 
     def test_empty_expressions(self):
         """Empty input returns empty output."""
-        assert build_batches([], batch_size=10) == []
+        assert build_batches([], max_selectors_per_batch=10) == []
 
     def test_single_expression_fits(self):
         """Single expression always fits in one batch."""
@@ -41,12 +41,12 @@ class TestBuildBatches:
         sel = MagicMock()
         expr.get_selectors.return_value = [sel]
 
-        result = build_batches([expr], batch_size=1)
+        result = build_batches([expr], max_selectors_per_batch=1)
         assert len(result) == 1
         assert result[0] == [expr]
 
     def test_all_fit_single_batch(self):
-        """All expressions fit in one batch when total selectors <= batch_size."""
+        """All expressions fit in one batch when total selectors <= max_selectors_per_batch."""
         sel_a = MagicMock()
         sel_b = MagicMock()
 
@@ -56,7 +56,7 @@ class TestBuildBatches:
         expr2 = MagicMock()
         expr2.get_selectors.return_value = [sel_b]
 
-        result = build_batches([expr1, expr2], batch_size=2)
+        result = build_batches([expr1, expr2], max_selectors_per_batch=2)
         assert len(result) == 1
         assert set(result[0]) == {expr1, expr2}
 
@@ -70,13 +70,13 @@ class TestBuildBatches:
         expr2 = MagicMock()
         expr2.get_selectors.return_value = [shared_sel]
 
-        result = build_batches([expr1, expr2], batch_size=1)
+        result = build_batches([expr1, expr2], max_selectors_per_batch=1)
         # Both share the same selector, so they fit in one batch
         assert len(result) == 1
         assert set(result[0]) == {expr1, expr2}
 
     def test_split_into_multiple_batches(self):
-        """Expressions with distinct selectors are split when they exceed batch_size."""
+        """Expressions with distinct selectors are split when they exceed max_selectors_per_batch."""
         sel_a = MagicMock()
         sel_b = MagicMock()
         sel_c = MagicMock()
@@ -90,8 +90,8 @@ class TestBuildBatches:
         expr3 = MagicMock()
         expr3.get_selectors.return_value = [sel_c]
 
-        result = build_batches([expr1, expr2, expr3], batch_size=1)
-        # Each has a unique selector, batch_size=1 → 3 batches
+        result = build_batches([expr1, expr2, expr3], max_selectors_per_batch=1)
+        # Each has a unique selector, max_selectors_per_batch=1 → 3 batches
         assert len(result) == 3
 
     def test_overlap_preference(self):
@@ -108,11 +108,11 @@ class TestBuildBatches:
         expr3 = MagicMock()
         expr3.get_selectors.return_value = [sel_b]
 
-        result = build_batches([expr1, expr2, expr3], batch_size=2)
-        # All share selectors through expr1, and batch_size=2 can hold {sel_a, sel_b}
+        result = build_batches([expr1, expr2, expr3], max_selectors_per_batch=2)
+        # All share selectors through expr1, and max_selectors_per_batch=2 can hold {sel_a, sel_b}
         assert len(result) == 1
 
-    def test_batch_size_respected(self):
+    def test_max_selectors_per_batch_respected(self):
         """No batch exceeds the selector limit."""
         selectors = [MagicMock() for _ in range(10)]
         expressions = []
@@ -121,8 +121,8 @@ class TestBuildBatches:
             expr.get_selectors.return_value = [sel]
             expressions.append(expr)
 
-        result = build_batches(expressions, batch_size=3)
-        # 10 unique selectors, batch_size=3 → at least 4 batches
+        result = build_batches(expressions, max_selectors_per_batch=3)
+        # 10 unique selectors, max_selectors_per_batch=3 → at least 4 batches
         assert len(result) >= 4
         # Each batch has at most 3 unique selectors
         for batch in result:
@@ -133,13 +133,13 @@ class TestBuildBatches:
             assert len(unique_sels) <= 3
 
     def test_oversized_single_expression_gets_own_batch(self):
-        """An expression with more selectors than batch_size still gets its own batch."""
-        # 5 selectors but batch_size=3
+        """An expression with more selectors than max_selectors_per_batch still gets its own batch."""
+        # 5 selectors but max_selectors_per_batch=3
         selectors = [MagicMock() for _ in range(5)]
         expr = MagicMock()
         expr.get_selectors.return_value = selectors
 
-        result = build_batches([expr], batch_size=3)
+        result = build_batches([expr], max_selectors_per_batch=3)
         assert len(result) == 1
         assert result[0] == [expr]
 
@@ -151,7 +151,7 @@ class TestBuildBatches:
         ExprC uses {S1,S2,S3,S4}           (4 selectors)
         ExprD uses {S6,S7,S8,S9}           (4 selectors)
         ExprE uses {S20}                   (1 selector)
-        batch_size=7 → Batch1={B,D,E}, Batch2={A,C}
+        max_selectors_per_batch=7 → Batch1={B,D,E}, Batch2={A,C}
         """
         s = [MagicMock() for _ in range(21)]  # s[1]..s[10], s[20]
 
@@ -170,7 +170,7 @@ class TestBuildBatches:
         exprE = MagicMock()
         exprE.get_selectors.return_value = [s[20]]
 
-        result = build_batches([exprA, exprB, exprC, exprD, exprE], batch_size=7)
+        result = build_batches([exprA, exprB, exprC, exprD, exprE], max_selectors_per_batch=7)
 
         assert len(result) == 2
 
@@ -185,7 +185,7 @@ class TestBuildBatches:
         expr = MagicMock()
         expr.get_selectors.return_value = []
 
-        result = build_batches([expr], batch_size=5)
+        result = build_batches([expr], max_selectors_per_batch=5)
         assert len(result) == 1
         assert result[0] == [expr]
 
