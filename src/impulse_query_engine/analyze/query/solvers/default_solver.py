@@ -1139,10 +1139,8 @@ class DefaultSolver(QuerySolver):
         q = query.db.channels(self.spark)
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
 
-        # Per-table equality filters on the channels table, keyed by internal
-        # column name (after column_name_mapping).  Applied before the select
-        # below so a filter may reference any channels column, including a
-        # dimension column that the UDF-column projection then drops.
+        # Equality filters on internal column names, applied before the select
+        # below so a filter may reference any channels column, dropped or not.
         for col_name, value in self.config.channels.filters.items():
             q = q.where(F.col(col_name) == value)
 

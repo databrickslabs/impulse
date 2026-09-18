@@ -111,12 +111,8 @@ class TestChannelsFilter:
         assert result.count() == 0
 
     def test_boolean_column_filter_matches_true_rows(self, spark, basic_narrow_db):
-        """A boolean channels column filters on the string ``"true"`` via literal coercion.
-
-        ``TableConfig.filters`` values are always strings; Spark casts the string
-        literal to the column's boolean type (the column is never stringified),
-        exactly as the other tables' filters already behave.
-        """
+        """A boolean channels column filters on ``"true"``: Spark casts the string
+        literal to the column's type, so only the ``true`` rows survive."""
         db = _clone_with_channel_col(basic_narrow_db, "is_valid", _only_row_marker(True, False))
         query = db.query
         cfg = SolverConfig(channels=TableConfig(filters={"is_valid": "true"}))

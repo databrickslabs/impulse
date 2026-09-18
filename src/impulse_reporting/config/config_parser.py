@@ -417,13 +417,11 @@ class QueryEngine(BaseModel):
 
     @model_validator(mode="after")
     def reject_channels_filter_on_is_plausible_in_raw(self):
-        """A channels filter on ``is_plausible`` in RAW mode is the wrong tool.
+        """Reject dropping implausible data via a channels filter in RAW mode.
 
-        ``channels.filters`` are applied *before* raw encoding, so filtering on the
-        plausibility flag bridges intervals across the dropped samples (the last
-        good value is held across the gap).  ``drop_implausible_data`` instead drops
-        implausible rows *inside* the encoder, after interval boundaries are assigned,
-        so a dropped sample splits the surrounding interval.  Steer users there.
+        ``channels.filters`` run before raw encoding and bridge intervals across
+        dropped samples; ``drop_implausible_data`` drops inside the encoder instead,
+        keeping interval boundaries correct.
         """
         if self.data_type is DataType.RAW and self.solver_config is not None:
             plausibility_col = self.solver_config.is_plausible_col

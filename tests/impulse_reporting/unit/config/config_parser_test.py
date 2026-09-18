@@ -237,12 +237,7 @@ def test_channels_filter_on_is_plausible_rejected_in_raw():
 
 def test_channels_filter_on_mapped_is_plausible_rejected_in_raw():
     """The guard keys off the internal name, so it also catches a physical column
-    mapped to is_plausible — the most common real-world setup.
-
-    channels.filters keys are internal names (applied after column_name_mapping), so
-    the only working way to filter a mapped plausibility column is via 'is_plausible';
-    the physical name never appears in a valid filter key.
-    """
+    mapped to is_plausible (filter keys are always internal names)."""
     config_json = {
         **impulse_config_JSON,
         "query_engine": {
