@@ -59,7 +59,7 @@ jobs:
     name: Testing (${{ matrix.component }})
     runs-on:
       group: databrickslabs-protected-runner-group
-      labels: linux-ubuntu-latest
+      labels: larger
     needs: [ not-a-fork, lint ]
     permissions:
       id-token: write
