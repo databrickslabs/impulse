@@ -189,6 +189,8 @@ Internal column names that mappings can target:
 | `container_id`  | Container identifier                                     |
 | `channel_id`    | Channel identifier                                       |
 | `tstart`, `tend`| Sample interval start/end on the `channels` table (RLE)  |
+| `timestamp`     | Raw sample timestamp on the `channels` table (RAW mode; encoded into `tstart`/`tend`) |
+| `is_plausible`  | Boolean plausibility flag on the `channels` table (RAW mode); consumed by `drop_implausible_data` |
 | `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` to derive event-fact start/end |
 | `value`         | Sample value (or attribute value on the EAV tag table)   |
 | `key`           | Attribute key on the EAV `container_tags` table          |
@@ -213,6 +215,17 @@ Per-table `filters` are applied for `container_tags`, `container_metrics`,
 and `poi_channels` are accepted for forward compatibility but **not yet applied**.
 Sections for tables you do not configure (e.g. `channel_tags`, `channel_mapping`)
 are simply unused.
+
+:::
+
+:::caution Channels filters in RAW mode
+
+`channels.filters` are applied **before** raw encoding. A filter that removes
+samples from the middle of a channel therefore *bridges* the surrounding interval
+(the last good value is held across the gap) rather than splitting it. To drop
+implausible samples with correct interval boundaries, use `drop_implausible_data`,
+not a channels filter — the config validator rejects a `channels.filters` entry on
+the `is_plausible` column when `data_type = RAW` for exactly this reason.
 
 :::
 

@@ -199,9 +199,9 @@ def test_poi_channels_uri_reaches_measurement_db():
 def test_impulse_config_drop_implausible_data_rejects_rle():
     """drop_implausible_data=True with RLE data must raise ValidationError.
 
-    The implausible filter is only wired into the RAW -> RLE conversion path in
-    IntervalEncoder. Silently allowing this combination would let users think
-    the filter is running when it is not.
+    The implausible filter is only wired into the RAW -> interval conversion path
+    (RleEncoder / IntervalEncoder). Silently allowing this combination would let
+    users think the filter is running when it is not.
     """
     config_json = {
         **impulse_config_JSON,
@@ -213,6 +213,83 @@ def test_impulse_config_drop_implausible_data_rejects_rle():
     }
     with pytest.raises(ValidationError, match="requires data_type=RAW"):
         ImpulseConfig.model_validate(config_json)
+
+
+def test_channels_filter_on_is_plausible_rejected_in_raw():
+    """A channels.filters entry on is_plausible in RAW mode must raise.
+
+    The filter is applied before raw encoding, so it would bridge intervals across
+    dropped samples instead of splitting them; drop_implausible_data is the right tool.
+    """
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "solver_config": {
+                "channels": {"filters": {"is_plausible": "true"}},
+            },
+        },
+    }
+    with pytest.raises(ValidationError, match="before raw encoding"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_channels_filter_on_mapped_is_plausible_rejected_in_raw():
+    """The guard keys off the internal name, so it also catches a physical column
+    mapped to is_plausible — the most common real-world setup.
+
+    channels.filters keys are internal names (applied after column_name_mapping), so
+    the only working way to filter a mapped plausibility column is via 'is_plausible';
+    the physical name never appears in a valid filter key.
+    """
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "solver_config": {
+                "channels": {
+                    "column_name_mapping": {"plaus_flag": "is_plausible"},
+                    "filters": {"is_plausible": "true"},
+                },
+            },
+        },
+    }
+    with pytest.raises(ValidationError, match="before raw encoding"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_channels_filter_non_plausibility_allowed_in_raw():
+    """A normal scoping channels.filters entry in RAW mode is fine (no over-blocking)."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "solver_config": {
+                "channels": {"filters": {"source": "live"}},
+            },
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.solver_config.channels.filters == {"source": "live"}
+
+
+def test_channels_filter_on_is_plausible_allowed_in_rle():
+    """In RLE mode no encoder runs, so filtering on is_plausible is legitimate scoping."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RLE",
+            "solver_config": {
+                "channels": {"filters": {"is_plausible": "true"}},
+            },
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.solver_config.channels.filters == {"is_plausible": "true"}
 
 
 def test_impulse_config_cleanup_temp_tables_defaults_to_false():
