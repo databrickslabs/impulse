@@ -20,7 +20,7 @@ TEST_PATH ?= tests/
 # Spark JVM (see the worker-isolated `spark` fixture in tests/conftest.py), so `-n auto`
 # is capped to bound memory on many-core machines. Override with
 # `make test PYTEST_XARGS=-n0` to run serially in-process for debugging.
-PYTEST_XARGS ?= -n auto --maxprocesses=4
+PYTEST_XARGS ?= -n auto --maxprocesses=8
 
 clean:
 	rm -fr .venv htmlcov .pytest_cache .ruff_cache .coverage coverage.xml test-results.xml
