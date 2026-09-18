@@ -160,7 +160,8 @@ in `solver_config` so the solver renames each table's columns at read time.
   the internal names.
 - `filters` (`dict[str, str]`): equality filters applied **after** renaming. Keys are internal column
   names; values are literals to match. Useful for project/toolbox scoping where a single value should
-  always be enforced.
+  always be enforced. Values are strings but are coerced to the target column's type, so a boolean
+  column takes `"true"` / `"false"` (an unparseable value errors at read time under ANSI mode).
 
 Top-level fields on `SolverConfig`:
 
@@ -178,7 +179,7 @@ Per-table sections (each a `TableConfig`):
 | `channel_tags`     | when `channel_tags_table` is configured    | Tag key/value column renames                                      |
 | `channel_metrics`  | always                                     | Custom channel_id column, custom value/timestamp columns          |
 | `channel_mapping`  | when `channel_mapping_table` is configured | Alias-table column renames; `priority` column; optional `join_keys` for non-default alias-resolution composite keys |
-| `channels`         | always                                     | RLE column renames (`tstart`/`tend`/`value`)                      |
+| `channels`         | always                                     | RLE column renames (`tstart`/`tend`/`value`); `filters` supported (applied at read time, before non-solve columns are dropped) |
 | `unit_conversion`  | when `unit_conversion_table` is configured | Unit-conversion table column renames (`unit`, `group_id`, `conversion_factor`) |
 
 Internal column names that mappings can target:
@@ -205,10 +206,13 @@ Internal column names that mappings can target:
 
 :::note Feature support
 
-`DefaultSolver` consumes every section of `solver_config`: per-table
-`column_name_mapping`, per-table `filters`, top-level `project_id`, and the
-`channel_mapping` / `unit_conversion` sections. Sections for tables you do
-not configure (e.g. `channel_tags`, `channel_mapping`) are simply unused.
+`DefaultSolver` consumes every section's `column_name_mapping`, plus the
+top-level `project_id` and the `channel_mapping` / `unit_conversion` sections.
+Per-table `filters` are applied for `container_tags`, `container_metrics`,
+`channel_mapping`, and `channels`. Filters on `channel_tags`, `channel_metrics`,
+and `poi_channels` are accepted for forward compatibility but **not yet applied**.
+Sections for tables you do not configure (e.g. `channel_tags`, `channel_mapping`)
+are simply unused.
 
 :::
 
@@ -234,7 +238,8 @@ not configure (e.g. `channel_tags`, `channel_mapping`) are simply unused.
             "filters": {"toolbox_id": "my_toolbox"}
         },
         "channels": {
-            "column_name_mapping": {}
+            "column_name_mapping": {},
+            "filters": {"source": "live"}
         }
     }
 }
