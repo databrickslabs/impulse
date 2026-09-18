@@ -55,7 +55,8 @@ lock-dependencies:
 	uv lock
 	printf 'setuptools>=61.0\nwheel\n' | uv pip compile --generate-hashes --universal --no-header --quiet - > .build-constraints.txt
 	@perl -pi -e 's|registry = "https://[^"]*"|registry = "https://pypi.org/simple"|g' uv.lock
-	@printf 'Stripped registry references from uv.lock.\n'
+	@perl -pi -e 's|https://pypi-proxy\.dev\.databricks\.com/|https://files.pythonhosted.org/|g' uv.lock
+	@printf 'Stripped registry and proxy URLs from uv.lock.\n'
 
 # Mirror a fork PR onto a fork-test/pr-<N> branch in the main repo and open a test PR,
 # so CI (which is skipped for fork PRs) runs with JFrog/OIDC. Review the fork code first.
