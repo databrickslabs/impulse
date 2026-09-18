@@ -540,8 +540,7 @@ def _combine_container_chunks(
 
     With a sink, append each chunk into one ``__impulse_temp_*`` Delta table and read it
     back once, avoiding a deep ``unionByName`` tree and materializing one chunk at a time.
-    Without a sink, ``unionByName`` the chunks directly: a temp view is lazy, so wrapping
-    each chunk in one would neither materialize it nor cut lineage — only add catalog churn.
+    Without a sink, ``unionByName`` the chunks directly
     """
     if not has_sink:
         return reduce(lambda a, b: a.unionByName(b), parts)

@@ -1,5 +1,5 @@
 import json
-import warnings
+import logging
 import zlib
 from typing import Any
 from databricks.sdk import WorkspaceClient
@@ -64,6 +64,8 @@ from impulse_reporting.persist.report_storage import (
 )
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 from impulse_query_engine.telemetry import log_telemetry, telemetry_logger
+
+logger = logging.getLogger(__name__)
 
 
 class Report:
@@ -972,9 +974,8 @@ class Report:
         If a batch is detected again unchanged after being persisted (no forward
         progress, e.g. a misconfigured ``gold_last_modified_column`` or containers
         excluded by ``container_filters`` that never yield a gold row), the loop would
-        otherwise spin forever. ``run()`` detects the repeated batch, emits a
-        ``UserWarning`` naming the stuck containers, and stops (partial completion)
-        rather than hanging.
+        otherwise spin forever. ``run()`` detects the repeated batch, logs a warning
+        naming the stuck containers, and stops (partial completion) rather than hanging.
         """
         previous_batch_ids = None
         while True:
@@ -992,13 +993,13 @@ class Report:
             # stalled and the loop would never terminate. Stop instead of hanging.
             current_batch_ids = frozenset(self._processed_container_ids or [])
             if current_batch_ids == previous_batch_ids:
-                warnings.warn(
-                    f"Incremental run stopped early: {len(current_batch_ids)} containers were "
-                    "detected again after being persisted, so the run made no forward progress. "
-                    f"First ids: {sorted(current_batch_ids)[:10]}. Likely causes: a misconfigured "
-                    "gold_last_modified_column or containers that produce no measurement_dimension "
-                    "row. Remaining containers were not processed.",
-                    stacklevel=2,
+                logger.warning(
+                    "Incremental run stopped early: %d containers were detected again after "
+                    "being persisted, so the run made no forward progress. First ids: %s. "
+                    "Likely causes: a misconfigured gold_last_modified_column or containers that "
+                    "produce no measurement_dimension row. Remaining containers were not processed.",
+                    len(current_batch_ids),
+                    sorted(current_batch_ids)[:10],
                 )
                 return
             previous_batch_ids = current_batch_ids

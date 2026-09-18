@@ -10,6 +10,7 @@ These tests use lightweight aggregations (few histogram bins) and share a single
 baseline (computed once) so each determine+persist cycle stays cheap.
 """
 
+import logging
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
@@ -387,13 +388,13 @@ def test_run_without_persist_does_not_loop(spark):
     assert _container_ids(spark, "nopersist") == [1]
 
 
-def test_run_stops_when_drain_makes_no_progress(spark):
-    """A stalled drain must stop with a warning instead of looping forever.
+def test_run_stops_when_drain_makes_no_progress(spark, caplog):
+    """A stalled drain must stop with a logged warning instead of looping forever.
 
     Every container's freshness ``timestamp`` is set far in the future, so a persisted
     container is always re-detected as updated and never drops out. With cap=1 the lowest
     container (1) is selected every iteration and blocks the drain. run() must detect the
-    repeated batch, warn, and return rather than hang.
+    repeated batch, log a warning, and return rather than hang.
     """
     spark.read.table("spark_catalog.silver.container_metrics").withColumn(
         "timestamp", F.lit("2999-01-01 00:00:00").cast("timestamp")
@@ -404,8 +405,9 @@ def test_run_stops_when_drain_makes_no_progress(spark):
         report = _make_report(
             spark, "container_metrics_future", "stuck", max_containers_per_batch=1
         )
-        with pytest.warns(UserWarning, match="no forward progress"):
+        with caplog.at_level(logging.WARNING, logger="impulse_reporting.core.report"):
             report.run()
+        assert "no forward progress" in caplog.text
         # Only the first batch (container 1) was ever committed; the drain stalled on it,
         # so the remaining containers were left unprocessed rather than looped on.
         assert _container_ids(spark, "stuck") == [1]
