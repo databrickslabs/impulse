@@ -1,4 +1,5 @@
 import re
+import warnings
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated
@@ -422,8 +423,46 @@ class QueryEngine(BaseModel):
         if self.drop_implausible_data and self.data_type is not DataType.RAW:
             raise ValueError(
                 "drop_implausible_data=True requires data_type=RAW. "
-                "The implausible-data filter is only applied during the RAW -> RLE "
+                "The implausible-data filter is only applied during the RAW -> interval "
                 "conversion path; RLE input is passed through unchanged."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def reject_channels_filter_on_is_plausible_in_raw(self):
+        """Reject an is_plausible channels filter in RAW mode (delegates to SolverConfig).
+
+        The shared invariant lives on ``SolverConfig`` so direct query-engine use
+        (``DefaultSolver``) enforces the same rule; here we surface it at config-parse time.
+        """
+        if self.solver_config is not None:
+            self.solver_config.reject_implausible_channels_filter_in_raw(
+                is_raw=self.data_type is DataType.RAW
+            )
+        return self
+
+    @model_validator(mode="after")
+    def warn_channels_filters_bridge_in_raw(self):
+        """Warn (not reject) on any non-plausibility channels filter in RAW mode.
+
+        Such filters run before raw encoding and bridge intervals across dropped
+        samples. That is fine for whole-channel scoping but corrupts per-sample cleaning,
+        and the two cannot be told apart statically, so we warn. ``is_plausible`` is
+        hard-rejected above as the one unambiguously per-sample case.
+        """
+        if self.data_type is not DataType.RAW or self.solver_config is None:
+            return self
+        plausibility_col = self.solver_config.is_plausible_col
+        other = [c for c in self.solver_config.channels.filters if c != plausibility_col]
+        if other:
+            warnings.warn(
+                f"channels.filters {other} in RAW mode run before raw encoding and bridge "
+                "intervals across dropped samples. Use them only for whole-channel scoping, "
+                "not per-sample cleaning. To drop implausible points with correct interval "
+                "boundaries, use drop_implausible_data=True instead.",
+                # stacklevel=1 (the warn call itself): inside a pydantic model_validator the
+                # frames above are pydantic internals, so a higher level would mislead.
+                stacklevel=1,
             )
         return self
 

@@ -400,3 +400,20 @@ class SolverConfig(BaseModel):
             # per-row series_type / dtype marker column is needed in the frame.
             "value_string": self.poi_value_string_col,
         }
+
+    def reject_implausible_channels_filter_in_raw(self, is_raw: bool) -> None:
+        """Raise if an is_plausible channels filter is set in RAW mode.
+
+        Such a filter runs before raw encoding and bridges intervals across dropped
+        samples instead of splitting them; use drop_implausible_data instead. No-op
+        when not raw.
+        """
+        if not is_raw:
+            return
+        if self.is_plausible_col in self.channels.filters:
+            raise ValueError(
+                f"A channels.filters entry on '{self.is_plausible_col}' in RAW mode is "
+                "applied before raw encoding, which bridges intervals across dropped "
+                "samples. Use drop_implausible_data=True instead -- it drops "
+                "implausible points inside the encoder with correct interval boundaries."
+            )

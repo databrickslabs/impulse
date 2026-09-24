@@ -161,7 +161,8 @@ in `solver_config` so the solver renames each table's columns at read time.
   the internal names.
 - `filters` (`dict[str, str]`): equality filters applied **after** renaming. Keys are internal column
   names; values are literals to match. Useful for project/toolbox scoping where a single value should
-  always be enforced.
+  always be enforced. Values are strings but are coerced to the target column's type, so a boolean
+  column takes `"true"` / `"false"` (an unparseable value errors at read time under ANSI mode).
 
 Top-level fields on `SolverConfig`:
 
@@ -179,7 +180,7 @@ Per-table sections (each a `TableConfig`):
 | `channel_tags`     | when `channel_tags_table` is configured    | Tag key/value column renames                                      |
 | `channel_metrics`  | always                                     | Custom channel_id column, custom value/timestamp columns          |
 | `channel_mapping`  | when `channel_mapping_table` is configured | Alias-table column renames; `priority` column; optional `join_keys` for non-default alias-resolution composite keys |
-| `channels`         | always                                     | RLE column renames (`tstart`/`tend`/`value`)                      |
+| `channels`         | always                                     | RLE column renames (`tstart`/`tend`/`value`); `filters` supported (applied at read time, before non-solve columns are dropped) |
 | `unit_conversion`  | when `unit_conversion_table` is configured | Unit-conversion table column renames (`unit`, `group_id`, `conversion_factor`) |
 
 Internal column names that mappings can target:
@@ -189,6 +190,8 @@ Internal column names that mappings can target:
 | `container_id`  | Container identifier                                     |
 | `channel_id`    | Channel identifier                                       |
 | `tstart`, `tend`| Sample interval start/end on the `channels` table (RLE)  |
+| `timestamp`     | Raw sample timestamp on the `channels` table (RAW mode; encoded into `tstart`/`tend`) |
+| `is_plausible`  | Boolean plausibility flag on the `channels` table (RAW mode); consumed by `drop_implausible_data` |
 | `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` to derive event-fact start/end |
 | `value`         | Sample value (or attribute value on the EAV tag table)   |
 | `key`           | Attribute key on the EAV `container_tags` table          |
@@ -206,10 +209,36 @@ Internal column names that mappings can target:
 
 :::note Feature support
 
-`DefaultSolver` consumes every section of `solver_config`: per-table
-`column_name_mapping`, per-table `filters`, top-level `project_id`, and the
-`channel_mapping` / `unit_conversion` sections. Sections for tables you do
-not configure (e.g. `channel_tags`, `channel_mapping`) are simply unused.
+`DefaultSolver` consumes every section's `column_name_mapping`, plus the
+top-level `project_id` and the `channel_mapping` / `unit_conversion` sections.
+Per-table `filters` are applied for `container_tags`, `container_metrics`,
+`channel_mapping`, and `channels`. Filters on `channel_tags`, `channel_metrics`,
+and `poi_channels` are accepted for forward compatibility but **not yet applied**.
+Sections for tables you do not configure (e.g. `channel_tags`, `channel_mapping`)
+are simply unused.
+
+:::
+
+:::caution Channels filters in RAW mode
+
+`channels.filters` are applied **before** raw encoding. A filter that removes
+samples from the middle of a channel therefore *bridges* the surrounding interval
+(the last good value is held across the gap) rather than splitting it.
+
+**Intended scope:** use `channels.filters` in RAW mode **only for whole-channel
+scoping** (a value constant across all of a channel's samples, e.g. a single
+`source`/stream or project scoping), never for per-sample cleaning (value ranges,
+quality flags, NaN drops). Per-sample cleaning leaves interior gaps that get bridged,
+distorting the signal. To drop implausible samples with correct boundaries, use
+`drop_implausible_data`.
+
+When `data_type = RAW`, the validator **rejects** a `channels.filters` entry on
+`is_plausible` (unambiguously per-sample) and **warns** on any other entry, since it
+cannot tell scoping from cleaning statically.
+
+In RLE mode there is no such restriction: the `channels` table is already encoded, so
+a filter simply drops the matching `[tstart, tend)` interval rows without bridging, and
+may target any column.
 
 :::
 
@@ -235,7 +264,8 @@ not configure (e.g. `channel_tags`, `channel_mapping`) are simply unused.
             "filters": {"toolbox_id": "my_toolbox"}
         },
         "channels": {
-            "column_name_mapping": {}
+            "column_name_mapping": {},
+            "filters": {"source": "live"}
         }
     }
 }

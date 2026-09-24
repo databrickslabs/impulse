@@ -131,6 +131,8 @@ DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False
   `is_raw_data=True`; the ad-hoc equivalent of `query_engine.raw_encoder`. Import from
   `impulse_query_engine.analyze.query.solvers.solver_config`.
 - `drop_implausible_data=True` drops rows where `is_plausible = false` (requires `is_raw_data=True`).
+  A `channels.filters` entry on `is_plausible` with `is_raw_data=True` is rejected at construction; use
+  `drop_implausible_data` instead.
 - `config` takes a `SolverConfig` for column-name remapping / project scoping — the same object
   described under `solver_config` in `impulse-config`.
 

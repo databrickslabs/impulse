@@ -270,6 +270,9 @@ class DefaultSolver(QuerySolver):
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
         self.raw_encoder: RawEncoder = raw_encoder
+        # In RAW mode an is_plausible channels filter drops samples before raw
+        # encoding, bridging intervals instead of splitting them. Reject it.
+        self.config.reject_implausible_channels_filter_in_raw(is_raw=self.is_raw_data)
         self.channel_encoder: RleEncoder | IntervalEncoder = self._build_channel_encoder()
 
     def _build_channel_encoder(self) -> RleEncoder | IntervalEncoder:
@@ -1098,9 +1101,11 @@ class DefaultSolver(QuerySolver):
         """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
 
         Applies optional per-channel unit conversion, reads and column-maps the
-        channel-data table (raw-encoding it when in raw mode), broadcast-joins it
-        to the channel-match frame on ``[container_id, channel_id]``, and counts
-        the distinct containers.  Any container-metadata columns already on
+        channel-data table (raw-encoding it when in raw mode), applies the
+        per-table ``channels.filters`` as equality predicates (after
+        ``column_name_mapping``), broadcast-joins it to the channel-match frame
+        on ``[container_id, channel_id]``, and counts the distinct containers.
+        Any container-metadata columns already on
         *channels_df* (attached by :meth:`attach_container_metadata`) ride
         through the broadcast join into ``joined_df``.
 
@@ -1136,6 +1141,11 @@ class DefaultSolver(QuerySolver):
 
         q = query.db.channels(self.spark)
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
+
+        # Equality filters on internal column names, applied before the select
+        # below so a filter may reference any channels column, dropped or not.
+        for col_name, value in self.config.channels.filters.items():
+            q = q.where(F.col(col_name) == value)
 
         if self.is_raw_data:
             # Encode the raw samples into intervals (RLE or interval) for the solving step.
