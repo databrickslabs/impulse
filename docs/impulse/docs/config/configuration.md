@@ -236,6 +236,10 @@ When `data_type = RAW`, the validator **rejects** a `channels.filters` entry on
 `is_plausible` (unambiguously per-sample) and **warns** on any other entry, since it
 cannot tell scoping from cleaning statically.
 
+In RLE mode there is no such restriction: the `channels` table is already encoded, so
+a filter simply drops the matching `[tstart, tend)` interval rows without bridging, and
+may target any column.
+
 :::
 
 ### Example: DefaultSolver with renamed columns and per-table filters
