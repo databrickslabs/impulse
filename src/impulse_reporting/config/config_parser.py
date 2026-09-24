@@ -430,21 +430,15 @@ class QueryEngine(BaseModel):
 
     @model_validator(mode="after")
     def reject_channels_filter_on_is_plausible_in_raw(self):
-        """Reject dropping implausible data via a channels filter in RAW mode.
+        """Reject an is_plausible channels filter in RAW mode (delegates to SolverConfig).
 
-        ``channels.filters`` run before raw encoding and bridge intervals across
-        dropped samples; ``drop_implausible_data`` drops inside the encoder instead,
-        keeping interval boundaries correct.
+        The shared invariant lives on ``SolverConfig`` so direct query-engine use
+        (``DefaultSolver``) enforces the same rule; here we surface it at config-parse time.
         """
-        if self.data_type is DataType.RAW and self.solver_config is not None:
-            plausibility_col = self.solver_config.is_plausible_col
-            if plausibility_col in self.solver_config.channels.filters:
-                raise ValueError(
-                    f"A channels.filters entry on '{plausibility_col}' in RAW mode is "
-                    "applied before raw encoding, which bridges intervals across dropped "
-                    "samples. Use drop_implausible_data=True instead -- it drops "
-                    "implausible points inside the encoder with correct interval boundaries."
-                )
+        if self.solver_config is not None:
+            self.solver_config.reject_implausible_channels_filter_in_raw(
+                is_raw=self.data_type is DataType.RAW
+            )
         return self
 
     @model_validator(mode="after")

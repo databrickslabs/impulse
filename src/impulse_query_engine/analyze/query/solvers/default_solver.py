@@ -270,6 +270,9 @@ class DefaultSolver(QuerySolver):
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
         self.raw_encoder: RawEncoder = raw_encoder
+        # In RAW mode an is_plausible channels filter drops samples before raw
+        # encoding, bridging intervals instead of splitting them. Reject it.
+        self.config.reject_implausible_channels_filter_in_raw(is_raw=self.is_raw_data)
         self.channel_encoder: RleEncoder | IntervalEncoder = self._build_channel_encoder()
 
     def _build_channel_encoder(self) -> RleEncoder | IntervalEncoder:

@@ -125,3 +125,28 @@ class TestChannelsFilter:
         assert rows[0]["container_id"] == 1
         assert rows[0]["tstart"] == _C1_RPM_TSTART
         assert rows[0]["value"] == pytest.approx(_C1_RPM_VALUE * 2)
+
+
+class TestChannelsFilterRawGuard:
+    """The shared RAW-mode hard-reject is enforced at DefaultSolver construction.
+
+    This guarantees direct engine use cannot bypass the invariant that the reporting
+    config parser enforces (an is_plausible channels filter would bridge intervals
+    across dropped samples before raw encoding).
+    """
+
+    def test_is_plausible_filter_rejected_at_construction_in_raw(self, spark):
+        """Building a RAW solver with an is_plausible channels filter raises immediately."""
+        cfg = SolverConfig(channels=TableConfig(filters={"is_plausible": "true"}))
+        with pytest.raises(ValueError, match="before raw encoding"):
+            DefaultSolver(spark, config=cfg, is_raw_data=True)
+
+    def test_is_plausible_filter_allowed_when_not_raw(self, spark):
+        """The same filter is legitimate scoping outside RAW mode, so construction succeeds."""
+        cfg = SolverConfig(channels=TableConfig(filters={"is_plausible": "true"}))
+        DefaultSolver(spark, config=cfg, is_raw_data=False)
+
+    def test_non_plausibility_filter_allowed_in_raw(self, spark):
+        """The hard-reject is is_plausible-only: a scoping filter builds fine in RAW mode."""
+        cfg = SolverConfig(channels=TableConfig(filters={"source": "live"}))
+        DefaultSolver(spark, config=cfg, is_raw_data=True)
