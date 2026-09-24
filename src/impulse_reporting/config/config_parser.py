@@ -1,4 +1,5 @@
 import re
+import warnings
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated
@@ -444,6 +445,29 @@ class QueryEngine(BaseModel):
                     "samples. Use drop_implausible_data=True instead -- it drops "
                     "implausible points inside the encoder with correct interval boundaries."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def warn_channels_filters_bridge_in_raw(self):
+        """Warn (not reject) on any non-plausibility channels filter in RAW mode.
+
+        Such filters run before raw encoding and bridge intervals across dropped
+        samples. That is fine for whole-channel scoping but corrupts per-sample cleaning,
+        and the two cannot be told apart statically, so we warn. ``is_plausible`` is
+        hard-rejected above as the one unambiguously per-sample case.
+        """
+        if self.data_type is not DataType.RAW or self.solver_config is None:
+            return self
+        plausibility_col = self.solver_config.is_plausible_col
+        other = [c for c in self.solver_config.channels.filters if c != plausibility_col]
+        if other:
+            warnings.warn(
+                f"channels.filters {other} in RAW mode run before raw encoding and bridge "
+                "intervals across dropped samples. Use them only for whole-channel scoping, "
+                "not per-sample cleaning. To drop implausible points with correct interval "
+                "boundaries, use drop_implausible_data=True instead.",
+                stacklevel=2,
+            )
         return self
 
     @model_validator(mode="after")

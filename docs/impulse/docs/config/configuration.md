@@ -223,10 +223,18 @@ are simply unused.
 
 `channels.filters` are applied **before** raw encoding. A filter that removes
 samples from the middle of a channel therefore *bridges* the surrounding interval
-(the last good value is held across the gap) rather than splitting it. To drop
-implausible samples with correct interval boundaries, use `drop_implausible_data`,
-not a channels filter — the config validator rejects a `channels.filters` entry on
-the `is_plausible` column when `data_type = RAW` for exactly this reason.
+(the last good value is held across the gap) rather than splitting it.
+
+**Intended scope:** use `channels.filters` in RAW mode **only for whole-channel
+scoping** (a value constant across all of a channel's samples, e.g. a single
+`source`/stream or project scoping), never for per-sample cleaning (value ranges,
+quality flags, NaN drops). Per-sample cleaning leaves interior gaps that get bridged,
+distorting the signal. To drop implausible samples with correct boundaries, use
+`drop_implausible_data`.
+
+When `data_type = RAW`, the validator **rejects** a `channels.filters` entry on
+`is_plausible` (unambiguously per-sample) and **warns** on any other entry, since it
+cannot tell scoping from cleaning statically.
 
 :::
 

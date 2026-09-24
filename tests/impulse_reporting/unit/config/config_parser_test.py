@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 from pydantic import ValidationError
 
@@ -303,8 +305,12 @@ def test_channels_filter_on_mapped_is_plausible_rejected_in_raw():
         ImpulseConfig.model_validate(config_json)
 
 
-def test_channels_filter_non_plausibility_allowed_in_raw():
-    """A normal scoping channels.filters entry in RAW mode is fine (no over-blocking)."""
+def test_channels_filter_non_plausibility_warns_in_raw():
+    """A non-plausibility channels.filters entry in RAW mode is allowed but warns.
+
+    It may be legitimate whole-channel scoping, so it is not rejected, but it bridges
+    intervals across dropped samples, so the validator emits a reminder warning.
+    """
     config_json = {
         **impulse_config_JSON,
         "query_engine": {
@@ -315,7 +321,26 @@ def test_channels_filter_non_plausibility_allowed_in_raw():
             },
         },
     }
-    config = ImpulseConfig.model_validate(config_json)
+    with pytest.warns(UserWarning, match="bridge intervals"):
+        config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.solver_config.channels.filters == {"source": "live"}
+
+
+def test_channels_filter_non_plausibility_no_warning_in_rle():
+    """In RLE mode no encoder runs, so a scoping channels filter must not warn."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RLE",
+            "solver_config": {
+                "channels": {"filters": {"source": "live"}},
+            },
+        },
+    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        config = ImpulseConfig.model_validate(config_json)
     assert config.query_engine.solver_config.channels.filters == {"source": "live"}
 
 
