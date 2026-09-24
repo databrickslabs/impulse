@@ -117,6 +117,10 @@ With `data_type="RAW"`, the `channels` table additionally uses the internal name
 per-sample timestamp) and — only when `drop_implausible_data` is on — `is_plausible`. Remap them the
 same way, e.g. `"channels": {"column_name_mapping": {"ts_raw": "timestamp"}}`.
 
+**`channels.filters` in RAW mode** run before raw encoding, so they bridge intervals across dropped
+samples. Use them only for whole-channel scoping, not per-sample cleaning: an `is_plausible` filter is
+rejected (use `drop_implausible_data`), any other channels filter warns.
+
 Top-level `project_id` (str, optional) applies an equality filter on the `project_id` column of every
 table that has one (`container_tags`, `container_metrics`, `channel_mapping`). Omit if not needed.
 

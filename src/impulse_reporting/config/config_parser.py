@@ -460,7 +460,9 @@ class QueryEngine(BaseModel):
                 "intervals across dropped samples. Use them only for whole-channel scoping, "
                 "not per-sample cleaning. To drop implausible points with correct interval "
                 "boundaries, use drop_implausible_data=True instead.",
-                stacklevel=2,
+                # stacklevel=1 (the warn call itself): inside a pydantic model_validator the
+                # frames above are pydantic internals, so a higher level would mislead.
+                stacklevel=1,
             )
         return self
 
