@@ -399,8 +399,36 @@ class QueryEngine(BaseModel):
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
-    batch_size: int = 500
+    max_selectors_per_batch: int = 500
     max_containers_per_batch: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_deprecated_batch_size(cls, data):
+        """Accept the deprecated ``batch_size`` alias for ``max_selectors_per_batch``.
+
+        ``batch_size`` was renamed to ``max_selectors_per_batch`` (it caps the number
+        of unique ``TimeSeriesSelector`` instances per solve batch, not a row count).
+        The old name keeps working for now but warns; setting both is an error.
+        """
+        if not isinstance(data, dict):
+            return data
+        if "batch_size" in data:
+            if "max_selectors_per_batch" in data:
+                raise ValueError(
+                    "Set only one of query_engine.max_selectors_per_batch or the deprecated "
+                    "alias query_engine.batch_size, not both."
+                )
+            warnings.warn(
+                "query_engine.batch_size is deprecated; use max_selectors_per_batch instead. "
+                "batch_size will be removed in a future release.",
+                DeprecationWarning,
+                # stacklevel=1 (the warn call itself): inside a pydantic model_validator the
+                # frames above are pydantic internals, so a higher level would mislead.
+                stacklevel=1,
+            )
+            data["max_selectors_per_batch"] = data.pop("batch_size")
+        return data
 
     @field_validator("max_containers_per_batch", mode="after")
     @classmethod
