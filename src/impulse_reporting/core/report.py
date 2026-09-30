@@ -220,6 +220,9 @@ class Report:
 
         Builds the registered config class from the ``source`` tables plus
         ``query_engine.measurement_db_config``, then the registered DB class.
+        Maps the optional ``container_tags`` field from the Source config
+        to the ``container_tags_table`` parameter expected by
+        ``MeasurementDBConfig``.
 
         Parameters
         ----------
@@ -233,7 +236,11 @@ class Report:
         AbstractMeasurementDB
             The measurement database instance.
         """
-        db_cls, db_config = build_measurement_db_config(config.source, config.query_engine)
+        source_dict = dict(config.source)
+        # Map config field name to MeasurementDBConfig parameter name
+        if "container_tags" in source_dict:
+            source_dict["container_tags_table"] = source_dict.pop("container_tags")
+        db_cls, db_config = build_measurement_db_config(source_dict, config.query_engine)
         return db_cls(db_config, ws)
 
     @staticmethod

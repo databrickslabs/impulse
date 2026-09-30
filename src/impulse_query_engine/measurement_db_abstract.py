@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class AbstractMeasurementDB(ABC):
-    """Read seam contract: returns silver-shaped frames for the solver.
+    """Contract for a MeasurementDB implementation: returns silver-shaped frames for the solver.
 
     Implementations are selected by name via ``register_measurement_db`` and built as
     ``db_cls(config, ws)``. The returned frames must match the silver model the solver expects.

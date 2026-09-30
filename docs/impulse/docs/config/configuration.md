@@ -142,8 +142,8 @@ Two independent filter families:
 | `max_channels_per_batch` | `int`         | `500`                    | Caps how many distinct channels are read in one solve batch, to bound per-solve memory. Counts channel selections (each distinct `channel(...)` / `poi_channel(...)` in your expressions). Applies to events, aggregations, and calculated channels; for calculated channels it counts the *input* channels they read, not the number of calculated channels. The cap is a packing target, not a hard limit: an expression that on its own reads more channels than the cap still runs, in a batch of its own. Must be `>= 1`. The old name `batch_size` is a **deprecated alias** (still accepted, warns, removed in a future release); setting both raises a validation error. |
 | `max_containers_per_batch` | `int`       | `null`                   | Caps how many containers are solved at once, to bound per-solve memory. `null` disables the cap; when set it must be `>= 1`. On an **incremental** run, `Report.run()` commits at most this many upserted containers per iteration and loops until the population is drained (see [incremental](#incremental-optional)). On a **full** run, and when a changed definition recomputes over all containers, the population is split into chunks of about this size and solved chunk by chunk. Chunk sizes are approximate (the cap is a memory heuristic, not an exact bound). |
 | `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` to scope reads by project — it is applied to `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured), so it works in both narrow EAV and wide-only data models. Omit it when you don't need project scoping. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
-| `measurement_db`        | `str`          | `"MeasurementDB"`        | Registered name of the read seam that loads the silver tables. The default is the built-in reader. Select a custom implementation to reshape a different source schema at read time. See [Custom measurement DB](#custom-measurement-db). |
-| `measurement_db_config` | `dict`         | `null`                   | Constructor arguments for the selected read seam's config class, passed alongside the `source` tables (e.g. extra source tables, prefilter keys). |
+| `measurement_db`        | `str`          | `"MeasurementDB"`        | Registered name of the MeasurementDB implementation to use. The default is the built-in reader; a custom implementation can reshape a different source schema at read time. See [Custom measurement DB](#custom-measurement-db). |
+| `measurement_db_config` | `dict`         | `null`                   | Keyword arguments for that implementation's config class, merged with the `source` tables (e.g. extra source tables, prefilter keys). |
 
 If `query_engine` is omitted, the default is `DefaultSolver` with
 `data_type = "RLE"`.
@@ -153,7 +153,7 @@ If `query_engine` is omitted, the default is `DefaultSolver` with
 ## Custom measurement DB
 
 When your raw tables need more than column renames to match the silver model (unions, joins, a
-grain change, an EAV unpivot), plug in your own read seam instead of changing Impulse:
+grain change, an EAV unpivot), plug in your own MeasurementDB implementation instead of changing Impulse:
 
 ```python
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
