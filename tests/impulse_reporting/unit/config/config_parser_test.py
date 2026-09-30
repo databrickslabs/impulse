@@ -3,6 +3,9 @@ import warnings
 import pytest
 from pydantic import ValidationError
 
+import impulse_query_engine.measurement_db_registry as registry
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.config.config_parser import (
     CalculatedChannels,
     CastType,
@@ -126,6 +129,52 @@ def test_impulse_config_data_format_raw():
     }
     config = ImpulseConfig.model_validate(config_json)
     assert config.query_engine.data_type == DataType.RAW
+
+
+def test_impulse_config_measurement_db_defaults():
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    assert config.query_engine.measurement_db == "MeasurementDB"
+    assert config.query_engine.measurement_db_config is None
+
+
+class _SessionDBConfig(MeasurementDBConfig):
+    def __init__(self, *, session_table: str, **base_kwargs):
+        super().__init__(**base_kwargs)
+        self.session_table = session_table
+
+
+@pytest.fixture
+def session_db_registered(monkeypatch):
+    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+    register_measurement_db("SessionDB", _SessionDBConfig)(MeasurementDB)
+
+
+def _with_measurement_db(name: str, extra: dict | None = None) -> dict:
+    query_engine = {"measurement_db": name, "measurement_db_config": extra}
+    return {**impulse_config_JSON, "query_engine": query_engine}
+
+
+def test_impulse_config_measurement_db_selector_parsed(session_db_registered):
+    config_json = _with_measurement_db("SessionDB", {"session_table": "cat.raw.sessions"})
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.measurement_db == "SessionDB"
+    assert config.query_engine.measurement_db_config == {"session_table": "cat.raw.sessions"}
+
+
+@pytest.mark.parametrize(
+    ("name", "extra", "error"),
+    [
+        ("NotRegistered", None, "Unknown measurement DB 'NotRegistered'"),
+        ("SessionDB", None, "missing 1 required keyword-only argument: 'session_table'"),
+        ("SessionDB", {"session_table": "t", "typo": 1}, "unexpected keyword argument 'typo'"),
+        ("SessionDB", {"session_table": "t", "channels_uri": "x"}, "multiple values"),
+    ],
+)
+def test_impulse_config_measurement_db_config_rejected_at_parse_time(
+    session_db_registered, name, extra, error
+):
+    with pytest.raises(ValidationError, match=error):
+        ImpulseConfig.model_validate(_with_measurement_db(name, extra))
 
 
 def test_impulse_config_drop_in_plausible_data_defaults_to_false():
