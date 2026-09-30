@@ -6,6 +6,7 @@ from impulse_reporting.events.basic_event import BasicEvent
 from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from impulse_reporting.events.sequence_of_events import SequenceOfEvents
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
 
@@ -25,6 +26,8 @@ class EventType(Enum):
         Container event type spanning the full measurement container.
     SEQUENCE_OF_EVENTS : SequenceOfEvents
         Sequence-of-events type for ordered interval sequence detection.
+    TIME_WINDOW_EVENT : TimeWindowEvent
+        Fixed-duration tumbling-window type; one instance per window across each container.
 
     """
 
@@ -32,6 +35,7 @@ class EventType(Enum):
     CONTAINER_EVENT = ContainerEvent
     SEQUENCE_OF_EVENTS = SequenceOfEvents
     POINTS_IN_TIME_EVENT = PointsInTimeEvent
+    TIME_WINDOW_EVENT = TimeWindowEvent
 
     def get_fact_table_name(self) -> str:
         """
@@ -53,6 +57,7 @@ class EventType(Enum):
                 | EventType.CONTAINER_EVENT
                 | EventType.SEQUENCE_OF_EVENTS
                 | EventType.POINTS_IN_TIME_EVENT
+                | EventType.TIME_WINDOW_EVENT
             ):
                 return "event_instance_fact"
             case _:
@@ -78,6 +83,7 @@ class EventType(Enum):
                 | EventType.CONTAINER_EVENT
                 | EventType.SEQUENCE_OF_EVENTS
                 | EventType.POINTS_IN_TIME_EVENT
+                | EventType.TIME_WINDOW_EVENT
             ):
                 return EVENT_INSTANCE_FACT_SCHEMA
             case _:
@@ -103,6 +109,7 @@ class EventType(Enum):
                 | EventType.CONTAINER_EVENT
                 | EventType.SEQUENCE_OF_EVENTS
                 | EventType.POINTS_IN_TIME_EVENT
+                | EventType.TIME_WINDOW_EVENT
             ):
                 return "event_dimension"
             case _:
@@ -126,6 +133,7 @@ class EventType(Enum):
                 | EventType.CONTAINER_EVENT
                 | EventType.SEQUENCE_OF_EVENTS
                 | EventType.POINTS_IN_TIME_EVENT
+                | EventType.TIME_WINDOW_EVENT
             ):
                 return EVENT_DIMENSION_SCHEMA
             case _:
