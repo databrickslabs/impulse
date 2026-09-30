@@ -103,6 +103,12 @@ def test_str_includes_window_length():
     assert "window_length=10" in str(TimeWindowExpression(10))
 
 
+def test_str_stable_across_int_and_float_window_length():
+    # int 10 and float 10.0 are the same window; the string form (which feeds the event
+    # definition hash) must not differ between them.
+    assert str(TimeWindowExpression(10)) == str(TimeWindowExpression(10.0))
+
+
 @pytest.mark.parametrize("bad", [0, -1, -10.5, None])
 def test_non_positive_window_length_raises(bad):
     with pytest.raises(ValueError, match="strictly positive"):

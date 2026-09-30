@@ -59,7 +59,10 @@ class TimeWindowExpression(TimeSeriesExpression):
                 f"TimeWindowExpression requires a strictly positive window_length, "
                 f"got {window_length!r}."
             )
-        self.window_length = window_length
+        # Store as float so the string form (and thus the event definition hash) is stable
+        # regardless of whether an int or float was passed: 10 and 10.0 are the same window
+        # and must not trigger a spurious full recompute in incremental mode.
+        self.window_length = float(window_length)
         TimeSeriesExpression.__init__(self, is_single_signal=False)
 
     def __str__(self) -> str:
@@ -170,9 +173,9 @@ class TimeWindowExpression(TimeSeriesExpression):
             return Intervals.empty()
 
         # Number of windows covering the span; the last one is clamped to stop_ts below.
+        # The span is strictly positive (guarded above) and window_length is strictly
+        # positive (enforced in __init__), so window_count >= 1.
         window_count = int(np.ceil((stop_ts - start_ts) / self.window_length))
-        if window_count <= 0:
-            return Intervals.empty()
 
         indices = np.arange(window_count)
         starts = start_ts + indices * self.window_length

@@ -66,6 +66,14 @@ def test_definition_hash_stable_across_desc_and_attributes():
     assert a.determine_definition_hash() == b.determine_definition_hash()
 
 
+def test_definition_hash_stable_across_int_and_float_window_length():
+    # 10000 and 10000.0 describe identical windows; the hash must not change between them
+    # (otherwise an int/float re-run forces a spurious full recompute in incremental mode).
+    a = TimeWindowEvent(name="w", window_length=10000)
+    b = TimeWindowEvent(name="w", window_length=10000.0)
+    assert a.determine_definition_hash() == b.determine_definition_hash()
+
+
 # ---------------------------------------------------------------------------
 # metadata dict shape
 # ---------------------------------------------------------------------------
