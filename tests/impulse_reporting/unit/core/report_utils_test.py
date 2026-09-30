@@ -76,7 +76,8 @@ class TestBuildBatches:
         assert set(result[0]) == {expr1, expr2}
 
     def test_split_into_multiple_batches(self):
-        """Expressions with distinct selectors are split when they exceed max_selectors_per_batch."""
+        """Expressions with distinct selectors are split when they exceed
+        max_selectors_per_batch."""
         sel_a = MagicMock()
         sel_b = MagicMock()
         sel_c = MagicMock()
@@ -133,7 +134,8 @@ class TestBuildBatches:
             assert len(unique_sels) <= 3
 
     def test_oversized_single_expression_gets_own_batch(self):
-        """An expression with more selectors than max_selectors_per_batch still gets its own batch."""
+        """An expression with more selectors than max_selectors_per_batch still gets
+        its own batch."""
         # 5 selectors but max_selectors_per_batch=3
         selectors = [MagicMock() for _ in range(5)]
         expr = MagicMock()
