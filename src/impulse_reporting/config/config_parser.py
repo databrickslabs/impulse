@@ -1,9 +1,11 @@
+import os
 import re
 import warnings
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated
 
+import pydantic
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
@@ -348,6 +350,13 @@ class ContainerFilters(BaseModel):
     metric_filters: list[list[MetricFilter]] = []
 
 
+_BATCH_SIZE_DEPRECATION_MSG = (
+    "query_engine.batch_size is deprecated; use max_channels_per_batch instead. "
+    "batch_size will be removed in a future release."
+)
+_PYDANTIC_DIR = os.path.dirname(pydantic.__file__)
+
+
 class QueryEngine(BaseModel):
     """
     Configuration for the query engine solver.
@@ -399,8 +408,65 @@ class QueryEngine(BaseModel):
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
-    batch_size: int = 500
+    max_channels_per_batch: int = 500
     max_containers_per_batch: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_deprecated_batch_size(cls, data):
+        """Accept the deprecated ``batch_size`` alias for ``max_channels_per_batch``.
+
+        ``batch_size`` was renamed to ``max_channels_per_batch`` (it caps the number
+        of distinct ``TimeSeriesSelector`` selections per solve batch, not a row count).
+        The old name keeps working for now but warns; setting both is an error.
+        """
+        if not isinstance(data, dict):
+            return data
+        if "batch_size" in data:
+            if "max_channels_per_batch" in data:
+                raise ValueError(
+                    "Set only one of query_engine.max_channels_per_batch or the deprecated "
+                    "alias query_engine.batch_size, not both."
+                )
+            # FutureWarning, not DeprecationWarning: the latter is hidden by default when
+            # raised from library code, so notebook/job users would never see it.
+            warnings.warn(
+                _BATCH_SIZE_DEPRECATION_MSG,
+                FutureWarning,
+                # stacklevel=1 (the warn call itself): inside a pydantic model_validator the
+                # frames above are pydantic internals, so a higher level would mislead.
+                stacklevel=1,
+            )
+            # Copy so the caller's config dict is left untouched (it may be reused).
+            data = dict(data)
+            data["max_channels_per_batch"] = data.pop("batch_size")
+        return data
+
+    @property
+    def batch_size(self) -> int:
+        """Deprecated alias for :attr:`max_channels_per_batch`."""
+        warnings.warn(_BATCH_SIZE_DEPRECATION_MSG, FutureWarning, stacklevel=2)
+        return self.max_channels_per_batch
+
+    @batch_size.setter
+    def batch_size(self, value: int) -> None:
+        # Skip pydantic's __setattr__ frames so the warning points at the caller.
+        warnings.warn(
+            _BATCH_SIZE_DEPRECATION_MSG,
+            FutureWarning,
+            stacklevel=2,
+            skip_file_prefixes=(_PYDANTIC_DIR,),
+        )
+        # Assignment skips field validators (no validate_assignment), so check explicitly.
+        self.max_channels_per_batch = self._validate_max_channels_per_batch(value)
+
+    @field_validator("max_channels_per_batch", mode="after")
+    @classmethod
+    def _validate_max_channels_per_batch(cls, value: int) -> int:
+        """Max distinct ``TimeSeriesSelector`` selections (by ``selector_id``) per solve batch."""
+        if value < 1:
+            raise ValueError("max_channels_per_batch must be >= 1.")
+        return value
 
     @field_validator("max_containers_per_batch", mode="after")
     @classmethod
