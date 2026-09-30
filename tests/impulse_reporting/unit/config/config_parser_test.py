@@ -263,6 +263,22 @@ def test_impulse_config_batch_size_attribute_is_deprecated_alias():
     assert "batch_size" not in query_engine.model_dump()
 
 
+@pytest.mark.parametrize("value", [0, -1])
+def test_impulse_config_batch_size_setter_rejects_non_positive(value):
+    """The deprecated setter enforces the same ``>= 1`` rule as construction."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_channels_per_batch": 7},
+    }
+    query_engine = ImpulseConfig.model_validate(config_json).query_engine
+    with (
+        pytest.warns(FutureWarning, match="batch_size is deprecated"),
+        pytest.raises(ValueError, match="max_channels_per_batch must be >= 1"),
+    ):
+        query_engine.batch_size = value
+    assert query_engine.max_channels_per_batch == 7
+
+
 @pytest.mark.parametrize(
     "query_engine",
     [

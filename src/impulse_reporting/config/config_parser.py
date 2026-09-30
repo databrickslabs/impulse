@@ -417,7 +417,7 @@ class QueryEngine(BaseModel):
         """Accept the deprecated ``batch_size`` alias for ``max_channels_per_batch``.
 
         ``batch_size`` was renamed to ``max_channels_per_batch`` (it caps the number
-        of unique ``TimeSeriesSelector`` instances per solve batch, not a row count).
+        of distinct ``TimeSeriesSelector`` selections per solve batch, not a row count).
         The old name keeps working for now but warns; setting both is an error.
         """
         if not isinstance(data, dict):
@@ -457,12 +457,13 @@ class QueryEngine(BaseModel):
             stacklevel=2,
             skip_file_prefixes=(_PYDANTIC_DIR,),
         )
-        self.max_channels_per_batch = value
+        # Assignment skips field validators (no validate_assignment), so check explicitly.
+        self.max_channels_per_batch = self._validate_max_channels_per_batch(value)
 
     @field_validator("max_channels_per_batch", mode="after")
     @classmethod
     def _validate_max_channels_per_batch(cls, value: int) -> int:
-        """Max unique ``TimeSeriesSelector`` instances per solve batch."""
+        """Max distinct ``TimeSeriesSelector`` selections (by ``selector_id``) per solve batch."""
         if value < 1:
             raise ValueError("max_channels_per_batch must be >= 1.")
         return value

@@ -41,7 +41,7 @@ def build_batches(
 ) -> list[list[TimeSeriesExpression]]:
     """Selector-aware best-fit-decreasing bin packing.
 
-    Groups expressions that share ``TimeSeriesSelector`` instances to
+    Groups expressions that share selectors (same ``selector_id``) to
     maximise data locality and minimise cross-batch selector duplication.
 
     Parameters
@@ -49,7 +49,9 @@ def build_batches(
     expressions : list[TimeSeriesExpression]
         Expressions to partition into batches.
     max_channels_per_batch : int
-        Maximum number of unique ``TimeSeriesSelector`` instances per batch.
+        Maximum number of distinct selectors per batch, deduplicated by the
+        content-based ``selector_id`` (selectors built from the same tags count
+        once). A single expression that alone exceeds the cap gets its own batch.
 
     Returns
     -------
@@ -82,7 +84,7 @@ def build_batches(
     # smallest growth of the selector set (= highest overlap) without
     # exceeding max_channels_per_batch.  If no batch can accommodate it, open a new one.
     #
-    # Why BFD?  Expressions that share the same TimeSeriesSelector objects
+    # Why BFD?  Expressions that share the same selectors (same selector_id)
     # (e.g. same channel/signal) are naturally packed together, maximising
     # data locality during the Spark solve step and minimising the number
     # of redundant selector reads across batches.
@@ -593,7 +595,8 @@ def solve_expressions_batched(
     solver : QuerySolver
         Query solver instance.
     max_channels_per_batch : int
-        Maximum number of unique selectors per batch (passed to ``build_batches``).
+        Maximum number of distinct selectors (by ``selector_id``) per batch (passed to
+        ``build_batches``).
     has_sink : bool
         Whether a Unity Catalog sink is configured.
     catalog : str, optional
@@ -696,7 +699,8 @@ def solve_calculated_channels_batched(
     solver : QuerySolver
         Query solver implementing ``solve_calculated_channels``.
     max_channels_per_batch : int
-        Maximum number of unique selectors per batch (passed to ``build_batches``).
+        Maximum number of distinct selectors (by ``selector_id``) per batch (passed to
+        ``build_batches``).
     has_sink : bool
         Whether a Unity Catalog sink is configured.
     catalog : str, optional

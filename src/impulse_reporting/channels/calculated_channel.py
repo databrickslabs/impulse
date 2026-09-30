@@ -47,9 +47,10 @@ class CalculatedChannel:
     Structurally parallels :class:`BasicEvent` (holds an aliased expression,
     name-derived id, SHA-256 definition hash). Like the other entity types, its
     narrow solve is batched from :class:`Report` (see
-    ``Report._solve_calculated_channels_batched``): the channels are partitioned so
-    that no batch reads more than ``max_channels_per_batch`` distinct input
-    channels; each batch is solved via ``QueryBuilder.solve_calculated_channels``
+    ``Report._solve_calculated_channels_batched``): the channels are packed into
+    batches of at most ``max_channels_per_batch`` distinct input channels (a channel
+    whose own inputs exceed the cap gets a batch of its own); each batch is solved
+    via ``QueryBuilder.solve_calculated_channels``
     and persisted as a temp table, then the batches are unioned into a narrow
     ``solved_df``. :meth:`determine_calculated_channels` shapes that already-solved
     df, mirroring ``determine_aggregations`` / ``determine_events``.
