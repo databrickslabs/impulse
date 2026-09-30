@@ -94,8 +94,8 @@ across selections.
 ## Batching (in a Report)
 
 Inside a `Report`, calculated channels are solved in **batches**, the same pattern events and
-aggregations use (see `impulse-reporting`). The channels are partitioned by `query_engine.batch_size`
-(max unique input selectors per batch), each batch is solved via `solve_calculated_channels` and
+aggregations use (see `impulse-reporting`). The channels are partitioned by `query_engine.max_channels_per_batch`
+(max distinct input channels per batch), each batch is solved via `solve_calculated_channels` and
 persisted as a temp table (`__impulse_temp_{run_id}_{batch_idx}` in the sink schema, or a Spark temp
 view when sinkless), and the batches are unioned into the final `calculated_channel_fact`. The temp
 tables share the `__impulse_temp_*` prefix, so they are cleaned up like the aggregation/event batches

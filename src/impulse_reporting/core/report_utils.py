@@ -37,19 +37,21 @@ if TYPE_CHECKING:
 
 def build_batches(
     expressions: list[TimeSeriesExpression],
-    batch_size: int,
+    max_channels_per_batch: int,
 ) -> list[list[TimeSeriesExpression]]:
     """Selector-aware best-fit-decreasing bin packing.
 
-    Groups expressions that share ``TimeSeriesSelector`` instances to
+    Groups expressions that share selectors (same ``selector_id``) to
     maximise data locality and minimise cross-batch selector duplication.
 
     Parameters
     ----------
     expressions : list[TimeSeriesExpression]
         Expressions to partition into batches.
-    batch_size : int
-        Maximum number of unique ``TimeSeriesSelector`` instances per batch.
+    max_channels_per_batch : int
+        Maximum number of distinct selectors per batch, deduplicated by the
+        content-based ``selector_id`` (selectors built from the same tags count
+        once). A single expression that alone exceeds the cap gets its own batch.
 
     Returns
     -------
@@ -72,7 +74,7 @@ def build_batches(
     all_selector_ids: set[int] = set()
     for s in selector_ids.values():
         all_selector_ids |= s
-    if len(all_selector_ids) <= batch_size:
+    if len(all_selector_ids) <= max_channels_per_batch:
         return [list(expressions)]
 
     # --- Phase 3: Best-Fit Decreasing (BFD) bin-packing.
@@ -80,9 +82,9 @@ def build_batches(
     # Sort expressions by the number of selectors they use (heaviest first).
     # Then for each expression find the existing batch where it causes the
     # smallest growth of the selector set (= highest overlap) without
-    # exceeding batch_size.  If no batch can accommodate it, open a new one.
+    # exceeding max_channels_per_batch.  If no batch can accommodate it, open a new one.
     #
-    # Why BFD?  Expressions that share the same TimeSeriesSelector objects
+    # Why BFD?  Expressions that share the same selectors (same selector_id)
     # (e.g. same channel/signal) are naturally packed together, maximising
     # data locality during the Spark solve step and minimising the number
     # of redundant selector reads across batches.
@@ -99,7 +101,7 @@ def build_batches(
         # Find the batch with the most selector overlap that still fits
         for bi in range(len(final_batches)):
             combined = batch_selector_ids[bi] | expr_sels
-            if len(combined) <= batch_size:
+            if len(combined) <= max_channels_per_batch:
                 overlap = len(batch_selector_ids[bi] & expr_sels)
                 if overlap > best_overlap:
                     best_overlap = overlap
@@ -566,7 +568,7 @@ def solve_expressions_batched(
     expressions: list[TimeSeriesExpression],
     query: QueryBuilder,
     solver: QuerySolver,
-    batch_size: int,
+    max_channels_per_batch: int,
     *,
     has_sink: bool = False,
     catalog: str = None,
@@ -592,8 +594,9 @@ def solve_expressions_batched(
         Query builder instance.
     solver : QuerySolver
         Query solver instance.
-    batch_size : int
-        Maximum number of unique selectors per batch (passed to ``build_batches``).
+    max_channels_per_batch : int
+        Maximum number of distinct selectors (by ``selector_id``) per batch (passed to
+        ``build_batches``).
     has_sink : bool
         Whether a Unity Catalog sink is configured.
     catalog : str, optional
@@ -629,7 +632,9 @@ def solve_expressions_batched(
                 catalog,
                 schema,
             )
-            for batch_idx, batch_exprs in enumerate(build_batches(expressions, batch_size))
+            for batch_idx, batch_exprs in enumerate(
+                build_batches(expressions, max_channels_per_batch)
+            )
         ]
         dfs = [spark.table(name) for name in batch_names]
         result = dfs[0]
@@ -665,7 +670,7 @@ def solve_calculated_channels_batched(
     qe_channels: list,
     query: QueryBuilder,
     solver: QuerySolver,
-    batch_size: int,
+    max_channels_per_batch: int,
     *,
     has_sink: bool = False,
     catalog: str = None,
@@ -693,8 +698,9 @@ def solve_calculated_channels_batched(
         Query builder instance.
     solver : QuerySolver
         Query solver implementing ``solve_calculated_channels``.
-    batch_size : int
-        Maximum number of unique selectors per batch (passed to ``build_batches``).
+    max_channels_per_batch : int
+        Maximum number of distinct selectors (by ``selector_id``) per batch (passed to
+        ``build_batches``).
     has_sink : bool
         Whether a Unity Catalog sink is configured.
     catalog : str, optional
@@ -728,7 +734,9 @@ def solve_calculated_channels_batched(
                 catalog,
                 schema,
             )
-            for batch_idx, batch_channels in enumerate(build_batches(qe_channels, batch_size))
+            for batch_idx, batch_channels in enumerate(
+                build_batches(qe_channels, max_channels_per_batch)
+            )
         ]
         dfs = [spark.table(name) for name in batch_names]
         result = dfs[0]
