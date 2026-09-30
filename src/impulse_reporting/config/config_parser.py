@@ -351,7 +351,7 @@ class ContainerFilters(BaseModel):
 
 
 _BATCH_SIZE_DEPRECATION_MSG = (
-    "query_engine.batch_size is deprecated; use max_selectors_per_batch instead. "
+    "query_engine.batch_size is deprecated; use max_channels_per_batch instead. "
     "batch_size will be removed in a future release."
 )
 _PYDANTIC_DIR = os.path.dirname(pydantic.__file__)
@@ -408,24 +408,24 @@ class QueryEngine(BaseModel):
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
-    max_selectors_per_batch: int = 500
+    max_channels_per_batch: int = 500
     max_containers_per_batch: int | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _resolve_deprecated_batch_size(cls, data):
-        """Accept the deprecated ``batch_size`` alias for ``max_selectors_per_batch``.
+        """Accept the deprecated ``batch_size`` alias for ``max_channels_per_batch``.
 
-        ``batch_size`` was renamed to ``max_selectors_per_batch`` (it caps the number
+        ``batch_size`` was renamed to ``max_channels_per_batch`` (it caps the number
         of unique ``TimeSeriesSelector`` instances per solve batch, not a row count).
         The old name keeps working for now but warns; setting both is an error.
         """
         if not isinstance(data, dict):
             return data
         if "batch_size" in data:
-            if "max_selectors_per_batch" in data:
+            if "max_channels_per_batch" in data:
                 raise ValueError(
-                    "Set only one of query_engine.max_selectors_per_batch or the deprecated "
+                    "Set only one of query_engine.max_channels_per_batch or the deprecated "
                     "alias query_engine.batch_size, not both."
                 )
             # FutureWarning, not DeprecationWarning: the latter is hidden by default when
@@ -439,14 +439,14 @@ class QueryEngine(BaseModel):
             )
             # Copy so the caller's config dict is left untouched (it may be reused).
             data = dict(data)
-            data["max_selectors_per_batch"] = data.pop("batch_size")
+            data["max_channels_per_batch"] = data.pop("batch_size")
         return data
 
     @property
     def batch_size(self) -> int:
-        """Deprecated alias for :attr:`max_selectors_per_batch`."""
+        """Deprecated alias for :attr:`max_channels_per_batch`."""
         warnings.warn(_BATCH_SIZE_DEPRECATION_MSG, FutureWarning, stacklevel=2)
-        return self.max_selectors_per_batch
+        return self.max_channels_per_batch
 
     @batch_size.setter
     def batch_size(self, value: int) -> None:
@@ -457,14 +457,14 @@ class QueryEngine(BaseModel):
             stacklevel=2,
             skip_file_prefixes=(_PYDANTIC_DIR,),
         )
-        self.max_selectors_per_batch = value
+        self.max_channels_per_batch = value
 
-    @field_validator("max_selectors_per_batch", mode="after")
+    @field_validator("max_channels_per_batch", mode="after")
     @classmethod
-    def _validate_max_selectors_per_batch(cls, value: int) -> int:
+    def _validate_max_channels_per_batch(cls, value: int) -> int:
         """Max unique ``TimeSeriesSelector`` instances per solve batch."""
         if value < 1:
-            raise ValueError("max_selectors_per_batch must be >= 1.")
+            raise ValueError("max_channels_per_batch must be >= 1.")
         return value
 
     @field_validator("max_containers_per_batch", mode="after")

@@ -40,7 +40,7 @@ def _config(
     silver_table="container_metrics",
     is_enabled=False,
     calculated_channels=None,
-    max_selectors_per_batch=None,
+    max_channels_per_batch=None,
 ):
     kwargs = dict(
         source=Source(
@@ -61,8 +61,8 @@ def _config(
     )
     if calculated_channels is not None:
         kwargs["calculated_channels"] = calculated_channels
-    if max_selectors_per_batch is not None:
-        kwargs["query_engine"] = QueryEngine(max_selectors_per_batch=max_selectors_per_batch)
+    if max_channels_per_batch is not None:
+        kwargs["query_engine"] = QueryEngine(max_channels_per_batch=max_channels_per_batch)
     return ImpulseConfig(**kwargs)
 
 
@@ -157,14 +157,14 @@ def test_persist_calculated_channel_full(spark):
 
 
 def test_batched_calculated_channels_union(spark):
-    """max_selectors_per_batch=1 with two channels on DISTINCT input selectors splits them into
+    """max_channels_per_batch=1 with two channels on DISTINCT input selectors splits them into
     separate batches (each persisted as a temp table); the final fact is the union.
     """
     report = Report(
         name="calc_channel_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
-        config=dict(_config(is_enabled=False, max_selectors_per_batch=1)),
+        config=dict(_config(is_enabled=False, max_channels_per_batch=1)),
     )
     q = report.get_db().query
     ch_speed = CalculatedChannel(

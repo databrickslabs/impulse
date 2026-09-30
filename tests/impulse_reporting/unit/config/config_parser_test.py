@@ -195,40 +195,40 @@ def test_impulse_config_cap_allowed_with_incremental_disabled():
     assert config.query_engine.max_containers_per_batch == 10
 
 
-def test_impulse_config_max_selectors_per_batch_defaults_to_500():
+def test_impulse_config_max_channels_per_batch_defaults_to_500():
     """The selector cap defaults to 500 when unset."""
     config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
-    assert config.query_engine.max_selectors_per_batch == 500
+    assert config.query_engine.max_channels_per_batch == 500
 
 
-def test_impulse_config_max_selectors_per_batch_parsed():
+def test_impulse_config_max_channels_per_batch_parsed():
     config_json = {
         **impulse_config_JSON,
-        "query_engine": {"solver": "KeyValueStoreSolver", "max_selectors_per_batch": 42},
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_channels_per_batch": 42},
     }
     config = ImpulseConfig.model_validate(config_json)
-    assert config.query_engine.max_selectors_per_batch == 42
+    assert config.query_engine.max_channels_per_batch == 42
 
 
 def test_impulse_config_batch_size_deprecated_alias_maps_and_warns():
-    """The legacy ``batch_size`` alias still populates ``max_selectors_per_batch`` but warns."""
+    """The legacy ``batch_size`` alias still populates ``max_channels_per_batch`` but warns."""
     config_json = {
         **impulse_config_JSON,
         "query_engine": {"solver": "KeyValueStoreSolver", "batch_size": 42},
     }
     with pytest.warns(FutureWarning, match="batch_size is deprecated"):
         config = ImpulseConfig.model_validate(config_json)
-    assert config.query_engine.max_selectors_per_batch == 42
+    assert config.query_engine.max_channels_per_batch == 42
 
 
-def test_impulse_config_batch_size_and_max_selectors_both_set_errors():
+def test_impulse_config_batch_size_and_max_channels_both_set_errors():
     """Setting both the alias and the new field is rejected."""
     config_json = {
         **impulse_config_JSON,
         "query_engine": {
             "solver": "KeyValueStoreSolver",
             "batch_size": 42,
-            "max_selectors_per_batch": 100,
+            "max_channels_per_batch": 100,
         },
     }
     with pytest.raises(ValidationError, match="Set only one of"):
@@ -242,15 +242,15 @@ def test_impulse_config_batch_size_alias_does_not_mutate_input():
     for _ in range(2):
         with pytest.warns(FutureWarning, match="batch_size is deprecated"):
             config = ImpulseConfig.model_validate(config_json)
-        assert config.query_engine.max_selectors_per_batch == 42
+        assert config.query_engine.max_channels_per_batch == 42
     assert query_engine == {"solver": "KeyValueStoreSolver", "batch_size": 42}
 
 
 def test_impulse_config_batch_size_attribute_is_deprecated_alias():
-    """Reading/writing ``batch_size`` forwards to ``max_selectors_per_batch`` and warns."""
+    """Reading/writing ``batch_size`` forwards to ``max_channels_per_batch`` and warns."""
     config_json = {
         **impulse_config_JSON,
-        "query_engine": {"solver": "KeyValueStoreSolver", "max_selectors_per_batch": 7},
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_channels_per_batch": 7},
     }
     query_engine = ImpulseConfig.model_validate(config_json).query_engine
     with pytest.warns(FutureWarning, match="batch_size is deprecated"):
@@ -259,26 +259,26 @@ def test_impulse_config_batch_size_attribute_is_deprecated_alias():
         query_engine.batch_size = 9
     # The setter warning is attributed to the caller, not to pydantic internals.
     assert record[0].filename == __file__
-    assert query_engine.max_selectors_per_batch == 9
+    assert query_engine.max_channels_per_batch == 9
     assert "batch_size" not in query_engine.model_dump()
 
 
 @pytest.mark.parametrize(
     "query_engine",
     [
-        {"max_selectors_per_batch": 0},
-        {"max_selectors_per_batch": -1},
+        {"max_channels_per_batch": 0},
+        {"max_channels_per_batch": -1},
         {"batch_size": 0},
     ],
 )
-def test_impulse_config_max_selectors_per_batch_rejects_non_positive(query_engine):
+def test_impulse_config_max_channels_per_batch_rejects_non_positive(query_engine):
     config_json = {
         **impulse_config_JSON,
         "query_engine": {"solver": "KeyValueStoreSolver", **query_engine},
     }
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", FutureWarning)
-        with pytest.raises(ValidationError, match="max_selectors_per_batch must be >= 1"):
+        with pytest.raises(ValidationError, match="max_channels_per_batch must be >= 1"):
             ImpulseConfig.model_validate(config_json)
 
 
