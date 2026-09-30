@@ -8,14 +8,15 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
 from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
+from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 from impulse_query_engine.model.series.intervals import Intervals
 
-# Internal (post-``column_name_mapping``) container-metric column names for the
-# measurement start/stop timestamps.  These mirror ``SolverConfig.start_ts_col`` /
-# ``SolverConfig.stop_ts_col`` (the same source ``ContainerEvent`` relies on) and are the
-# keys under which the solve exposes them via ``SeriesCache.container_metrics``.
-_START_TS_COL = "start_ts"
-_STOP_TS_COL = "stop_ts"
+# Reuse SolverConfig's canonical internal (post-``column_name_mapping``) column names for
+# the measurement start/stop timestamps rather than re-declaring the literals here. These
+# are the keys under which the solve exposes them via ``SeriesCache.container_metrics``, and
+# they are the same names ``ContainerEvent`` relies on. A default instance suffices since
+# the names are config-invariant.
+_SOLVER_CONFIG = SolverConfig()
 
 
 class TumblingWindowsExpression(TimeSeriesExpression):
@@ -124,7 +125,7 @@ class TumblingWindowsExpression(TimeSeriesExpression):
         set of str
             The measurement start/stop timestamp columns.
         """
-        return {_START_TS_COL, _STOP_TS_COL}
+        return {_SOLVER_CONFIG.start_ts_col, _SOLVER_CONFIG.stop_ts_col}
 
     def get_selectors(self) -> list[TimeSeriesSelector]:
         """
@@ -162,8 +163,8 @@ class TumblingWindowsExpression(TimeSeriesExpression):
             window clamped to ``stop_ts``. Empty when the container boundaries are absent
             (e.g. the empty cache used for type validation) or non-positive in span.
         """
-        start_ts = cache.container_metrics.get(_START_TS_COL)
-        stop_ts = cache.container_metrics.get(_STOP_TS_COL)
+        start_ts = cache.container_metrics.get(_SOLVER_CONFIG.start_ts_col)
+        stop_ts = cache.container_metrics.get(_SOLVER_CONFIG.stop_ts_col)
 
         if start_ts is None or stop_ts is None or stop_ts <= start_ts:
             return Intervals.empty()
