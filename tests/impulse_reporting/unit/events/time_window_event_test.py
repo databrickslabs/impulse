@@ -2,8 +2,8 @@
 
 import pytest
 
-from impulse_query_engine.analyze.query.events.tumbling_windows_expression import (
-    TumblingWindowsExpression,
+from impulse_query_engine.analyze.query.events.time_window_expression import (
+    TimeWindowExpression,
 )
 from impulse_reporting.events.time_window_event import TimeWindowEvent
 
@@ -16,7 +16,7 @@ def test_init():
     assert event.name == "w10"
     assert event.window_length == 10000
     assert event.description is None
-    assert isinstance(event.get_expression(), TumblingWindowsExpression)
+    assert isinstance(event.get_expression(), TimeWindowExpression)
 
 
 def test_init_surfaces_window_length_attribute():

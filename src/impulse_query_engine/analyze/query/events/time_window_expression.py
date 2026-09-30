@@ -19,7 +19,7 @@ from impulse_query_engine.model.series.intervals import Intervals
 _SOLVER_CONFIG = SolverConfig()
 
 
-class TumblingWindowsExpression(TimeSeriesExpression):
+class TimeWindowExpression(TimeSeriesExpression):
     """Produce consecutive fixed-duration windows spanning a measurement container.
 
     The windows are derived purely from the container's ``start_ts`` / ``stop_ts`` metadata
@@ -41,7 +41,7 @@ class TumblingWindowsExpression(TimeSeriesExpression):
 
     def __init__(self, window_length: float):
         """
-        Initialize a TumblingWindowsExpression.
+        Initialize a TimeWindowExpression.
 
         Parameters
         ----------
@@ -56,7 +56,7 @@ class TumblingWindowsExpression(TimeSeriesExpression):
         """
         if window_length is None or window_length <= 0:
             raise ValueError(
-                f"TumblingWindowsExpression requires a strictly positive window_length, "
+                f"TimeWindowExpression requires a strictly positive window_length, "
                 f"got {window_length!r}."
             )
         self.window_length = window_length
@@ -64,7 +64,7 @@ class TumblingWindowsExpression(TimeSeriesExpression):
 
     def __str__(self) -> str:
         """
-        Return a string representation of the TumblingWindowsExpression.
+        Return a string representation of the TimeWindowExpression.
 
         The ``window_length`` is included so it flows into the event's definition hash.
 
@@ -73,7 +73,7 @@ class TumblingWindowsExpression(TimeSeriesExpression):
         str
             String representation of the object.
         """
-        return f"TumblingWindowsExpression<window_length={self.window_length}>"
+        return f"TimeWindowExpression<window_length={self.window_length}>"
 
     def dtype(self):
         """
@@ -149,7 +149,7 @@ class TumblingWindowsExpression(TimeSeriesExpression):
 
     def build(self, cache: SeriesCache) -> Intervals:
         """
-        Build the tumbling windows spanning the container.
+        Build the fixed-duration windows spanning the container.
 
         Parameters
         ----------

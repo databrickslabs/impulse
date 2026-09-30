@@ -1,4 +1,4 @@
 from .sequence_of_events_expression import SequenceOfEventsExpression
-from .tumbling_windows_expression import TumblingWindowsExpression
+from .time_window_expression import TimeWindowExpression
 
-__all__ = ["SequenceOfEventsExpression", "TumblingWindowsExpression"]
+__all__ = ["SequenceOfEventsExpression", "TimeWindowExpression"]

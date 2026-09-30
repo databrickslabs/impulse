@@ -27,7 +27,7 @@ class EventType(Enum):
     SEQUENCE_OF_EVENTS : SequenceOfEvents
         Sequence-of-events type for ordered interval sequence detection.
     TIME_WINDOW_EVENT : TimeWindowEvent
-        Fixed-duration tumbling-window type; one instance per window across each container.
+        Fixed-duration time-window type; one instance per window across each container.
 
     """
 

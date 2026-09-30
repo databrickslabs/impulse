@@ -12,8 +12,8 @@ from pyspark.sql import DataFrame, Row, SparkSession
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
-from impulse_query_engine.analyze.query.events.tumbling_windows_expression import (
-    TumblingWindowsExpression,
+from impulse_query_engine.analyze.query.events.time_window_expression import (
+    TimeWindowExpression,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
@@ -31,7 +31,7 @@ class TimeWindowEvent(Event):
     Unlike ``ContainerEvent`` (one instance per container), a ``TimeWindowEvent`` emits one
     event instance per fixed-duration slice, tiling the container's ``start_ts`` / ``stop_ts``
     span with windows of length ``window_length``.  The final slice is clamped to the
-    container end.  Boundaries come from a :class:`TumblingWindowsExpression`, so the event
+    container end.  Boundaries come from a :class:`TimeWindowExpression`, so the event
     fact and any aggregation scoped to this event share the same solved windows and their
     ``event_instance_id`` values match by construction.
     """
@@ -75,7 +75,7 @@ class TimeWindowEvent(Event):
                 f"got {window_length!r}."
             )
         self.window_length = window_length
-        self.expression = TumblingWindowsExpression(window_length).alias(name)
+        self.expression = TimeWindowExpression(window_length).alias(name)
         self.expression.require_evaluation_type(
             Intervals, owner="TimeWindowEvent", example="window_length=60000"
         )
@@ -108,7 +108,7 @@ class TimeWindowEvent(Event):
         Returns
         -------
         TimeSeriesExpression or None
-            The tumbling-windows expression for the event.
+            The time-window expression for the event.
         """
         return self.expression
 

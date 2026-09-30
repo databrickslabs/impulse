@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from impulse_query_engine.analyze.query.events import TumblingWindowsExpression
+from impulse_query_engine.analyze.query.events import TimeWindowExpression
 from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
 from impulse_query_engine.model.series.intervals import Intervals
 
@@ -24,7 +24,7 @@ class _FakeCache:
 
 
 def _build(start_ts, stop_ts, window_length) -> Intervals:
-    expr = TumblingWindowsExpression(window_length)
+    expr = TimeWindowExpression(window_length)
     return expr.build(_FakeCache({"start_ts": start_ts, "stop_ts": stop_ts}))
 
 
@@ -81,18 +81,18 @@ def test_degenerate_container_yields_no_windows():
 
 
 def test_missing_container_metrics_yields_empty():
-    expr = TumblingWindowsExpression(10)
+    expr = TimeWindowExpression(10)
     assert len(expr.build(_FakeCache({}))) == 0
     # The empty cache used by evaluation_type() has no container metrics.
     assert len(expr.build(EmptyTimeSeriesCache())) == 0
 
 
 def test_evaluation_type_is_intervals():
-    assert TumblingWindowsExpression(10).evaluation_type() is Intervals
+    assert TimeWindowExpression(10).evaluation_type() is Intervals
 
 
 def test_no_selectors_and_requests_container_metrics():
-    expr = TumblingWindowsExpression(10)
+    expr = TimeWindowExpression(10)
     assert expr.get_selectors() == []
     assert expr.get_selector_expr() is None
     assert expr.required_container_metrics() == {"start_ts", "stop_ts"}
@@ -100,10 +100,10 @@ def test_no_selectors_and_requests_container_metrics():
 
 
 def test_str_includes_window_length():
-    assert "window_length=10" in str(TumblingWindowsExpression(10))
+    assert "window_length=10" in str(TimeWindowExpression(10))
 
 
 @pytest.mark.parametrize("bad", [0, -1, -10.5, None])
 def test_non_positive_window_length_raises(bad):
     with pytest.raises(ValueError, match="strictly positive"):
-        TumblingWindowsExpression(bad)
+        TimeWindowExpression(bad)

@@ -233,7 +233,7 @@ seconds or any derived unit. So 60 one-minute windows over millisecond timestamp
 
 ### How it works
 
-1. A tumbling-window expression reads `start_ts` and `stop_ts` from the `container_metrics` table
+1. A time-window expression reads `start_ts` and `stop_ts` from the `container_metrics` table
    and tiles `[start_ts, stop_ts]` into consecutive windows of length `window_length`.
 2. The **final window is clamped** to `stop_ts` when the last full window would overrun it; any
    zero-length trailing slice is dropped (every instance satisfies `start_ts < end_ts`).
