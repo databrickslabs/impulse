@@ -9,7 +9,7 @@ ContainerEvent — an event spanning the full measurement container.
 ## ContainerEvent
 
 ```python
-class ContainerEvent(Event)
+class ContainerEvent(ContainerBoundaryEvent)
 ```
 
 Event that treats the full measurement container as a single event instance.

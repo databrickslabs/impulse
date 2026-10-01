@@ -14,6 +14,7 @@ Covers both silver-layer shapes:
 """
 
 import pandas as pd
+import pyspark.sql.functions as F
 import pytest
 from pyspark.sql import SparkSession
 
@@ -329,3 +330,59 @@ def test_cache_reads_container_meta_from_surviving_row_only():
     )
     assert cache.container_tags == {"brand": "BMW"}
     assert cache.container_metrics["num_channels"] == 11
+
+
+def _timestamp_boundaries_db(basic_narrow_db: MeasurementDB) -> MeasurementDB:
+    """Clone of basic_narrow_db with start_ts / stop_ts (epoch ms) recast to TIMESTAMP."""
+    tables = dict(basic_narrow_db.config.debug_tables)
+    tables["container_metrics"] = (
+        tables["container_metrics"]
+        .withColumn("start_ts", F.timestamp_millis("start_ts"))
+        .withColumn("stop_ts", F.timestamp_millis("stop_ts"))
+    )
+    return MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+
+def _grab_start_ts(ts, container_metrics):
+    value = container_metrics["start_ts"]
+    if value is None:  # type-inference pass on the empty cache
+        return 0.0
+    # Encode what reached the UDF: the epoch-seconds value, or -1 for a pd.Timestamp.
+    return -1.0 if isinstance(value, pd.Timestamp) else float(value)
+
+
+def test_timestamp_boundaries_converted_for_udf_when_epoch_unit_set(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """With epoch_unit set, a TIMESTAMP start_ts reaches the UDF as epoch seconds."""
+    db = _timestamp_boundaries_db(basic_narrow_db)
+    query = db.query
+    result = query.select(
+        query.channel(channel_name="Engine RPM")
+        .apply(_grab_start_ts, container_metrics=["start_ts"])
+        .alias("start")
+    ).solve(spark, solver=DefaultSolver(spark, config=SolverConfig(epoch_unit="s")))
+
+    expected = {
+        r.container_id: r.s
+        for r in db.container_metrics(spark)
+        .select("container_id", F.col("start_ts").cast("double").alias("s"))
+        .collect()
+    }
+    rows = {row.container_id: row.start for row in result.collect()}
+    assert rows and all(rows[cid] == expected[cid] for cid in rows), (rows, expected)
+
+
+def test_timestamp_boundaries_unchanged_for_udf_without_epoch_unit(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """Backward compatibility: without epoch_unit, the UDF still gets a pd.Timestamp."""
+    query = _timestamp_boundaries_db(basic_narrow_db).query
+    result = query.select(
+        query.channel(channel_name="Engine RPM")
+        .apply(_grab_start_ts, container_metrics=["start_ts"])
+        .alias("start")
+    ).solve(spark, solver=DefaultSolver(spark))
+
+    rows = [row.start for row in result.collect()]
+    assert rows and all(value == -1.0 for value in rows), rows

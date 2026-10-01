@@ -180,6 +180,10 @@ for human-readable display, `start_ts`/`stop_ts` for the gold
 the epoch-typed pair). Populate whichever your queries and
 `measurement_dimensions` config need.
 
+`start_ts`/`stop_ts` may also be `TIMESTAMP` columns. To use them with a `TimeWindowEvent`, set
+[`solver_config.epoch_unit`](../config/configuration.md#solver-column-mappings-and-filters) to the
+epoch unit of the channel sample timestamps, so the window boundaries share the samples' time base.
+
 :::
 
 ---

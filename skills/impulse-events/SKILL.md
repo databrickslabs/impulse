@@ -3,9 +3,10 @@ name: impulse-events
 description: >
   Define event windows in Impulse — the time spans that scope aggregations. Use when the user wants to
   "define an event", segment recordings into intervals (e.g. "engine RPM between 2000 and 5000"),
-  aggregate over the whole recording, capture state transitions/sequences, or mark instants like rising
-  edges. Covers BasicEvent, ContainerEvent, SequenceOfEvents, and PointsInTimeEvent — which TSAL result
-  type each requires, their constructor parameters, and the event fact/dimension output.
+  aggregate over the whole recording, split a recording into fixed time windows (one-minute, hourly,
+  daily segments), capture state transitions/sequences, or mark instants like rising edges. Covers
+  BasicEvent, ContainerEvent, SequenceOfEvents, PointsInTimeEvent, and TimeWindowEvent — which TSAL
+  result type each requires, their constructor parameters, and the event fact/dimension output.
 ---
 
 # Impulse — events
@@ -29,6 +30,7 @@ Choose the type by what you need:
 | `ContainerEvent`    | none                           | exactly one                  | full recording               |
 | `SequenceOfEvents`  | ordered list, each `Intervals` | one per joined sequence      | interval (`start < end`)     |
 | `PointsInTimeEvent` | one, must yield `PointsInTime` | one per instant              | zero (`start == end`)        |
+| `TimeWindowEvent`   | none (needs a `window_length`) | one per fixed window         | fixed window (last clamped)  |
 
 The TSAL result type is validated at construction — passing the wrong type raises `ValueError`.
 
@@ -123,12 +125,45 @@ report.add_event(rpm_rising)
 Parameters: `name` (required), `expr` (required, must yield `PointsInTime`), `desc`, `required_channels`,
 `attributes`.
 
+## TimeWindowEvent
+
+Splits each recording into consecutive fixed-duration windows — one instance per slice — from the
+container's `start_ts`/`stop_ts` in `container_metrics` (no expression). The final window is clamped to
+the recording end. Use it for repeated segments (one-minute, ten-minute, hourly, daily) that scope
+aggregations per window.
+
+```python
+from impulse_reporting.events.time_window_event import TimeWindowEvent
+
+ten_minute = TimeWindowEvent(
+    name="ten_minute_windows",
+    window_length=600_000,      # same time unit as the timestamps (e.g. ms-since-epoch)
+    desc="Ten-minute segments",
+)
+report.add_event(ten_minute)
+```
+
+| Parameter           | Type                | Required | Description                                                                     |
+|---------------------|---------------------|----------|---------------------------------------------------------------------------------|
+| `name`              | `str`               | Yes      | Unique event name.                                                              |
+| `window_length`     | `float`             | Yes      | Fixed window length, **in the same time unit as the timestamps**. Must be finite and > 0. |
+| `desc`              | `str`               | No       | Description.                                                                    |
+| `required_channels` | `list[str]`         | No       | Informational.                                                                  |
+| `attributes`        | `Mapping[str, str]` | No       | Free-form metadata; `window_length` is added automatically.                     |
+
+Windows are computed from `container_metrics` for every container matching the report's filters, with
+or without channel data or a scoped aggregation. Pair it with an aggregation scoped to the event (e.g.
+`StatsAggregator(..., event=...)`) to compute one statistic per window; those rows carry the same
+`event_instance_id` values as the windows. Because the windows come from `container_metrics`, those
+boundaries must share the channel samples' time base for the per-window values to be meaningful.
+
 ## Output schema
 
 All event types share two gold tables.
 
 **event_dimension** (one row per event) — key columns: `event_id`, `report_id`,
-`event_type` (`"BASIC_EVENT"`, `"CONTAINER_EVENT"`, `"SEQUENCE_OF_EVENTS"`, `"POINTS_IN_TIME_EVENT"`),
+`event_type` (`"BASIC_EVENT"`, `"CONTAINER_EVENT"`, `"SEQUENCE_OF_EVENTS"`, `"POINTS_IN_TIME_EVENT"`,
+`"TIME_WINDOW_EVENT"`),
 `event_name`, `event_description`, `required_channels`, `event_expression` (TSAL string, `"NA"` for
 `ContainerEvent`), `definition_hash`, `attributes`.
 
