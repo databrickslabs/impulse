@@ -14,26 +14,31 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.analyze.query.events.time_window_expression import (
     TimeWindowExpression,
+    window_intervals_col,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.model.series.intervals import Intervals
-from impulse_reporting.events.event import Event
+from impulse_reporting.events.container_boundary_event import ContainerBoundaryEvent
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
 
-class TimeWindowEvent(Event):
+class TimeWindowEvent(ContainerBoundaryEvent):
     """Event that divides each measurement container into consecutive fixed windows.
 
     Unlike ``ContainerEvent`` (one instance per container), a ``TimeWindowEvent`` emits one
     event instance per fixed-duration slice, tiling the container's ``start_ts`` / ``stop_ts``
     span with windows of length ``window_length``.  The final slice is clamped to the
-    container end.  Boundaries come from a :class:`TimeWindowExpression`, so the event
-    fact and any aggregation scoped to this event share the same solved windows and their
-    ``event_instance_id`` values match by construction.
+    container end.
+
+    The event fact is computed natively in Spark from ``container_metrics`` (via
+    :func:`window_intervals_col`), so every filtered container gets windows regardless of
+    its channel data.  Aggregations scoped to this event evaluate the
+    :class:`TimeWindowExpression` in the solve, which computes bit-identical windows, so
+    the timestamp-based ``event_instance_id`` values match on both sides.
     """
 
     def __init__(
@@ -68,14 +73,16 @@ class TimeWindowEvent(Event):
         ValueError
             If ``window_length`` is not strictly positive.
         """
-        Event.__init__(self, name)
+        ContainerBoundaryEvent.__init__(self, name)
         if window_length is None or window_length <= 0:
             raise ValueError(
                 f"TimeWindowEvent requires a strictly positive window_length, "
                 f"got {window_length!r}."
             )
-        self.window_length = window_length
         self.expression = TimeWindowExpression(window_length).alias(name)
+        # Use the expression's normalized (float) length everywhere, so the event fact,
+        # the solve and event_dimension all see the same value for 10 and 10.0.
+        self.window_length = self.expression.window_length
         self.expression.require_evaluation_type(
             Intervals, owner="TimeWindowEvent", example="window_length=60000"
         )
@@ -86,7 +93,7 @@ class TimeWindowEvent(Event):
             normalized_attributes = {str(k): str(v) for k, v in attributes.items()}
         # Surface the window length for traceability in event_dimension, without
         # clobbering an explicit user-supplied attribute of the same key.
-        normalized_attributes.setdefault("window_length", str(window_length))
+        normalized_attributes.setdefault("window_length", str(self.window_length))
         self.attributes = normalized_attributes
 
     def get_id(self) -> int:
@@ -184,14 +191,17 @@ class TimeWindowEvent(Event):
         solved_df: DataFrame = None,
         query: QueryBuilder = None,
         solver: QuerySolver = None,
-        pre_filtered_containers_df=None,
-    ):
+        pre_filtered_containers_df: DataFrame = None,
+    ) -> DataFrame:
         """
         Extract the event fact table for the given list of TimeWindowEvent objects.
 
-        Each window becomes one event instance (``start_ts < end_ts``). The window intervals
-        are read from the centralized solve (the same column consumed by scoped aggregations),
-        so the resulting ``event_instance_id`` values match on both sides.
+        Resolves the matching containers via the solver's filter pipeline (like
+        ``ContainerEvent``) and computes each event's windows natively from the
+        containers' ``start_ts`` / ``stop_ts``, so every filtered container gets windows.
+        Each window becomes one event instance (``start_ts < end_ts``). The windows are
+        bit-identical to the ones the solve computes for scoped aggregations (see
+        :func:`window_intervals_col`), so the ``event_instance_id`` values match.
 
         Parameters
         ----------
@@ -200,11 +210,11 @@ class TimeWindowEvent(Event):
         events : list of TimeWindowEvent
             List of TimeWindowEvent objects to process.
         solved_df : DataFrame, optional
-            Pre-solved wide DataFrame from centralized batch solve. Required.
+            Not used by TimeWindowEvent (kept for interface compatibility).
         query : QueryBuilder, optional
-            Query builder (unused, kept for interface compatibility).
+            Query builder with filters applied.
         solver : QuerySolver, optional
-            Query solver (unused, kept for interface compatibility).
+            Solver whose filter pipeline is used for container resolution.
         pre_filtered_containers_df : DataFrame, optional
             Pre-filtered containers for incremental processing.
 
@@ -213,26 +223,36 @@ class TimeWindowEvent(Event):
         DataFrame
             Spark DataFrame containing event instance facts.
         """
-        if solved_df is None:
-            raise ValueError(
-                "TimeWindowEvent.determine_events requires solved_df. "
-                "Provide a pre-solved DataFrame from the centralized batch-solve flow."
-            )
+        container_metrics_df = cls.resolve_container_metrics(
+            spark, query, solver, pre_filtered_containers_df
+        )
 
-        event_names = [event.get_name() for event in events]
+        # Silver-side names come from SolverConfig (column_name_mapping aware).
+        start_ts = f.col(solver.config.start_ts_col)
+        stop_ts = f.col(solver.config.stop_ts_col)
+
+        # One (event_name, windows) struct per event, exploded in a single pass over the
+        # containers. start_ts / end_ts stay doubles: the event_instance_id hashes their
+        # string form, which must match the doubles produced by the solve.
+        per_event = f.array(
+            *[
+                f.struct(
+                    f.lit(event.get_name()).alias("event_name"),
+                    window_intervals_col(start_ts, stop_ts, event.window_length).alias("windows"),
+                )
+                for event in events
+            ]
+        )
 
         df = (
-            solved_df.select("container_id", *event_names)
-            .unpivot(
-                f.col("container_id"),
-                event_names,
-                variableColumnName="event_name",
-                valueColumnName="value",
+            container_metrics_df.select(
+                f.col(solver.config.container_id_col).alias("container_id"),
+                f.explode(per_event).alias("event"),
             )
             .select(
                 "container_id",
-                "event_name",
-                f.explode(f.col("value")).alias("event_instance"),
+                f.col("event.event_name").alias("event_name"),
+                f.explode(f.col("event.windows")).alias("event_instance"),
             )
             .withColumn("start_ts", f.col("event_instance").getItem(0))
             .withColumn("end_ts", f.col("event_instance").getItem(1))

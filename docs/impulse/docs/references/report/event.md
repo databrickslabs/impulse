@@ -233,8 +233,9 @@ seconds or any derived unit. So 60 one-minute windows over millisecond timestamp
 
 ### How it works
 
-1. A time-window expression reads `start_ts` and `stop_ts` from the `container_metrics` table
-   and tiles `[start_ts, stop_ts]` into consecutive windows of length `window_length`.
+1. The event resolves the matching containers through the report's container filters (like
+   `ContainerEvent`), reads `start_ts` and `stop_ts` from the `container_metrics` table, and
+   tiles `[start_ts, stop_ts]` into consecutive windows of length `window_length`.
 2. The **final window is clamped** to `stop_ts` when the last full window would overrun it; any
    zero-length trailing slice is dropped (every instance satisfies `start_ts < end_ts`).
 3. Each window becomes one **event instance** with a unique `event_instance_id`, written to the
@@ -243,12 +244,19 @@ seconds or any derived unit. So 60 one-minute windows over millisecond timestamp
    its statistic **once per window** and joins back to those instances.
 
 :::note
-A `TimeWindowEvent` is evaluated in the shared batch solve alongside the report's channel-based
-selections, so it materializes windows for the containers covered by that solve. In practice this
-is every container the report touches -- a `TimeWindowEvent` is normally paired with at least one
-aggregation (its purpose), which supplies the channels. The window boundaries come from
-`container_metrics`, so for a scoped aggregation to produce meaningful per-window values, those
-boundaries must share the channel samples' time base (as they do in real measurement data).
+The windows are computed from `container_metrics` alone, so **every** container that matches the
+report's filters gets windows, whether or not it has channel data and whether or not an
+aggregation is scoped to the event. An aggregation scoped to the event computes the same windows
+in the query engine, so its per-window rows carry the same `event_instance_id` values. For the
+per-window values to be meaningful, the container boundaries must share the channel samples' time
+base (as they do in real measurement data).
+:::
+
+:::note
+Window boundaries are stored as doubles (`start_ts` / `end_ts`), like every other event type. Epoch
+timestamps in nanoseconds exceed the range doubles represent exactly, so their window boundaries
+are rounded to about 256 ns. The rounding is the same for the event and its aggregations, so their
+`event_instance_id` values still match.
 :::
 
 ## Event output schema

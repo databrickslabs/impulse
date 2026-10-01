@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
+import pyspark.sql.functions as F
+from pyspark.sql import Column
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -17,6 +19,48 @@ from impulse_query_engine.model.series.intervals import Intervals
 # they are the same names ``ContainerEvent`` relies on. A default instance suffices since
 # the names are config-invariant.
 _SOLVER_CONFIG = SolverConfig()
+
+
+def window_intervals_col(start_ts: Column, stop_ts: Column, window_length: float) -> Column:
+    """Spark counterpart of :meth:`TimeWindowExpression.build`.
+
+    Computes the same fixed-duration windows natively in Spark, so the reporting
+    ``TimeWindowEvent`` can materialize windows for every container without a solve.
+    The ``event_instance_id`` of a window hashes its ``start_ts`` / ``end_ts``, so the
+    windows computed here must be **bit-identical** to the ones ``build`` computes for
+    scoped aggregations.  Both therefore run the same IEEE-754 operations in the same
+    order on the same doubles: cast the boundaries to double *before* subtracting,
+    ``count = ceil((stop - start) / W)``, ``start_i = start + i * W``,
+    ``end_i = min(start + (i + 1) * W, stop)``, and drop windows with
+    ``start_i >= end_i``.  Keep the two implementations in sync.
+
+    Parameters
+    ----------
+    start_ts : pyspark.sql.Column
+        Container start timestamp.
+    stop_ts : pyspark.sql.Column
+        Container stop timestamp.
+    window_length : float
+        Fixed window length, in the same time unit as the timestamps. Must be strictly
+        positive.
+
+    Returns
+    -------
+    pyspark.sql.Column
+        ``array<array<double>>`` with one ``[start, end]`` pair per window; empty when the
+        boundaries are null or the span is not strictly positive.
+    """
+    start, stop = start_ts.cast("double"), stop_ts.cast("double")
+    w = F.lit(float(window_length))
+    count = F.ceil((stop - start) / w)
+    windows = F.transform(
+        F.sequence(F.lit(0), count - F.lit(1)),
+        lambda i: F.array(start + i * w, F.least(start + (i + F.lit(1)) * w, stop)),
+    )
+    windows = F.filter(windows, lambda p: p[0] < p[1])
+    # Gate on a positive span: sequence(0, -1) yields [0, -1] (a descending sequence),
+    # not an empty array, so degenerate containers would otherwise emit bogus windows.
+    return F.when(stop > start, windows).otherwise(F.array().cast("array<array<double>>"))
 
 
 class TimeWindowExpression(TimeSeriesExpression):
@@ -37,6 +81,8 @@ class TimeWindowExpression(TimeSeriesExpression):
 
     This is the query-engine counterpart of the reporting ``TimeWindowEvent``.  It evaluates
     to :class:`Intervals`, so it can scope a ``StatsAggregator`` (one statistic per window).
+    The reporting event fact computes the same windows natively via
+    :func:`window_intervals_col`; the two must stay bit-identical.
     """
 
     def __init__(self, window_length: float):
@@ -169,7 +215,15 @@ class TimeWindowExpression(TimeSeriesExpression):
         start_ts = cache.container_metrics.get(_SOLVER_CONFIG.start_ts_col)
         stop_ts = cache.container_metrics.get(_SOLVER_CONFIG.stop_ts_col)
 
-        if start_ts is None or stop_ts is None or stop_ts <= start_ts:
+        if start_ts is None or stop_ts is None:
+            return Intervals.empty()
+
+        # Mirror window_intervals_col exactly: convert to double *before* subtracting.  A
+        # long column reaches pandas as int64 or float64 depending on the group (nulls
+        # force float64), and an exact int64 span can round differently from the double
+        # span for large values (e.g. ns epochs), changing the window count.
+        start_ts, stop_ts = float(start_ts), float(stop_ts)
+        if not stop_ts > start_ts:
             return Intervals.empty()
 
         # Number of windows covering the span; the last one is clamped to stop_ts below.

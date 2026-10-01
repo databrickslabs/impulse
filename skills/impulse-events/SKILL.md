@@ -151,9 +151,11 @@ report.add_event(ten_minute)
 | `required_channels` | `list[str]`         | No       | Informational.                                                                  |
 | `attributes`        | `Mapping[str, str]` | No       | Free-form metadata; `window_length` is added automatically.                     |
 
-Pair it with an aggregation scoped to the event (e.g. `StatsAggregator(..., event=...)`) to compute one
-statistic per window. Because the windows come from `container_metrics`, those boundaries must share the
-channel samples' time base for the per-window values to be meaningful.
+Windows are computed from `container_metrics` for every container matching the report's filters, with
+or without channel data or a scoped aggregation. Pair it with an aggregation scoped to the event (e.g.
+`StatsAggregator(..., event=...)`) to compute one statistic per window; those rows carry the same
+`event_instance_id` values as the windows. Because the windows come from `container_metrics`, those
+boundaries must share the channel samples' time base for the per-window values to be meaningful.
 
 ## Output schema
 

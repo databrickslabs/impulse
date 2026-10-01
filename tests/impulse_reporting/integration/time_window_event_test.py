@@ -11,6 +11,7 @@ from impulse_reporting.config.config_parser import (
     Comparator,
     ContainerFilters,
     ImpulseConfig,
+    IncrementalConfig,
     MetricFilter,
     QueryEngine,
     Solvers,
@@ -73,7 +74,7 @@ def _expected_window_count(container_id: int) -> int:
 
 
 def test_time_window_event_in_report(spark, basic_narrow_db):
-    """A TimeWindowEvent (co-solved with an aggregation) tiles each container into windows."""
+    """A TimeWindowEvent (alongside a scoped aggregation) tiles each container into windows."""
     my_report = Report(
         name="time_window_event_report",
         spark=spark,
@@ -86,8 +87,6 @@ def test_time_window_event_in_report(spark, basic_narrow_db):
     )
     my_report.add_event(window_evt)
 
-    # A channel-bearing aggregation must be present so the batched solve forms
-    # per-container groups the (selector-less) window expression can ride on.
     query = my_report.get_db().query
     page = Page(page_number=1)
     my_report.add_page(page)
@@ -133,7 +132,7 @@ def test_time_window_event_in_report(spark, basic_narrow_db):
     dim_rows = my_report.event_metadata_dfs["TIME_WINDOW_EVENT"].collect()
     assert len(dim_rows) == 1
     assert dim_rows[0].event_type == "TIME_WINDOW_EVENT"
-    assert dim_rows[0].attributes["window_length"] == str(WINDOW_LENGTH)
+    assert dim_rows[0].attributes["window_length"] == str(float(WINDOW_LENGTH))
 
 
 # Window length (channel-sample time unit, µs) for the aligned-boundary test.
@@ -142,13 +141,25 @@ def test_time_window_event_in_report(spark, basic_narrow_db):
 ALIGNED_WINDOW_LENGTH = 600_000_000
 _ALIGNED_SCHEMA = "spark_catalog.silver_tw_aligned"
 
+# Customer-shaped time bases for the id-join test. Each entry: (timestamp transform applied
+# to channel tstart/tend and container start_ts/stop_ts, window length in that unit).
+#   us:  the basic db's native µs epochs (< 2^53, every boundary exactly representable).
+#   ns:  ns epochs (~1.5e18, beyond 2^53) with a window that is NOT a multiple of the
+#        256 ns double spacing there, so the boundaries round.
+#   sec: seconds as doubles with a fractional window, so the boundaries round.
+_TIME_BASES = {
+    "us": (lambda c: c, ALIGNED_WINDOW_LENGTH),
+    "ns": (lambda c: c.cast("long") * F.lit(1000), 600_000_000_007),
+    "sec": (lambda c: c.cast("double") / F.lit(1e6), 600.3),
+}
 
-@pytest.fixture
-def setup_tw_aligned_db(spark, setup_basic_db):  # noqa: F811
-    """Silver tables cloned from the basic db with container_metrics start_ts / stop_ts
-    recomputed from each container's channel-sample range, so the container boundaries
-    (and thus the windows) share the samples' time base."""
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {_ALIGNED_SCHEMA}")
+
+def _clone_aligned_silver(spark, schema: str, to_time_base=lambda c: c) -> None:
+    """Clone the basic silver tables into *schema* with container_metrics start_ts / stop_ts
+    recomputed from each container's channel-sample range (so the container boundaries,
+    and thus the windows, share the samples' time base), then map all of those timestamps
+    through *to_time_base*."""
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
     channels = spark.read.table("spark_catalog.silver.channels")
     bounds = channels.groupBy("container_id").agg(
         F.min("tstart").alias("_agg_start"),
@@ -162,29 +173,46 @@ def setup_tw_aligned_db(spark, setup_basic_db):  # noqa: F811
         .withColumn("start_ts", F.coalesce("_agg_start", "start_ts").cast(start_type))
         .withColumn("stop_ts", F.coalesce("_agg_stop", "stop_ts").cast(stop_type))
         .drop("_agg_start", "_agg_stop")
+        .withColumn("start_ts", to_time_base(F.col("start_ts")))
+        .withColumn("stop_ts", to_time_base(F.col("stop_ts")))
     )
     aligned_cm.write.format("delta").mode("overwrite").option(
         "overwriteSchema", "true"
-    ).saveAsTable(f"{_ALIGNED_SCHEMA}.container_metrics")
-    for table in ("channel_metrics", "channels"):
-        spark.read.table(f"spark_catalog.silver.{table}").write.format("delta").mode(
-            "overwrite"
-        ).saveAsTable(f"{_ALIGNED_SCHEMA}.{table}")
-    yield
-    spark.sql(f"DROP SCHEMA IF EXISTS {_ALIGNED_SCHEMA} CASCADE")
+    ).saveAsTable(f"{schema}.container_metrics")
+    channels.withColumn("tstart", to_time_base(F.col("tstart"))).withColumn(
+        "tend", to_time_base(F.col("tend"))
+    ).write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(
+        f"{schema}.channels"
+    )
+    spark.read.table("spark_catalog.silver.channel_metrics").write.format("delta").mode(
+        "overwrite"
+    ).saveAsTable(f"{schema}.channel_metrics")
 
 
-def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
-    """Stats scoped to a TimeWindowEvent yield per-window values that join to the fact."""
-    config = dict(
+@pytest.fixture
+def setup_tw_aligned_db(spark, setup_basic_db, request):  # noqa: F811
+    """Aligned silver clone in the time base given by ``request.param`` (default ``us``).
+
+    Yields ``(schema, window_length)``.
+    """
+    time_base = getattr(request, "param", "us")
+    to_time_base, window_length = _TIME_BASES[time_base]
+    schema = f"{_ALIGNED_SCHEMA}_{time_base}"
+    _clone_aligned_silver(spark, schema, to_time_base)
+    yield schema, window_length
+    spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+
+
+def _aligned_config(schema: str, table_prefix: str, **extra) -> dict:
+    return dict(
         ImpulseConfig(
             source=Source(
-                container_metrics_table=f"{_ALIGNED_SCHEMA}.container_metrics",
-                channel_metrics_table=f"{_ALIGNED_SCHEMA}.channel_metrics",
-                channels_uri=f"{_ALIGNED_SCHEMA}.channels",
+                container_metrics_table=f"{schema}.container_metrics",
+                channel_metrics_table=f"{schema}.channel_metrics",
+                channels_uri=f"{schema}.channels",
             ),
             unity_sink=UnitySink(
-                catalog="spark_catalog", schema="gold", table_prefix="time_window_join_test"
+                catalog="spark_catalog", schema="gold", table_prefix=table_prefix
             ),
             container_filters=ContainerFilters(
                 metric_filters=[
@@ -197,44 +225,35 @@ def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
             ),
             query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
             measurement_dimensions=["container_id", "start_ts", "stop_ts"],
-        )
-    )
-    my_report = Report(
-        name="time_window_join_report",
-        spark=spark,
-        workspace_client=create_autospec(WorkspaceClient),
-        config=config,
-    )
-
-    window_evt = TimeWindowEvent(name="ten_min", window_length=ALIGNED_WINDOW_LENGTH)
-    my_report.add_event(window_evt)
-
-    query = my_report.get_db().query
-    page = Page(page_number=1)
-    my_report.add_page(page)
-    page.add_aggregation(
-        StatsAggregator(
-            name="rpm_stats_per_window",
-            input_expressions=[query.channel(channel_name="Engine RPM")],
-            channel_names=["Engine RPM"],
-            statistics=["min", "max", "mean"],
-            event=window_evt,
-            desc="Engine RPM stats per window",
+            **extra,
         )
     )
 
-    my_report.determine_report()
-    my_report.persist_results()
 
-    stats_fact = spark.read.table("spark_catalog.gold.time_window_join_test_stats_aggregator_fact")
+def _rpm_stats(report: Report, event: TimeWindowEvent, statistics=("min", "max", "mean")):
+    query = report.get_db().query
+    return StatsAggregator(
+        name="rpm_stats_per_window",
+        input_expressions=[query.channel(channel_name="Engine RPM")],
+        channel_names=["Engine RPM"],
+        statistics=list(statistics),
+        event=event,
+        desc="Engine RPM stats per window",
+    )
+
+
+def _assert_ids_join(spark, table_prefix: str) -> tuple[set, set]:  # noqa: F811
+    """Assert every stats event_instance_id exists in event_instance_fact, with real values.
+
+    Returns ``(stats_event_ids, event_ids)`` for further checks.
+    """
+    stats_fact = spark.read.table(f"spark_catalog.gold.{table_prefix}_stats_aggregator_fact")
     event_instance_fact = spark.read.table(
-        "spark_catalog.gold.time_window_join_test_event_instance_fact"
+        f"spark_catalog.gold.{table_prefix}_event_instance_fact"
     )
-    assert stats_fact.count() > 0
-    assert event_instance_fact.count() > 0
 
     # Real computed values: with aligned boundaries every window overlaps RPM samples,
-    # so each produces a positive max.
+    # so the windows produce a positive max.
     max_values = [
         r.statistic_value
         for r in stats_fact.filter(F.col("aggregation_label") == "max").collect()
@@ -259,6 +278,33 @@ def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
     assert stats_event_ids.issubset(
         event_ids
     ), f"stats event_instance_ids not in event_instance_fact: {stats_event_ids - event_ids}"
+    return stats_event_ids, event_ids
+
+
+@pytest.mark.parametrize("setup_tw_aligned_db", ["us", "ns", "sec"], indirect=True)
+def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
+    """Stats scoped to a TimeWindowEvent yield per-window values whose event_instance_id
+    joins to the natively computed event fact, for µs, ns and seconds-as-double time bases."""
+    schema, window_length = setup_tw_aligned_db
+    table_prefix = f"time_window_join_test_{schema.rsplit('_', 1)[-1]}"
+    my_report = Report(
+        name="time_window_join_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=_aligned_config(schema, table_prefix),
+    )
+
+    window_evt = TimeWindowEvent(name="ten_min", window_length=window_length)
+    my_report.add_event(window_evt)
+
+    page = Page(page_number=1)
+    my_report.add_page(page)
+    page.add_aggregation(_rpm_stats(my_report, window_evt))
+
+    my_report.determine_report()
+    my_report.persist_results()
+
+    _assert_ids_join(spark, table_prefix)
 
 
 def test_multiple_time_window_events_coexist(spark, basic_narrow_db):
@@ -303,3 +349,156 @@ def test_multiple_time_window_events_coexist(spark, basic_narrow_db):
 
     dim_rows = my_report.event_metadata_dfs["TIME_WINDOW_EVENT"].collect()
     assert {d.event_name for d in dim_rows} == {"ten_sec", "thirty_sec"}
+
+
+# ---------------------------------------------------------------------------
+# Coverage: windows for every filtered container, independent of channel data
+# ---------------------------------------------------------------------------
+_PARTIAL_SCHEMA = "spark_catalog.silver_tw_partial"
+_RPM_CHANNEL_ID = 5
+
+
+@pytest.fixture
+def setup_tw_partial_db(spark, setup_basic_db):  # noqa: F811
+    """Basic silver clone where container 3 has no Engine RPM channel (metrics or data)."""
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {_PARTIAL_SCHEMA}")
+    no_rpm_on_3 = ~((F.col("container_id") == 3) & (F.col("channel_id") == _RPM_CHANNEL_ID))
+    spark.read.table("spark_catalog.silver.container_metrics").write.format("delta").mode(
+        "overwrite"
+    ).saveAsTable(f"{_PARTIAL_SCHEMA}.container_metrics")
+    for table in ("channel_metrics", "channels"):
+        spark.read.table(f"spark_catalog.silver.{table}").filter(no_rpm_on_3).write.format(
+            "delta"
+        ).mode("overwrite").saveAsTable(f"{_PARTIAL_SCHEMA}.{table}")
+    yield
+    spark.sql(f"DROP SCHEMA IF EXISTS {_PARTIAL_SCHEMA} CASCADE")
+
+
+def _assert_windows_for_all_containers(rows) -> None:
+    for container_id in EXPECTED_CONTAINERS:
+        count = sum(1 for r in rows if r.container_id == container_id)
+        assert count == _expected_window_count(container_id), (
+            f"container {container_id}: expected {_expected_window_count(container_id)} "
+            f"windows, got {count}"
+        )
+
+
+def test_time_window_event_covers_containers_without_aggregated_channel(
+    spark, setup_tw_partial_db
+):
+    """Windows exist for every filtered container even when the scoped aggregation's
+    channel is missing on some of them and the solve is split into single-channel batches.
+
+    Previously the windows came from the channel solve, so container 3 (no Engine RPM)
+    got none whenever the window expression landed in the RPM batch."""
+    config = _config("time_window_partial_test")
+    config.source = Source(
+        container_metrics_table=f"{_PARTIAL_SCHEMA}.container_metrics",
+        channel_metrics_table=f"{_PARTIAL_SCHEMA}.channel_metrics",
+        channels_uri=f"{_PARTIAL_SCHEMA}.channels",
+    )
+    config.query_engine = QueryEngine(
+        solver=Solvers.KEY_VALUE_STORE_SOLVER, max_channels_per_batch=1
+    )
+    my_report = Report(
+        name="time_window_partial_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(config),
+    )
+    window_evt = TimeWindowEvent(name="ten_sec", window_length=WINDOW_LENGTH)
+    my_report.add_event(window_evt)
+    page = Page(page_number=1)
+    my_report.add_page(page)
+    page.add_aggregation(_rpm_stats(my_report, window_evt))
+
+    my_report.determine_report()
+
+    rows = my_report.event_dfs["TIME_WINDOW_EVENT"]["changed"].collect()
+    _assert_windows_for_all_containers(rows)
+
+
+def test_standalone_time_window_event_covers_all_containers(spark, basic_narrow_db):
+    """A TimeWindowEvent with no aggregation (nothing to solve) still materializes windows."""
+    my_report = Report(
+        name="time_window_standalone_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(_config("time_window_standalone_test")),
+    )
+    my_report.add_event(TimeWindowEvent(name="ten_sec", window_length=WINDOW_LENGTH))
+
+    my_report.determine_report()
+
+    rows = my_report.event_dfs["TIME_WINDOW_EVENT"]["changed"].collect()
+    _assert_windows_for_all_containers(rows)
+    assert all(r.start_ts < r.end_ts for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# Incremental: ids still join when the aggregation and the event use different scopes
+# ---------------------------------------------------------------------------
+def test_time_window_event_ids_join_after_incremental_run(spark, setup_tw_aligned_db):
+    """Run 1 (full) on containers 1-2; run 2 (incremental) adds container 3 and changes the
+    aggregation's definition. The changed aggregation recomputes over all containers while
+    the unchanged event only computes container 3, yet every stats id must still join."""
+    schema, window_length = setup_tw_aligned_db
+    table_prefix = "time_window_inc_test"
+    cm_run_1 = f"{schema}.container_metrics_run_1"
+    cm_run_2 = f"{schema}.container_metrics_run_2"
+    past = F.lit("2020-01-01 00:00:00").cast("timestamp")
+    cm = spark.read.table(f"{schema}.container_metrics")
+    cm.filter(F.col("container_id").isin([1, 2])).withColumn("timestamp", past).write.format(
+        "delta"
+    ).mode("overwrite").saveAsTable(cm_run_1)
+
+    def _run(cm_table: str, is_incremental: bool, statistics) -> None:
+        config = _aligned_config(
+            schema,
+            table_prefix,
+            incremental=IncrementalConfig(
+                enabled=is_incremental,
+                silver_last_modified_column="timestamp",
+                gold_last_modified_column="_created_at",
+            ),
+        )
+        config["source"].container_metrics_table = cm_table
+        report = Report(
+            name="time_window_inc_report",
+            spark=spark,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=config,
+        )
+        window_evt = TimeWindowEvent(name="ten_min", window_length=window_length)
+        report.add_event(window_evt)
+        page = Page(page_number=1)
+        report.add_page(page)
+        page.add_aggregation(_rpm_stats(report, window_evt, statistics))
+        report.determine_report()
+        report.persist_results()
+
+    _run(cm_run_1, is_incremental=False, statistics=("min", "max", "mean"))
+
+    # Container 3 is new (recent timestamp); 1 and 2 are unchanged.
+    cm.withColumn(
+        "timestamp", F.when(F.col("container_id") == 3, F.current_timestamp()).otherwise(past)
+    ).write.format("delta").mode("overwrite").saveAsTable(cm_run_2)
+    # Adding a statistic changes the aggregation's definition hash (event unchanged).
+    _run(cm_run_2, is_incremental=True, statistics=("min", "max", "mean", "median"))
+
+    stats_event_ids, _ = _assert_ids_join(spark, table_prefix)
+
+    event_fact = spark.read.table(f"spark_catalog.gold.{table_prefix}_event_instance_fact")
+    stats_fact = spark.read.table(f"spark_catalog.gold.{table_prefix}_stats_aggregator_fact")
+    assert {r.container_id for r in event_fact.select("container_id").distinct().collect()} == {
+        1,
+        2,
+        3,
+    }
+    # The changed aggregation was recomputed for all containers (incl. the new one).
+    assert {r.container_id for r in stats_fact.select("container_id").distinct().collect()} == {
+        1,
+        2,
+        3,
+    }
+    assert stats_fact.filter(F.col("aggregation_label") == "median").count() > 0

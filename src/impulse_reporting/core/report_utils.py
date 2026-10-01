@@ -320,8 +320,8 @@ def dispatch_events(
 ) -> dict:
     """Dispatch ``determine_events`` calls per type.
 
-    Solvable event types receive ``solved_df``; ``ContainerEvent`` receives
-    ``query``/``solver``.
+    Solvable event types receive ``solved_df``; container-boundary events
+    (``ContainerEvent``, ``TimeWindowEvent``) receive ``query``/``solver``.
 
     Parameters
     ----------
@@ -333,7 +333,8 @@ def dispatch_events(
     solver : QuerySolver
     pre_filtered_containers_df : DataFrame | None
     container_event_cls : type
-        The ``ContainerEvent`` class.
+        Base class of the container-boundary events (``ContainerBoundaryEvent``);
+        subclasses are resolved via the filter pipeline instead of ``solved_df``.
 
     Returns
     -------
@@ -348,7 +349,7 @@ def dispatch_events(
         cls = type_enum[type_name].value
 
         if issubclass(cls, container_event_cls):
-            # ContainerEvent uses filter pipeline, not solved_df
+            # Container-boundary events use the filter pipeline, not solved_df
             event_dfs[type_name] = cls.determine_events(
                 spark,
                 events,

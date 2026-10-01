@@ -11,7 +11,7 @@ from pyspark.sql import DataFrame, Row, SparkSession
 
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from impulse_reporting.events.event import Event
+from impulse_reporting.events.container_boundary_event import ContainerBoundaryEvent
 from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     )
 
 
-class ContainerEvent(Event):
+class ContainerEvent(ContainerBoundaryEvent):
     """Event that treats the full measurement container as a single event instance.
 
     Unlike ``BasicEvent``, no time-series expression is needed — the event
@@ -170,9 +170,8 @@ class ContainerEvent(Event):
             Spark DataFrame matching ``EVENT_INSTANCE_FACT_SCHEMA``.
         """
         # Resolve containers via solver filter pipeline
-        container_tags_df = solver.filter_container_tags(spark, query)
-        container_metrics_df = solver.filter_container_metrics(
-            spark, query, container_tags_df, pre_filtered_containers_df
+        container_metrics_df = cls.resolve_container_metrics(
+            spark, query, solver, pre_filtered_containers_df
         )
 
         # Rename silver columns to gold event fact column names and cast

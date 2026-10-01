@@ -9,7 +9,7 @@ TimeWindowEvent — splits each container into consecutive fixed-duration window
 ## TimeWindowEvent
 
 ```python
-class TimeWindowEvent(Event)
+class TimeWindowEvent(ContainerBoundaryEvent)
 ```
 
 Event that divides each measurement container into consecutive fixed windows.
@@ -17,9 +17,9 @@ Event that divides each measurement container into consecutive fixed windows.
 Unlike ``ContainerEvent`` (one instance per container), a ``TimeWindowEvent`` emits one
 event instance per fixed-duration slice, tiling the container's ``start_ts`` / ``stop_ts``
 span with windows of length ``window_length``.  The final slice is clamped to the
-container end.  Boundaries come from a :class:`TimeWindowExpression`, so the event
-fact and any aggregation scoped to this event share the same solved windows and their
-``event_instance_id`` values match by construction.
+container end.
+
+The event fact is computed natively in Spark from ``container_metrics`` (via
 
 
 #### \_\_init\_\_
@@ -130,29 +130,33 @@ Get a Spark Row representation of the event.
 #### determine\_events
 
 ```python
-def determine_events(cls,
-                     spark: SparkSession,
-                     events: list[TimeWindowEvent],
-                     *,
-                     solved_df: DataFrame = None,
-                     query: QueryBuilder = None,
-                     solver: QuerySolver = None,
-                     pre_filtered_containers_df=None)
+def determine_events(
+        cls,
+        spark: SparkSession,
+        events: list[TimeWindowEvent],
+        *,
+        solved_df: DataFrame = None,
+        query: QueryBuilder = None,
+        solver: QuerySolver = None,
+        pre_filtered_containers_df: DataFrame = None) -> DataFrame
 ```
 
 Extract the event fact table for the given list of TimeWindowEvent objects.
 
-Each window becomes one event instance (``start_ts < end_ts``). The window intervals
-are read from the centralized solve (the same column consumed by scoped aggregations),
-so the resulting ``event_instance_id`` values match on both sides.
+Resolves the matching containers via the solver's filter pipeline (like
+``ContainerEvent``) and computes each event's windows natively from the
+containers' ``start_ts`` / ``stop_ts``, so every filtered container gets windows.
+Each window becomes one event instance (``start_ts < end_ts``). The windows are
+bit-identical to the ones the solve computes for scoped aggregations (see
+:func:`window_intervals_col`), so the ``event_instance_id`` values match.
 
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session for data processing.
 - `events` (`list of TimeWindowEvent`): List of TimeWindowEvent objects to process.
-- `solved_df` (`DataFrame`): Pre-solved wide DataFrame from centralized batch solve. Required.
-- `query` (`QueryBuilder`): Query builder (unused, kept for interface compatibility).
-- `solver` (`QuerySolver`): Query solver (unused, kept for interface compatibility).
+- `solved_df` (`DataFrame`): Not used by TimeWindowEvent (kept for interface compatibility).
+- `query` (`QueryBuilder`): Query builder with filters applied.
+- `solver` (`QuerySolver`): Solver whose filter pipeline is used for container resolution.
 - `pre_filtered_containers_df` (`DataFrame`): Pre-filtered containers for incremental processing.
 
 **Returns**:
