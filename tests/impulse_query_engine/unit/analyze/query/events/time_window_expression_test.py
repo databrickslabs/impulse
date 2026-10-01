@@ -4,6 +4,7 @@ import random
 from unittest.mock import MagicMock
 
 import numpy as np
+import pandas as pd
 import pyspark.sql.functions as F
 import pytest
 
@@ -132,6 +133,13 @@ def test_int64_and_float64_inputs_build_identical_windows():
     a = _build(np.int64(start), np.int64(stop), 1_000_000_007)
     b = _build(np.float64(start), np.float64(stop), 1_000_000_007)
     assert a.get_data() == b.get_data()
+
+
+def test_datetime_container_metrics_raise_clear_error():
+    # TIMESTAMP boundaries reach pandas as pd.Timestamp unless epoch_unit converts them.
+    start, stop = pd.Timestamp("2025-07-03 07:41:41"), pd.Timestamp("2025-07-03 07:43:30")
+    with pytest.raises(TypeError, match="epoch_unit"):
+        _build(start, stop, 10)
 
 
 def test_nan_container_metrics_yield_empty():

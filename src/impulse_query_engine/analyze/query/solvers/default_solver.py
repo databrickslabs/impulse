@@ -1314,6 +1314,10 @@ class DefaultSolver(QuerySolver):
             meta_df = metrics.select(container_id_col, *metric_cols).dropDuplicates(
                 [container_id_col]
             )
+            # TIMESTAMP start_ts/stop_ts would reach pandas as session-local, tz-naive
+            # Timestamps; convert them to epoch numbers in Spark when epoch_unit is set
+            # (no-op otherwise), matching the container-boundary events.
+            meta_df = self.config.normalize_container_boundaries(meta_df)
 
         if tag_keys:
             if query.db.config.container_tags_table is None:

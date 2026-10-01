@@ -126,6 +126,12 @@ so that solver code can always reference the same constants.
 override for the channel mapping (alias) table.
 - `channels` (`TableConfig`): Column mappings and filters for the channel data table.
 - `unit_conversion` (`TableConfig`): Column mappings and filters for the unit conversion table.
+- `epoch_unit` (`{"s", "ms", "us", "ns"} or None`): Epoch unit of the channel sample timestamps (``tstart`` / ``tend``).  When set,
+``TIMESTAMP``-typed container ``start_ts`` / ``stop_ts`` are converted to epoch
+numbers in this unit for container-boundary events (``ContainerEvent``,
+``TimeWindowEvent``) and for expressions that request them in the solve.  Only
+required for a ``TimeWindowEvent`` over ``TIMESTAMP`` boundaries; when unset,
+nothing is converted.
 
 #### from\_json
 
@@ -456,4 +462,66 @@ def col_map() -> dict[str, str]
 
 Short-key → internal-column-name mapping for UDFs and caches.
 
+
+#### reject\_implausible\_channels\_filter\_in\_raw
+
+```python
+def reject_implausible_channels_filter_in_raw(is_raw: bool) -> None
+```
+
+Raise if an is_plausible channels filter is set in RAW mode.
+
+Such a filter runs before raw encoding and bridges intervals across dropped
+samples instead of splitting them; use drop_implausible_data instead. No-op
+when not raw.
+
+
+#### normalize\_container\_boundaries
+
+```python
+def normalize_container_boundaries(df: DataFrame) -> DataFrame
+```
+
+Convert ``TIMESTAMP`` container start/stop columns to epoch numbers.
+
+Opt-in via :attr:`epoch_unit`: when it is unset, *df* is returned unchanged.
+Otherwise each ``TIMESTAMP`` ``start_ts`` / ``stop_ts`` column becomes an epoch
+number in that unit, computed from ``unix_micros`` (exact and independent of the
+session time zone).  ``"s"`` / ``"ms"`` give doubles (``"s"`` equals Spark's
+``cast(timestamp as double)``), ``"us"`` / ``"ns"`` give longs.  Numeric columns
+are left as they are.  Applying the same transform before both the event fact
+and the solve keeps their window boundaries identical.
+
+**Arguments**:
+
+- `df` (`pyspark.sql.DataFrame`): Column-mapped ``container_metrics`` frame (or a projection of it).
+
+**Raises**:
+
+- `ValueError`: If :attr:`epoch_unit` is set and a boundary column is ``TIMESTAMP_NTZ`` or
+``DATE`` (their epoch depends on a time zone and is not supported).
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: *df* with converted boundary columns.
+
+#### require\_epoch\_boundaries
+
+```python
+def require_epoch_boundaries(df: DataFrame, owner: str) -> None
+```
+
+Raise unless the container start/stop columns on *df* are epoch numbers.
+
+Call after :meth:`normalize_container_boundaries`.  Checks the schema only, so it
+fails fast on the driver before any Spark job runs.
+
+**Arguments**:
+
+- `df` (`pyspark.sql.DataFrame`): Normalized container_metrics frame.
+- `owner` (`str`): Name of the feature that needs epoch boundaries, used in the error message.
+
+**Raises**:
+
+- `ValueError`: If ``start_ts`` / ``stop_ts`` is still a date/time type.
 

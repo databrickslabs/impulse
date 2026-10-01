@@ -3,9 +3,11 @@
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
 import pytest
 from databricks.sdk import WorkspaceClient
 
+from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.config.config_parser import (
     Comparator,
@@ -20,6 +22,7 @@ from impulse_reporting.config.config_parser import (
 )
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
+from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.time_window_event import TimeWindowEvent
 from tests.conftest import setup_basic_db, spark  # noqa: F401  (pytest fixtures)
 
@@ -141,24 +144,41 @@ def test_time_window_event_in_report(spark, basic_narrow_db):
 ALIGNED_WINDOW_LENGTH = 600_000_000
 _ALIGNED_SCHEMA = "spark_catalog.silver_tw_aligned"
 
-# Customer-shaped time bases for the id-join test. Each entry: (timestamp transform applied
-# to channel tstart/tend and container start_ts/stop_ts, window length in that unit).
-#   us:  the basic db's native µs epochs (< 2^53, every boundary exactly representable).
-#   ns:  ns epochs (~1.5e18, beyond 2^53) with a window that is NOT a multiple of the
-#        256 ns double spacing there, so the boundaries round.
-#   sec: seconds as doubles with a fractional window, so the boundaries round.
+
+# Customer-shaped time bases for the id-join test, all derived from the basic db's µs epochs.
+# Each entry: (transform for channel tstart/tend, transform for container start_ts/stop_ts,
+# window length in the samples' unit, SolverConfig.epoch_unit).
+#   us:     the native µs epochs (< 2^53, every boundary exactly representable).
+#   ns:     ns epochs (~1.5e18, beyond 2^53) with a window that is NOT a multiple of the
+#           256 ns double spacing there, so the boundaries round.
+#   sec:    seconds as doubles with a fractional window, so the boundaries round.
+#   sec_ts: samples as seconds-as-double, container boundaries as TIMESTAMP (converted to
+#           epoch seconds via epoch_unit="s").
+def _to_seconds(c):
+    return c.cast("double") / F.lit(1e6)
+
+
+def _to_ns(c):
+    return c.cast("long") * F.lit(1000)
+
+
 _TIME_BASES = {
-    "us": (lambda c: c, ALIGNED_WINDOW_LENGTH),
-    "ns": (lambda c: c.cast("long") * F.lit(1000), 600_000_000_007),
-    "sec": (lambda c: c.cast("double") / F.lit(1e6), 600.3),
+    "us": (lambda c: c, lambda c: c, ALIGNED_WINDOW_LENGTH, None),
+    "ns": (_to_ns, _to_ns, 600_000_000_007, None),
+    "sec": (_to_seconds, _to_seconds, 600.3, None),
+    "sec_ts": (_to_seconds, lambda c: F.timestamp_micros(c.cast("long")), 600.3, "s"),
 }
 
 
-def _clone_aligned_silver(spark, schema: str, to_time_base=lambda c: c) -> None:
+def _clone_aligned_silver(
+    spark, schema: str, to_time_base=lambda c: c, boundaries_to_time_base=None
+) -> None:
     """Clone the basic silver tables into *schema* with container_metrics start_ts / stop_ts
     recomputed from each container's channel-sample range (so the container boundaries,
-    and thus the windows, share the samples' time base), then map all of those timestamps
-    through *to_time_base*."""
+    and thus the windows, share the samples' time base). Channel timestamps are then mapped
+    through *to_time_base* and the container boundaries through *boundaries_to_time_base*
+    (default: the same transform)."""
+    boundaries_to_time_base = boundaries_to_time_base or to_time_base
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
     channels = spark.read.table("spark_catalog.silver.channels")
     bounds = channels.groupBy("container_id").agg(
@@ -173,8 +193,8 @@ def _clone_aligned_silver(spark, schema: str, to_time_base=lambda c: c) -> None:
         .withColumn("start_ts", F.coalesce("_agg_start", "start_ts").cast(start_type))
         .withColumn("stop_ts", F.coalesce("_agg_stop", "stop_ts").cast(stop_type))
         .drop("_agg_start", "_agg_stop")
-        .withColumn("start_ts", to_time_base(F.col("start_ts")))
-        .withColumn("stop_ts", to_time_base(F.col("stop_ts")))
+        .withColumn("start_ts", boundaries_to_time_base(F.col("start_ts")))
+        .withColumn("stop_ts", boundaries_to_time_base(F.col("stop_ts")))
     )
     aligned_cm.write.format("delta").mode("overwrite").option(
         "overwriteSchema", "true"
@@ -193,17 +213,17 @@ def _clone_aligned_silver(spark, schema: str, to_time_base=lambda c: c) -> None:
 def setup_tw_aligned_db(spark, setup_basic_db, request):  # noqa: F811
     """Aligned silver clone in the time base given by ``request.param`` (default ``us``).
 
-    Yields ``(schema, window_length)``.
+    Yields ``(schema, window_length, epoch_unit)``.
     """
     time_base = getattr(request, "param", "us")
-    to_time_base, window_length = _TIME_BASES[time_base]
+    to_time_base, boundaries_to_time_base, window_length, epoch_unit = _TIME_BASES[time_base]
     schema = f"{_ALIGNED_SCHEMA}_{time_base}"
-    _clone_aligned_silver(spark, schema, to_time_base)
-    yield schema, window_length
+    _clone_aligned_silver(spark, schema, to_time_base, boundaries_to_time_base)
+    yield schema, window_length, epoch_unit
     spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
 
 
-def _aligned_config(schema: str, table_prefix: str, **extra) -> dict:
+def _aligned_config(schema: str, table_prefix: str, epoch_unit=None, **extra) -> dict:
     return dict(
         ImpulseConfig(
             source=Source(
@@ -223,7 +243,10 @@ def _aligned_config(schema: str, table_prefix: str, **extra) -> dict:
                     ]
                 ]
             ),
-            query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
+            query_engine=QueryEngine(
+                solver=Solvers.KEY_VALUE_STORE_SOLVER,
+                solver_config=SolverConfig(epoch_unit=epoch_unit) if epoch_unit else None,
+            ),
             measurement_dimensions=["container_id", "start_ts", "stop_ts"],
             **extra,
         )
@@ -281,17 +304,18 @@ def _assert_ids_join(spark, table_prefix: str) -> tuple[set, set]:  # noqa: F811
     return stats_event_ids, event_ids
 
 
-@pytest.mark.parametrize("setup_tw_aligned_db", ["us", "ns", "sec"], indirect=True)
+@pytest.mark.parametrize("setup_tw_aligned_db", ["us", "ns", "sec", "sec_ts"], indirect=True)
 def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
     """Stats scoped to a TimeWindowEvent yield per-window values whose event_instance_id
-    joins to the natively computed event fact, for µs, ns and seconds-as-double time bases."""
-    schema, window_length = setup_tw_aligned_db
-    table_prefix = f"time_window_join_test_{schema.rsplit('_', 1)[-1]}"
+    joins to the natively computed event fact, for µs, ns and seconds-as-double time bases,
+    and for TIMESTAMP container boundaries converted via epoch_unit."""
+    schema, window_length, epoch_unit = setup_tw_aligned_db
+    table_prefix = f"time_window_join_test_{schema.removeprefix(_ALIGNED_SCHEMA + '_')}"
     my_report = Report(
         name="time_window_join_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
-        config=_aligned_config(schema, table_prefix),
+        config=_aligned_config(schema, table_prefix, epoch_unit=epoch_unit),
     )
 
     window_evt = TimeWindowEvent(name="ten_min", window_length=window_length)
@@ -442,7 +466,7 @@ def test_time_window_event_ids_join_after_incremental_run(spark, setup_tw_aligne
     """Run 1 (full) on containers 1-2; run 2 (incremental) adds container 3 and changes the
     aggregation's definition. The changed aggregation recomputes over all containers while
     the unchanged event only computes container 3, yet every stats id must still join."""
-    schema, window_length = setup_tw_aligned_db
+    schema, window_length, _ = setup_tw_aligned_db
     table_prefix = "time_window_inc_test"
     cm_run_1 = f"{schema}.container_metrics_run_1"
     cm_run_2 = f"{schema}.container_metrics_run_2"
@@ -502,3 +526,58 @@ def test_time_window_event_ids_join_after_incremental_run(spark, setup_tw_aligne
         3,
     }
     assert stats_fact.filter(F.col("aggregation_label") == "median").count() > 0
+
+
+# ---------------------------------------------------------------------------
+# TIMESTAMP container boundaries: epoch_unit is opt-in, required only by TimeWindowEvent
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("setup_tw_aligned_db", ["sec_ts"], indirect=True)
+def test_time_window_event_timestamp_boundaries_require_epoch_unit(spark, setup_tw_aligned_db):
+    """A TimeWindowEvent over TIMESTAMP boundaries without epoch_unit fails fast and clearly."""
+    schema, window_length, _ = setup_tw_aligned_db
+    my_report = Report(
+        name="time_window_no_unit_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=_aligned_config(schema, "time_window_no_unit_test"),
+    )
+    my_report.add_event(TimeWindowEvent(name="ten_min", window_length=window_length))
+
+    with pytest.raises(ValueError, match=r"TimeWindowEvent.*epoch_unit"):
+        my_report.determine_report()
+
+
+@pytest.mark.parametrize("epoch_unit", [None, "s"])
+@pytest.mark.parametrize("setup_tw_aligned_db", ["sec_ts"], indirect=True)
+def test_container_event_timestamp_boundaries(spark, setup_tw_aligned_db, epoch_unit):
+    """Backward compatibility: a ContainerEvent over TIMESTAMP boundaries runs without
+    epoch_unit (as today) and yields epoch seconds; epoch_unit="s" gives identical values.
+    measurement_dimension keeps the TIMESTAMP type either way."""
+    schema, _, _ = setup_tw_aligned_db
+    table_prefix = f"container_event_ts_test_{epoch_unit or 'unset'}"
+    my_report = Report(
+        name="container_event_ts_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=_aligned_config(schema, table_prefix, epoch_unit=epoch_unit),
+    )
+    my_report.add_event(ContainerEvent(name="full_container"))
+    my_report.determine_report()
+    my_report.persist_results()
+
+    expected = {
+        r.container_id: (r.s, r.e)
+        for r in spark.read.table(f"{schema}.container_metrics")
+        .select(
+            "container_id",
+            F.col("start_ts").cast("double").alias("s"),
+            F.col("stop_ts").cast("double").alias("e"),
+        )
+        .collect()
+    }
+    event_fact = spark.read.table(f"spark_catalog.gold.{table_prefix}_event_instance_fact")
+    actual = {r.container_id: (r.start_ts, r.end_ts) for r in event_fact.collect()}
+    assert actual and all(actual[cid] == expected[cid] for cid in actual), (actual, expected)
+
+    measurement_dim = spark.read.table(f"spark_catalog.gold.{table_prefix}_measurement_dimension")
+    assert isinstance(measurement_dim.schema["start_ts"].dataType, T.TimestampType)

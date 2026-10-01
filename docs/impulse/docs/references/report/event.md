@@ -229,6 +229,12 @@ my_report.add_event(ten_minute_windows)
 the same time unit as the stored timestamps (milliseconds-since-epoch in the sample data), not
 seconds or any derived unit. So 60 one-minute windows over millisecond timestamps use
 `window_length=60_000`.
+
+If `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns, set
+[`solver_config.epoch_unit`](../../config/configuration.md#solver-column-mappings-and-filters)
+to the epoch unit of the channel sample timestamps (e.g. `"s"`). The boundaries are converted to
+that unit, and `window_length` is expressed in it. Without it, the report fails with an error
+naming the setting.
 :::
 
 ### How it works

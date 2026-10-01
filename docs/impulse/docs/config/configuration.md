@@ -170,6 +170,18 @@ Top-level fields on `SolverConfig`:
   the `project_id` column (after column-name mapping) of every table it reads that carries one —
   `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured).
   Omit it if you don't need project-level scoping; the solver does not require it.
+- `epoch_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional): Epoch unit of the channel sample
+  timestamps (`tstart`/`tend`). Only needed when `container_metrics.start_ts`/`stop_ts` are
+  `TIMESTAMP` columns **and** the report uses a `TimeWindowEvent`, whose windows must be in the
+  samples' time base. Such a report fails with a clear error until it is set. When set, `TIMESTAMP`
+  boundaries are converted to epoch numbers in that unit:
+  - `ContainerEvent` and `TimeWindowEvent` write `start_ts`/`end_ts` in that unit. With `"s"`, the
+    values are identical to the default.
+  - Expressions that request `start_ts`/`stop_ts` as container metrics (e.g. via
+    `apply(..., container_metrics=[...])`) receive epoch numbers instead of timestamps.
+
+  `measurement_dimension` and container filters always see the original columns. When unset,
+  nothing is converted. `TIMESTAMP_NTZ` and `DATE` boundaries are not supported.
 
 Per-table sections (each a `TableConfig`):
 
@@ -192,7 +204,7 @@ Internal column names that mappings can target:
 | `tstart`, `tend`| Sample interval start/end on the `channels` table (RLE)  |
 | `timestamp`     | Raw sample timestamp on the `channels` table (RAW mode; encoded into `tstart`/`tend`) |
 | `is_plausible`  | Boolean plausibility flag on the `channels` table (RAW mode); consumed by `drop_implausible_data` |
-| `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` to derive event-fact start/end |
+| `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` and `TimeWindowEvent` to derive event-fact start/end. May be `TIMESTAMP` (see `epoch_unit`) |
 | `value`         | Sample value (or attribute value on the EAV tag table)   |
 | `key`           | Attribute key on the EAV `container_tags` table          |
 | `priority`      | Tie-breaker column on the `channel_mapping` table        |

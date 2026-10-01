@@ -227,6 +227,9 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         container_metrics_df = cls.resolve_container_metrics(
             spark, query, solver, pre_filtered_containers_df
         )
+        # Windows are computed in the channel samples' epoch unit, so TIMESTAMP boundaries
+        # need solver_config.epoch_unit (fails fast on the schema, before any Spark job).
+        solver.config.require_epoch_boundaries(container_metrics_df, owner="TimeWindowEvent")
 
         # Silver-side names come from SolverConfig (column_name_mapping aware).
         start_ts = f.col(solver.config.start_ts_col)

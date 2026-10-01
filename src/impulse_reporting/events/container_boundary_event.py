@@ -42,9 +42,14 @@ class ContainerBoundaryEvent(Event):
         Returns
         -------
         DataFrame
-            Column-mapped ``container_metrics`` rows of the matching containers.
+            Column-mapped ``container_metrics`` rows of the matching containers, with
+            ``TIMESTAMP`` boundaries converted to epoch numbers when
+            ``solver.config.epoch_unit`` is set (unchanged otherwise).
         """
         container_tags_df = solver.filter_container_tags(spark, query)
-        return solver.filter_container_metrics(
+        container_metrics_df = solver.filter_container_metrics(
             spark, query, container_tags_df, pre_filtered_containers_df
         )
+        # Same transform as the solve's container metadata, so the event boundaries and
+        # those seen by scoped aggregations are identical.
+        return solver.config.normalize_container_boundaries(container_metrics_df)

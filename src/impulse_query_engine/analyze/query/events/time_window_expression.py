@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import math
 
 import numpy as np
@@ -221,6 +222,16 @@ class TimeWindowExpression(TimeSeriesExpression):
 
         if start_ts is None or stop_ts is None:
             return Intervals.empty()
+
+        for name, value in (("start_ts", start_ts), ("stop_ts", stop_ts)):
+            # pd.Timestamp subclasses datetime.datetime; dates and numpy datetimes too.
+            if isinstance(value, (datetime.date, np.datetime64)):
+                raise TypeError(
+                    f"TimeWindowExpression needs epoch-number container boundaries, but "
+                    f"{name} is {type(value).__name__}. For TIMESTAMP columns, set "
+                    "solver_config.epoch_unit to the epoch unit of the channel sample "
+                    "timestamps so they are converted before the solve."
+                )
 
         # Mirror window_intervals_col exactly: convert to double *before* subtracting.  A
         # long column reaches pandas as int64 or float64 depending on the group (nulls
