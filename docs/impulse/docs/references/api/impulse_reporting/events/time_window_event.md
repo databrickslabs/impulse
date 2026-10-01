@@ -38,7 +38,7 @@ Initialize a TimeWindowEvent object.
 
 - `name` (`str`): Name of the event.
 - `window_length` (`float`): Fixed window length, in the same time unit as the underlying timestamps
-(e.g. milliseconds-since-epoch). Must be strictly positive.
+(e.g. milliseconds-since-epoch). Must be strictly positive and finite.
 - `desc` (`str`): Description of the event.
 - `required_channels` (`list of str`): List of required channels for the event. Informational; stored in the event
 dimension table.
@@ -47,7 +47,7 @@ automatically (without overriding a user-supplied key).
 
 **Raises**:
 
-- `ValueError`: If ``window_length`` is not strictly positive.
+- `ValueError`: If ``window_length`` is not strictly positive and finite.
 
 #### get\_id
 

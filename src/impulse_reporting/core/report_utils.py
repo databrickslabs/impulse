@@ -316,7 +316,7 @@ def dispatch_events(
     query: QueryBuilder,
     solver: QuerySolver,
     pre_filtered_containers_df: DataFrame | None,
-    container_event_cls: type,
+    boundary_event_cls: type,
 ) -> dict:
     """Dispatch ``determine_events`` calls per type.
 
@@ -332,7 +332,7 @@ def dispatch_events(
     query : QueryBuilder
     solver : QuerySolver
     pre_filtered_containers_df : DataFrame | None
-    container_event_cls : type
+    boundary_event_cls : type
         Base class of the container-boundary events (``ContainerBoundaryEvent``);
         subclasses are resolved via the filter pipeline instead of ``solved_df``.
 
@@ -348,7 +348,7 @@ def dispatch_events(
             continue
         cls = type_enum[type_name].value
 
-        if issubclass(cls, container_event_cls):
+        if issubclass(cls, boundary_event_cls):
             # Container-boundary events use the filter pipeline, not solved_df
             event_dfs[type_name] = cls.determine_events(
                 spark,

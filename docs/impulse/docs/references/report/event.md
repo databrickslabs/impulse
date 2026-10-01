@@ -219,7 +219,7 @@ my_report.add_event(ten_minute_windows)
 | Parameter           | Type                | Required | Description                                                                                                     |
 |---------------------|---------------------|----------|-----------------------------------------------------------------------------------------------------------------|
 | `name`              | `str`               | Yes      | Unique event name.                                                                                              |
-| `window_length`     | `float`             | Yes      | Fixed window length, **in the same time unit as the underlying timestamps** (e.g. milliseconds-since-epoch). Must be strictly positive; validated at construction. |
+| `window_length`     | `float`             | Yes      | Fixed window length, **in the same time unit as the underlying timestamps** (e.g. milliseconds-since-epoch). Must be strictly positive and finite; validated at construction. |
 | `desc`              | `str`               | No       | Human-readable description.                                                                                     |
 | `required_channels` | `list[str]`         | No       | Channel names required for this event. Informational; stored in the event dimension table.                     |
 | `attributes`        | `Mapping[str, str]` | No       | Free-form key-value metadata. `window_length` is surfaced here automatically (without overriding a user key).  |

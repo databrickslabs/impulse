@@ -119,7 +119,7 @@ def test_str_stable_across_int_and_float_window_length():
     assert str(TimeWindowExpression(10)) == str(TimeWindowExpression(10.0))
 
 
-@pytest.mark.parametrize("bad", [0, -1, -10.5, None])
+@pytest.mark.parametrize("bad", [0, -1, -10.5, None, float("inf"), float("-inf"), float("nan")])
 def test_non_positive_window_length_raises(bad):
     with pytest.raises(ValueError, match="strictly positive"):
         TimeWindowExpression(bad)

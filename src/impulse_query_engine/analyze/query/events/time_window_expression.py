@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pyspark.sql.functions as F
 from pyspark.sql import Column
@@ -93,16 +95,18 @@ class TimeWindowExpression(TimeSeriesExpression):
         ----------
         window_length : float
             Fixed window length, in the same time unit as the underlying timestamps
-            (e.g. milliseconds-since-epoch). Must be strictly positive.
+            (e.g. milliseconds-since-epoch). Must be strictly positive and finite.
 
         Raises
         ------
         ValueError
-            If ``window_length`` is not strictly positive.
+            If ``window_length`` is not strictly positive and finite.
         """
-        if window_length is None or window_length <= 0:
+        # inf / NaN must be rejected too: inf gives a zero window count, for which Spark's
+        # sequence(0, -1) emits a bogus window, and NaN crashes the solve in build().
+        if window_length is None or not math.isfinite(window_length) or window_length <= 0:
             raise ValueError(
-                f"TimeWindowExpression requires a strictly positive window_length, "
+                f"TimeWindowExpression requires a strictly positive, finite window_length, "
                 f"got {window_length!r}."
             )
         # Store as float so the string form (and thus the event definition hash) is stable

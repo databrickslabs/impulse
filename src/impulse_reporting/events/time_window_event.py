@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Mapping
 
 import pyspark.sql.functions as f
@@ -58,7 +59,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             Name of the event.
         window_length : float
             Fixed window length, in the same time unit as the underlying timestamps
-            (e.g. milliseconds-since-epoch). Must be strictly positive.
+            (e.g. milliseconds-since-epoch). Must be strictly positive and finite.
         desc : str, optional
             Description of the event.
         required_channels : list of str, optional
@@ -71,12 +72,12 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         Raises
         ------
         ValueError
-            If ``window_length`` is not strictly positive.
+            If ``window_length`` is not strictly positive and finite.
         """
         ContainerBoundaryEvent.__init__(self, name)
-        if window_length is None or window_length <= 0:
+        if window_length is None or not math.isfinite(window_length) or window_length <= 0:
             raise ValueError(
-                f"TimeWindowEvent requires a strictly positive window_length, "
+                f"TimeWindowEvent requires a strictly positive, finite window_length, "
                 f"got {window_length!r}."
             )
         self.expression = TimeWindowExpression(window_length).alias(name)
@@ -265,7 +266,6 @@ class TimeWindowEvent(ContainerBoundaryEvent):
                 ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
             )
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
-            .where(f.col("start_ts") < f.col("end_ts"))  # Ensure valid time intervals
         )
         return df
 

@@ -146,7 +146,7 @@ report.add_event(ten_minute)
 | Parameter           | Type                | Required | Description                                                                     |
 |---------------------|---------------------|----------|---------------------------------------------------------------------------------|
 | `name`              | `str`               | Yes      | Unique event name.                                                              |
-| `window_length`     | `float`             | Yes      | Fixed window length, **in the same time unit as the timestamps**. Must be > 0.  |
+| `window_length`     | `float`             | Yes      | Fixed window length, **in the same time unit as the timestamps**. Must be finite and > 0. |
 | `desc`              | `str`               | No       | Description.                                                                    |
 | `required_channels` | `list[str]`         | No       | Informational.                                                                  |
 | `attributes`        | `Mapping[str, str]` | No       | Free-form metadata; `window_length` is added automatically.                     |

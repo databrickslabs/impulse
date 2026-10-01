@@ -495,7 +495,7 @@ class TestDispatchEvents:
             query=MagicMock(),
             solver=MagicMock(),
             pre_filtered_containers_df=None,
-            container_event_cls=object,
+            boundary_event_cls=object,
         )
         assert event_dfs == {}
 
@@ -532,7 +532,7 @@ class TestDispatchEvents:
             query=MagicMock(),
             solver=MagicMock(),
             pre_filtered_containers_df=MagicMock(spec=DataFrame),
-            container_event_cls=FakeContainerBase,
+            boundary_event_cls=FakeContainerBase,
         )
 
         assert received_kwargs == {"solved_df": mock_solved}
@@ -573,7 +573,7 @@ class TestDispatchEvents:
             query=mock_query,
             solver=mock_solver,
             pre_filtered_containers_df=mock_pre_filtered,
-            container_event_cls=FakeContainerBase,
+            boundary_event_cls=FakeContainerBase,
         )
 
         assert received_kwargs["query"] is mock_query
@@ -594,7 +594,7 @@ class TestDispatchEvents:
             query=MagicMock(),
             solver=MagicMock(),
             pre_filtered_containers_df=None,
-            container_event_cls=object,
+            boundary_event_cls=object,
         )
 
         assert "BASIC_EVENT" not in event_dfs
@@ -633,7 +633,7 @@ class TestDispatchEvents:
             query=MagicMock(),
             solver=MagicMock(),
             pre_filtered_containers_df=None,
-            container_event_cls=FakeContainerBase,
+            boundary_event_cls=FakeContainerBase,
         )
 
         assert len(meta_calls) == 0

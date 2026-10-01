@@ -52,7 +52,7 @@ def test_is_container_boundary_event_but_not_container_event():
     assert issubclass(ContainerEvent, ContainerBoundaryEvent)
 
 
-@pytest.mark.parametrize("bad", [0, -1, -5.5, None])
+@pytest.mark.parametrize("bad", [0, -1, -5.5, None, float("inf"), float("-inf"), float("nan")])
 def test_non_positive_window_length_raises(bad):
     with pytest.raises(ValueError, match="strictly positive"):
         TimeWindowEvent(name="bad", window_length=bad)
