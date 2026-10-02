@@ -457,3 +457,16 @@ def col_map() -> dict[str, str]
 Short-key → internal-column-name mapping for UDFs and caches.
 
 
+#### reject\_implausible\_channels\_filter\_in\_raw
+
+```python
+def reject_implausible_channels_filter_in_raw(is_raw: bool) -> None
+```
+
+Raise if an is_plausible channels filter is set in RAW mode.
+
+Such a filter runs before raw encoding and bridges intervals across dropped
+samples instead of splitting them; use drop_implausible_data instead. No-op
+when not raw.
+
+
