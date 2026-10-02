@@ -3,12 +3,14 @@ import re
 import warnings
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Annotated
+from typing import Annotated, Any, Self
 
 import pydantic
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
+from impulse_query_engine.measurement_db import AbstractMeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db_registry import resolve_measurement_db
 from impulse_reporting.channels.calculated_channel_kpis import DEFAULT_KPIS, KPI_BUILDERS
 
 
@@ -388,6 +390,11 @@ class QueryEngine(BaseModel):
 
         When omitted, all default column names are used and no
         project/toolbox filtering is applied.
+    measurement_db : str, default="MeasurementDB"
+        Registered name of the MeasurementDB implementation to use.
+    measurement_db_config : dict, optional
+        Keyword arguments for that implementation's config class,
+        merged with the ``source`` tables.
 
     Notes
     -----
@@ -408,6 +415,8 @@ class QueryEngine(BaseModel):
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
+    measurement_db: str = "MeasurementDB"
+    measurement_db_config: dict[str, Any] | None = None
     max_channels_per_batch: int = 500
     max_containers_per_batch: int | None = None
 
@@ -651,6 +660,24 @@ class FullRecalculation(BaseModel):
     calculated_channels: list[str] = []
 
 
+def build_measurement_db_config(
+    source_dict: dict[str, Any], query_engine: QueryEngine
+) -> tuple[type[AbstractMeasurementDB], MeasurementDBConfig]:
+    """Resolve the selected MeasurementDB implementation and build its config class from
+    ``measurement_db_config`` merged with the ``source`` tables in *source_dict*.
+
+    Raises ``KeyError`` for an unregistered ``measurement_db`` and ``TypeError`` for a missing,
+    unknown or duplicated config key.
+    """
+    registration = resolve_measurement_db(query_engine.measurement_db)
+    db_config = registration.config_cls(
+        **source_dict,
+        **(query_engine.measurement_db_config or {}),
+        table_locations="unity_catalog",
+    )
+    return registration.db_cls, db_config
+
+
 class ImpulseConfig(BaseModel):
     """
      Main configuration model.
@@ -764,3 +791,14 @@ class ImpulseConfig(BaseModel):
                 seen.add(name)
                 normalized.append(name)
         return normalized
+
+    @model_validator(mode="after")
+    def _validate_measurement_db(self) -> Self:
+        """Build the selected MeasurementDB implementation's config class once, so an unregistered
+        ``measurement_db`` or a missing, unknown or duplicated key fails when the config is parsed.
+        """
+        try:
+            build_measurement_db_config(dict(self.source), self.query_engine)
+        except (KeyError, TypeError) as exc:
+            raise ValueError(f"query_engine.measurement_db: {exc.args[0]}") from exc
+        return self

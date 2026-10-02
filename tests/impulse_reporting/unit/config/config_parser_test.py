@@ -3,6 +3,9 @@ import warnings
 import pytest
 from pydantic import ValidationError
 
+import impulse_query_engine.measurement_db_registry as registry
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.config.config_parser import (
     CalculatedChannels,
     CastType,
@@ -16,6 +19,7 @@ from impulse_reporting.config.config_parser import (
     RawEncoder,
     Solvers,
     TagFilter,
+    build_measurement_db_config,
     is_valid_table_name,
     is_valid_unity_entity_name,
 )
@@ -126,6 +130,18 @@ def test_impulse_config_data_format_raw():
     }
     config = ImpulseConfig.model_validate(config_json)
     assert config.query_engine.data_type == DataType.RAW
+
+
+def test_impulse_config_measurement_db_defaults():
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    assert config.query_engine.measurement_db == "MeasurementDB"
+    assert config.query_engine.measurement_db_config is None
+
+
+class _SessionDBConfig(MeasurementDBConfig):
+    def __init__(self, *, session_table: str, **base_kwargs):
+        super().__init__(**base_kwargs)
+        self.session_table = session_table
 
 
 def test_impulse_config_drop_in_plausible_data_defaults_to_false():
@@ -1325,3 +1341,141 @@ def test_calculated_channels_unknown_kpi_rejected():
     """An unknown KPI name is rejected at validation with a helpful message."""
     with pytest.raises(ValidationError, match="Unknown calculated-channel KPI"):
         CalculatedChannels(kpis=["bogus"])
+
+
+@pytest.fixture
+def session_db_registered(monkeypatch):
+    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+    register_measurement_db("SessionDB", _SessionDBConfig)(MeasurementDB)
+
+
+def _add_custom_measurement_db_to_report_config(name: str, extra: dict | None = None) -> dict:
+    query_engine = {"measurement_db": name, "measurement_db_config": extra}
+    return {**impulse_config_JSON, "query_engine": query_engine}
+
+
+def test_impulse_config_measurement_db_selector_parsed(session_db_registered):
+    config_json = _add_custom_measurement_db_to_report_config(
+        "SessionDB", {"session_table": "cat.raw.sessions"}
+    )
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.measurement_db == "SessionDB"
+    assert config.query_engine.measurement_db_config == {"session_table": "cat.raw.sessions"}
+
+
+@pytest.mark.parametrize(
+    ("custom_measurement_db_name", "extra", "error"),
+    [
+        ("NotRegistered", None, "Unknown measurement DB 'NotRegistered'"),
+        ("SessionDB", None, "missing 1 required keyword-only argument: 'session_table'"),
+        ("SessionDB", {"session_table": "t", "typo": 1}, "unexpected keyword argument 'typo'"),
+        ("SessionDB", {"session_table": "t", "channels_uri": "x"}, "multiple values"),
+    ],
+)
+def test_impulse_config_measurement_db_config_rejected_at_parse_time(
+    session_db_registered, custom_measurement_db_name, extra, error
+):
+    with pytest.raises(ValidationError, match=error):
+        ImpulseConfig.model_validate(
+            _add_custom_measurement_db_to_report_config(custom_measurement_db_name, extra)
+        )
+
+
+# ---------------------------------------------------------------------------
+# build_measurement_db_config — the config_parser factory that resolves the
+# selected implementation and builds its config object, merging the ``source``
+# tables with the custom ``measurement_db_config`` kwargs. A custom DB subclass
+# relies on every one of those params reaching its config object. Parsing
+# itself calls this factory (see ``ImpulseConfig._validate_measurement_db``), so
+# these go through ``model_validate`` first and then inspect the built config.
+# ---------------------------------------------------------------------------
+class _AcmeDBConfig(MeasurementDBConfig):
+    """A representative custom config: one required extra table, two optional prefilter keys,
+    and an extra table declared for pinning. Richer than ``_SessionDBConfig`` so a test can
+    assert that *every* param a custom config uses is present on the built object."""
+
+    def __init__(
+        self,
+        *,
+        recording_session_table: str,  # required: a missing value is reported at parse time
+        signal_name=(),  # optional prefilter key
+        start_dt=None,  # optional prefilter key
+        **base_kwargs,  # source tables + table_locations, forwarded to the base
+    ):
+        super().__init__(**base_kwargs)
+        self.recording_session_table = recording_session_table
+        self.signal_name = list(signal_name)
+        self.start_dt = start_dt
+
+    def configured_table_uris(self) -> list[str]:
+        return super().configured_table_uris() + [self.recording_session_table]
+
+
+class _AcmeDB(MeasurementDB): ...
+
+
+@pytest.fixture
+def acme_db_registered(monkeypatch):
+    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+    register_measurement_db("AcmeDB", _AcmeDBConfig)(_AcmeDB)
+
+
+def test_build_measurement_db_config_defaults_to_builtin():
+    """No selector -> the factory resolves the built-in and builds a base config from source."""
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    db_cls, db_config = build_measurement_db_config(dict(config.source), config.query_engine)
+
+    assert db_cls is MeasurementDB
+    assert type(db_config) is MeasurementDBConfig
+    assert db_config.container_metrics_table == "impulse_demo.silver.container_metric"
+    assert db_config.channel_metrics_table == "impulse_demo.silver.channel_metric"
+    assert db_config.channels_uri == "impulse_demo.silver.channel_data"
+    assert db_config.table_locations == "unity_catalog"
+
+
+def test_build_measurement_db_config_builds_custom_config_with_all_params(acme_db_registered):
+    """The factory resolves the registered class and builds its config with EVERY param present:
+    the custom ``measurement_db_config`` kwargs, the merged ``source`` tables, and
+    ``table_locations`` -- and declares the custom extra table for pinning."""
+    acme_config = {
+        "recording_session_table": "acme.raw.recording_session",
+        "signal_name": ["ENGINE_SPEED", "VEHICLE_SPEED"],
+        "start_dt": "2026-04-01",
+    }
+    config = ImpulseConfig.model_validate(
+        _add_custom_measurement_db_to_report_config("AcmeDB", acme_config)
+    )
+    db_cls, db_config = build_measurement_db_config(dict(config.source), config.query_engine)
+
+    # Resolves to the registered custom DB + config class, not the built-in.
+    assert db_cls is _AcmeDB
+    assert type(db_config) is _AcmeDBConfig
+
+    # Every custom param the config declares is present on the built object.
+    assert db_config.recording_session_table == "acme.raw.recording_session"
+    assert db_config.signal_name == ["ENGINE_SPEED", "VEHICLE_SPEED"]
+    assert db_config.start_dt == "2026-04-01"
+
+    # The source tables are merged in (base kwargs) and the location is forced to unity_catalog.
+    assert db_config.container_metrics_table == "impulse_demo.silver.container_metric"
+    assert db_config.channel_metrics_table == "impulse_demo.silver.channel_metric"
+    assert db_config.channels_uri == "impulse_demo.silver.channel_data"
+    assert db_config.table_locations == "unity_catalog"
+
+    # The custom extra table is declared alongside the source tables for Delta version pinning.
+    assert "acme.raw.recording_session" in db_config.configured_table_uris()
+
+
+def test_build_measurement_db_config_omits_optional_custom_params(acme_db_registered):
+    """Optional custom params are genuinely optional: the config builds with only the required one,
+    and the optional params fall back to their declared defaults."""
+    config = ImpulseConfig.model_validate(
+        _add_custom_measurement_db_to_report_config(
+            "AcmeDB", {"recording_session_table": "acme.raw.recording_session"}
+        )
+    )
+    _, db_config = build_measurement_db_config(dict(config.source), config.query_engine)
+
+    assert db_config.recording_session_table == "acme.raw.recording_session"
+    assert db_config.signal_name == []
+    assert db_config.start_dt is None

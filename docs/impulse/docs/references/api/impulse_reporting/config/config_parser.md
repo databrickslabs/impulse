@@ -208,6 +208,9 @@ scoping.  Key sub-fields:
 
 When omitted, all default column names are used and no
 project/toolbox filtering is applied.
+- `measurement_db` (`str, default="MeasurementDB"`): Registered name of the MeasurementDB implementation to use.
+- `measurement_db_config` (`dict`): Keyword arguments for that implementation's config class,
+merged with the ``source`` tables.
 
 #### validate\_drop\_implausible\_data\_requires\_raw
 
@@ -219,6 +222,32 @@ def validate_drop_implausible_data_requires_raw()
 
 The filter is applied inside the RAW -> interval conversion path by the
 selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).
+
+
+#### reject\_channels\_filter\_on\_is\_plausible\_in\_raw
+
+```python
+def reject_channels_filter_on_is_plausible_in_raw()
+```
+
+Reject an is_plausible channels filter in RAW mode (delegates to SolverConfig).
+
+The shared invariant lives on ``SolverConfig`` so direct query-engine use
+(``DefaultSolver``) enforces the same rule; here we surface it at config-parse time.
+
+
+#### warn\_channels\_filters\_bridge\_in\_raw
+
+```python
+def warn_channels_filters_bridge_in_raw()
+```
+
+Warn (not reject) on any non-plausibility channels filter in RAW mode.
+
+Such filters run before raw encoding and bridge intervals across dropped
+samples. That is fine for whole-channel scoping but corrupts per-sample cleaning,
+and the two cannot be told apart statically, so we warn. ``is_plausible`` is
+hard-rejected above as the one unambiguously per-sample case.
 
 
 #### default\_raw\_encoder\_for\_raw\_data
@@ -293,6 +322,22 @@ Names that do not match any registered entity are rejected at the start of
 - `aggregations` (`list of str, default=[]`): Names of aggregations to fully recalculate.
 - `events` (`list of str, default=[]`): Names of events to fully recalculate.
 - `calculated_channels` (`list of str, default=[]`): Names of calculated channels to fully recalculate.
+
+#### build\_measurement\_db\_config
+
+```python
+def build_measurement_db_config(
+    source_dict: dict[str, Any], query_engine: QueryEngine
+) -> tuple[type[AbstractMeasurementDB], MeasurementDBConfig]
+```
+
+Resolve the selected MeasurementDB implementation and build its config class from
+
+``measurement_db_config`` merged with the ``source`` tables in *source_dict*.
+
+Raises ``KeyError`` for an unregistered ``measurement_db`` and ``TypeError`` for a missing,
+unknown or duplicated config key.
+
 
 ## ImpulseConfig
 
