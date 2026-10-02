@@ -3,7 +3,7 @@ import re
 import warnings
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Annotated
+from typing import Annotated, Any, Self
 
 import pydantic
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
