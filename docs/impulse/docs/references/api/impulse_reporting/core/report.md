@@ -52,14 +52,14 @@ Returns a unique identifier for the report.
 #### get\_db
 
 ```python
-def get_db() -> MeasurementDB
+def get_db() -> AbstractMeasurementDB
 ```
 
 Get the measurement database associated with this report.
 
 **Returns**:
 
-`MeasurementDB`: The measurement database instance.
+`AbstractMeasurementDB`: The measurement database instance.
 
 #### get\_solver
 
@@ -109,11 +109,13 @@ Load Impulse configuration from a dictionary.
 
 ```python
 def create_measurement_db(config: ImpulseConfig,
-                          ws: WorkspaceClient) -> MeasurementDB
+                          ws: WorkspaceClient) -> AbstractMeasurementDB
 ```
 
-Create a measurement database based on the provided configuration.
+Create the measurement database selected by ``query_engine.measurement_db``.
 
+Builds the registered config class from the ``source`` tables plus
+``query_engine.measurement_db_config``, then the registered DB class.
 Maps the optional ``container_tags`` field from the Source config
 to the ``container_tags_table`` parameter expected by
 ``MeasurementDBConfig``.
@@ -125,12 +127,12 @@ to the ``container_tags_table`` parameter expected by
 
 **Returns**:
 
-`MeasurementDB`: The measurement database instance.
+`AbstractMeasurementDB`: The measurement database instance.
 
 #### create\_query\_builder
 
 ```python
-def create_query_builder(db: MeasurementDB,
+def create_query_builder(db: AbstractMeasurementDB,
                          config: ImpulseConfig) -> QueryBuilder
 ```
 
@@ -143,7 +145,7 @@ supports tag and metric filters, but tag filters require the narrow
 
 **Arguments**:
 
-- `db` (`MeasurementDB`): The measurement database instance.
+- `db` (`AbstractMeasurementDB`): The measurement database instance.
 - `config` (`ImpulseConfig`): The Impulse configuration.
 
 **Raises**:

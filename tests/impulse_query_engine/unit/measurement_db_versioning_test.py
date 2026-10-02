@@ -54,7 +54,9 @@ def test_pin_versions_freezes_snapshot(spark, pin_schema):  # noqa: F811
     assert db.container_metrics(spark).count() == 10
 
 
-def test_pin_versions_pins_extra_table_declared_by_config_subclass(spark, pin_schema):  # noqa: F811
+def test_pin_versions_pins_extra_table_declared_by_config_subclass(
+    spark, pin_schema
+):  # noqa: F811
     # A custom read seam declares its extra tables via ``configured_table_uris``; the inherited
     # ``pin_versions`` then pins them together with the silver tables.
     extra = f"{pin_schema}.sessions"
