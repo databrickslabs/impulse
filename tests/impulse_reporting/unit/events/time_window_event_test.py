@@ -133,7 +133,7 @@ def test_max_windows_per_container_excluded_from_hash():
 
 @pytest.mark.parametrize("bad", [0, -1, 2.5, True, None])
 def test_invalid_max_windows_per_container_raises(bad):
-    with pytest.raises(ValueError, match="max_windows must be a positive integer"):
+    with pytest.raises(ValueError, match="^max_windows_per_container must be a positive integer"):
         TimeWindowEvent(name="w", window_length=10, max_windows_per_container=bad)
 
 

@@ -16,6 +16,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.events.time_window_expression import (
     MAX_WINDOWS_PER_CONTAINER,
     TimeWindowExpression,
+    validate_max_windows,
     window_intervals_col,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
@@ -89,6 +90,10 @@ class TimeWindowEvent(ContainerBoundaryEvent):
                 f"TimeWindowEvent requires a strictly positive, finite window_length, "
                 f"got {window_length!r}."
             )
+        # Validated here so the error names this event's parameter, not the expression's.
+        max_windows_per_container = validate_max_windows(
+            max_windows_per_container, param_name="max_windows_per_container"
+        )
         self.expression = TimeWindowExpression(
             window_length, max_windows=max_windows_per_container
         ).alias(name)

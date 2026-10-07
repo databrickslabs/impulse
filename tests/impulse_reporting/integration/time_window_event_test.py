@@ -274,10 +274,15 @@ def _aligned_config(
     )
 
 
-def _rpm_stats(report: Report, event: TimeWindowEvent, statistics=("min", "max", "mean")):
+def _rpm_stats(
+    report: Report,
+    event: TimeWindowEvent,
+    statistics=("min", "max", "mean"),
+    name: str = "rpm_stats_per_window",
+):
     query = report.get_db().query
     return StatsAggregator(
-        name="rpm_stats_per_window",
+        name=name,
         input_expressions=[query.channel(channel_name="Engine RPM")],
         channel_names=["Engine RPM"],
         statistics=list(statistics),
@@ -463,48 +468,81 @@ def test_time_window_event_aggregation_join_raw(spark, setup_tw_aligned_db, raw_
     _assert_window_stats_match_samples(spark, schema, table_prefix, channels_table)
 
 
-def test_multiple_time_window_events_coexist(spark, basic_narrow_db):
-    """Two TimeWindowEvents with different windows are allowed and both materialize."""
+def _container_boundaries(spark, schema: str) -> dict:  # noqa: F811
+    """``{container_id: (start_ts, stop_ts)}`` of the clone's container_metrics, as doubles."""
+    return {
+        r.container_id: (float(r.start_ts), float(r.stop_ts))
+        for r in spark.read.table(f"{schema}.container_metrics")
+        .select("container_id", "start_ts", "stop_ts")
+        .collect()
+    }
+
+
+def _assert_windows_tile_containers(rows, boundaries: dict, window_length: float) -> None:
+    """Each container's windows tile its ``[start_ts, stop_ts]`` exactly: they start at
+    ``start_ts``, are contiguous, all but the last are ``window_length`` long, and the last
+    one is clamped to ``stop_ts``."""
+    for container_id, (start, stop) in boundaries.items():
+        windows = sorted((r.start_ts, r.end_ts) for r in rows if r.container_id == container_id)
+        assert len(windows) == math.ceil((stop - start) / window_length), container_id
+        assert windows[0][0] == start and windows[-1][1] == stop, (container_id, windows)
+        assert all(prev[1] == nxt[0] for prev, nxt in zip(windows, windows[1:])), container_id
+        assert all(e - s == window_length for s, e in windows[:-1]), container_id
+        assert 0 < windows[-1][1] - windows[-1][0] <= window_length, container_id
+
+
+def test_multiple_time_window_events_coexist(spark, setup_tw_aligned_db):
+    """Two TimeWindowEvents with different window lengths coexist in one report: each tiles
+    every container with its own windows, and the statistics scoped to each event carry
+    the values of that event's windows. The ids hash the event name, so window k of one
+    event never joins window k of the other."""
+    schema, window_length, _ = setup_tw_aligned_db
+    table_prefix = "time_window_multi_test"
     my_report = Report(
         name="time_window_multi_report",
         spark=spark,
         workspace_client=create_autospec(WorkspaceClient),
-        config=dict(_config("time_window_multi_test")),
+        config=_aligned_config(schema, table_prefix),
     )
 
-    evt_10s = TimeWindowEvent(name="ten_sec", window_length=WINDOW_LENGTH)
-    evt_30s = TimeWindowEvent(name="thirty_sec", window_length=3 * WINDOW_LENGTH)
-    my_report.add_event(evt_10s)
-    my_report.add_event(evt_30s)
+    evt_short = TimeWindowEvent(name="ten_min", window_length=window_length)
+    evt_long = TimeWindowEvent(name="thirty_min", window_length=3 * window_length)
+    my_report.add_event(evt_short)
+    my_report.add_event(evt_long)
 
-    query = my_report.get_db().query
     page = Page(page_number=1)
     my_report.add_page(page)
-    page.add_aggregation(
-        StatsAggregator(
-            name="rpm_stats",
-            input_expressions=[query.channel(channel_name="Engine RPM")],
-            channel_names=["Engine RPM"],
-            statistics=["mean"],
-            event=evt_10s,
-            desc="Engine RPM stats per 10s window",
-        )
-    )
+    page.add_aggregation(_rpm_stats(my_report, evt_short, name="rpm_stats_ten_min"))
+    page.add_aggregation(_rpm_stats(my_report, evt_long, name="rpm_stats_thirty_min"))
 
     my_report.determine_report()
+    my_report.persist_results()
 
-    rows = my_report.event_dfs["TIME_WINDOW_EVENT"]["changed"].collect()
-    names = {r.event_id for r in rows}
-    # Two distinct events (distinct event_ids) share the shared fact table.
-    assert names == {evt_10s.get_id(), evt_30s.get_id()}
+    event_fact = spark.read.table(f"spark_catalog.gold.{table_prefix}_event_instance_fact")
+    event_rows = event_fact.collect()
+    boundaries = _container_boundaries(spark, schema)
+    for event, length in ((evt_short, window_length), (evt_long, 3 * window_length)):
+        _assert_windows_tile_containers(
+            [r for r in event_rows if r.event_id == event.get_id()], boundaries, length
+        )
 
-    # The 10s event produces strictly more windows than the 30s event.
-    count_10s = sum(1 for r in rows if r.event_id == evt_10s.get_id())
-    count_30s = sum(1 for r in rows if r.event_id == evt_30s.get_id())
-    assert count_10s > count_30s > 0
+    # Every stats row joins a window of its own event, with its window's sample values.
+    _assert_ids_join(spark, table_prefix)
+    stats_fact = spark.read.table(f"spark_catalog.gold.{table_prefix}_stats_aggregator_fact")
+    cross_event = (
+        stats_fact.select("event_instance_id", F.col("event_id").alias("stats_event_id"))
+        .join(event_fact.select("event_instance_id", "event_id"), "event_instance_id")
+        .filter(F.col("stats_event_id") != F.col("event_id"))
+    )
+    assert cross_event.count() == 0
+    assert {r.event_id for r in stats_fact.select("event_id").distinct().collect()} == {
+        evt_short.get_id(),
+        evt_long.get_id(),
+    }
+    _assert_window_stats_match_samples(spark, schema, table_prefix)
 
     dim_rows = my_report.event_metadata_dfs["TIME_WINDOW_EVENT"].collect()
-    assert {d.event_name for d in dim_rows} == {"ten_sec", "thirty_sec"}
+    assert {d.event_name for d in dim_rows} == {"ten_min", "thirty_min"}
 
 
 # ---------------------------------------------------------------------------
@@ -531,12 +569,11 @@ def setup_tw_partial_db(spark, setup_basic_db):  # noqa: F811
 
 
 def _assert_windows_for_all_containers(rows) -> None:
-    for container_id in EXPECTED_CONTAINERS:
-        count = sum(1 for r in rows if r.container_id == container_id)
-        assert count == _expected_window_count(container_id), (
-            f"container {container_id}: expected {_expected_window_count(container_id)} "
-            f"windows, got {count}"
-        )
+    """Every filtered container is tiled into WINDOW_LENGTH windows over its boundaries."""
+    boundaries = {
+        cid: (float(b["start_ts"]), float(b["stop_ts"])) for cid, b in EXPECTED_CONTAINERS.items()
+    }
+    _assert_windows_tile_containers(rows, boundaries, WINDOW_LENGTH)
 
 
 def test_time_window_event_covers_containers_without_aggregated_channel(
@@ -572,6 +609,16 @@ def test_time_window_event_covers_containers_without_aggregated_channel(
 
     rows = my_report.event_dfs["TIME_WINDOW_EVENT"]["changed"].collect()
     _assert_windows_for_all_containers(rows)
+
+    # The stats cover every window of the containers that have Engine RPM, and none of
+    # container 3, whose windows exist regardless.
+    window_ids = {r.event_instance_id for r in rows}
+    stats_rows = my_report.aggregation_dfs["STATS_AGGREGATOR"]["changed"].collect()
+    assert {r.container_id for r in stats_rows} == {1, 2}
+    assert {r.event_instance_id for r in stats_rows} == {
+        r.event_instance_id for r in rows if r.container_id in (1, 2)
+    }
+    assert {r.event_instance_id for r in stats_rows} <= window_ids
 
 
 def test_standalone_time_window_event_covers_all_containers(spark, basic_narrow_db):

@@ -32,17 +32,21 @@ MAX_WINDOWS_PER_CONTAINER = 1_000_000
 
 _WINDOW_LIMIT_HINT = (
     "Check that window_length is in the epoch unit of the container boundaries "
-    "(solver_config.epoch_unit), or raise max_windows_per_container."
+    "(solver_config.epoch_unit), or raise the limit (TimeWindowEvent "
+    "max_windows_per_container, TimeWindowExpression max_windows)."
 )
 
 
-def _validate_max_windows(max_windows: int) -> int:
+def validate_max_windows(max_windows: int, param_name: str = "max_windows") -> int:
     """Return *max_windows* as an int, raising unless it is a positive integer.
 
     Parameters
     ----------
     max_windows : int
         Maximum number of windows per container.
+    param_name : str, optional
+        Name of the caller's parameter, used in the error message (default
+        ``"max_windows"``).
 
     Returns
     -------
@@ -59,7 +63,7 @@ def _validate_max_windows(max_windows: int) -> int:
         or not isinstance(max_windows, numbers.Integral)
         or max_windows <= 0
     ):
-        raise ValueError(f"max_windows must be a positive integer, got {max_windows!r}.")
+        raise ValueError(f"{param_name} must be a positive integer, got {max_windows!r}.")
     return int(max_windows)
 
 
@@ -107,7 +111,7 @@ def window_intervals_col(
         ``array<array<double>>`` with one ``[start, end]`` pair per window; empty when a
         boundary is null, NaN or infinite, or the span is not strictly positive.
     """
-    max_windows = _validate_max_windows(max_windows)
+    max_windows = validate_max_windows(max_windows)
     start, stop = start_ts.cast("double"), stop_ts.cast("double")
     w = F.lit(float(window_length))
     count = F.ceil((stop - start) / w)
@@ -198,7 +202,7 @@ class TimeWindowExpression(TimeSeriesExpression):
         # regardless of whether an int or float was passed: 10 and 10.0 are the same window
         # and must not trigger a spurious full recompute in incremental mode.
         self.window_length = float(window_length)
-        self.max_windows = _validate_max_windows(max_windows)
+        self.max_windows = validate_max_windows(max_windows)
         self.epoch_unit: str | None = None
         TimeSeriesExpression.__init__(self, is_single_signal=False)
 
