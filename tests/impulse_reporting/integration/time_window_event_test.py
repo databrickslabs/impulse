@@ -1,7 +1,6 @@
 """Integration tests for TimeWindowEvent with end-to-end Report usage."""
 
 import math
-from itertools import pairwise
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
@@ -117,21 +116,8 @@ def test_time_window_event_in_report(spark, basic_narrow_db):
     total_expected = sum(_expected_window_count(cid) for cid in EXPECTED_CONTAINERS)
     assert len(rows) == total_expected
 
-    for container_id, expected in EXPECTED_CONTAINERS.items():
-        windows = sorted(
-            ((r.start_ts, r.end_ts) for r in rows if r.container_id == container_id),
-            key=lambda w: w[0],
-        )
-        assert len(windows) == _expected_window_count(container_id)
-        # First window starts at the container start.
-        assert windows[0][0] == expected["start_ts"]
-        # Windows are contiguous: each end equals the next start.
-        for (_, end), (nxt_start, _) in zip(windows, windows[1:], strict=False):
-            assert end == nxt_start
-        # Final window is clamped to the container stop.
-        assert windows[-1][1] == expected["stop_ts"]
-        # Every window is a valid, non-empty interval.
-        assert all(start < end for start, end in windows)
+    _assert_windows_for_all_containers(rows)
+    for container_id in EXPECTED_CONTAINERS:
         # Per-window instances are distinct (unlike ContainerEvent's single id).
         instance_ids = [r.event_instance_id for r in rows if r.container_id == container_id]
         assert len(set(instance_ids)) == len(instance_ids)
@@ -470,26 +456,35 @@ def test_time_window_event_aggregation_join_raw(spark, setup_tw_aligned_db, raw_
 
 
 def _container_boundaries(spark, schema: str) -> dict:  # noqa: F811
-    """``{container_id: (start_ts, stop_ts)}`` of the clone's container_metrics, as doubles."""
+    """``{container_id: (start_ts, stop_ts)}`` as doubles, for the containers in the report's
+    scope (``_aligned_config`` filters on ``vehicle_key == "Seat_Leon"``)."""
     return {
         r.container_id: (float(r.start_ts), float(r.stop_ts))
         for r in spark.read.table(f"{schema}.container_metrics")
+        .filter(F.col("vehicle_key") == "Seat_Leon")
         .select("container_id", "start_ts", "stop_ts")
         .collect()
     }
 
 
 def _assert_windows_tile_containers(rows, boundaries: dict, window_length: float) -> None:
-    """Each container's windows tile its ``[start_ts, stop_ts]`` exactly: they start at
-    ``start_ts``, are contiguous, all but the last are ``window_length`` long, and the last
-    one is clamped to ``stop_ts``."""
+    """Each container's windows tile its ``[start_ts, stop_ts]`` exactly: window ``i`` spans
+    ``[start + i * W, min(start + (i + 1) * W, stop)]``, so the windows start at
+    ``start_ts``, are contiguous and the last one is clamped to ``stop_ts``.
+
+    The expected boundaries use the same double arithmetic as the event, so the comparison
+    is exact for every time base (ns epochs, fractional windows). A container without a
+    positive span expects no windows.
+    """
     for container_id, (start, stop) in boundaries.items():
         windows = sorted((r.start_ts, r.end_ts) for r in rows if r.container_id == container_id)
-        assert len(windows) == math.ceil((stop - start) / window_length), container_id
-        assert windows[0][0] == start and windows[-1][1] == stop, (container_id, windows)
-        assert all(prev[1] == nxt[0] for prev, nxt in pairwise(windows)), container_id
-        assert all(e - s == window_length for s, e in windows[:-1]), container_id
-        assert 0 < windows[-1][1] - windows[-1][0] <= window_length, container_id
+        count = math.ceil((stop - start) / window_length) if stop > start else 0
+        expected = [
+            (start + i * window_length, min(start + (i + 1) * window_length, stop))
+            for i in range(count)
+        ]
+        expected = [(s, e) for s, e in expected if s < e]
+        assert windows == expected, (container_id, windows[:3], expected[:3])
 
 
 def test_multiple_time_window_events_coexist(spark, setup_tw_aligned_db):
@@ -613,13 +608,11 @@ def test_time_window_event_covers_containers_without_aggregated_channel(
 
     # The stats cover every window of the containers that have Engine RPM, and none of
     # container 3, whose windows exist regardless.
-    window_ids = {r.event_instance_id for r in rows}
     stats_rows = my_report.aggregation_dfs["STATS_AGGREGATOR"]["changed"].collect()
     assert {r.container_id for r in stats_rows} == {1, 2}
     assert {r.event_instance_id for r in stats_rows} == {
         r.event_instance_id for r in rows if r.container_id in (1, 2)
     }
-    assert {r.event_instance_id for r in stats_rows} <= window_ids
 
 
 def test_standalone_time_window_event_covers_all_containers(spark, basic_narrow_db):
