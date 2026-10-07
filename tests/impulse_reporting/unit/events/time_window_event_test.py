@@ -96,22 +96,24 @@ def test_definition_hash_stable_across_int_and_float_window_length():
     assert a.determine_definition_hash() == b.determine_definition_hash()
 
 
-def test_definition_hash_changes_with_epoch_unit():
-    # epoch_unit decides the unit TIMESTAMP boundaries are tiled in, so flipping it must
-    # force a full recompute. It reaches the hash through the expression string.
-    unset = TimeWindowEvent(name="w", window_length=10000)
-    cleared = TimeWindowEvent(name="w", window_length=10000)
-    cleared.set_epoch_unit(None)
-    s, ms = TimeWindowEvent(name="w", window_length=10000), TimeWindowEvent(
-        name="w", window_length=10000
-    )
-    s.set_epoch_unit("s")
-    ms.set_epoch_unit("ms")
+def test_definition_hash_changes_with_channel_time_frame():
+    # The channel time frame decides where the windows lie, so changing the unit or the
+    # origin must force a full recompute. It reaches the hash through the expression string.
+    def event(unit=None, origin="epoch") -> TimeWindowEvent:
+        e = TimeWindowEvent(name="w", window_length=10000)
+        e.set_channel_time(unit, origin)
+        return e
 
-    assert ms.epoch_unit == ms.get_expression().epoch_unit == "ms"
-    assert "epoch_unit=ms" in ms.as_dict()["event_expression"]
-    assert unset.determine_definition_hash() == cleared.determine_definition_hash()
-    assert len({e.determine_definition_hash() for e in (unset, s, ms)}) == 3
+    unset = TimeWindowEvent(name="w", window_length=10000)
+    s, ms, ms_relative = event("s"), event("ms"), event("ms", "container_start")
+
+    assert ms_relative.get_expression().channel_time_unit == "ms"
+    assert ms_relative.get_expression().channel_time_origin == "container_start"
+    assert "channel_time_origin=container_start" in ms_relative.as_dict()["event_expression"]
+    # The defaults keep today's hash.
+    assert unset.determine_definition_hash() == event().determine_definition_hash()
+    hashes = {e.determine_definition_hash() for e in (unset, s, ms, ms_relative)}
+    assert len(hashes) == 4
 
 
 # ---------------------------------------------------------------------------

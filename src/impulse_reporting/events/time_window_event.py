@@ -103,19 +103,22 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         normalized_attributes.setdefault("window_length", str(self.window_length))
         self.attributes = normalized_attributes
 
-    def set_epoch_unit(self, epoch_unit: str | None) -> None:
-        """Set the epoch unit ``TIMESTAMP`` container boundaries are converted to.
+    def set_channel_time(self, unit: str | None, origin: str = "epoch") -> None:
+        """Record the channel time frame the windows are computed in.
 
-        Also recorded on the expression, whose string form feeds the definition hashes of
-        this event and of the aggregations scoped to it.
+        Set by ``Report.add_event`` from the report's ``solver_config``.  Stored on the
+        expression, whose string form feeds the definition hashes of this event and of the
+        aggregations scoped to it.
 
         Parameters
         ----------
-        epoch_unit : str or None
-            The report's ``solver_config.epoch_unit``.
+        unit : str or None
+            The report's ``solver_config.channel_time_unit``.
+        origin : str, optional
+            The report's ``solver_config.channel_time_origin`` (default ``"epoch"``).
         """
-        ContainerBoundaryEvent.set_epoch_unit(self, epoch_unit)
-        self.expression.epoch_unit = epoch_unit
+        self.expression.channel_time_unit = unit
+        self.expression.channel_time_origin = origin
 
     def get_expression(self) -> TimeSeriesExpression | None:
         """
@@ -143,9 +146,9 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         Calculate definition hash for the time-window event.
 
         Only includes the expression string, which encodes the attributes that affect the
-        event results: ``window_length`` and, when set, ``epoch_unit`` (the unit of
-        ``TIMESTAMP`` boundaries). Resizing the window or changing the unit therefore forces
-        a full recompute in incremental mode.
+        event results: ``window_length`` and the channel time frame (``channel_time_unit``,
+        ``channel_time_origin``; omitted while unset / default). Resizing the window or
+        changing the time frame therefore forces a full recompute in incremental mode.
 
         Excludes: name, description, required_channels, max_windows_per_container,
         report_id
@@ -198,7 +201,8 @@ class TimeWindowEvent(ContainerBoundaryEvent):
 
         Resolves the matching containers via the solver's filter pipeline (like
         ``ContainerEvent``) and computes each event's windows natively from the
-        containers' ``start_ts`` / ``stop_ts``, so every filtered container gets windows.
+        containers' ``start_ts`` / ``stop_ts`` in the channel time frame
+        (``SolverConfig.with_window_bounds``), so every filtered container gets windows.
         Each window becomes one event instance (``start_ts < end_ts``) whose
         ``event_instance_id`` hashes its position among the container's windows. The solve
         computes the same windows in the same order for scoped aggregations (see
@@ -227,13 +231,12 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         container_metrics_df = cls.resolve_container_metrics(
             spark, query, solver, pre_filtered_containers_df
         )
-        # Windows are computed in the channel samples' epoch unit, so TIMESTAMP boundaries
-        # need solver_config.epoch_unit (fails fast on the schema, before any Spark job).
-        solver.config.require_epoch_boundaries(container_metrics_df, owner="TimeWindowEvent")
-
-        # Silver-side names come from SolverConfig (column_name_mapping aware).
-        start_ts = f.col(solver.config.start_ts_col)
-        stop_ts = f.col(solver.config.stop_ts_col)
+        # The windows are computed in the channel time frame, from the same bounds the solve
+        # uses for scoped aggregations (fails fast on the schema, e.g. when TIMESTAMP
+        # boundaries lack solver_config.channel_time_unit).
+        container_metrics_df = solver.config.with_window_bounds(container_metrics_df)
+        start_ts = f.col(solver.config.window_start_col)
+        stop_ts = f.col(solver.config.window_stop_col)
 
         # One (event_name, windows) struct per event, exploded in a single pass over the
         # containers. posexplode yields each window's position, which the

@@ -20,26 +20,7 @@ class ContainerBoundaryEvent(Event):
     filtered container yields instances regardless of its channel data.  The report
     therefore excludes these event types from the solvable expressions and dispatches
     them with ``query`` / ``solver`` rather than ``solved_df``.
-
-    Attributes
-    ----------
-    epoch_unit : str or None
-        ``solver_config.epoch_unit`` of the report the event belongs to, set by
-        ``Report.add_event``.  It decides the unit of ``TIMESTAMP`` boundaries, so
-        subclasses fold it into their definition hash.
     """
-
-    epoch_unit: str | None = None
-
-    def set_epoch_unit(self, epoch_unit: str | None) -> None:
-        """Set the epoch unit ``TIMESTAMP`` container boundaries are converted to.
-
-        Parameters
-        ----------
-        epoch_unit : str or None
-            The report's ``solver_config.epoch_unit``.
-        """
-        self.epoch_unit = epoch_unit
 
     def get_id(self) -> int:
         """Return a unique identifier derived from the event name.
@@ -104,14 +85,10 @@ class ContainerBoundaryEvent(Event):
         Returns
         -------
         DataFrame
-            Column-mapped ``container_metrics`` rows of the matching containers, with
-            ``TIMESTAMP`` boundaries converted to epoch numbers when
-            ``solver.config.epoch_unit`` is set (unchanged otherwise).
+            Column-mapped ``container_metrics`` rows of the matching containers, with the
+            original ``start_ts`` / ``stop_ts``.
         """
         container_tags_df = solver.filter_container_tags(spark, query)
-        container_metrics_df = solver.filter_container_metrics(
+        return solver.filter_container_metrics(
             spark, query, container_tags_df, pre_filtered_containers_df
         )
-        # Same transform as the solve's container metadata, so the event boundaries and
-        # those seen by scoped aggregations are identical.
-        return solver.config.normalize_container_boundaries(container_metrics_df)

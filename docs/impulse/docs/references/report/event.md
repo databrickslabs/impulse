@@ -231,20 +231,29 @@ the same time unit as the stored timestamps (milliseconds-since-epoch in the sam
 seconds or any derived unit. So 60 one-minute windows over millisecond timestamps use
 `window_length=60_000`.
 
-If `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns, set
-[`solver_config.epoch_unit`](../../config/configuration.md#solver-column-mappings-and-filters)
-to the epoch unit of the channel sample timestamps (`tstart`/`tend`, or `timestamp` for RAW
-data; e.g. `"s"`). The boundaries are converted to
-that unit, and `window_length` is expressed in it. Without it, the report fails with an error
-naming the setting. `epoch_unit` is part of the event's definition (and of the aggregations
-scoped to it), so changing it recomputes them over all containers in incremental mode.
+The windows are computed in the time frame of the channel timestamps, set by
+[`solver_config.channel_time_unit` and `channel_time_origin`](../../config/configuration.md#solver-column-mappings-and-filters):
+
+- If `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns, set `channel_time_unit` to the
+  unit of the channel timestamps (`tstart`/`tend`, or `timestamp` for RAW data; e.g. `"s"`), and
+  `window_length` is expressed in it. Without it, the report fails with an error naming the
+  setting.
+- If the channel timestamps are relative to the container start (e.g. seconds since the
+  recording started), also set `channel_time_origin="container_start"`. The windows then run from
+  `0` to `stop_ts - start_ts`.
+
+Only the windows use these settings: `ContainerEvent`, `measurement_dimension` and UDFs that read
+`start_ts`/`stop_ts` keep seeing the original values. The channel time frame is part of the
+event's definition (and of the aggregations scoped to it), so changing it recomputes them over all
+containers in incremental mode.
 :::
 
 ### How it works
 
 1. The event resolves the matching containers through the report's container filters (like
    `ContainerEvent`), reads `start_ts` and `stop_ts` from the `container_metrics` table, and
-   tiles `[start_ts, stop_ts]` into consecutive windows of length `window_length`.
+   tiles `[start_ts, stop_ts]`, in the channel time frame, into consecutive windows of length
+   `window_length`. The window instances in `event_instance_fact` are in that frame too.
 2. The **final window is clamped** to `stop_ts` when the last full window would overrun it; any
    zero-length trailing slice is dropped (every instance satisfies `start_ts < end_ts`).
    Containers whose `start_ts` or `stop_ts` is null, NaN or infinite get no windows.

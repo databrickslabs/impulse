@@ -1305,6 +1305,12 @@ class DefaultSolver(QuerySolver):
 
         if metric_cols:
             metrics = self.scoped_container_metrics(self.spark, query, pre_filtered_containers_df)
+            window_bounds = {self.config.window_start_col, self.config.window_stop_col}
+            if window_bounds & set(metric_cols):
+                # TimeWindowExpression reads the container bounds in the channel time
+                # frame, computed exactly like the TimeWindowEvent fact does. The raw
+                # start_ts/stop_ts stay unchanged for any other expression (e.g. UDFs).
+                metrics = self.config.with_window_bounds(metrics)
             missing = [c for c in metric_cols if c not in metrics.columns]
             if missing:
                 raise ValueError(
@@ -1314,10 +1320,6 @@ class DefaultSolver(QuerySolver):
             meta_df = metrics.select(container_id_col, *metric_cols).dropDuplicates(
                 [container_id_col]
             )
-            # TIMESTAMP start_ts/stop_ts would reach pandas as session-local, tz-naive
-            # Timestamps; convert them to epoch numbers in Spark when epoch_unit is set
-            # (no-op otherwise), matching the container-boundary events.
-            meta_df = self.config.normalize_container_boundaries(meta_df)
 
         if tag_keys:
             if query.db.config.container_tags_table is None:

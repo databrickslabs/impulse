@@ -147,24 +147,12 @@ def _sha256_long(text: str) -> int:
     return int.from_bytes(hashlib.sha256(text.encode()).digest()[:8], "big", signed=True)
 
 
-def test_definition_hash_without_epoch_unit_is_name_only():
-    """Unset epoch_unit keeps the pre-existing name-only hash, so gold tables written before
-    epoch_unit existed are not recomputed."""
+def test_definition_hash_is_name_only():
+    """The channel time settings only shape TimeWindowEvent windows; a ContainerEvent writes
+    the raw boundaries, so its hash stays the name alone and never forces a recompute."""
     event = ContainerEvent(name="ev")
     assert event.determine_definition_hash() == _sha256_long("ev")
-    event.set_epoch_unit(None)
-    assert event.determine_definition_hash() == _sha256_long("ev")
-
-
-def test_definition_hash_changes_with_epoch_unit():
-    """epoch_unit decides the unit of TIMESTAMP boundaries in start_ts / end_ts, so changing
-    it must force a recompute instead of mixing units in event_instance_fact."""
-    unset, ms, us = ContainerEvent(name="ev"), ContainerEvent(name="ev"), ContainerEvent(name="ev")
-    ms.set_epoch_unit("ms")
-    us.set_epoch_unit("us")
-    hashes = {e.determine_definition_hash() for e in (unset, ms, us)}
-    assert len(hashes) == 3
-    assert ms.as_dict()["definition_hash"] == ms.determine_definition_hash()
+    assert event.as_dict()["definition_hash"] == _sha256_long("ev")
 
 
 # ---------------------------------------------------------------------------

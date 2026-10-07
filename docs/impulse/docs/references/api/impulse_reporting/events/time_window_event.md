@@ -55,20 +55,22 @@ the definition hash.
 - `ValueError`: If ``window_length`` is not strictly positive and finite, or
 ``max_windows_per_container`` is not a positive integer.
 
-#### set\_epoch\_unit
+#### set\_channel\_time
 
 ```python
-def set_epoch_unit(epoch_unit: str | None) -> None
+def set_channel_time(unit: str | None, origin: str = "epoch") -> None
 ```
 
-Set the epoch unit ``TIMESTAMP`` container boundaries are converted to.
+Record the channel time frame the windows are computed in.
 
-Also recorded on the expression, whose string form feeds the definition hashes of
-this event and of the aggregations scoped to it.
+Set by ``Report.add_event`` from the report's ``solver_config``.  Stored on the
+expression, whose string form feeds the definition hashes of this event and of the
+aggregations scoped to it.
 
 **Arguments**:
 
-- `epoch_unit` (`str or None`): The report's ``solver_config.epoch_unit``.
+- `unit` (`str or None`): The report's ``solver_config.channel_time_unit``.
+- `origin` (`str`): The report's ``solver_config.channel_time_origin`` (default ``"epoch"``).
 
 #### get\_expression
 
@@ -103,9 +105,9 @@ def determine_definition_hash() -> int
 Calculate definition hash for the time-window event.
 
 Only includes the expression string, which encodes the attributes that affect the
-event results: ``window_length`` and, when set, ``epoch_unit`` (the unit of
-``TIMESTAMP`` boundaries). Resizing the window or changing the unit therefore forces
-a full recompute in incremental mode.
+event results: ``window_length`` and the channel time frame (``channel_time_unit``,
+``channel_time_origin``; omitted while unset / default). Resizing the window or
+changing the time frame therefore forces a full recompute in incremental mode.
 
 Excludes: name, description, required_channels, max_windows_per_container,
 report_id
@@ -144,7 +146,8 @@ Extract the event fact table for the given list of TimeWindowEvent objects.
 
 Resolves the matching containers via the solver's filter pipeline (like
 ``ContainerEvent``) and computes each event's windows natively from the
-containers' ``start_ts`` / ``stop_ts``, so every filtered container gets windows.
+containers' ``start_ts`` / ``stop_ts`` in the channel time frame
+(``SolverConfig.with_window_bounds``), so every filtered container gets windows.
 Each window becomes one event instance (``start_ts < end_ts``) whose
 ``event_instance_id`` hashes its position among the container's windows. The solve
 computes the same windows in the same order for scoped aggregations (see

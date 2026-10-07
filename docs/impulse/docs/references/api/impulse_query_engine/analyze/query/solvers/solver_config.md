@@ -126,13 +126,15 @@ so that solver code can always reference the same constants.
 override for the channel mapping (alias) table.
 - `channels` (`TableConfig`): Column mappings and filters for the channel data table.
 - `unit_conversion` (`TableConfig`): Column mappings and filters for the unit conversion table.
-- `epoch_unit` (`{"s", "ms", "us", "ns"} or None`): Epoch unit of the timestamps in the ``channels`` table (``tstart`` / ``tend``,
-or ``timestamp`` for RAW data); these are never converted.  Only
-``TIMESTAMP``-typed ``start_ts`` / ``stop_ts`` of the ``container_metrics``
-table are converted, into epoch numbers in this unit so they match the channel
-timestamps.  ``ContainerEvent``, ``TimeWindowEvent`` and expressions that read
-these columns see the converted values.  Only needed for a ``TimeWindowEvent``
-over ``TIMESTAMP`` container boundaries; unset means nothing is converted.
+- `channel_time_unit` (`{"s", "ms", "us", "ns"} or None`): Time unit of the timestamps in the ``channels`` table (``tstart`` / ``tend``, or
+``timestamp`` for RAW data).  Only used to compute ``TimeWindowEvent`` windows in
+that unit (see :meth:`with_window_bounds`); required when ``container_metrics``
+``start_ts`` / ``stop_ts`` are ``TIMESTAMP`` columns.  Nothing else is converted:
+channel timestamps, and the ``start_ts`` / ``stop_ts`` seen by UDFs,
+``ContainerEvent`` and ``measurement_dimension``, keep their original values.
+- `channel_time_origin` (`{"epoch", "container_start"}`): Origin of the channel timestamps: absolute epoch (default), or relative to the
+container's ``start_ts``.  Like :attr:`channel_time_unit`, only used for the
+``TimeWindowEvent`` windows.
 
 #### from\_json
 
@@ -220,6 +222,30 @@ def start_ts_col() -> str
 ```
 
 Internal column name for the measurement-start epoch timestamp on container_metrics.
+
+
+#### window\_start\_col
+
+```python
+def window_start_col() -> str
+```
+
+Internal column name for the container start in the channel time frame.
+
+Added by :meth:`with_window_bounds`; prefixed so it cannot clash with a customer
+column.
+
+
+#### window\_stop\_col
+
+```python
+def window_stop_col() -> str
+```
+
+Internal column name for the container stop in the channel time frame.
+
+Added by :meth:`with_window_bounds`; prefixed so it cannot clash with a customer
+column.
 
 
 #### stop\_ts\_col
@@ -477,52 +503,44 @@ samples instead of splitting them; use drop_implausible_data instead. No-op
 when not raw.
 
 
-#### normalize\_container\_boundaries
+#### with\_window\_bounds
 
 ```python
-def normalize_container_boundaries(df: DataFrame) -> DataFrame
+def with_window_bounds(df: DataFrame) -> DataFrame
 ```
 
-Convert ``TIMESTAMP`` container start/stop columns to epoch numbers.
+Add the container start/stop in the channel time frame, for ``TimeWindowEvent``.
 
-Opt-in via :attr:`epoch_unit`: when it is unset, *df* is returned unchanged.
-Otherwise each ``TIMESTAMP`` ``start_ts`` / ``stop_ts`` column becomes an epoch
-number in that unit, computed from ``unix_micros`` (exact and independent of the
-session time zone).  ``"s"`` / ``"ms"`` give doubles (``"s"`` equals Spark's
-``cast(timestamp as double)``), ``"us"`` / ``"ns"`` give longs.  Numeric columns
-are left as they are.  Applying the same transform before both the event fact
-and the solve keeps their window boundaries identical.
+A ``TimeWindowEvent`` tiles each container into windows that must be in the same
+time frame as the channel timestamps (:attr:`channel_time_unit`,
+:attr:`channel_time_origin`).  This adds :attr:`window_start_col` /
+:attr:`window_stop_col`, derived from the raw ``start_ts`` / ``stop_ts``, which stay
+unchanged for UDFs, ``ContainerEvent`` and ``measurement_dimension``:
+
+- origin ``"epoch"``: numeric boundaries as they are; ``TIMESTAMP`` boundaries as
+  epoch numbers in :attr:`channel_time_unit`;
+- origin ``"container_start"``: ``0`` and ``stop_ts - start_ts``, for ``TIMESTAMP``
+  boundaries in :attr:`channel_time_unit`, for numeric ones as they are (they must
+  already be in the channels' unit).
+
+``TIMESTAMP`` values are converted via ``unix_micros``, which is exact and
+independent of the session time zone; ``"s"`` / ``"ms"`` give doubles, ``"us"`` /
+``"ns"`` longs.  The event fact and the solve both call this, so their windows use
+the same bounds.  The types are checked on the schema, so a missing setting fails
+before any Spark job runs.
 
 **Arguments**:
 
-- `df` (`pyspark.sql.DataFrame`): Column-mapped ``container_metrics`` frame (or a projection of it).
+- `df` (`pyspark.sql.DataFrame`): Column-mapped ``container_metrics`` frame (or a projection of it) with
+``start_ts`` and ``stop_ts``.
 
 **Raises**:
 
-- `ValueError`: If :attr:`epoch_unit` is set and a boundary column is ``TIMESTAMP_NTZ`` or
-``DATE`` (their epoch depends on a time zone and is not supported).
+- `ValueError`: If ``start_ts`` / ``stop_ts`` are missing, are ``TIMESTAMP_NTZ`` or ``DATE``,
+mix ``TIMESTAMP`` and numeric types, or are ``TIMESTAMP`` while
+:attr:`channel_time_unit` is unset.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: *df* with converted boundary columns.
-
-#### require\_epoch\_boundaries
-
-```python
-def require_epoch_boundaries(df: DataFrame, owner: str) -> None
-```
-
-Raise unless the container start/stop columns on *df* are epoch numbers.
-
-Call after :meth:`normalize_container_boundaries`.  Checks the schema only, so it
-fails fast on the driver before any Spark job runs.
-
-**Arguments**:
-
-- `df` (`pyspark.sql.DataFrame`): Normalized container_metrics frame.
-- `owner` (`str`): Name of the feature that needs epoch boundaries, used in the error message.
-
-**Raises**:
-
-- `ValueError`: If ``start_ts`` / ``stop_ts`` is still a date/time type.
+`pyspark.sql.DataFrame`: *df* with the two window-bound columns added.
 

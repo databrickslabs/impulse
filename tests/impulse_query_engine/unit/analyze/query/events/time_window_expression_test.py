@@ -4,7 +4,6 @@ import random
 from unittest.mock import MagicMock
 
 import numpy as np
-import pandas as pd
 import pyspark.sql.functions as F
 import pytest
 
@@ -35,9 +34,13 @@ class _FakeCache:
         return {}
 
 
+# The container bounds in the channel time frame, as SolverConfig.with_window_bounds adds them.
+_WINDOW_START, _WINDOW_STOP = "__window_start", "__window_stop"
+
+
 def _build(start_ts, stop_ts, window_length, **kwargs) -> Intervals:
     expr = TimeWindowExpression(window_length, **kwargs)
-    return expr.build(_FakeCache({"start_ts": start_ts, "stop_ts": stop_ts}))
+    return expr.build(_FakeCache({_WINDOW_START: start_ts, _WINDOW_STOP: stop_ts}))
 
 
 def test_exact_multiple_windows_last_ends_at_stop():
@@ -107,7 +110,9 @@ def test_no_selectors_and_requests_container_metrics():
     expr = TimeWindowExpression(10)
     assert expr.get_selectors() == []
     assert expr.get_selector_expr() is None
-    assert expr.required_container_metrics() == {"start_ts", "stop_ts"}
+    # The bounds in the channel time frame, not the raw start_ts / stop_ts (which UDFs
+    # keep reading unconverted).
+    assert expr.required_container_metrics() == {_WINDOW_START, _WINDOW_STOP}
     assert expr.required_tags() == set()
 
 
@@ -121,13 +126,18 @@ def test_str_stable_across_int_and_float_window_length():
     assert str(TimeWindowExpression(10)) == str(TimeWindowExpression(10.0))
 
 
-def test_str_includes_epoch_unit_only_when_set():
+def test_str_includes_channel_time_frame_only_when_set():
     # The string feeds the definition hashes of the event and its scoped aggregations, so
-    # the unit must move them, while an unset unit keeps the unit-less form.
+    # the channel time frame must move them, while the defaults keep the plain form.
     expr = TimeWindowExpression(10)
     assert str(expr) == "TimeWindowExpression<window_length=10.0>"
-    expr.epoch_unit = "ms"
-    assert str(expr) == "TimeWindowExpression<window_length=10.0, epoch_unit=ms>"
+    expr.channel_time_unit = "ms"
+    assert str(expr) == "TimeWindowExpression<window_length=10.0, channel_time_unit=ms>"
+    expr.channel_time_origin = "container_start"
+    assert str(expr) == (
+        "TimeWindowExpression<window_length=10.0, channel_time_unit=ms, "
+        "channel_time_origin=container_start>"
+    )
 
 
 def test_max_windows_not_part_of_str():
@@ -153,7 +163,7 @@ def test_build_raises_beyond_max_windows():
 def test_build_unit_mismatch_hits_default_cap():
     # window_length=60 meant as seconds over a 1 h ns-epoch span: 6e10 windows.
     start = 1_700_000_000_000_000_000
-    with pytest.raises(ValueError, match="epoch unit of the container boundaries"):
+    with pytest.raises(ValueError, match="unit of the channel timestamps"):
         _build(np.int64(start), np.int64(start + 3_600_000_000_000), 60)
 
 
@@ -170,13 +180,6 @@ def test_int64_and_float64_inputs_build_identical_windows():
     a = _build(np.int64(start), np.int64(stop), 1_000_000_007)
     b = _build(np.float64(start), np.float64(stop), 1_000_000_007)
     assert a.get_data() == b.get_data()
-
-
-def test_datetime_container_metrics_raise_clear_error():
-    # TIMESTAMP boundaries reach pandas as pd.Timestamp unless epoch_unit converts them.
-    start, stop = pd.Timestamp("2025-07-03 07:41:41"), pd.Timestamp("2025-07-03 07:43:30")
-    with pytest.raises(TypeError, match="epoch_unit"):
-        _build(start, stop, 10)
 
 
 def test_nan_container_metrics_yield_empty():
@@ -359,7 +362,7 @@ def test_stats_aggregator_windows_equal_helper_windows(spark):  # noqa: F811
         event_expression=TimeWindowExpression(w),
         statistics=["mean"],
     )
-    cache = _FakeCache({"start_ts": np.float64(start), "stop_ts": np.float64(stop)})
+    cache = _FakeCache({_WINDOW_START: np.float64(start), _WINDOW_STOP: np.float64(stop)})
     event_timestamps, numeric_values, _, _ = agg.build(cache)
 
     assert len(spark_windows[0]) == 7

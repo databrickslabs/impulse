@@ -181,9 +181,10 @@ the epoch-typed pair). Populate whichever your queries and
 `measurement_dimensions` config need.
 
 `start_ts`/`stop_ts` may also be `TIMESTAMP` columns. To use them with a `TimeWindowEvent`, set
-[`solver_config.epoch_unit`](../config/configuration.md#solver-column-mappings-and-filters) to the
-epoch unit of the channel sample timestamps (`tstart`/`tend`, or `timestamp` in the raw format), so
-the window boundaries share the samples' time base.
+[`solver_config.channel_time_unit`](../config/configuration.md#solver-column-mappings-and-filters)
+to the unit of the channel sample timestamps (`tstart`/`tend`, or `timestamp` in the raw format),
+plus `channel_time_origin="container_start"` if those are relative to the container start, so
+the window boundaries share the samples' time base. The columns themselves are not converted.
 
 :::
 

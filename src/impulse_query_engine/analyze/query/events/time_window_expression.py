@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime
 import math
 import numbers
 
@@ -17,11 +16,10 @@ from impulse_query_engine.analyze.query.solvers.series_cache import SeriesCache
 from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 from impulse_query_engine.model.series.intervals import Intervals
 
-# Reuse SolverConfig's canonical internal (post-``column_name_mapping``) column names for
-# the measurement start/stop timestamps rather than re-declaring the literals here. These
-# are the keys under which the solve exposes them via ``SeriesCache.container_metrics``, and
-# they are the same names ``ContainerEvent`` relies on. A default instance suffices since
-# the names are config-invariant.
+# Reuse SolverConfig's internal column names for the container bounds in the channel time
+# frame (see SolverConfig.with_window_bounds) rather than re-declaring the literals here.
+# These are the keys under which the solve exposes them via ``SeriesCache.container_metrics``.
+# A default instance suffices since the names are config-invariant.
 _SOLVER_CONFIG = SolverConfig()
 
 # Default upper bound on the windows per container. A window_length in the wrong unit for the
@@ -31,8 +29,8 @@ _SOLVER_CONFIG = SolverConfig()
 MAX_WINDOWS_PER_CONTAINER = 1_000_000
 
 _WINDOW_LIMIT_HINT = (
-    "Check that window_length is in the epoch unit of the container boundaries "
-    "(solver_config.epoch_unit), or raise the limit (TimeWindowEvent "
+    "Check that window_length is in the unit of the channel timestamps "
+    "(solver_config.channel_time_unit), or raise the limit (TimeWindowEvent "
     "max_windows_per_container, TimeWindowExpression max_windows)."
 )
 
@@ -144,11 +142,12 @@ class TimeWindowExpression(TimeSeriesExpression):
     """Produce consecutive fixed-duration windows spanning a measurement container.
 
     The windows are derived purely from the container's ``start_ts`` / ``stop_ts`` metadata
-    (no channel data), so the expression declares no selectors and instead requests those
-    container metrics via :meth:`required_container_metrics`.  Windows tile
-    ``[start_ts, stop_ts]`` with a fixed length ``window_length`` (expressed in the same time
-    unit as the underlying timestamps); the final window is clamped to ``stop_ts`` when the
-    last full window would overrun it.
+    (no channel data), so the expression declares no selectors and instead requests the
+    container bounds in the channel time frame via :meth:`required_container_metrics`
+    (computed by ``SolverConfig.with_window_bounds``).  Windows tile those bounds with a
+    fixed length ``window_length`` (expressed in the same time unit as the channel
+    timestamps); the final window is clamped to the stop bound when the last full window
+    would overrun it.
 
     Visual timeline (window_length = W)::
 
@@ -163,12 +162,14 @@ class TimeWindowExpression(TimeSeriesExpression):
 
     Attributes
     ----------
-    epoch_unit : str or None
-        Epoch unit the solver converts ``TIMESTAMP`` boundaries to
-        (``solver_config.epoch_unit``), set by the reporting ``TimeWindowEvent``.
-        Descriptive only: :meth:`build` does not convert (the solver does).  It is part of
-        the string form, so the definition hashes of the event and of every aggregation
-        scoped to it change with the unit.
+    channel_time_unit : str or None
+        ``solver_config.channel_time_unit``, set by the reporting ``TimeWindowEvent``.
+    channel_time_origin : str
+        ``solver_config.channel_time_origin`` (default ``"epoch"``), set the same way.
+
+    Both are descriptive only: :meth:`build` does not convert (the solver computes the
+    bounds).  They are part of the string form, so the definition hashes of the event and of
+    every aggregation scoped to it change with the channel time frame.
     """
 
     def __init__(self, window_length: float, max_windows: int = MAX_WINDOWS_PER_CONTAINER):
@@ -203,24 +204,30 @@ class TimeWindowExpression(TimeSeriesExpression):
         # and must not trigger a spurious full recompute in incremental mode.
         self.window_length = float(window_length)
         self.max_windows = validate_max_windows(max_windows)
-        self.epoch_unit: str | None = None
+        self.channel_time_unit: str | None = None
+        self.channel_time_origin: str = "epoch"
         TimeSeriesExpression.__init__(self, is_single_signal=False)
 
     def __str__(self) -> str:
         """
         Return a string representation of the TimeWindowExpression.
 
-        The ``window_length`` (and ``epoch_unit``, when set) is included so it flows into
-        the definition hashes of the event and of the aggregations scoped to it.  An unset
-        ``epoch_unit`` is omitted, keeping the string identical to the unit-less form.
+        The ``window_length`` and the channel time frame are included so they flow into the
+        definition hashes of the event and of the aggregations scoped to it.  An unset
+        ``channel_time_unit`` and the default ``"epoch"`` origin are omitted, keeping the
+        default string unchanged.
 
         Returns
         -------
         str
             String representation of the object.
         """
-        unit = f", epoch_unit={self.epoch_unit}" if self.epoch_unit is not None else ""
-        return f"TimeWindowExpression<window_length={self.window_length}{unit}>"
+        frame = ""
+        if self.channel_time_unit is not None:
+            frame += f", channel_time_unit={self.channel_time_unit}"
+        if self.channel_time_origin != "epoch":
+            frame += f", channel_time_origin={self.channel_time_origin}"
+        return f"TimeWindowExpression<window_length={self.window_length}{frame}>"
 
     def dtype(self):
         """
@@ -270,9 +277,10 @@ class TimeWindowExpression(TimeSeriesExpression):
         Returns
         -------
         set of str
-            The measurement start/stop timestamp columns.
+            The container start/stop in the channel time frame, which the solver derives
+            from ``start_ts`` / ``stop_ts`` (``SolverConfig.with_window_bounds``).
         """
-        return {_SOLVER_CONFIG.start_ts_col, _SOLVER_CONFIG.stop_ts_col}
+        return {_SOLVER_CONFIG.window_start_col, _SOLVER_CONFIG.window_stop_col}
 
     def get_selectors(self) -> list[TimeSeriesSelector]:
         """
@@ -306,33 +314,20 @@ class TimeWindowExpression(TimeSeriesExpression):
         Returns
         -------
         Intervals
-            Consecutive fixed-length windows over ``[start_ts, stop_ts]``, with the final
-            window clamped to ``stop_ts``. Empty when the container boundaries are absent
-            (e.g. the empty cache used for type validation), NaN or infinite, or
-            non-positive in span.
+            Consecutive fixed-length windows over the container bounds, with the final
+            window clamped to the stop bound. Empty when the bounds are absent (e.g. the
+            empty cache used for type validation), NaN or infinite, or non-positive in span.
 
         Raises
         ------
-        TypeError
-            If a boundary is a date/time value rather than an epoch number.
         ValueError
             If the container would produce more than ``max_windows`` windows.
         """
-        start_ts = cache.container_metrics.get(_SOLVER_CONFIG.start_ts_col)
-        stop_ts = cache.container_metrics.get(_SOLVER_CONFIG.stop_ts_col)
+        start_ts = cache.container_metrics.get(_SOLVER_CONFIG.window_start_col)
+        stop_ts = cache.container_metrics.get(_SOLVER_CONFIG.window_stop_col)
 
         if start_ts is None or stop_ts is None:
             return Intervals.empty()
-
-        for name, value in (("start_ts", start_ts), ("stop_ts", stop_ts)):
-            # pd.Timestamp subclasses datetime.datetime; dates and numpy datetimes too.
-            if isinstance(value, (datetime.date, np.datetime64)):
-                raise TypeError(
-                    f"TimeWindowExpression needs epoch-number container boundaries, but "
-                    f"{name} is {type(value).__name__}. For TIMESTAMP columns, set "
-                    "solver_config.epoch_unit to the epoch unit of the channel sample "
-                    "timestamps so start_ts / stop_ts are converted before the solve."
-                )
 
         # Mirror window_intervals_col exactly: convert to double *before* subtracting.  A
         # long column reaches pandas as int64 or float64 depending on the group (nulls

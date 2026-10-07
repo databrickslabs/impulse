@@ -355,10 +355,10 @@ class TestStatsAggregatorDefinitionHash:
 
         assert stats_agg.determine_definition_hash() == expected
 
-    def test_time_window_epoch_unit_changes_hash(self):
+    def test_time_window_channel_time_changes_hash(self):
         """Statistics scoped to a TimeWindowEvent are computed per window, and the windows
-        tile TIMESTAMP boundaries in the report's epoch_unit, so the unit must move the
-        aggregation's hash too (it does so through the event expression string)."""
+        lie in the report's channel time frame, so changing it must move the aggregation's
+        hash too (it does so through the event expression string)."""
         event = TimeWindowEvent(name="windows", window_length=10_000)
         stats_agg = StatsAggregator(
             name="stats",
@@ -372,7 +372,7 @@ class TestStatsAggregatorDefinitionHash:
         )
         before = (stats_agg.determine_definition_hash(), hist.determine_definition_hash())
 
-        event.set_epoch_unit("ms")
+        event.set_channel_time("ms", "container_start")
 
         assert stats_agg.determine_definition_hash() != before[0]
         assert hist.determine_definition_hash() != before[1]

@@ -124,12 +124,14 @@ rejected (use `drop_implausible_data`), any other channels filter warns.
 Top-level `project_id` (str, optional) applies an equality filter on the `project_id` column of every
 table that has one (`container_tags`, `container_metrics`, `channel_mapping`). Omit if not needed.
 
-Top-level `epoch_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional) is the epoch unit of the `channels`
-timestamps (`tstart`/`tend`, or `timestamp` with `data_type="RAW"`); those are never converted. Only
-`TIMESTAMP`-typed `container_metrics.start_ts`/`stop_ts` are converted, into epoch numbers in that
-unit, so `ContainerEvent` / `TimeWindowEvent` boundaries match the channel timestamps. Needed only
-for a `TimeWindowEvent` over `TIMESTAMP` boundaries; with `"ns"`, boundaries must lie between
-1677-09-21 and 2262-04-11 (the int64 nanosecond range).
+Top-level `channel_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional) and `channel_time_origin`
+(`"epoch"` default | `"container_start"`) describe the time frame of the `channels` timestamps
+(`tstart`/`tend`, or `timestamp` with `data_type="RAW"`): absolute epoch numbers, or time relative
+to the container's `start_ts`. Only `TimeWindowEvent` uses them, to compute its windows in that
+frame from `container_metrics.start_ts`/`stop_ts` (origin `"container_start"`: from `0` to
+`stop_ts - start_ts`). `channel_time_unit` is required when those are `TIMESTAMP` columns. Nothing
+is converted in place: the channel timestamps, and the `start_ts`/`stop_ts` seen by
+`ContainerEvent`, `measurement_dimension` and UDFs (a `pd.Timestamp`), keep their original values.
 
 ```python
 "query_engine": {

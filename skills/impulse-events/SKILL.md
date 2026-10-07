@@ -158,10 +158,11 @@ or without channel data or a scoped aggregation. Pair it with an aggregation sco
 `event_instance_id` values as the windows (the id hashes container, event name and window position).
 Because the windows come from `container_metrics`, those boundaries must share the channel samples'
 time base for the per-window values to be meaningful. If `container_metrics.start_ts`/`stop_ts` are
-`TIMESTAMP` columns, set `query_engine.solver_config.epoch_unit` to the unit of the channel
-timestamps (`tstart`/`tend`, or `timestamp` for RAW); only those two container columns are
-converted, never the channel timestamps. Containers with null, NaN or infinite boundaries get no
-windows.
+`TIMESTAMP` columns, set `query_engine.solver_config.channel_time_unit` to the unit of the channel
+timestamps (`tstart`/`tend`, or `timestamp` for RAW), and `channel_time_origin="container_start"` if
+they are relative to the container start (windows then run from `0`). Only the windows use these
+settings; `start_ts`/`stop_ts` themselves keep their original values for `ContainerEvent` and UDFs.
+Containers with null, NaN or infinite boundaries get no windows.
 
 ## Output schema
 

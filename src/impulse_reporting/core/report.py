@@ -47,6 +47,7 @@ from impulse_reporting.events.container_boundary_event import ContainerBoundaryE
 from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.event import Event
 from impulse_reporting.events.event_types import EventType
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.incremental.container_detector import ContainerUpsertDetector
 from impulse_reporting.incremental.definition_hash_comparator import (
     DefinitionHashComparator,
@@ -415,9 +416,12 @@ class Report:
             )
         self.events.append(event)
         event.set_report_id(self.report_id)
-        if isinstance(event, ContainerBoundaryEvent):
-            # The unit of TIMESTAMP boundaries is part of these events' definitions.
-            event.set_epoch_unit(self.solver.config.epoch_unit)
+        if isinstance(event, TimeWindowEvent):
+            # The windows are computed in the channel time frame, so it is part of the
+            # event's (and its scoped aggregations') definition.
+            event.set_channel_time(
+                self.solver.config.channel_time_unit, self.solver.config.channel_time_origin
+            )
 
     def get_events(self) -> list[Event]:
         """
