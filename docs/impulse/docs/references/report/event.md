@@ -281,8 +281,11 @@ above.
 :::note
 Window boundaries are stored in `event_instance_fact` as doubles (its `start_ts` / `end_ts`
 columns), like every other event type. Epoch timestamps in nanoseconds exceed the range doubles
-represent exactly, so their window boundaries are rounded to about 256 ns. The event and its aggregations use the same window function, so the
-rounding is the same on both sides and their `event_instance_id` values still match.
+represent exactly, so their window boundaries are rounded to about 256 ns. The event and its
+aggregations use the same window function, so the rounding is the same on both sides and their
+`event_instance_id` values still match. If `window_length` is not a whole number in the channel
+unit (e.g. `0.2` or `1.7` over timestamps in seconds), or not a multiple of 256 ns for nanosecond
+epochs, rounding can add a final window only a few ulps long.
 :::
 
 ## Event output schema
