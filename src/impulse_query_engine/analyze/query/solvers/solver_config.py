@@ -20,8 +20,11 @@ from typing import Literal
 
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from pyspark.sql import Column, DataFrame
+
+# Nanoseconds per time unit, for converting container boundaries into the channel unit.
+_NANOS_PER_UNIT = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
 
 class RawEncoder(StrEnum):
@@ -148,11 +151,19 @@ class SolverConfig(BaseModel):
         Origin of the channel timestamps: absolute epoch (default), or relative to the
         container's ``start_ts``.  Like :attr:`channel_time_unit`, only used for the
         ``TimeWindowEvent`` windows.
+    container_time_unit : {"s", "ms", "us", "ns"} or None
+        Unit of **numeric** ``container_metrics`` ``start_ts`` / ``stop_ts``, when it differs
+        from :attr:`channel_time_unit` (e.g. boundaries in epoch ms, channels in µs).  Only
+        used to convert them into :attr:`channel_time_unit` for the ``TimeWindowEvent``
+        windows; requires :attr:`channel_time_unit`.  Unset means the numeric boundaries are
+        already in the channels' unit.  Not allowed for ``TIMESTAMP`` boundaries, which carry
+        their own unit.
     """
 
     project_id: str | None = None
     channel_time_unit: Literal["s", "ms", "us", "ns"] | None = None
     channel_time_origin: Literal["epoch", "container_start"] = "epoch"
+    container_time_unit: Literal["s", "ms", "us", "ns"] | None = None
 
     container_tags: TableConfig = TableConfig()
     container_metrics: TableConfig = TableConfig()
@@ -467,15 +478,16 @@ class SolverConfig(BaseModel):
         :attr:`window_stop_col`, derived from the raw ``start_ts`` / ``stop_ts``, which stay
         unchanged for UDFs, ``ContainerEvent`` and ``measurement_dimension``:
 
-        - origin ``"epoch"``: numeric boundaries as they are; ``TIMESTAMP`` boundaries as
-          epoch numbers in :attr:`channel_time_unit`;
-        - origin ``"container_start"``: ``0`` and ``stop_ts - start_ts``, for ``TIMESTAMP``
-          boundaries in :attr:`channel_time_unit`, for numeric ones as they are (they must
-          already be in the channels' unit).
+        - origin ``"epoch"``: ``TIMESTAMP`` boundaries as epoch numbers in
+          :attr:`channel_time_unit`; numeric boundaries converted from
+          :attr:`container_time_unit` to :attr:`channel_time_unit` (as they are when unset);
+        - origin ``"container_start"``: ``0`` and ``stop_ts - start_ts``, converted the same
+          way (the difference is taken first, in the boundaries' own unit).
 
         ``TIMESTAMP`` values are converted via ``unix_micros``, which is exact and
         independent of the session time zone; ``"s"`` / ``"ms"`` give doubles, ``"us"`` /
-        ``"ns"`` longs.  The event fact and the solve both call this, so their windows use
+        ``"ns"`` longs.  Numeric boundaries converted to a finer unit are multiplied by an
+        integer (exact, keeping longs), to a coarser unit divided (doubles).  The event fact and the solve both call this, so their windows use
         the same bounds.  The types are checked on the schema, so a missing setting fails
         before any Spark job runs.
 
@@ -495,7 +507,7 @@ class SolverConfig(BaseModel):
         ValueError
             If ``start_ts`` / ``stop_ts`` are missing, are ``TIMESTAMP_NTZ`` or ``DATE``,
             mix ``TIMESTAMP`` and numeric types, or are ``TIMESTAMP`` while
-            :attr:`channel_time_unit` is unset.
+            :attr:`channel_time_unit` is unset or :attr:`container_time_unit` is set.
         """
         types = {field.name: field.dataType for field in self._boundary_fields(df)}
         missing = [c for c in (self.start_ts_col, self.stop_ts_col) if c not in types]
@@ -527,6 +539,12 @@ class SolverConfig(BaseModel):
                 "channel_time_origin to 'container_start' if they are relative to the "
                 "container start."
             )
+        if timestamps and self.container_time_unit is not None:
+            raise ValueError(
+                f"container_time_unit only applies to numeric container_metrics "
+                f"'{self.start_ts_col}' / '{self.stop_ts_col}', but they are TIMESTAMP "
+                "columns, which carry their own unit. Remove container_time_unit."
+            )
 
         start, stop = F.col(self.start_ts_col), F.col(self.stop_ts_col)
         if self.channel_time_origin == "container_start":
@@ -535,16 +553,40 @@ class SolverConfig(BaseModel):
             window_stop = (
                 self._micros_in_unit(F.unix_micros(stop) - F.unix_micros(start))
                 if timestamps
-                else stop - start
+                else self._container_to_channel_unit(stop - start)
             )
         elif timestamps:
             window_start = self._micros_in_unit(F.unix_micros(start))
             window_stop = self._micros_in_unit(F.unix_micros(stop))
         else:
-            window_start, window_stop = start, stop
+            window_start = self._container_to_channel_unit(start)
+            window_stop = self._container_to_channel_unit(stop)
         return df.withColumn(self.window_start_col, window_start).withColumn(
             self.window_stop_col, window_stop
         )
+
+    def _container_to_channel_unit(self, col: Column) -> Column:
+        """Numeric boundary *col* converted from :attr:`container_time_unit` to
+        :attr:`channel_time_unit` (unchanged when unset or equal)."""
+        if self.container_time_unit is None or self.container_time_unit == self.channel_time_unit:
+            return col
+        source = _NANOS_PER_UNIT[self.container_time_unit]
+        target = _NANOS_PER_UNIT[self.channel_time_unit]
+        if source > target:
+            # Finer target unit: an integer factor keeps long boundaries exact.
+            return col * F.lit(source // target)
+        return col / F.lit(float(target // source))
+
+    @model_validator(mode="after")
+    def validate_container_time_unit_requires_channel_time_unit(self):
+        """``container_time_unit`` converts into ``channel_time_unit``, so it needs one."""
+        if self.container_time_unit is not None and self.channel_time_unit is None:
+            raise ValueError(
+                "container_time_unit requires channel_time_unit: numeric container boundaries "
+                "are converted from container_time_unit into the unit of the channel "
+                "timestamps."
+            )
+        return self
 
     def _micros_in_unit(self, micros: Column) -> Column:
         """Microseconds converted to :attr:`channel_time_unit`."""

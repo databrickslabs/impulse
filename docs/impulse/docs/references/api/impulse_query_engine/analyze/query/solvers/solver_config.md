@@ -135,6 +135,12 @@ channel timestamps, and the ``start_ts`` / ``stop_ts`` seen by UDFs,
 - `channel_time_origin` (`{"epoch", "container_start"}`): Origin of the channel timestamps: absolute epoch (default), or relative to the
 container's ``start_ts``.  Like :attr:`channel_time_unit`, only used for the
 ``TimeWindowEvent`` windows.
+- `container_time_unit` (`{"s", "ms", "us", "ns"} or None`): Unit of **numeric** ``container_metrics`` ``start_ts`` / ``stop_ts``, when it differs
+from :attr:`channel_time_unit` (e.g. boundaries in epoch ms, channels in µs).  Only
+used to convert them into :attr:`channel_time_unit` for the ``TimeWindowEvent``
+windows; requires :attr:`channel_time_unit`.  Unset means the numeric boundaries are
+already in the channels' unit.  Not allowed for ``TIMESTAMP`` boundaries, which carry
+their own unit.
 
 #### from\_json
 
@@ -517,15 +523,16 @@ time frame as the channel timestamps (:attr:`channel_time_unit`,
 :attr:`window_stop_col`, derived from the raw ``start_ts`` / ``stop_ts``, which stay
 unchanged for UDFs, ``ContainerEvent`` and ``measurement_dimension``:
 
-- origin ``"epoch"``: numeric boundaries as they are; ``TIMESTAMP`` boundaries as
-  epoch numbers in :attr:`channel_time_unit`;
-- origin ``"container_start"``: ``0`` and ``stop_ts - start_ts``, for ``TIMESTAMP``
-  boundaries in :attr:`channel_time_unit`, for numeric ones as they are (they must
-  already be in the channels' unit).
+- origin ``"epoch"``: ``TIMESTAMP`` boundaries as epoch numbers in
+  :attr:`channel_time_unit`; numeric boundaries converted from
+  :attr:`container_time_unit` to :attr:`channel_time_unit` (as they are when unset);
+- origin ``"container_start"``: ``0`` and ``stop_ts - start_ts``, converted the same
+  way (the difference is taken first, in the boundaries' own unit).
 
 ``TIMESTAMP`` values are converted via ``unix_micros``, which is exact and
 independent of the session time zone; ``"s"`` / ``"ms"`` give doubles, ``"us"`` /
-``"ns"`` longs.  The event fact and the solve both call this, so their windows use
+``"ns"`` longs.  Numeric boundaries converted to a finer unit are multiplied by an
+integer (exact, keeping longs), to a coarser unit divided (doubles).  The event fact and the solve both call this, so their windows use
 the same bounds.  The types are checked on the schema, so a missing setting fails
 before any Spark job runs.
 
@@ -538,9 +545,18 @@ before any Spark job runs.
 
 - `ValueError`: If ``start_ts`` / ``stop_ts`` are missing, are ``TIMESTAMP_NTZ`` or ``DATE``,
 mix ``TIMESTAMP`` and numeric types, or are ``TIMESTAMP`` while
-:attr:`channel_time_unit` is unset.
+:attr:`channel_time_unit` is unset or :attr:`container_time_unit` is set.
 
 **Returns**:
 
 `pyspark.sql.DataFrame`: *df* with the two window-bound columns added.
+
+#### validate\_container\_time\_unit\_requires\_channel\_time\_unit
+
+```python
+def validate_container_time_unit_requires_channel_time_unit()
+```
+
+``container_time_unit`` converts into ``channel_time_unit``, so it needs one.
+
 

@@ -149,6 +149,8 @@ _ALIGNED_SCHEMA = "spark_catalog.silver_tw_aligned"
 #           channel_time_unit="us", the long path of the conversion).
 #   rel_sec: samples as seconds since the container start (double), container boundaries as
 #           TIMESTAMP (windows from 0 via channel_time_origin="container_start").
+#   ms_bounds: native µs samples, container boundaries as epoch-ms longs (windows in µs via
+#           container_time_unit="ms"); without the conversion no window overlaps a sample.
 def _to_seconds(c):
     return c.cast("double") / F.lit(1e6)
 
@@ -161,6 +163,10 @@ def _to_timestamp(c):
     return F.timestamp_micros(c.cast("long"))
 
 
+def _to_ms(c):
+    return F.floor(c.cast("long") / F.lit(1000)).cast("long")
+
+
 _RELATIVE_SECONDS = {"channel_time_unit": "s", "channel_time_origin": "container_start"}
 
 _TIME_BASES = {
@@ -170,6 +176,12 @@ _TIME_BASES = {
     "sec_ts": (_to_seconds, _to_timestamp, 600.3, {"channel_time_unit": "s"}),
     "us_ts": (lambda c: c, _to_timestamp, ALIGNED_WINDOW_LENGTH, {"channel_time_unit": "us"}),
     "rel_sec": (_to_seconds, _to_timestamp, 600.3, _RELATIVE_SECONDS),
+    "ms_bounds": (
+        lambda c: c,
+        _to_ms,
+        ALIGNED_WINDOW_LENGTH,
+        {"channel_time_unit": "us", "container_time_unit": "ms"},
+    ),
 }
 
 
@@ -404,13 +416,16 @@ def _assert_window_stats_match_samples(
 
 
 @pytest.mark.parametrize(
-    "setup_tw_aligned_db", ["us", "ns", "sec", "sec_ts", "us_ts", "rel_sec"], indirect=True
+    "setup_tw_aligned_db",
+    ["us", "ns", "sec", "sec_ts", "us_ts", "rel_sec", "ms_bounds"],
+    indirect=True,
 )
 def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
     """Stats scoped to a TimeWindowEvent yield per-window values whose event_instance_id
     joins to the natively computed event fact, for µs, ns and seconds-as-double time bases,
-    for TIMESTAMP container boundaries (channel_time_unit), and for channel timestamps
-    relative to the container start (channel_time_origin="container_start")."""
+    for TIMESTAMP container boundaries (channel_time_unit), for channel timestamps relative
+    to the container start (channel_time_origin="container_start"), and for numeric
+    boundaries in another unit than the channels (container_time_unit)."""
     schema, window_length, channel_time = setup_tw_aligned_db
     table_prefix = f"time_window_join_test_{schema.removeprefix(_ALIGNED_SCHEMA + '_')}"
     my_report = Report(

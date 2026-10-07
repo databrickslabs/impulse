@@ -138,6 +138,8 @@ def test_str_includes_channel_time_frame_only_when_set():
         "TimeWindowExpression<window_length=10.0, channel_time_unit=ms, "
         "channel_time_origin=container_start>"
     )
+    expr.container_time_unit = "s"
+    assert str(expr).endswith(", container_time_unit=s>")
 
 
 def test_max_windows_not_part_of_str():

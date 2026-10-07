@@ -184,7 +184,9 @@ the epoch-typed pair). Populate whichever your queries and
 [`solver_config.channel_time_unit`](../config/configuration.md#solver-column-mappings-and-filters)
 to the unit of the channel sample timestamps (`tstart`/`tend`, or `timestamp` in the raw format),
 plus `channel_time_origin="container_start"` if those are relative to the container start, so
-the window boundaries share the samples' time base. The columns themselves are not converted.
+the window boundaries share the samples' time base. Numeric `start_ts`/`stop_ts` may use a different
+epoch unit than the channel samples (e.g. ms boundaries, µs samples); then also set
+`solver_config.container_time_unit`. The columns themselves are not converted.
 
 :::
 

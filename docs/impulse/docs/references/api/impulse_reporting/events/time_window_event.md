@@ -58,7 +58,9 @@ the definition hash.
 #### set\_channel\_time
 
 ```python
-def set_channel_time(unit: str | None, origin: str = "epoch") -> None
+def set_channel_time(unit: str | None,
+                     origin: str = "epoch",
+                     container_unit: str | None = None) -> None
 ```
 
 Record the channel time frame the windows are computed in.
@@ -71,6 +73,7 @@ aggregations scoped to it.
 
 - `unit` (`str or None`): The report's ``solver_config.channel_time_unit``.
 - `origin` (`str`): The report's ``solver_config.channel_time_origin`` (default ``"epoch"``).
+- `container_unit` (`str or None`): The report's ``solver_config.container_time_unit``.
 
 #### get\_expression
 
@@ -106,7 +109,7 @@ Calculate definition hash for the time-window event.
 
 Only includes the expression string, which encodes the attributes that affect the
 event results: ``window_length`` and the channel time frame (``channel_time_unit``,
-``channel_time_origin``; omitted while unset / default). Resizing the window or
+``channel_time_origin``, ``container_time_unit``; omitted while unset / default). Resizing the window or
 changing the time frame therefore forces a full recompute in incremental mode.
 
 Excludes: name, description, required_channels, max_windows_per_container,

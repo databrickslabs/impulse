@@ -227,12 +227,12 @@ my_report.add_event(ten_minute_windows)
 
 :::note
 `window_length` follows the same convention as `SequenceOfEvents.max_overlap`: it is expressed in
-the same time unit as the stored timestamps (milliseconds-since-epoch in the sample data), not
+the same time unit as the channel timestamps (microseconds-since-epoch in the sample data), not
 seconds or any derived unit. So 60 one-minute windows over millisecond timestamps use
 `window_length=60_000`.
 
 The windows are computed in the time frame of the channel timestamps, set by
-[`solver_config.channel_time_unit` and `channel_time_origin`](../../config/configuration.md#solver-column-mappings-and-filters):
+[`solver_config.channel_time_unit`, `channel_time_origin` and `container_time_unit`](../../config/configuration.md#solver-column-mappings-and-filters):
 
 - If `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns, set `channel_time_unit` to the
   unit of the channel timestamps (`tstart`/`tend`, or `timestamp` for RAW data; e.g. `"s"`), and
@@ -241,6 +241,9 @@ The windows are computed in the time frame of the channel timestamps, set by
 - If the channel timestamps are relative to the container start (e.g. seconds since the
   recording started), also set `channel_time_origin="container_start"`. The windows then run from
   `0` to `stop_ts - start_ts`.
+- If numeric `start_ts`/`stop_ts` are in another unit than the channel timestamps (e.g. epoch ms
+  boundaries, µs samples), set `container_time_unit` to their unit (e.g. `"ms"`) and
+  `channel_time_unit` to the channels' (e.g. `"us"`). Otherwise no window overlaps the samples.
 
 Only the windows use these settings: `ContainerEvent`, `measurement_dimension` and UDFs that read
 `start_ts`/`stop_ts` keep seeing the original values. The channel time frame is part of the

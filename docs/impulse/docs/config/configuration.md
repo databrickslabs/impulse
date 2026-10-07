@@ -177,13 +177,19 @@ Top-level fields on `SolverConfig`:
   since the recording started). Channel timestamps are never converted; they must already be
   numbers in that frame.
 
-  Both settings are only used by `TimeWindowEvent`, whose windows must lie in the channel time
+- `container_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional): the unit of **numeric**
+  `container_metrics.start_ts`/`stop_ts`, when it differs from the channels' unit. For example,
+  boundaries in epoch ms and channel samples in epoch µs need `container_time_unit = "ms"` and
+  `channel_time_unit = "us"`. Requires `channel_time_unit`; not allowed for `TIMESTAMP`
+  boundaries, which carry their own unit. Unset means the numeric boundaries are already in the
+  channels' unit.
+
+  These settings are only used by `TimeWindowEvent`, whose windows must lie in the channel time
   frame. It derives its window bounds from `container_metrics.start_ts`/`stop_ts`:
-  - origin `"epoch"`: numeric boundaries as they are; `TIMESTAMP` boundaries as epoch numbers in
-    `channel_time_unit`;
-  - origin `"container_start"`: `0` to `stop_ts - start_ts`, in `channel_time_unit` for
-    `TIMESTAMP` boundaries; numeric boundaries are only shifted (they must already be in the
-    channels' unit).
+  - origin `"epoch"`: `TIMESTAMP` boundaries as epoch numbers in `channel_time_unit`; numeric
+    boundaries converted from `container_time_unit` to `channel_time_unit` (as they are when
+    `container_time_unit` is unset);
+  - origin `"container_start"`: `0` to `stop_ts - start_ts`, converted the same way.
 
   `channel_time_unit` is required when the boundaries are `TIMESTAMP` columns; a report with a
   `TimeWindowEvent` fails with a clear error until it is set. `TIMESTAMP_NTZ` and `DATE` boundaries

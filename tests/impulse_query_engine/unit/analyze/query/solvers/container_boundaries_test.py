@@ -116,6 +116,69 @@ def test_numeric_boundaries_epoch_as_is_and_container_start_shifted(spark):  # n
     assert _bounds(SolverConfig(channel_time_origin="container_start"), df) == {1: (0, 3600.5)}
 
 
+def _ms_boundaries_df(spark: SparkSession):  # noqa: F811
+    """The TIMESTAMP boundaries of _boundaries_df as epoch-ms longs (container 1 only)."""
+    return (
+        _boundaries_df(spark)
+        .filter(F.col("container_id") == 1)
+        .select(
+            "container_id",
+            F.unix_millis("start_ts").alias("start_ts"),
+            F.unix_millis("stop_ts").alias("stop_ts"),
+        )
+    )
+
+
+def test_numeric_ms_boundaries_converted_to_finer_channel_unit_exactly(spark):  # noqa: F811
+    # Boundaries in epoch ms, channels in µs: an integer factor keeps the longs exact.
+    cfg = SolverConfig(channel_time_unit="us", container_time_unit="ms")
+    out = cfg.with_window_bounds(_ms_boundaries_df(spark))
+    start_ms = _EPOCH_MICROS // 1000
+    stop_ms = (_EPOCH_MICROS + _SPAN_MICROS) // 1000
+    assert out.schema[_START].dataType == T.LongType()
+    assert _bounds(cfg, _ms_boundaries_df(spark)) == {1: (start_ms * 1000, stop_ms * 1000)}
+
+    relative = SolverConfig(
+        channel_time_unit="us", channel_time_origin="container_start", container_time_unit="ms"
+    )
+    # The difference is taken in ms first, then converted.
+    assert _bounds(relative, _ms_boundaries_df(spark)) == {1: (0, (stop_ms - start_ms) * 1000)}
+
+
+def test_numeric_boundaries_converted_to_coarser_channel_unit(spark):  # noqa: F811
+    # Boundaries in epoch µs, channels in ms: a division, giving doubles.
+    df = spark.createDataFrame(
+        [(1, _EPOCH_MICROS, _EPOCH_MICROS + _SPAN_MICROS)],
+        "container_id int, start_ts long, stop_ts long",
+    )
+    cfg = SolverConfig(channel_time_unit="ms", container_time_unit="us")
+    out = cfg.with_window_bounds(df)
+    assert out.schema[_START].dataType == T.DoubleType()
+    assert _bounds(cfg, df) == {
+        1: (_EPOCH_MICROS / 1000.0, (_EPOCH_MICROS + _SPAN_MICROS) / 1000.0)
+    }
+
+
+def test_numeric_boundaries_unchanged_for_equal_or_unset_container_unit(spark):  # noqa: F811
+    df = _ms_boundaries_df(spark)
+    raw = {r.container_id: (r.start_ts, r.stop_ts) for r in df.collect()}
+    assert _bounds(SolverConfig(channel_time_unit="ms", container_time_unit="ms"), df) == raw
+    assert _bounds(SolverConfig(channel_time_unit="us"), df) == raw
+
+
+def test_container_time_unit_rejected_for_timestamp_boundaries(spark):  # noqa: F811
+    cfg = SolverConfig(channel_time_unit="s", container_time_unit="ms")
+    with pytest.raises(ValueError, match="container_time_unit only applies to numeric"):
+        cfg.with_window_bounds(_boundaries_df(spark))
+
+
+def test_container_time_unit_requires_channel_time_unit():
+    with pytest.raises(ValueError, match="container_time_unit requires channel_time_unit"):
+        SolverConfig.model_validate({"container_time_unit": "ms"})
+    cfg = SolverConfig.model_validate({"channel_time_unit": "us", "container_time_unit": "ms"})
+    assert (cfg.channel_time_unit, cfg.container_time_unit) == ("us", "ms")
+
+
 def test_raw_boundaries_stay_unchanged(spark):  # noqa: F811
     df = _boundaries_df(spark)
     cfg = SolverConfig(channel_time_unit="s", channel_time_origin="container_start")

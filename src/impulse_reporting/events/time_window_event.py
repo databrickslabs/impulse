@@ -103,7 +103,9 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         normalized_attributes.setdefault("window_length", str(self.window_length))
         self.attributes = normalized_attributes
 
-    def set_channel_time(self, unit: str | None, origin: str = "epoch") -> None:
+    def set_channel_time(
+        self, unit: str | None, origin: str = "epoch", container_unit: str | None = None
+    ) -> None:
         """Record the channel time frame the windows are computed in.
 
         Set by ``Report.add_event`` from the report's ``solver_config``.  Stored on the
@@ -116,9 +118,12 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             The report's ``solver_config.channel_time_unit``.
         origin : str, optional
             The report's ``solver_config.channel_time_origin`` (default ``"epoch"``).
+        container_unit : str or None, optional
+            The report's ``solver_config.container_time_unit``.
         """
         self.expression.channel_time_unit = unit
         self.expression.channel_time_origin = origin
+        self.expression.container_time_unit = container_unit
 
     def get_expression(self) -> TimeSeriesExpression | None:
         """
@@ -147,7 +152,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
 
         Only includes the expression string, which encodes the attributes that affect the
         event results: ``window_length`` and the channel time frame (``channel_time_unit``,
-        ``channel_time_origin``; omitted while unset / default). Resizing the window or
+        ``channel_time_origin``, ``container_time_unit``; omitted while unset / default). Resizing the window or
         changing the time frame therefore forces a full recompute in incremental mode.
 
         Excludes: name, description, required_channels, max_windows_per_container,

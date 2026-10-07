@@ -160,8 +160,10 @@ Because the windows come from `container_metrics`, those boundaries must share t
 time base for the per-window values to be meaningful. If `container_metrics.start_ts`/`stop_ts` are
 `TIMESTAMP` columns, set `query_engine.solver_config.channel_time_unit` to the unit of the channel
 timestamps (`tstart`/`tend`, or `timestamp` for RAW), and `channel_time_origin="container_start"` if
-they are relative to the container start (windows then run from `0`). Only the windows use these
-settings; `start_ts`/`stop_ts` themselves keep their original values for `ContainerEvent` and UDFs.
+they are relative to the container start (windows then run from `0`). Numeric boundaries in another
+unit than the channels (e.g. epoch ms vs. µs samples) need `container_time_unit` as well. Only the
+windows use these settings; `start_ts`/`stop_ts` keep their original values for `ContainerEvent` and
+UDFs.
 Containers with null, NaN or infinite boundaries get no windows.
 
 ## Output schema

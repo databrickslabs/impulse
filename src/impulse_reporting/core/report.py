@@ -419,8 +419,11 @@ class Report:
         if isinstance(event, TimeWindowEvent):
             # The windows are computed in the channel time frame, so it is part of the
             # event's (and its scoped aggregations') definition.
+            solver_config = self.solver.config
             event.set_channel_time(
-                self.solver.config.channel_time_unit, self.solver.config.channel_time_origin
+                solver_config.channel_time_unit,
+                solver_config.channel_time_origin,
+                solver_config.container_time_unit,
             )
 
     def get_events(self) -> list[Event]:

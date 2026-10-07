@@ -30,8 +30,9 @@ MAX_WINDOWS_PER_CONTAINER = 1_000_000
 
 _WINDOW_LIMIT_HINT = (
     "Check that window_length is in the unit of the channel timestamps "
-    "(solver_config.channel_time_unit), or raise the limit (TimeWindowEvent "
-    "max_windows_per_container, TimeWindowExpression max_windows)."
+    "(solver_config.channel_time_unit) and, for numeric container boundaries in another "
+    "unit, that solver_config.container_time_unit is set, or raise the limit "
+    "(TimeWindowEvent max_windows_per_container, TimeWindowExpression max_windows)."
 )
 
 
@@ -166,6 +167,8 @@ class TimeWindowExpression(TimeSeriesExpression):
         ``solver_config.channel_time_unit``, set by the reporting ``TimeWindowEvent``.
     channel_time_origin : str
         ``solver_config.channel_time_origin`` (default ``"epoch"``), set the same way.
+    container_time_unit : str or None
+        ``solver_config.container_time_unit``, set the same way.
 
     Both are descriptive only: :meth:`build` does not convert (the solver computes the
     bounds).  They are part of the string form, so the definition hashes of the event and of
@@ -206,6 +209,7 @@ class TimeWindowExpression(TimeSeriesExpression):
         self.max_windows = validate_max_windows(max_windows)
         self.channel_time_unit: str | None = None
         self.channel_time_origin: str = "epoch"
+        self.container_time_unit: str | None = None
         TimeSeriesExpression.__init__(self, is_single_signal=False)
 
     def __str__(self) -> str:
@@ -213,9 +217,9 @@ class TimeWindowExpression(TimeSeriesExpression):
         Return a string representation of the TimeWindowExpression.
 
         The ``window_length`` and the channel time frame are included so they flow into the
-        definition hashes of the event and of the aggregations scoped to it.  An unset
-        ``channel_time_unit`` and the default ``"epoch"`` origin are omitted, keeping the
-        default string unchanged.
+        definition hashes of the event and of the aggregations scoped to it.  Unset units
+        and the default ``"epoch"`` origin are omitted, keeping the default string
+        unchanged.
 
         Returns
         -------
@@ -227,6 +231,8 @@ class TimeWindowExpression(TimeSeriesExpression):
             frame += f", channel_time_unit={self.channel_time_unit}"
         if self.channel_time_origin != "epoch":
             frame += f", channel_time_origin={self.channel_time_origin}"
+        if self.container_time_unit is not None:
+            frame += f", container_time_unit={self.container_time_unit}"
         return f"TimeWindowExpression<window_length={self.window_length}{frame}>"
 
     def dtype(self):

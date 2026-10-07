@@ -99,21 +99,23 @@ def test_definition_hash_stable_across_int_and_float_window_length():
 def test_definition_hash_changes_with_channel_time_frame():
     # The channel time frame decides where the windows lie, so changing the unit or the
     # origin must force a full recompute. It reaches the hash through the expression string.
-    def event(unit=None, origin="epoch") -> TimeWindowEvent:
+    def event(unit=None, origin="epoch", container_unit=None) -> TimeWindowEvent:
         e = TimeWindowEvent(name="w", window_length=10000)
-        e.set_channel_time(unit, origin)
+        e.set_channel_time(unit, origin, container_unit)
         return e
 
     unset = TimeWindowEvent(name="w", window_length=10000)
     s, ms, ms_relative = event("s"), event("ms"), event("ms", "container_start")
+    ms_from_s = event("ms", container_unit="s")
 
     assert ms_relative.get_expression().channel_time_unit == "ms"
     assert ms_relative.get_expression().channel_time_origin == "container_start"
     assert "channel_time_origin=container_start" in ms_relative.as_dict()["event_expression"]
     # The defaults keep today's hash.
     assert unset.determine_definition_hash() == event().determine_definition_hash()
-    hashes = {e.determine_definition_hash() for e in (unset, s, ms, ms_relative)}
-    assert len(hashes) == 4
+    assert ms_from_s.get_expression().container_time_unit == "s"
+    hashes = {e.determine_definition_hash() for e in (unset, s, ms, ms_relative, ms_from_s)}
+    assert len(hashes) == 5
 
 
 # ---------------------------------------------------------------------------
