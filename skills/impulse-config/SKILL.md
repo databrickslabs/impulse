@@ -127,13 +127,14 @@ table that has one (`container_tags`, `container_metrics`, `channel_mapping`). O
 Top-level `channel_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional) and `channel_time_origin`
 (`"epoch"` default | `"container_start"`) describe the time frame of the `channels` timestamps
 (`tstart`/`tend`, or `timestamp` with `data_type="RAW"`): absolute epoch numbers, or time relative
-to the container's `start_ts`. Only `TimeWindowEvent` uses them, to compute its windows in that
+to the container's start (`container_metrics.start_ts`). Only `TimeWindowEvent` uses them, to compute its windows in that
 frame from `container_metrics.start_ts`/`stop_ts` (origin `"container_start"`: from `0` to
 `stop_ts - start_ts`). `channel_time_unit` is required when those are `TIMESTAMP` columns. If they
 are numeric but in another unit than the channels (e.g. epoch ms boundaries, µs samples), also set
 `container_time_unit` (e.g. `"ms"`; requires `channel_time_unit`, not allowed for `TIMESTAMP`).
-Nothing is converted in place: the channel timestamps, and the `start_ts`/`stop_ts` seen by
-`ContainerEvent`, `measurement_dimension` and UDFs (a `pd.Timestamp`), keep their original values.
+Nothing is converted in place: the channel timestamps, and the `container_metrics.start_ts` /
+`stop_ts` seen by `ContainerEvent`, `measurement_dimension` and UDFs (a `pd.Timestamp`), keep their
+original values.
 
 ```python
 "query_engine": {

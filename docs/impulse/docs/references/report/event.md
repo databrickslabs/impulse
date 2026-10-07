@@ -240,13 +240,14 @@ The windows are computed in the time frame of the channel timestamps, set by
   setting.
 - If the channel timestamps are relative to the container start (e.g. seconds since the
   recording started), also set `channel_time_origin="container_start"`. The windows then run from
-  `0` to `stop_ts - start_ts`.
-- If numeric `start_ts`/`stop_ts` are in another unit than the channel timestamps (e.g. epoch ms
-  boundaries, µs samples), set `container_time_unit` to their unit (e.g. `"ms"`) and
-  `channel_time_unit` to the channels' (e.g. `"us"`). Otherwise no window overlaps the samples.
+  `0` to the container's duration (`stop_ts - start_ts` of `container_metrics`).
+- If numeric `container_metrics.start_ts`/`stop_ts` are in another unit than the channel
+  timestamps (e.g. epoch ms boundaries, µs samples), set `container_time_unit` to their unit
+  (e.g. `"ms"`) and `channel_time_unit` to the channels' (e.g. `"us"`). Otherwise no window
+  overlaps the samples.
 
 Only the windows use these settings: `ContainerEvent`, `measurement_dimension` and UDFs that read
-`start_ts`/`stop_ts` keep seeing the original values. The channel time frame is part of the
+`container_metrics.start_ts`/`stop_ts` keep seeing the original values. The channel time frame is part of the
 event's definition (and of the aggregations scoped to it), so changing it recomputes them over all
 containers in incremental mode.
 :::
@@ -255,11 +256,12 @@ containers in incremental mode.
 
 1. The event resolves the matching containers through the report's container filters (like
    `ContainerEvent`), reads `start_ts` and `stop_ts` from the `container_metrics` table, and
-   tiles `[start_ts, stop_ts]`, in the channel time frame, into consecutive windows of length
+   tiles that span, in the channel time frame, into consecutive windows of length
    `window_length`. The window instances in `event_instance_fact` are in that frame too.
-2. The **final window is clamped** to `stop_ts` when the last full window would overrun it; any
-   zero-length trailing slice is dropped (every instance satisfies `start_ts < end_ts`).
-   Containers whose `start_ts` or `stop_ts` is null, NaN or infinite get no windows.
+2. The **final window is clamped** to the container's `stop_ts` when the last full window would
+   overrun it; any zero-length trailing slice is dropped (every window instance in
+   `event_instance_fact` satisfies `start_ts < end_ts`). Containers whose
+   `container_metrics.start_ts` or `stop_ts` is null, NaN or infinite get no windows.
 3. Each window becomes one **event instance**, written to the shared `event_instance_fact` table.
    Its `event_instance_id` hashes the container, the event name and the window's start and end,
    like for other interval events.
@@ -270,14 +272,16 @@ containers in incremental mode.
 The windows are computed from `container_metrics` alone, so **every** container that matches the
 report's filters gets windows, whether or not it has channel data and whether or not an
 aggregation is scoped to the event. An aggregation scoped to the event uses the same window
-function in the query engine, so its per-window rows carry the same `event_instance_id` values. For the per-window values to be meaningful, the container boundaries must share the channel
-samples' time base (as they do in real measurement data).
+function in the query engine, so its per-window rows carry the same `event_instance_id` values.
+For the per-window values to be meaningful, the container boundaries (`container_metrics.start_ts`
+/ `stop_ts`) must share the channel samples' time base, or be converted into it with the settings
+above.
 :::
 
 :::note
-Window boundaries are stored as doubles (`start_ts` / `end_ts`), like every other event type. Epoch
-timestamps in nanoseconds exceed the range doubles represent exactly, so their window boundaries
-are rounded to about 256 ns. The event and its aggregations use the same window function, so the
+Window boundaries are stored in `event_instance_fact` as doubles (its `start_ts` / `end_ts`
+columns), like every other event type. Epoch timestamps in nanoseconds exceed the range doubles
+represent exactly, so their window boundaries are rounded to about 256 ns. The event and its aggregations use the same window function, so the
 rounding is the same on both sides and their `event_instance_id` values still match.
 :::
 

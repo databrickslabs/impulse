@@ -173,8 +173,8 @@ Top-level fields on `SolverConfig`:
 - `channel_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional) and `channel_time_origin`
   (`"epoch"` (default) | `"container_start"`): the time frame of the channel timestamps
   (`tstart`/`tend`, or `timestamp` when `data_type = "RAW"`). `"epoch"` means absolute epoch
-  numbers; `"container_start"` means time relative to the container's `start_ts` (e.g. seconds
-  since the recording started). Channel timestamps are never converted; they must already be
+  numbers; `"container_start"` means time relative to the container's start
+  (`container_metrics.start_ts`, e.g. seconds since the recording started). Channel timestamps are never converted; they must already be
   numbers in that frame.
 
 - `container_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional): the unit of **numeric**
@@ -193,8 +193,8 @@ Top-level fields on `SolverConfig`:
 
   `channel_time_unit` is required when the boundaries are `TIMESTAMP` columns; a report with a
   `TimeWindowEvent` fails with a clear error until it is set. `TIMESTAMP_NTZ` and `DATE` boundaries
-  are not supported. Everything else sees the original `start_ts`/`stop_ts`: `ContainerEvent`,
-  `measurement_dimension`, container filters, and UDFs that request them via
+  are not supported. Everything else sees the original `container_metrics.start_ts`/`stop_ts`:
+  `ContainerEvent`, `measurement_dimension`, container filters, and UDFs that request them via
   `apply(..., container_metrics=[...])` (a `TIMESTAMP` arrives there as a `pd.Timestamp`).
 
   The channel time frame is part of the definition hash of every `TimeWindowEvent` and of the
