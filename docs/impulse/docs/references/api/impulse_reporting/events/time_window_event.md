@@ -70,18 +70,6 @@ this event and of the aggregations scoped to it.
 
 - `epoch_unit` (`str or None`): The report's ``solver_config.epoch_unit``.
 
-#### get\_id
-
-```python
-def get_id() -> int
-```
-
-Returns a unique identifier for the event.
-
-**Returns**:
-
-`int`: Unique positive 32-bit integer identifier for the event.
-
 #### get\_expression
 
 ```python
@@ -138,18 +126,6 @@ Get a dictionary representation of the event.
 
 `dict`: Dictionary containing event metadata.
 
-#### as\_spark\_row
-
-```python
-def as_spark_row() -> Row
-```
-
-Get a Spark Row representation of the event.
-
-**Returns**:
-
-`Row`: Spark Row containing event metadata.
-
 #### determine\_events
 
 ```python
@@ -186,22 +162,4 @@ computes the same windows in the same order for scoped aggregations (see
 **Returns**:
 
 `DataFrame`: Spark DataFrame containing event instance facts.
-
-#### determine\_metadata\_df
-
-```python
-def determine_metadata_df(cls, spark: SparkSession,
-                          events: list[TimeWindowEvent])
-```
-
-Create a Spark DataFrame containing event metadata.
-
-**Arguments**:
-
-- `spark` (`SparkSession`): Spark session for data processing.
-- `events` (`list of TimeWindowEvent`): List of TimeWindowEvent objects.
-
-**Returns**:
-
-`DataFrame`: Spark DataFrame containing event metadata.
 

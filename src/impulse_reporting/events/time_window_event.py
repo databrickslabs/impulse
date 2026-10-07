@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import math
 from collections.abc import Mapping
 
 import pyspark.sql.functions as f
-import zlib
-from pyspark.sql import DataFrame, Row, SparkSession
+from pyspark.sql import DataFrame, SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
@@ -21,9 +19,7 @@ from impulse_query_engine.analyze.query.events.time_window_expression import (
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from impulse_query_engine.model.series.intervals import Intervals
 from impulse_reporting.events.container_boundary_event import ContainerBoundaryEvent
-from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
@@ -85,12 +81,8 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             ``max_windows_per_container`` is not a positive integer.
         """
         ContainerBoundaryEvent.__init__(self, name)
-        if window_length is None or not math.isfinite(window_length) or window_length <= 0:
-            raise ValueError(
-                f"TimeWindowEvent requires a strictly positive, finite window_length, "
-                f"got {window_length!r}."
-            )
-        # Validated here so the error names this event's parameter, not the expression's.
+        # window_length is validated by TimeWindowExpression. max_windows_per_container is
+        # validated here so the error names this event's parameter, not the expression's.
         max_windows_per_container = validate_max_windows(
             max_windows_per_container, param_name="max_windows_per_container"
         )
@@ -101,9 +93,6 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         # the solve and event_dimension all see the same value for 10 and 10.0.
         self.window_length = self.expression.window_length
         self.max_windows_per_container = self.expression.max_windows
-        self.expression.require_evaluation_type(
-            Intervals, owner="TimeWindowEvent", example="window_length=60000"
-        )
         self.description = desc
         self.required_channels = required_channels
         normalized_attributes: dict[str, str] = {}
@@ -127,18 +116,6 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         """
         ContainerBoundaryEvent.set_epoch_unit(self, epoch_unit)
         self.expression.epoch_unit = epoch_unit
-
-    def get_id(self) -> int:
-        """
-        Returns a unique identifier for the event.
-
-        Returns
-        -------
-        int
-            Unique positive 32-bit integer identifier for the event.
-        """
-        hash_input = f"{self.name}"
-        return zlib.crc32(hash_input.encode()) & 0x7FFFFFFF  # Ensures positive 32-bit int
 
     def get_expression(self) -> TimeSeriesExpression | None:
         """
@@ -204,17 +181,6 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             "definition_hash": self.determine_definition_hash(),
             "attributes": self.attributes,
         }
-
-    def as_spark_row(self) -> Row:
-        """
-        Get a Spark Row representation of the event.
-
-        Returns
-        -------
-        Row
-            Spark Row containing event metadata.
-        """
-        return Row(**self.as_dict())
 
     @classmethod
     def determine_events(
@@ -310,23 +276,3 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
         )
         return df
-
-    @classmethod
-    def determine_metadata_df(cls, spark: SparkSession, events: list[TimeWindowEvent]):
-        """
-        Create a Spark DataFrame containing event metadata.
-
-        Parameters
-        ----------
-        spark : SparkSession
-            Spark session for data processing.
-        events : list of TimeWindowEvent
-            List of TimeWindowEvent objects.
-
-        Returns
-        -------
-        DataFrame
-            Spark DataFrame containing event metadata.
-        """
-        events = [event.as_spark_row() for event in events]
-        return spark.createDataFrame(events, schema=EVENT_DIMENSION_SCHEMA)

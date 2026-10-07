@@ -33,18 +33,6 @@ Initialise a ContainerEvent.
 - `desc` (`str`): Human-readable description.
 - `attributes` (`dict`): Key-value metadata for the event.
 
-#### get\_id
-
-```python
-def get_id() -> int
-```
-
-Return a unique identifier derived from the event name.
-
-**Returns**:
-
-`int`: Positive 32-bit integer identifier.
-
 #### get\_expression
 
 ```python
@@ -100,18 +88,6 @@ Return a dictionary representation of the event.
 
 `dict`: 
 
-#### as\_spark\_row
-
-```python
-def as_spark_row() -> Row
-```
-
-Return a Spark ``Row`` representation.
-
-**Returns**:
-
-`Row`: 
-
 #### determine\_events
 
 ```python
@@ -143,22 +119,4 @@ produces one event instance per container.
 **Returns**:
 
 `DataFrame`: Spark DataFrame matching ``EVENT_INSTANCE_FACT_SCHEMA``.
-
-#### determine\_metadata\_df
-
-```python
-def determine_metadata_df(cls, spark: SparkSession,
-                          events: list[ContainerEvent]) -> DataFrame
-```
-
-Create a Spark DataFrame containing event metadata.
-
-**Arguments**:
-
-- `spark` (`SparkSession`): Active Spark session.
-- `events` (`list of ContainerEvent`): List of ContainerEvent objects.
-
-**Returns**:
-
-`DataFrame`: Spark DataFrame matching ``EVENT_DIMENSION_SCHEMA``.
 

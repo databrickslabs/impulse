@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from pyspark.sql import DataFrame, SparkSession
+import zlib
+
+from pyspark.sql import DataFrame, Row, SparkSession
 
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_reporting.events.event import Event
+from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
 
 
 class ContainerBoundaryEvent(Event):
@@ -37,6 +40,46 @@ class ContainerBoundaryEvent(Event):
             The report's ``solver_config.epoch_unit``.
         """
         self.epoch_unit = epoch_unit
+
+    def get_id(self) -> int:
+        """Return a unique identifier derived from the event name.
+
+        Returns
+        -------
+        int
+            Positive 32-bit integer identifier.
+        """
+        return zlib.crc32(self.name.encode()) & 0x7FFFFFFF
+
+    def as_spark_row(self) -> Row:
+        """Return a Spark ``Row`` representation of :meth:`as_dict`.
+
+        Returns
+        -------
+        Row
+        """
+        return Row(**self.as_dict())
+
+    @classmethod
+    def determine_metadata_df(
+        cls, spark: SparkSession, events: list[ContainerBoundaryEvent]
+    ) -> DataFrame:
+        """Create a Spark DataFrame containing event metadata.
+
+        Parameters
+        ----------
+        spark : SparkSession
+            Active Spark session.
+        events : list of ContainerBoundaryEvent
+            Events of one container-boundary type.
+
+        Returns
+        -------
+        DataFrame
+            Spark DataFrame matching ``EVENT_DIMENSION_SCHEMA``.
+        """
+        rows = [event.as_spark_row() for event in events]
+        return spark.createDataFrame(rows, schema=EVENT_DIMENSION_SCHEMA)
 
     @staticmethod
     def resolve_container_metrics(
