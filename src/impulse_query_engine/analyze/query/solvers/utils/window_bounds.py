@@ -133,8 +133,10 @@ def _container_to_channel_unit(col: Column, config: SolverConfig) -> Column:
     source = _NANOS_PER_UNIT[config.container_time_unit]
     target = _NANOS_PER_UNIT[config.channel_time_unit]
     if source > target:
-        # Finer target unit: an integer factor keeps long boundaries exact.
-        return col * F.lit(source // target)
+        # Finer target unit: an integer factor keeps long boundaries exact. A long literal
+        # widens INT boundaries to long (int * int would stay int and overflow, e.g. epoch
+        # seconds * 1000); doubles and decimals keep their type.
+        return col * F.lit(source // target).cast(T.LongType())
     return col / F.lit(float(target // source))
 
 

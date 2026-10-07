@@ -146,6 +146,47 @@ def test_numeric_ms_boundaries_converted_to_finer_channel_unit_exactly(spark):  
     assert _bounds(relative, _ms_boundaries_df(spark)) == {1: (0, (stop_ms - start_ms) * 1000)}
 
 
+@pytest.mark.parametrize("ansi", ["true", "false"])
+def test_int_boundaries_widen_to_long_instead_of_overflowing(spark, ansi):  # noqa: F811
+    """INT epoch seconds * 1000 exceeds int32. Spark keeps int * int as int, which raised
+    ARITHMETIC_OVERFLOW under ANSI and silently wrapped to negative bounds without it."""
+    int_seconds = (
+        _boundaries_df(spark)
+        .filter(F.col("container_id") == 1)
+        .select(
+            "container_id",
+            F.unix_seconds("start_ts").cast("int").alias("start_ts"),
+            F.unix_seconds("stop_ts").cast("int").alias("stop_ts"),
+        )
+    )
+    start_s = _EPOCH_MICROS // 1_000_000
+    stop_s = (_EPOCH_MICROS + _SPAN_MICROS) // 1_000_000
+    previous_ansi = spark.conf.get("spark.sql.ansi.enabled")
+    spark.conf.set("spark.sql.ansi.enabled", ansi)
+    try:
+        cfg = SolverConfig(channel_time_unit="ms", container_time_unit="s")
+        out = with_window_bounds(int_seconds, cfg)
+        assert out.schema[_START].dataType == T.LongType()
+        assert _bounds(cfg, int_seconds) == {1: (start_s * 1000, stop_s * 1000)}
+
+        relative = SolverConfig(
+            channel_time_unit="ms", channel_time_origin="container_start", container_time_unit="s"
+        )
+        assert _bounds(relative, int_seconds) == {1: (0, (stop_s - start_s) * 1000)}
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
+
+
+def test_double_boundaries_keep_fractions_when_converted_to_finer_unit(spark):  # noqa: F811
+    df = spark.createDataFrame(
+        [(1, 1000.25, 4600.75)], "container_id int, start_ts double, stop_ts double"
+    )
+    cfg = SolverConfig(channel_time_unit="ms", container_time_unit="s")
+    out = with_window_bounds(df, cfg)
+    assert out.schema[_START].dataType == T.DoubleType()
+    assert _bounds(cfg, df) == {1: (1_000_250.0, 4_600_750.0)}
+
+
 def test_numeric_boundaries_converted_to_coarser_channel_unit(spark):  # noqa: F811
     # Boundaries in epoch µs, channels in ms: a division, giving doubles.
     df = spark.createDataFrame(
