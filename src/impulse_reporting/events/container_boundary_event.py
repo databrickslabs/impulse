@@ -17,7 +17,26 @@ class ContainerBoundaryEvent(Event):
     filtered container yields instances regardless of its channel data.  The report
     therefore excludes these event types from the solvable expressions and dispatches
     them with ``query`` / ``solver`` rather than ``solved_df``.
+
+    Attributes
+    ----------
+    epoch_unit : str or None
+        ``solver_config.epoch_unit`` of the report the event belongs to, set by
+        ``Report.add_event``.  It decides the unit of ``TIMESTAMP`` boundaries, so
+        subclasses fold it into their definition hash.
     """
+
+    epoch_unit: str | None = None
+
+    def set_epoch_unit(self, epoch_unit: str | None) -> None:
+        """Set the epoch unit ``TIMESTAMP`` container boundaries are converted to.
+
+        Parameters
+        ----------
+        epoch_unit : str or None
+            The report's ``solver_config.epoch_unit``.
+        """
+        self.epoch_unit = epoch_unit
 
     @staticmethod
     def resolve_container_metrics(

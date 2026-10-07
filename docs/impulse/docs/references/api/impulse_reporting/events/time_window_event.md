@@ -29,7 +29,8 @@ def __init__(name: str,
              window_length: float,
              desc: str = None,
              required_channels: list[str] = None,
-             attributes: Mapping[str, str] = None)
+             attributes: Mapping[str, str] = None,
+             max_windows_per_container: int = MAX_WINDOWS_PER_CONTAINER)
 ```
 
 Initialize a TimeWindowEvent object.
@@ -44,10 +45,30 @@ Initialize a TimeWindowEvent object.
 dimension table.
 - `attributes` (`Mapping[str, str]`): Key-value metadata for the event. ``window_length`` is surfaced here
 automatically (without overriding a user-supplied key).
+- `max_windows_per_container` (`int`): Maximum number of windows per container (default 1,000,000). A container
+exceeding it fails the report with an error naming the limit, which usually
+means ``window_length`` is in the wrong unit for the boundaries. Not part of
+the definition hash.
 
 **Raises**:
 
-- `ValueError`: If ``window_length`` is not strictly positive and finite.
+- `ValueError`: If ``window_length`` is not strictly positive and finite, or
+``max_windows_per_container`` is not a positive integer.
+
+#### set\_epoch\_unit
+
+```python
+def set_epoch_unit(epoch_unit: str | None) -> None
+```
+
+Set the epoch unit ``TIMESTAMP`` container boundaries are converted to.
+
+Also recorded on the expression, whose string form feeds the definition hashes of
+this event and of the aggregations scoped to it.
+
+**Arguments**:
+
+- `epoch_unit` (`str or None`): The report's ``solver_config.epoch_unit``.
 
 #### get\_id
 
@@ -93,11 +114,13 @@ def determine_definition_hash() -> int
 
 Calculate definition hash for the time-window event.
 
-Only includes the expression string (which encodes ``window_length``), the sole
-attribute that affects the event results, so resizing the window forces a full
-recompute in incremental mode.
+Only includes the expression string, which encodes the attributes that affect the
+event results: ``window_length`` and, when set, ``epoch_unit`` (the unit of
+``TIMESTAMP`` boundaries). Resizing the window or changing the unit therefore forces
+a full recompute in incremental mode.
 
-Excludes: name, description, required_channels, report_id
+Excludes: name, description, required_channels, max_windows_per_container,
+report_id
 
 **Returns**:
 
@@ -146,9 +169,10 @@ Extract the event fact table for the given list of TimeWindowEvent objects.
 Resolves the matching containers via the solver's filter pipeline (like
 ``ContainerEvent``) and computes each event's windows natively from the
 containers' ``start_ts`` / ``stop_ts``, so every filtered container gets windows.
-Each window becomes one event instance (``start_ts < end_ts``). The windows are
-bit-identical to the ones the solve computes for scoped aggregations (see
-:func:`window_intervals_col`), so the ``event_instance_id`` values match.
+Each window becomes one event instance (``start_ts < end_ts``) whose
+``event_instance_id`` hashes its position among the container's windows. The solve
+computes the same windows in the same order for scoped aggregations (see
+:func:`window_intervals_col`), so the ids match.
 
 **Arguments**:
 

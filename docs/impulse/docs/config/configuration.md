@@ -183,6 +183,12 @@ Top-level fields on `SolverConfig`:
   `measurement_dimension` and container filters always see the original columns. When unset,
   nothing is converted. `TIMESTAMP_NTZ` and `DATE` boundaries are not supported.
 
+  `epoch_unit` is part of the definition hash of `ContainerEvent`, `TimeWindowEvent` and every
+  aggregation scoped to a `TimeWindowEvent`, so changing it recomputes them over all containers in
+  incremental mode instead of mixing units in the gold tables. Expressions that read
+  `start_ts`/`stop_ts` through `apply(..., container_metrics=[...])` are not covered: after changing
+  `epoch_unit`, list them under [`full_recalculation`](#full_recalculation-optional).
+
 Per-table sections (each a `TableConfig`):
 
 | Section            | When it applies                            | Typical mappings                                                  |

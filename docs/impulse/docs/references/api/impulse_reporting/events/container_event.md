@@ -80,7 +80,9 @@ Calculate definition hash.
 The hash only captures computation-relevant attributes.
 For a ``ContainerEvent`` the identity is fully determined by the
 fact that it is a container event (there is no expression to vary),
-so the name of the event is hashed.
+so the name of the event is hashed. When ``epoch_unit`` is set it is
+hashed too, since it decides the unit of ``TIMESTAMP`` boundaries in
+``start_ts`` / ``end_ts``; unset, the hash is the name alone, as before.
 
 **Returns**:
 

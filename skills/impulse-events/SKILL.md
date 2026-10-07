@@ -150,12 +150,15 @@ report.add_event(ten_minute)
 | `desc`              | `str`               | No       | Description.                                                                    |
 | `required_channels` | `list[str]`         | No       | Informational.                                                                  |
 | `attributes`        | `Mapping[str, str]` | No       | Free-form metadata; `window_length` is added automatically.                     |
+| `max_windows_per_container` | `int`       | No       | Windows-per-container limit (default 1,000,000); exceeding it fails the report, usually a `window_length` unit mismatch. |
 
 Windows are computed from `container_metrics` for every container matching the report's filters, with
 or without channel data or a scoped aggregation. Pair it with an aggregation scoped to the event (e.g.
 `StatsAggregator(..., event=...)`) to compute one statistic per window; those rows carry the same
-`event_instance_id` values as the windows. Because the windows come from `container_metrics`, those
-boundaries must share the channel samples' time base for the per-window values to be meaningful.
+`event_instance_id` values as the windows (the id hashes container, event name and window position).
+Because the windows come from `container_metrics`, those boundaries must share the channel samples'
+time base for the per-window values to be meaningful. Containers with null, NaN or infinite
+boundaries get no windows.
 
 ## Output schema
 

@@ -11,6 +11,7 @@ import pytest
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
 from impulse_query_engine.analyze.query.events import TimeWindowExpression
 from impulse_query_engine.analyze.query.events.time_window_expression import (
+    MAX_WINDOWS_PER_CONTAINER,
     window_intervals_col,
 )
 from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
@@ -34,8 +35,8 @@ class _FakeCache:
         return {}
 
 
-def _build(start_ts, stop_ts, window_length) -> Intervals:
-    expr = TimeWindowExpression(window_length)
+def _build(start_ts, stop_ts, window_length, **kwargs) -> Intervals:
+    expr = TimeWindowExpression(window_length, **kwargs)
     return expr.build(_FakeCache({"start_ts": start_ts, "stop_ts": stop_ts}))
 
 
@@ -120,6 +121,42 @@ def test_str_stable_across_int_and_float_window_length():
     assert str(TimeWindowExpression(10)) == str(TimeWindowExpression(10.0))
 
 
+def test_str_includes_epoch_unit_only_when_set():
+    # The string feeds the definition hashes of the event and its scoped aggregations, so
+    # the unit must move them, while an unset unit keeps the unit-less form.
+    expr = TimeWindowExpression(10)
+    assert str(expr) == "TimeWindowExpression<window_length=10.0>"
+    expr.epoch_unit = "ms"
+    assert str(expr) == "TimeWindowExpression<window_length=10.0, epoch_unit=ms>"
+
+
+def test_max_windows_not_part_of_str():
+    # The cap only decides between an error and a result, so it must not force a recompute.
+    assert MAX_WINDOWS_PER_CONTAINER == 1_000_000
+    assert TimeWindowExpression(10).max_windows == MAX_WINDOWS_PER_CONTAINER
+    assert str(TimeWindowExpression(10, max_windows=5)) == str(TimeWindowExpression(10))
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, True, None, "10"])
+def test_invalid_max_windows_raises(bad):
+    with pytest.raises(ValueError, match="max_windows must be a positive integer"):
+        TimeWindowExpression(10, max_windows=bad)
+
+
+def test_build_raises_beyond_max_windows():
+    # 10 windows are fine at max_windows=10, not at 9.
+    assert len(_build(0, 100, 10, max_windows=10)) == 10
+    with pytest.raises(ValueError, match="10 windows of length 10.0 .* exceed max_windows=9"):
+        _build(0, 100, 10, max_windows=9)
+
+
+def test_build_unit_mismatch_hits_default_cap():
+    # window_length=60 meant as seconds over a 1 h ns-epoch span: 6e10 windows.
+    start = 1_700_000_000_000_000_000
+    with pytest.raises(ValueError, match="epoch unit of the container boundaries"):
+        _build(np.int64(start), np.int64(start + 3_600_000_000_000), 60)
+
+
 @pytest.mark.parametrize("bad", [0, -1, -10.5, None, float("inf"), float("-inf"), float("nan")])
 def test_non_positive_window_length_raises(bad):
     with pytest.raises(ValueError, match="strictly positive"):
@@ -146,6 +183,12 @@ def test_nan_container_metrics_yield_empty():
     # A null start/stop arrives as NaN in a float64 column.
     assert len(_build(np.nan, 100.0, 10)) == 0
     assert len(_build(0.0, np.nan, 10)) == 0
+
+
+def test_infinite_container_metrics_yield_empty():
+    # Used to overflow in int(np.ceil(inf)).
+    assert len(_build(0.0, np.inf, 10)) == 0
+    assert len(_build(-np.inf, 100.0, 10)) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +224,38 @@ def test_window_intervals_col_edge_cases(spark):  # noqa: F811
     assert all(s < e for windows in w.values() for s, e in windows)
 
 
-def _as_set(windows) -> set[tuple[float, float]]:
-    return {(float(s), float(e)) for s, e in windows}
+def test_window_intervals_col_non_finite_bounds_yield_no_windows(spark):  # noqa: F811
+    """NaN / infinite boundaries give no windows on both sides. Spark orders NaN above
+    every number, so a NaN stop_ts used to pass ``stop > start`` and emit [[0, 4], [-4, 0]]."""
+    nan, inf = float("nan"), float("inf")
+    rows = [(0, 0.0, nan), (1, nan, 10.0), (2, nan, nan), (3, 0.0, inf), (4, -inf, 10.0)]
+    _, w = _spark_windows(spark, rows, 4, ts_type="double")
+
+    for k, start, stop in rows:
+        assert w[k] == [], f"row {k} ({start}, {stop}) produced {w[k]}"
+        assert _build(start, stop, 4).get_data() == []
+
+
+def test_window_intervals_col_raises_beyond_max_windows(spark):  # noqa: F811
+    df = spark.createDataFrame([(0, 0, 100)], "k int, start_ts long, stop_ts long")
+    ok = df.select(window_intervals_col(F.col("start_ts"), F.col("stop_ts"), 10, max_windows=10))
+    assert len(ok.collect()[0][0]) == 10
+
+    too_many = df.select(
+        window_intervals_col(F.col("start_ts"), F.col("stop_ts"), 10, max_windows=9)
+    )
+    with pytest.raises(Exception, match="10 windows of length 10.0 .* exceed max_windows=9"):
+        too_many.collect()
+
+
+def test_window_intervals_col_invalid_max_windows_raises():
+    with pytest.raises(ValueError, match="max_windows must be a positive integer"):
+        window_intervals_col(F.col("start_ts"), F.col("stop_ts"), 10, max_windows=0)
+
+
+def _as_list(windows) -> list[tuple[float, float]]:
+    """Windows as ordered (start, end) pairs: the order is the window index the ids hash."""
+    return [(float(s), float(e)) for s, e in windows]
 
 
 def _count_mismatch_case(window_length: float) -> tuple[int, int]:
@@ -204,8 +277,9 @@ def _count_mismatch_case(window_length: float) -> tuple[int, int]:
 
 
 def test_window_intervals_col_bit_identical_to_build(spark):  # noqa: F811
-    """The id contract: the event fact (Spark) and scoped aggregations (numpy ``build``)
-    must produce bit-identical windows, since event_instance_id hashes start/end."""
+    """The event fact (Spark) and scoped aggregations (numpy ``build``) produce the same
+    windows in the same order: event_instance_id hashes the window's position, and the
+    stored boundaries must describe the window the statistics were computed over."""
     rnd = random.Random(7)
 
     # Long timestamps: ns epochs (~1.7e18, beyond 2^53) and µs epochs, with spans hugging
@@ -258,10 +332,10 @@ def test_window_intervals_col_bit_identical_to_build(spark):  # noqa: F811
 
         mismatches = []
         for k, (start, stop, w) in enumerate(cases):
-            expected = _as_set(spark_windows[k])
+            expected = _as_list(spark_windows[k])
             assert expected, f"case {k} produced no windows"
             for np_type in np_types:
-                built = _as_set(_build(np_type(start), np_type(stop), w).get_data())
+                built = _as_list(_build(np_type(start), np_type(stop), w).get_data())
                 if built != expected:
                     mismatches.append((k, np_type.__name__, start, stop, w))
         assert not mismatches, f"Spark/numpy window mismatch: {mismatches[:5]}"
@@ -289,5 +363,6 @@ def test_stats_aggregator_windows_equal_helper_windows(spark):  # noqa: F811
     event_timestamps, numeric_values, _, _ = agg.build(cache)
 
     assert len(spark_windows[0]) == 7
-    assert _as_set(event_timestamps) == _as_set(spark_windows[0])
+    # Same windows in the same order: event_timestamps' position is the window index.
+    assert _as_list(event_timestamps) == _as_list(spark_windows[0])
     assert len(numeric_values[0]) == len(event_timestamps)

@@ -14,6 +14,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.analyze.query.events.time_window_expression import (
+    MAX_WINDOWS_PER_CONTAINER,
     TimeWindowExpression,
     window_intervals_col,
 )
@@ -38,8 +39,9 @@ class TimeWindowEvent(ContainerBoundaryEvent):
     The event fact is computed natively in Spark from ``container_metrics`` (via
     :func:`window_intervals_col`), so every filtered container gets windows regardless of
     its channel data.  Aggregations scoped to this event evaluate the
-    :class:`TimeWindowExpression` in the solve, which computes bit-identical windows, so
-    the timestamp-based ``event_instance_id`` values match on both sides.
+    :class:`TimeWindowExpression` in the solve, which computes the same windows in the
+    same order.  ``event_instance_id`` hashes the window's position rather than its
+    boundaries, so both sides match without relying on bit-identical doubles.
     """
 
     def __init__(
@@ -49,6 +51,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         desc: str = None,
         required_channels: list[str] = None,
         attributes: Mapping[str, str] = None,
+        max_windows_per_container: int = MAX_WINDOWS_PER_CONTAINER,
     ):
         """
         Initialize a TimeWindowEvent object.
@@ -68,11 +71,17 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         attributes : Mapping[str, str], optional
             Key-value metadata for the event. ``window_length`` is surfaced here
             automatically (without overriding a user-supplied key).
+        max_windows_per_container : int, optional
+            Maximum number of windows per container (default 1,000,000). A container
+            exceeding it fails the report with an error naming the limit, which usually
+            means ``window_length`` is in the wrong unit for the boundaries. Not part of
+            the definition hash.
 
         Raises
         ------
         ValueError
-            If ``window_length`` is not strictly positive and finite.
+            If ``window_length`` is not strictly positive and finite, or
+            ``max_windows_per_container`` is not a positive integer.
         """
         ContainerBoundaryEvent.__init__(self, name)
         if window_length is None or not math.isfinite(window_length) or window_length <= 0:
@@ -80,10 +89,13 @@ class TimeWindowEvent(ContainerBoundaryEvent):
                 f"TimeWindowEvent requires a strictly positive, finite window_length, "
                 f"got {window_length!r}."
             )
-        self.expression = TimeWindowExpression(window_length).alias(name)
+        self.expression = TimeWindowExpression(
+            window_length, max_windows=max_windows_per_container
+        ).alias(name)
         # Use the expression's normalized (float) length everywhere, so the event fact,
         # the solve and event_dimension all see the same value for 10 and 10.0.
         self.window_length = self.expression.window_length
+        self.max_windows_per_container = self.expression.max_windows
         self.expression.require_evaluation_type(
             Intervals, owner="TimeWindowEvent", example="window_length=60000"
         )
@@ -96,6 +108,20 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         # clobbering an explicit user-supplied attribute of the same key.
         normalized_attributes.setdefault("window_length", str(self.window_length))
         self.attributes = normalized_attributes
+
+    def set_epoch_unit(self, epoch_unit: str | None) -> None:
+        """Set the epoch unit ``TIMESTAMP`` container boundaries are converted to.
+
+        Also recorded on the expression, whose string form feeds the definition hashes of
+        this event and of the aggregations scoped to it.
+
+        Parameters
+        ----------
+        epoch_unit : str or None
+            The report's ``solver_config.epoch_unit``.
+        """
+        ContainerBoundaryEvent.set_epoch_unit(self, epoch_unit)
+        self.expression.epoch_unit = epoch_unit
 
     def get_id(self) -> int:
         """
@@ -134,11 +160,13 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         """
         Calculate definition hash for the time-window event.
 
-        Only includes the expression string (which encodes ``window_length``), the sole
-        attribute that affects the event results, so resizing the window forces a full
-        recompute in incremental mode.
+        Only includes the expression string, which encodes the attributes that affect the
+        event results: ``window_length`` and, when set, ``epoch_unit`` (the unit of
+        ``TIMESTAMP`` boundaries). Resizing the window or changing the unit therefore forces
+        a full recompute in incremental mode.
 
-        Excludes: name, description, required_channels, report_id
+        Excludes: name, description, required_channels, max_windows_per_container,
+        report_id
 
         Returns
         -------
@@ -200,9 +228,10 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         Resolves the matching containers via the solver's filter pipeline (like
         ``ContainerEvent``) and computes each event's windows natively from the
         containers' ``start_ts`` / ``stop_ts``, so every filtered container gets windows.
-        Each window becomes one event instance (``start_ts < end_ts``). The windows are
-        bit-identical to the ones the solve computes for scoped aggregations (see
-        :func:`window_intervals_col`), so the ``event_instance_id`` values match.
+        Each window becomes one event instance (``start_ts < end_ts``) whose
+        ``event_instance_id`` hashes its position among the container's windows. The solve
+        computes the same windows in the same order for scoped aggregations (see
+        :func:`window_intervals_col`), so the ids match.
 
         Parameters
         ----------
@@ -236,13 +265,18 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         stop_ts = f.col(solver.config.stop_ts_col)
 
         # One (event_name, windows) struct per event, exploded in a single pass over the
-        # containers. start_ts / end_ts stay doubles: the event_instance_id hashes their
-        # string form, which must match the doubles produced by the solve.
+        # containers. posexplode yields each window's position, which the
+        # event_instance_id hashes (scoped aggregations use the same position).
         per_event = f.array(
             *[
                 f.struct(
                     f.lit(event.get_name()).alias("event_name"),
-                    window_intervals_col(start_ts, stop_ts, event.window_length).alias("windows"),
+                    window_intervals_col(
+                        start_ts,
+                        stop_ts,
+                        event.window_length,
+                        max_windows=event.max_windows_per_container,
+                    ).alias("windows"),
                 )
                 for event in events
             ]
@@ -256,7 +290,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             .select(
                 "container_id",
                 f.col("event.event_name").alias("event_name"),
-                f.explode(f.col("event.windows")).alias("event_instance"),
+                f.posexplode(f.col("event.windows")).alias("window_index", "event_instance"),
             )
             .withColumn("start_ts", f.col("event_instance").getItem(0))
             .withColumn("end_ts", f.col("event_instance").getItem(1))

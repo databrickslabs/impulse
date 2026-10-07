@@ -415,6 +415,9 @@ class Report:
             )
         self.events.append(event)
         event.set_report_id(self.report_id)
+        if isinstance(event, ContainerBoundaryEvent):
+            # The unit of TIMESTAMP boundaries is part of these events' definitions.
+            event.set_epoch_unit(self.solver.config.epoch_unit)
 
     def get_events(self) -> list[Event]:
         """

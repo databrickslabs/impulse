@@ -481,7 +481,9 @@ class StatsAggregator(Aggregation):
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame with exploded statistics for each signal and interval.
+            DataFrame with exploded statistics for each signal and interval, carrying the
+            interval's position as ``interval_index`` (the window index of a
+            ``TimeWindowEvent``).
         """
         # Step 1: Explode by signal index to get one row per signal.
         #
@@ -526,6 +528,7 @@ class StatsAggregator(Aggregation):
             "event_id",
             "event_name",
             "signal_index",
+            "interval_index",
             f.col("zipped.event_timestamps").getItem(0).alias("start_ts"),
             f.col("zipped.event_timestamps").getItem(1).alias("end_ts"),
             f.col("zipped.signal_stats_per_interval").alias("statistics"),
@@ -538,6 +541,7 @@ class StatsAggregator(Aggregation):
             "event_name",
             "event_id",
             "signal_index",
+            "interval_index",
             "start_ts",
             "end_ts",
             f.explode(f.col("statistics")).alias("aggregation_label", "statistic_value"),
@@ -663,8 +667,9 @@ class StatsAggregator(Aggregation):
         Add an event_instance_id column, matching ``event_instance_fact``.
 
         The id comes from ``generate_event_instance_id_column``: a ``ContainerEvent``
-        gets ``xxhash64(container_id)`` (one id per container), all other event types get
-        the timestamp-based hash. The container-event case is applied per row (keyed on
+        gets ``xxhash64(container_id)`` (one id per container), a ``TimeWindowEvent`` the
+        window-index hash over ``interval_index``, all other event types the
+        timestamp-based hash. The event-type cases are applied per row (keyed on
         ``stats_name``) since a frame may mix event types.
 
         Parameters
@@ -678,22 +683,34 @@ class StatsAggregator(Aggregation):
             Function that adds the event_instance_id column to a DataFrame.
         """
         from impulse_reporting.events.container_event import ContainerEvent
+        from impulse_reporting.events.time_window_event import TimeWindowEvent
 
         def _(df: DataFrame) -> DataFrame:
-            container_event_stats_names = [
-                agg.get_name()
-                for agg in aggregations
-                if agg and isinstance(agg.get_event(), ContainerEvent)
-            ]
+            def stats_names_scoped_to(event_cls: type) -> list[str]:
+                return [
+                    agg.get_name()
+                    for agg in aggregations
+                    if agg and isinstance(agg.get_event(), event_cls)
+                ]
 
-            timestamp_based_id = generate_event_instance_id_column()
+            container_event_stats_names = stats_names_scoped_to(ContainerEvent)
+            time_window_stats_names = stats_names_scoped_to(TimeWindowEvent)
+
+            event_instance_id_column = generate_event_instance_id_column()
+            # Only reference interval_index when a TimeWindowEvent is in play: frames of
+            # other aggregation types (e.g. PointValueAggregator) do not carry it.
+            if time_window_stats_names:
+                event_instance_id_column = f.when(
+                    f.col("stats_name").isin(time_window_stats_names),
+                    generate_event_instance_id_column(
+                        event_type=TimeWindowEvent, window_index_col="interval_index"
+                    ),
+                ).otherwise(event_instance_id_column)
             if container_event_stats_names:
                 event_instance_id_column = f.when(
                     f.col("stats_name").isin(container_event_stats_names),
                     generate_event_instance_id_column(event_type=ContainerEvent),
-                ).otherwise(timestamp_based_id)
-            else:
-                event_instance_id_column = timestamp_based_id
+                ).otherwise(event_instance_id_column)
 
             return df.withColumn("event_instance_id", event_instance_id_column)
 

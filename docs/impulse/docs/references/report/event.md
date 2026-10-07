@@ -223,6 +223,7 @@ my_report.add_event(ten_minute_windows)
 | `desc`              | `str`               | No       | Human-readable description.                                                                                     |
 | `required_channels` | `list[str]`         | No       | Channel names required for this event. Informational; stored in the event dimension table.                     |
 | `attributes`        | `Mapping[str, str]` | No       | Free-form key-value metadata. `window_length` is surfaced here automatically (without overriding a user key).  |
+| `max_windows_per_container` | `int`       | No       | Upper bound on the windows per container (default `1_000_000`). A container that would exceed it fails the report with an error naming the limit, which usually means `window_length` is in the wrong unit for the timestamps. Raise it for very long containers with short windows. Not part of the definition hash. |
 
 :::note
 `window_length` follows the same convention as `SequenceOfEvents.max_overlap`: it is expressed in
@@ -234,7 +235,8 @@ If `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns, set
 [`solver_config.epoch_unit`](../../config/configuration.md#solver-column-mappings-and-filters)
 to the epoch unit of the channel sample timestamps (e.g. `"s"`). The boundaries are converted to
 that unit, and `window_length` is expressed in it. Without it, the report fails with an error
-naming the setting.
+naming the setting. `epoch_unit` is part of the event's definition (and of the aggregations
+scoped to it), so changing it recomputes them over all containers in incremental mode.
 :::
 
 ### How it works
@@ -244,25 +246,27 @@ naming the setting.
    tiles `[start_ts, stop_ts]` into consecutive windows of length `window_length`.
 2. The **final window is clamped** to `stop_ts` when the last full window would overrun it; any
    zero-length trailing slice is dropped (every instance satisfies `start_ts < end_ts`).
-3. Each window becomes one **event instance** with a unique `event_instance_id`, written to the
-   shared `event_instance_fact` table.
+   Containers whose `start_ts` or `stop_ts` is null, NaN or infinite get no windows.
+3. Each window becomes one **event instance**, written to the shared `event_instance_fact` table.
+   Its `event_instance_id` hashes the container, the event name and the window's position in
+   the container (0, 1, 2, ...).
 4. An aggregation scoped to the event (`StatsAggregator(..., event=time_window_event)`) computes
    its statistic **once per window** and joins back to those instances.
 
 :::note
 The windows are computed from `container_metrics` alone, so **every** container that matches the
 report's filters gets windows, whether or not it has channel data and whether or not an
-aggregation is scoped to the event. An aggregation scoped to the event computes the same windows
-in the query engine, so its per-window rows carry the same `event_instance_id` values. For the
-per-window values to be meaningful, the container boundaries must share the channel samples' time
-base (as they do in real measurement data).
+aggregation is scoped to the event. An aggregation scoped to the event computes the same windows,
+in the same order, in the query engine, so its per-window rows carry the same `event_instance_id`
+values. For the per-window values to be meaningful, the container boundaries must share the channel
+samples' time base (as they do in real measurement data).
 :::
 
 :::note
 Window boundaries are stored as doubles (`start_ts` / `end_ts`), like every other event type. Epoch
 timestamps in nanoseconds exceed the range doubles represent exactly, so their window boundaries
-are rounded to about 256 ns. The rounding is the same for the event and its aggregations, so their
-`event_instance_id` values still match.
+are rounded to about 256 ns. The `event_instance_id` depends on the window's position, not on its
+boundaries, so the rounding does not affect how aggregations join to the windows.
 :::
 
 ## Event output schema

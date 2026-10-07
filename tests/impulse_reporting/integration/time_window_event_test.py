@@ -1,5 +1,6 @@
 """Integration tests for TimeWindowEvent with end-to-end Report usage."""
 
+import math
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
@@ -304,6 +305,62 @@ def _assert_ids_join(spark, table_prefix: str) -> tuple[set, set]:  # noqa: F811
     return stats_event_ids, event_ids
 
 
+def _assert_window_stats_match_samples(spark, schema: str, table_prefix: str):  # noqa: F811
+    """Each window's RPM min / max equal those of the silver samples overlapping that window,
+    and windows without RPM samples carry no value (RPM only covers each container's first
+    minute, so most windows are empty).
+
+    The ids hash the window's position, so a position that drifted between the event fact
+    and the solve would attach a neighbouring window's values; this pins every stats row to
+    the window whose boundaries event_instance_fact stores.
+    """
+    rpm_channels = (
+        spark.read.table(f"{schema}.channel_metrics")
+        .filter(F.col("channel_name") == "Engine RPM")
+        .select("container_id", "channel_id")
+    )
+    samples = (
+        spark.read.table(f"{schema}.channels")
+        .join(rpm_channels, ["container_id", "channel_id"])
+        .select(
+            "container_id",
+            F.col("tstart").cast("double").alias("tstart"),
+            F.col("tend").cast("double").alias("tend"),
+            F.col("value").cast("double").alias("value"),
+        )
+    )
+    windows = spark.read.table(f"spark_catalog.gold.{table_prefix}_event_instance_fact")
+    expected = (
+        windows.join(samples, "container_id")
+        .filter((F.col("tstart") < F.col("end_ts")) & (F.col("tend") > F.col("start_ts")))
+        .groupBy("container_id", "event_instance_id")
+        .agg(F.min("value").alias("expected_min"), F.max("value").alias("expected_max"))
+    )
+    actual = (
+        spark.read.table(f"spark_catalog.gold.{table_prefix}_stats_aggregator_fact")
+        .groupBy("container_id", "event_instance_id")
+        .pivot("aggregation_label", ["min", "max"])
+        .agg(F.first("statistic_value"))
+    )
+    rows = actual.join(expected, ["container_id", "event_instance_id"], "left").collect()
+
+    def _is_missing(value) -> bool:
+        return value is None or math.isnan(value)
+
+    with_samples = [r for r in rows if r.expected_max is not None]
+    assert with_samples and len(with_samples) < len(rows)
+    mismatches = [
+        r
+        for r in rows
+        if (
+            (r["min"], r["max"]) != (r.expected_min, r.expected_max)
+            if r.expected_max is not None
+            else not (_is_missing(r["min"]) and _is_missing(r["max"]))
+        )
+    ]
+    assert not mismatches, mismatches[:5]
+
+
 @pytest.mark.parametrize("setup_tw_aligned_db", ["us", "ns", "sec", "sec_ts"], indirect=True)
 def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
     """Stats scoped to a TimeWindowEvent yield per-window values whose event_instance_id
@@ -329,6 +386,7 @@ def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
     my_report.persist_results()
 
     _assert_ids_join(spark, table_prefix)
+    _assert_window_stats_match_samples(spark, schema, table_prefix)
 
 
 def test_multiple_time_window_events_coexist(spark, basic_narrow_db):
@@ -581,3 +639,90 @@ def test_container_event_timestamp_boundaries(spark, setup_tw_aligned_db, epoch_
 
     measurement_dim = spark.read.table(f"spark_catalog.gold.{table_prefix}_measurement_dimension")
     assert isinstance(measurement_dim.schema["start_ts"].dataType, T.TimestampType)
+
+
+@pytest.mark.parametrize("setup_tw_aligned_db", ["sec_ts"], indirect=True)
+def test_epoch_unit_change_recomputes_boundary_events(spark, setup_tw_aligned_db):
+    """Changing epoch_unit between incremental runs moves the definition hashes of the
+    TimeWindowEvent, the ContainerEvent and the aggregation scoped to the windows. They
+    recompute over all containers, so the gold tables never mix units."""
+    schema, window_length, epoch_unit = setup_tw_aligned_db
+    assert epoch_unit == "s"
+    table_prefix = "time_window_epoch_unit_test"
+    cm_run_1 = f"{schema}.container_metrics_run_1"
+    cm_run_2 = f"{schema}.container_metrics_run_2"
+    past = F.lit("2020-01-01 00:00:00").cast("timestamp")
+    cm = spark.read.table(f"{schema}.container_metrics")
+    cm.filter(F.col("container_id").isin([1, 2])).withColumn("timestamp", past).write.format(
+        "delta"
+    ).mode("overwrite").saveAsTable(cm_run_1)
+    # Container 3 is new in run 2 (recent timestamp); 1 and 2 are unchanged.
+    cm.withColumn(
+        "timestamp", F.when(F.col("container_id") == 3, F.current_timestamp()).otherwise(past)
+    ).write.format("delta").mode("overwrite").saveAsTable(cm_run_2)
+
+    def _run(cm_table: str, unit: str, is_incremental: bool):
+        config = _aligned_config(
+            schema,
+            table_prefix,
+            epoch_unit=unit,
+            incremental=IncrementalConfig(
+                enabled=is_incremental,
+                silver_last_modified_column="timestamp",
+                gold_last_modified_column="_created_at",
+            ),
+        )
+        config["source"].container_metrics_table = cm_table
+        report = Report(
+            name="time_window_epoch_unit_report",
+            spark=spark,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=config,
+        )
+        window_evt = TimeWindowEvent(name="ten_min", window_length=window_length)
+        container_evt = ContainerEvent(name="full_container")
+        report.add_event(window_evt)
+        report.add_event(container_evt)
+        page = Page(page_number=1)
+        report.add_page(page)
+        stats = _rpm_stats(report, window_evt)
+        page.add_aggregation(stats)
+        report.determine_report()
+        report.persist_results()
+        return report, window_evt, container_evt, stats
+
+    def _event_rows(event_id: int):
+        return (
+            spark.read.table(f"spark_catalog.gold.{table_prefix}_event_instance_fact")
+            .filter(F.col("event_id") == event_id)
+            .collect()
+        )
+
+    _, _, container_evt, _ = _run(cm_run_1, "s", is_incremental=False)
+    starts_in_s = {r.container_id: r.start_ts for r in _event_rows(container_evt.get_id())}
+    assert set(starts_in_s) == {1, 2}
+
+    report, window_evt, container_evt, stats = _run(cm_run_2, "ms", is_incremental=True)
+
+    changed_events = {i for ids in report._changed_event_ids.values() for i in ids}
+    changed_aggs = {i for ids in report._changed_aggregation_ids.values() for i in ids}
+    assert {window_evt.get_id(), container_evt.get_id()} <= changed_events
+    assert stats.get_id() in changed_aggs
+
+    # The unchanged containers 1 and 2 were rewritten in ms, not left in seconds.
+    container_rows = _event_rows(container_evt.get_id())
+    assert {r.container_id for r in container_rows} == {1, 2, 3}
+    for r in container_rows:
+        if r.container_id in starts_in_s:
+            assert r.start_ts == pytest.approx(starts_in_s[r.container_id] * 1000)
+    starts_in_ms = {r.container_id: r.start_ts for r in container_rows}
+
+    # Every window tiles the container's ms span: none is left over from the seconds run.
+    window_rows = _event_rows(window_evt.get_id())
+    assert {r.container_id for r in window_rows} == {1, 2, 3}
+    first_window = {}
+    for r in window_rows:
+        first_window[r.container_id] = min(
+            first_window.get(r.container_id, r.start_ts), r.start_ts
+        )
+    assert first_window == starts_in_ms

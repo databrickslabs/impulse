@@ -18,6 +18,7 @@ from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.basic_event import BasicEvent
 from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
 
 
@@ -528,6 +529,60 @@ def test_determine_aggregations_container_event_instance_id(spark, basic_narrow_
     basic_rows = df.filter(f.col("visual_id") == basic_stats.get_id()).collect()
     assert len(basic_rows) > 0
     assert all(row.event_instance_id != row.expected_container_id for row in basic_rows)
+
+
+def test_determine_aggregations_time_window_event_instance_id(spark, basic_narrow_db):
+    """Time-window stats rows use the window-index id that ``TimeWindowEvent.determine_events``
+    writes to ``event_instance_fact``: one id per window, all of them materialized. Basic-event
+    stats in the same frame keep the timestamp-based id."""
+    eng_rpm = basic_narrow_db.query.channel(channel_name="Engine RPM")
+
+    window_event = TimeWindowEvent(name="ten_s", window_length=10_000)
+    basic_event = BasicEvent(name="rpm_event", expr=eng_rpm > 500)
+    window_stats = StatsAggregator(
+        name="window_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max"],
+        event=window_event,
+    )
+    basic_stats = StatsAggregator(
+        name="basic_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max"],
+        event=basic_event,
+    )
+
+    solver = DefaultSolver(spark)
+    solved_df = basic_narrow_db.query.select(
+        window_stats.get_expression(), basic_stats.get_expression()
+    ).solve(spark, solver)
+    df = StatsAggregator.determine_aggregations(
+        spark=spark, aggregations=[window_stats, basic_stats], solved_df=solved_df
+    )
+    windows = TimeWindowEvent.determine_events(
+        spark, [window_event], query=basic_narrow_db.query, solver=solver
+    )
+
+    window_ids = {r.event_instance_id for r in windows.collect()}
+    window_count = {
+        r.container_id: r.n
+        for r in windows.groupBy("container_id").count().withColumnRenamed("count", "n").collect()
+    }
+    window_rows = df.filter(f.col("visual_id") == window_stats.get_id())
+    assert window_rows.count() > 0
+    assert {r.event_instance_id for r in window_rows.collect()} <= window_ids
+    # Every window of every solved container gets its own id (no collapsed indices).
+    per_container = window_rows.groupBy("container_id").agg(
+        f.countDistinct("event_instance_id").alias("n")
+    )
+    for row in per_container.collect():
+        assert row.n == window_count[row.container_id], row
+
+    basic_rows = df.filter(f.col("visual_id") == basic_stats.get_id()).collect()
+    assert len(basic_rows) > 0
+    assert not {r.event_instance_id for r in basic_rows} & window_ids
 
 
 def test_determine_metadata_df(spark, basic_narrow_db):
