@@ -72,9 +72,9 @@ def tile_windows(
 
     The one window implementation behind ``TimeWindowEvent``: the solve calls it through
     :meth:`TimeWindowExpression.build` (scoped aggregations), the event fact through
-    :func:`window_intervals_udf`.  ``event_instance_id`` hashes a window's position, so both
-    sides must produce the same windows in the same order, which a single function
-    guarantees as long as both pass in the same values.  Both read the same Spark-computed
+    :func:`window_intervals_udf`.  ``event_instance_id`` hashes each window's boundaries, so
+    both sides must produce identical windows, which a single function guarantees as long as
+    both pass in the same values.  Both read the same Spark-computed
     bounds (``SolverConfig.with_window_bounds``), but pandas hands them over as ``int64`` or
     ``float64`` (nulls force ``float64``), or as ``None`` / ``NaN``.  The bounds are
     therefore converted to ``float`` first: ``int64`` -> ``float64`` rounds to the nearest

@@ -81,7 +81,10 @@ def _expected_window_count(container_id: int) -> int:
 
 
 def test_time_window_event_in_report(spark, basic_narrow_db):
-    """A TimeWindowEvent (alongside a scoped aggregation) tiles each container into windows."""
+    """A TimeWindowEvent registered on a report tiles each container exactly into windows,
+    with one id per window, and writes its event_dimension row. Per-window statistics are
+    covered by test_time_window_event_aggregation_join (the basic fixture's container
+    boundaries don't overlap its samples, so they would all be NaN here)."""
     my_report = Report(
         name="time_window_event_report",
         spark=spark,
@@ -93,20 +96,6 @@ def test_time_window_event_in_report(spark, basic_narrow_db):
         name="ten_sec", window_length=WINDOW_LENGTH, desc="Ten second windows"
     )
     my_report.add_event(window_evt)
-
-    query = my_report.get_db().query
-    page = Page(page_number=1)
-    my_report.add_page(page)
-    page.add_aggregation(
-        StatsAggregator(
-            name="rpm_stats_per_window",
-            input_expressions=[query.channel(channel_name="Engine RPM")],
-            channel_names=["Engine RPM"],
-            statistics=["min", "max", "mean"],
-            event=window_evt,
-            desc="Engine RPM stats per window",
-        )
-    )
 
     my_report.determine_report()
 
@@ -360,9 +349,8 @@ def _assert_window_stats_match_samples(
     and windows without RPM samples carry no value (RPM only covers each container's first
     minute, so most windows are empty).
 
-    The ids hash the window's position, so a position that drifted between the event fact
-    and the solve would attach a neighbouring window's values; this pins every stats row to
-    the window whose boundaries event_instance_fact stores.
+    This pins every stats row to the window whose boundaries event_instance_fact stores, so
+    windows that differed between the event fact and the solve would show up here.
     """
     rpm_channels = (
         spark.read.table(f"{schema}.channel_metrics")
@@ -544,8 +532,8 @@ def _assert_windows_tile_containers(rows, boundaries: dict, window_length: float
 def test_multiple_time_window_events_coexist(spark, setup_tw_aligned_db):
     """Two TimeWindowEvents with different window lengths coexist in one report: each tiles
     every container with its own windows, and the statistics scoped to each event carry
-    the values of that event's windows. The ids hash the event name, so window k of one
-    event never joins window k of the other."""
+    the values of that event's windows. The ids include the event name, so a window of one
+    event never joins the other event's windows, even where their boundaries coincide."""
     schema, window_length, _ = setup_tw_aligned_db
     table_prefix = "time_window_multi_test"
     my_report = Report(

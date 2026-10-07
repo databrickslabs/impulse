@@ -37,8 +37,8 @@ class TimeWindowEvent(ContainerBoundaryEvent):
     :func:`window_intervals_udf`), so every filtered container gets windows regardless of
     its channel data.  Aggregations scoped to this event evaluate the
     :class:`TimeWindowExpression` in the solve.  Both use the same window function
-    (``tile_windows``), and ``event_instance_id`` hashes the window's position, so the
-    ids match on both sides.
+    (``tile_windows``), so they produce identical windows, and the timestamp-based
+    ``event_instance_id`` (like for other interval events) matches on both sides.
     """
 
     def __init__(
@@ -209,9 +209,8 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         containers' ``start_ts`` / ``stop_ts`` in the channel time frame
         (``SolverConfig.with_window_bounds``), so every filtered container gets windows.
         Each window becomes one event instance (``start_ts < end_ts``) whose
-        ``event_instance_id`` hashes its position among the container's windows. The solve
-        uses the same window function for scoped aggregations (see
-        :func:`window_intervals_udf`), so the ids match.
+        ``event_instance_id`` hashes its boundaries. The solve uses the same window function
+        for scoped aggregations (see :func:`window_intervals_udf`), so the ids match.
 
         Parameters
         ----------
@@ -244,9 +243,8 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         stop_ts = f.col(solver.config.window_stop_col)
 
         # One (event_name, windows) struct per event, exploded in a single pass over the
-        # containers. posexplode yields each window's position, which the
-        # event_instance_id hashes (scoped aggregations use the same position). The windows
-        # UDF only sees this container-level plan, never the channels table.
+        # containers. The windows UDF only sees this container-level plan, never the
+        # channels table.
         per_event = f.array(
             *[
                 f.struct(
@@ -267,7 +265,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             .select(
                 "container_id",
                 f.col("event.event_name").alias("event_name"),
-                f.posexplode(f.col("event.windows")).alias("window_index", "event_instance"),
+                f.explode(f.col("event.windows")).alias("event_instance"),
             )
             .withColumn("start_ts", f.col("event_instance").getItem(0))
             .withColumn("end_ts", f.col("event_instance").getItem(1))

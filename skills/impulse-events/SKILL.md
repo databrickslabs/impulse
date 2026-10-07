@@ -155,7 +155,7 @@ report.add_event(ten_minute)
 Windows are computed from `container_metrics` for every container matching the report's filters, with
 or without channel data or a scoped aggregation. Pair it with an aggregation scoped to the event (e.g.
 `StatsAggregator(..., event=...)`) to compute one statistic per window; those rows carry the same
-`event_instance_id` values as the windows (the id hashes container, event name and window position).
+`event_instance_id` values as the windows (both sides use the same window function).
 Because the windows come from `container_metrics`, those boundaries must share the channel samples'
 time base for the per-window values to be meaningful. If `container_metrics.start_ts`/`stop_ts` are
 `TIMESTAMP` columns, set `query_engine.solver_config.channel_time_unit` to the unit of the channel

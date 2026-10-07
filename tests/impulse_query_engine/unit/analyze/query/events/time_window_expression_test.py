@@ -255,7 +255,7 @@ def test_window_intervals_udf_invalid_max_windows_raises():
 
 
 def _as_list(windows) -> list[tuple[float, float]]:
-    """Windows as ordered (start, end) pairs: the order is the window index the ids hash."""
+    """Windows as ordered (start, end) pairs."""
     return [(float(s), float(e)) for s, e in windows]
 
 
@@ -352,6 +352,6 @@ def test_stats_aggregator_windows_equal_helper_windows(spark):  # noqa: F811
     event_timestamps, numeric_values, _, _ = agg.build(cache)
 
     assert len(expected) == 7
-    # Same windows in the same order: event_timestamps' position is the window index.
+    # The same windows, in the same order.
     assert _as_list(event_timestamps) == _as_list(expected)
     assert len(numeric_values[0]) == len(event_timestamps)

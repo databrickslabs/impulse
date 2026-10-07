@@ -152,9 +152,8 @@ Resolves the matching containers via the solver's filter pipeline (like
 containers' ``start_ts`` / ``stop_ts`` in the channel time frame
 (``SolverConfig.with_window_bounds``), so every filtered container gets windows.
 Each window becomes one event instance (``start_ts < end_ts``) whose
-``event_instance_id`` hashes its position among the container's windows. The solve
-uses the same window function for scoped aggregations (see
-:func:`window_intervals_udf`), so the ids match.
+``event_instance_id`` hashes its boundaries. The solve uses the same window function
+for scoped aggregations (see :func:`window_intervals_udf`), so the ids match.
 
 **Arguments**:
 

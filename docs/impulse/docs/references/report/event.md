@@ -261,8 +261,8 @@ containers in incremental mode.
    zero-length trailing slice is dropped (every instance satisfies `start_ts < end_ts`).
    Containers whose `start_ts` or `stop_ts` is null, NaN or infinite get no windows.
 3. Each window becomes one **event instance**, written to the shared `event_instance_fact` table.
-   Its `event_instance_id` hashes the container, the event name and the window's position in
-   the container (0, 1, 2, ...).
+   Its `event_instance_id` hashes the container, the event name and the window's start and end,
+   like for other interval events.
 4. An aggregation scoped to the event (`StatsAggregator(..., event=time_window_event)`) computes
    its statistic **once per window** and joins back to those instances.
 
@@ -277,8 +277,8 @@ samples' time base (as they do in real measurement data).
 :::note
 Window boundaries are stored as doubles (`start_ts` / `end_ts`), like every other event type. Epoch
 timestamps in nanoseconds exceed the range doubles represent exactly, so their window boundaries
-are rounded to about 256 ns. The `event_instance_id` depends on the window's position, not on its
-boundaries, so the rounding does not affect how aggregations join to the windows.
+are rounded to about 256 ns. The event and its aggregations use the same window function, so the
+rounding is the same on both sides and their `event_instance_id` values still match.
 :::
 
 ## Event output schema
