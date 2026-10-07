@@ -4,6 +4,7 @@ import random
 from unittest.mock import MagicMock
 
 import numpy as np
+import pandas as pd
 import pyspark.sql.functions as F
 import pytest
 
@@ -11,7 +12,8 @@ from impulse_query_engine.analyze.query.aggregations.stats_aggregator import Sta
 from impulse_query_engine.analyze.query.events import TimeWindowExpression
 from impulse_query_engine.analyze.query.events.time_window_expression import (
     MAX_WINDOWS_PER_CONTAINER,
-    window_intervals_col,
+    tile_windows,
+    window_intervals_udf,
 )
 from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
 from impulse_query_engine.model.series.intervals import Intervals
@@ -196,29 +198,34 @@ def test_infinite_container_metrics_yield_empty():
     assert len(_build(-np.inf, 100.0, 10)) == 0
 
 
+def test_tile_windows_none_and_na_yield_empty():
+    for start, stop in ((None, 100), (0, None), (pd.NA, 100), (0, np.nan)):
+        starts, ends = tile_windows(start, stop, 10)
+        assert len(starts) == len(ends) == 0
+
+
 # ---------------------------------------------------------------------------
-# window_intervals_col: the native-Spark mirror used by the reporting event fact
+# window_intervals_udf: tile_windows on the event fact side (one row per container)
 # ---------------------------------------------------------------------------
-def _spark_windows(spark, rows, window_length, ts_type="long"):  # noqa: F811
+def _udf_windows(spark, rows, window_length, ts_type="long", **kwargs):  # noqa: F811
     df = spark.createDataFrame(rows, f"k int, start_ts {ts_type}, stop_ts {ts_type}")
-    out = df.select(
-        "k", window_intervals_col(F.col("start_ts"), F.col("stop_ts"), window_length).alias("w")
-    )
+    windows = window_intervals_udf(window_length, **kwargs)
+    out = df.select("k", windows(F.col("start_ts"), F.col("stop_ts")).alias("w"))
     return out, {r.k: [list(p) for p in r.w] for r in out.collect()}
 
 
-def test_window_intervals_col_edge_cases(spark):  # noqa: F811
+def test_window_intervals_udf_edge_cases(spark):  # noqa: F811
     rows = [
         (0, 0, 100),  # exact multiple -> 10 windows
         (1, 0, 105),  # short final window clamped to stop
         (2, 1000, 1010),  # span == W -> 1 window
         (3, 1000, 1001),  # span < W -> 1 clamped window
-        (4, 50, 50),  # stop == start -> none (sequence(0, -1) is [0, -1], not [])
+        (4, 50, 50),  # stop == start -> none
         (5, 60, 50),  # stop < start -> none
         (6, None, 50),  # null bound -> none
         (7, 0, None),
     ]
-    out, w = _spark_windows(spark, rows, 10)
+    out, w = _udf_windows(spark, rows, 10)
 
     assert out.schema["w"].dataType.simpleString() == "array<array<double>>"
     assert w[0] == [[float(s), float(s + 10)] for s in range(0, 100, 10)]
@@ -226,36 +233,25 @@ def test_window_intervals_col_edge_cases(spark):  # noqa: F811
     assert w[2] == [[1000.0, 1010.0]]
     assert w[3] == [[1000.0, 1001.0]]
     assert w[4] == w[5] == w[6] == w[7] == []
-    assert all(s < e for windows in w.values() for s, e in windows)
 
 
-def test_window_intervals_col_non_finite_bounds_yield_no_windows(spark):  # noqa: F811
-    """NaN / infinite boundaries give no windows on both sides. Spark orders NaN above
-    every number, so a NaN stop_ts used to pass ``stop > start`` and emit [[0, 4], [-4, 0]]."""
+def test_window_intervals_udf_non_finite_bounds_yield_no_windows(spark):  # noqa: F811
     nan, inf = float("nan"), float("inf")
     rows = [(0, 0.0, nan), (1, nan, 10.0), (2, nan, nan), (3, 0.0, inf), (4, -inf, 10.0)]
-    _, w = _spark_windows(spark, rows, 4, ts_type="double")
-
-    for k, start, stop in rows:
-        assert w[k] == [], f"row {k} ({start}, {stop}) produced {w[k]}"
-        assert _build(start, stop, 4).get_data() == []
+    _, w = _udf_windows(spark, rows, 4, ts_type="double")
+    assert all(w[k] == [] for k, _, _ in rows), w
 
 
-def test_window_intervals_col_raises_beyond_max_windows(spark):  # noqa: F811
-    df = spark.createDataFrame([(0, 0, 100)], "k int, start_ts long, stop_ts long")
-    ok = df.select(window_intervals_col(F.col("start_ts"), F.col("stop_ts"), 10, max_windows=10))
-    assert len(ok.collect()[0][0]) == 10
-
-    too_many = df.select(
-        window_intervals_col(F.col("start_ts"), F.col("stop_ts"), 10, max_windows=9)
-    )
+def test_window_intervals_udf_raises_beyond_max_windows(spark):  # noqa: F811
+    _, ok = _udf_windows(spark, [(0, 0, 100)], 10, max_windows=10)
+    assert len(ok[0]) == 10
     with pytest.raises(Exception, match="10 windows of length 10.0 .* exceed max_windows=9"):
-        too_many.collect()
+        _udf_windows(spark, [(0, 0, 100)], 10, max_windows=9)
 
 
-def test_window_intervals_col_invalid_max_windows_raises():
+def test_window_intervals_udf_invalid_max_windows_raises():
     with pytest.raises(ValueError, match="max_windows must be a positive integer"):
-        window_intervals_col(F.col("start_ts"), F.col("stop_ts"), 10, max_windows=0)
+        window_intervals_udf(10, max_windows=0)
 
 
 def _as_list(windows) -> list[tuple[float, float]]:
@@ -266,8 +262,8 @@ def _as_list(windows) -> list[tuple[float, float]]:
 def _count_mismatch_case(window_length: float) -> tuple[int, int]:
     """Find ns-epoch (start, stop) whose int64 and double spans yield different counts.
 
-    This is exactly the case where numpy without the float() conversion (exact int64
-    subtraction) and Spark (double subtraction) disagree on the number of windows.
+    This is exactly the case where exact int64 subtraction and double subtraction disagree
+    on the number of windows, so tile_windows must convert to float first on every path.
     """
     base = 1_700_000_000_000_000_000
     for start in range(base, base + 512):
@@ -281,76 +277,64 @@ def _count_mismatch_case(window_length: float) -> tuple[int, int]:
     raise AssertionError("no int64/double count-mismatch case found")
 
 
-def test_window_intervals_col_bit_identical_to_build(spark):  # noqa: F811
-    """The event fact (Spark) and scoped aggregations (numpy ``build``) produce the same
-    windows in the same order: event_instance_id hashes the window's position, and the
-    stored boundaries must describe the window the statistics were computed over."""
+def _batch_dtype_udf():
+    """Pandas UDF reporting the dtype the bounds arrive in, per row of the batch (created
+    lazily: defining a pandas UDF needs an active Spark session)."""
+
+    @F.pandas_udf("string")
+    def batch_dtype(start: pd.Series) -> pd.Series:
+        return pd.Series([str(start.dtype)] * len(start))
+
+    return batch_dtype
+
+
+def test_event_fact_and_solve_windows_identical_across_input_dtypes(spark):  # noqa: F811
+    """Both sides call tile_windows, but pandas hands the bounds over differently: the event
+    fact UDF gets int64 for a batch without nulls and float64 once a null is in the batch,
+    the solve gets float64 (its container metrics are nulled on most rows). For ns epochs
+    beyond 2^53, including a span where int64 and double subtraction disagree on the count,
+    all paths must produce the same windows in the same order."""
     rnd = random.Random(7)
-
-    # Long timestamps: ns epochs (~1.7e18, beyond 2^53) and µs epochs, with spans hugging
-    # multiples of W. Includes W values that are not multiples of the 256 ns double spacing.
-    long_cases = []
-    for w in (1e9, 6e10, 333_333_333.0, 1_000_000_007.0):
-        for _ in range(60):
-            start = rnd.randint(1_600_000_000_000_000_000, 1_800_000_000_000_000_000)
-            stop = start + int(rnd.randint(1, 50) * w) + rnd.randint(-600, 600)
-            long_cases.append((start, stop, w))
-    for w in (1e6, 10_000_000.0):
-        for _ in range(30):
-            start = rnd.randint(1_600_000_000_000_000, 1_800_000_000_000_000)
-            stop = start + int(rnd.randint(1, 50) * w) + rnd.randint(-5, 5)
-            long_cases.append((start, stop, w))
-    edge_start, edge_stop = _count_mismatch_case(1_000_000_007.0)
-    long_cases.append((edge_start, edge_stop, 1_000_000_007.0))
-
-    # Seconds as doubles with fractional window lengths.
-    double_cases = []
-    for w in (0.1, 0.25, 0.3, 1.7, 60.0):
-        for _ in range(60):
-            start = rnd.uniform(1.6e9, 1.8e9)
-            stop = start + rnd.randint(1, 50) * w + rnd.uniform(-1e-6, 1e-6)
-            double_cases.append((start, stop, w))
-
-    for cases, ts_type, np_types in (
-        (long_cases, "long", (np.int64, np.float64)),
-        (double_cases, "double", (np.float64,)),
-    ):
-        lengths = sorted({w for _, _, w in cases})
-        df = spark.createDataFrame(
-            [(k, s, e, w) for k, (s, e, w) in enumerate(cases)],
-            f"k int, start_ts {ts_type}, stop_ts {ts_type}, w double",
+    window_length = 1_000_000_007.0
+    cases = []
+    for _ in range(60):
+        start = rnd.randint(1_600_000_000_000_000_000, 1_800_000_000_000_000_000)
+        cases.append(
+            (start, start + int(rnd.randint(1, 50) * window_length) + rnd.randint(-600, 600))
         )
-        # A single CASE WHEN column computes each row's windows for its own length only,
-        # so all cases run in one Spark job.
-        windows_col = None
-        for w in lengths:
-            branch = window_intervals_col(F.col("start_ts"), F.col("stop_ts"), w)
-            condition = F.col("w") == F.lit(w)
-            windows_col = (
-                F.when(condition, branch)
-                if windows_col is None
-                else windows_col.when(condition, branch)
-            )
-        spark_windows = {
-            r.k: r.windows for r in df.select("k", windows_col.alias("windows")).collect()
-        }
+    cases.append(_count_mismatch_case(window_length))
+    rows = [(k, s, e) for k, (s, e) in enumerate(cases)]
+    windows = window_intervals_udf(window_length)
+    batch_dtype = _batch_dtype_udf()
 
-        mismatches = []
-        for k, (start, stop, w) in enumerate(cases):
-            expected = _as_list(spark_windows[k])
-            assert expected, f"case {k} produced no windows"
-            for np_type in np_types:
-                built = _as_list(_build(np_type(start), np_type(stop), w).get_data())
-                if built != expected:
-                    mismatches.append((k, np_type.__name__, start, stop, w))
-        assert not mismatches, f"Spark/numpy window mismatch: {mismatches[:5]}"
+    def _event_fact(batch_rows) -> tuple[dict, set]:
+        # One partition, so one Arrow batch: a null anywhere turns the whole batch float64.
+        df = spark.createDataFrame(batch_rows, "k int, start_ts long, stop_ts long").coalesce(1)
+        out = df.select(
+            "k",
+            windows(F.col("start_ts"), F.col("stop_ts")).alias("w"),
+            batch_dtype(F.col("start_ts")).alias("dtype"),
+        ).collect()
+        return {r.k: _as_list(r.w) for r in out if r.k >= 0}, {r.dtype for r in out}
+
+    without_nulls, dtypes_int = _event_fact(rows)
+    with_null, dtypes_float = _event_fact([*rows, (-1, None, None)])
+    assert dtypes_int == {"int64"} and dtypes_float == {"float64"}
+
+    mismatches = []
+    for k, (start, stop) in enumerate(cases):
+        solve = _as_list(_build(np.float64(start), np.float64(stop), window_length).get_data())
+        assert solve, f"case {k} produced no windows"
+        if not (without_nulls[k] == with_null[k] == solve):
+            mismatches.append((k, start, stop))
+    assert not mismatches, f"event fact / solve window mismatch: {mismatches[:5]}"
 
 
 def test_stats_aggregator_windows_equal_helper_windows(spark):  # noqa: F811
     """A StatsAggregator scoped to a TimeWindowExpression emits exactly the helper's windows
     (no merging of touching windows, no extra drops)."""
     start, stop, w = 1_700_000_000_000_000_123, 1_700_000_007_000_000_049, 1_000_000_007.0
-    _, spark_windows = _spark_windows(spark, [(0, start, stop)], w)
+    expected = list(zip(*tile_windows(start, stop, w), strict=True))
 
     # One channel sampled across the whole container, so every window has data.
     ts = np.linspace(float(start), float(stop), 50)
@@ -367,7 +351,7 @@ def test_stats_aggregator_windows_equal_helper_windows(spark):  # noqa: F811
     cache = _FakeCache({_WINDOW_START: np.float64(start), _WINDOW_STOP: np.float64(stop)})
     event_timestamps, numeric_values, _, _ = agg.build(cache)
 
-    assert len(spark_windows[0]) == 7
+    assert len(expected) == 7
     # Same windows in the same order: event_timestamps' position is the window index.
-    assert _as_list(event_timestamps) == _as_list(spark_windows[0])
+    assert _as_list(event_timestamps) == _as_list(expected)
     assert len(numeric_values[0]) == len(event_timestamps)

@@ -269,9 +269,8 @@ containers in incremental mode.
 :::note
 The windows are computed from `container_metrics` alone, so **every** container that matches the
 report's filters gets windows, whether or not it has channel data and whether or not an
-aggregation is scoped to the event. An aggregation scoped to the event computes the same windows,
-in the same order, in the query engine, so its per-window rows carry the same `event_instance_id`
-values. For the per-window values to be meaningful, the container boundaries must share the channel
+aggregation is scoped to the event. An aggregation scoped to the event uses the same window
+function in the query engine, so its per-window rows carry the same `event_instance_id` values. For the per-window values to be meaningful, the container boundaries must share the channel
 samples' time base (as they do in real measurement data).
 :::
 

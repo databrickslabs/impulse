@@ -15,7 +15,7 @@ from impulse_query_engine.analyze.query.events.time_window_expression import (
     MAX_WINDOWS_PER_CONTAINER,
     TimeWindowExpression,
     validate_max_windows,
-    window_intervals_col,
+    window_intervals_udf,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
@@ -33,12 +33,12 @@ class TimeWindowEvent(ContainerBoundaryEvent):
     span with windows of length ``window_length``.  The final slice is clamped to the
     container end.
 
-    The event fact is computed natively in Spark from ``container_metrics`` (via
-    :func:`window_intervals_col`), so every filtered container gets windows regardless of
+    The event fact is computed from ``container_metrics`` alone (via
+    :func:`window_intervals_udf`), so every filtered container gets windows regardless of
     its channel data.  Aggregations scoped to this event evaluate the
-    :class:`TimeWindowExpression` in the solve, which computes the same windows in the
-    same order.  ``event_instance_id`` hashes the window's position rather than its
-    boundaries, so both sides match without relying on bit-identical doubles.
+    :class:`TimeWindowExpression` in the solve.  Both use the same window function
+    (``tile_windows``), and ``event_instance_id`` hashes the window's position, so the
+    ids match on both sides.
     """
 
     def __init__(
@@ -210,8 +210,8 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         (``SolverConfig.with_window_bounds``), so every filtered container gets windows.
         Each window becomes one event instance (``start_ts < end_ts``) whose
         ``event_instance_id`` hashes its position among the container's windows. The solve
-        computes the same windows in the same order for scoped aggregations (see
-        :func:`window_intervals_col`), so the ids match.
+        uses the same window function for scoped aggregations (see
+        :func:`window_intervals_udf`), so the ids match.
 
         Parameters
         ----------
@@ -245,17 +245,15 @@ class TimeWindowEvent(ContainerBoundaryEvent):
 
         # One (event_name, windows) struct per event, exploded in a single pass over the
         # containers. posexplode yields each window's position, which the
-        # event_instance_id hashes (scoped aggregations use the same position).
+        # event_instance_id hashes (scoped aggregations use the same position). The windows
+        # UDF only sees this container-level plan, never the channels table.
         per_event = f.array(
             *[
                 f.struct(
                     f.lit(event.get_name()).alias("event_name"),
-                    window_intervals_col(
-                        start_ts,
-                        stop_ts,
-                        event.window_length,
-                        max_windows=event.max_windows_per_container,
-                    ).alias("windows"),
+                    window_intervals_udf(
+                        event.window_length, max_windows=event.max_windows_per_container
+                    )(start_ts, stop_ts).alias("windows"),
                 )
                 for event in events
             ]

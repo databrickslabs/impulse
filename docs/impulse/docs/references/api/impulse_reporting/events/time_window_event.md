@@ -19,7 +19,7 @@ event instance per fixed-duration slice, tiling the container's ``start_ts`` / `
 span with windows of length ``window_length``.  The final slice is clamped to the
 container end.
 
-The event fact is computed natively in Spark from ``container_metrics`` (via
+The event fact is computed from ``container_metrics`` alone (via
 
 
 #### \_\_init\_\_
@@ -153,8 +153,8 @@ containers' ``start_ts`` / ``stop_ts`` in the channel time frame
 (``SolverConfig.with_window_bounds``), so every filtered container gets windows.
 Each window becomes one event instance (``start_ts < end_ts``) whose
 ``event_instance_id`` hashes its position among the container's windows. The solve
-computes the same windows in the same order for scoped aggregations (see
-:func:`window_intervals_col`), so the ids match.
+uses the same window function for scoped aggregations (see
+:func:`window_intervals_udf`), so the ids match.
 
 **Arguments**:
 
