@@ -233,7 +233,8 @@ seconds or any derived unit. So 60 one-minute windows over millisecond timestamp
 
 If `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns, set
 [`solver_config.epoch_unit`](../../config/configuration.md#solver-column-mappings-and-filters)
-to the epoch unit of the channel sample timestamps (e.g. `"s"`). The boundaries are converted to
+to the epoch unit of the channel sample timestamps (`tstart`/`tend`, or `timestamp` for RAW
+data; e.g. `"s"`). The boundaries are converted to
 that unit, and `window_length` is expressed in it. Without it, the report fails with an error
 naming the setting. `epoch_unit` is part of the event's definition (and of the aggregations
 scoped to it), so changing it recomputes them over all containers in incremental mode.

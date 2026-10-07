@@ -171,10 +171,12 @@ Top-level fields on `SolverConfig`:
   `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured).
   Omit it if you don't need project-level scoping; the solver does not require it.
 - `epoch_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional): Epoch unit of the channel sample
-  timestamps (`tstart`/`tend`). Only needed when `container_metrics.start_ts`/`stop_ts` are
-  `TIMESTAMP` columns **and** the report uses a `TimeWindowEvent`, whose windows must be in the
-  samples' time base. Such a report fails with a clear error until it is set. When set, `TIMESTAMP`
-  boundaries are converted to epoch numbers in that unit:
+  timestamps (`tstart`/`tend`, or `timestamp` when `data_type = "RAW"`). It only describes them:
+  channel timestamps are never converted and must already be epoch numbers. Only needed when
+  `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns **and** the report uses a
+  `TimeWindowEvent`, whose windows must be in the samples' time base. Such a report fails with a
+  clear error until it is set. When set, `TIMESTAMP` boundaries are converted to epoch numbers in
+  that unit:
   - `ContainerEvent` and `TimeWindowEvent` write `start_ts`/`end_ts` in that unit. With `"s"`, the
     values are identical to the default.
   - Expressions that request `start_ts`/`stop_ts` as container metrics (e.g. via

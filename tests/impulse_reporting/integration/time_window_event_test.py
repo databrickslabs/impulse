@@ -7,12 +7,14 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 import pytest
 from databricks.sdk import WorkspaceClient
+from pyspark.sql import Window
 
-from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
+from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.config.config_parser import (
     Comparator,
     ContainerFilters,
+    DataType,
     ImpulseConfig,
     IncrementalConfig,
     MetricFilter,
@@ -155,6 +157,8 @@ _ALIGNED_SCHEMA = "spark_catalog.silver_tw_aligned"
 #   sec:    seconds as doubles with a fractional window, so the boundaries round.
 #   sec_ts: samples as seconds-as-double, container boundaries as TIMESTAMP (converted to
 #           epoch seconds via epoch_unit="s").
+#   us_ts:  native µs samples, container boundaries as TIMESTAMP (converted to epoch µs via
+#           epoch_unit="us", the long path of the conversion).
 def _to_seconds(c):
     return c.cast("double") / F.lit(1e6)
 
@@ -168,6 +172,12 @@ _TIME_BASES = {
     "ns": (_to_ns, _to_ns, 600_000_000_007, None),
     "sec": (_to_seconds, _to_seconds, 600.3, None),
     "sec_ts": (_to_seconds, lambda c: F.timestamp_micros(c.cast("long")), 600.3, "s"),
+    "us_ts": (
+        lambda c: c,
+        lambda c: F.timestamp_micros(c.cast("long")),
+        ALIGNED_WINDOW_LENGTH,
+        "us",
+    ),
 }
 
 
@@ -224,13 +234,21 @@ def setup_tw_aligned_db(spark, setup_basic_db, request):  # noqa: F811
     spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
 
 
-def _aligned_config(schema: str, table_prefix: str, epoch_unit=None, **extra) -> dict:
+def _aligned_config(
+    schema: str,
+    table_prefix: str,
+    epoch_unit=None,
+    raw_encoder: RawEncoder | None = None,
+    channels_table: str = "channels",
+    **extra,
+) -> dict:
+    """Report config over the aligned clone; a *raw_encoder* switches to ``data_type=RAW``."""
     return dict(
         ImpulseConfig(
             source=Source(
                 container_metrics_table=f"{schema}.container_metrics",
                 channel_metrics_table=f"{schema}.channel_metrics",
-                channels_uri=f"{schema}.channels",
+                channels_uri=f"{schema}.{channels_table}",
             ),
             unity_sink=UnitySink(
                 catalog="spark_catalog", schema="gold", table_prefix=table_prefix
@@ -247,6 +265,8 @@ def _aligned_config(schema: str, table_prefix: str, epoch_unit=None, **extra) ->
             query_engine=QueryEngine(
                 solver=Solvers.KEY_VALUE_STORE_SOLVER,
                 solver_config=SolverConfig(epoch_unit=epoch_unit) if epoch_unit else None,
+                data_type=DataType.RAW if raw_encoder else DataType.RLE,
+                raw_encoder=raw_encoder,
             ),
             measurement_dimensions=["container_id", "start_ts", "stop_ts"],
             **extra,
@@ -305,7 +325,9 @@ def _assert_ids_join(spark, table_prefix: str) -> tuple[set, set]:  # noqa: F811
     return stats_event_ids, event_ids
 
 
-def _assert_window_stats_match_samples(spark, schema: str, table_prefix: str):  # noqa: F811
+def _assert_window_stats_match_samples(
+    spark, schema: str, table_prefix: str, channels_table: str = "channels"  # noqa: F811
+):
     """Each window's RPM min / max equal those of the silver samples overlapping that window,
     and windows without RPM samples carry no value (RPM only covers each container's first
     minute, so most windows are empty).
@@ -319,15 +341,19 @@ def _assert_window_stats_match_samples(spark, schema: str, table_prefix: str):  
         .filter(F.col("channel_name") == "Engine RPM")
         .select("container_id", "channel_id")
     )
-    samples = (
-        spark.read.table(f"{schema}.channels")
-        .join(rpm_channels, ["container_id", "channel_id"])
-        .select(
-            "container_id",
-            F.col("tstart").cast("double").alias("tstart"),
-            F.col("tend").cast("double").alias("tend"),
-            F.col("value").cast("double").alias("value"),
+    channels = spark.read.table(f"{schema}.{channels_table}")
+    if "tend" not in channels.columns:
+        # RAW points: each sample is valid until the next one, the last one only at its own
+        # timestamp (the documented raw->interval rule of both encoders).
+        by_time = Window.partitionBy("container_id", "channel_id").orderBy("tstart")
+        channels = channels.withColumnRenamed("timestamp", "tstart").withColumn(
+            "tend", F.coalesce(F.lead("tstart").over(by_time), F.col("tstart"))
         )
+    samples = channels.join(rpm_channels, ["container_id", "channel_id"]).select(
+        "container_id",
+        F.col("tstart").cast("double").alias("tstart"),
+        F.col("tend").cast("double").alias("tend"),
+        F.col("value").cast("double").alias("value"),
     )
     windows = spark.read.table(f"spark_catalog.gold.{table_prefix}_event_instance_fact")
     expected = (
@@ -361,7 +387,9 @@ def _assert_window_stats_match_samples(spark, schema: str, table_prefix: str):  
     assert not mismatches, mismatches[:5]
 
 
-@pytest.mark.parametrize("setup_tw_aligned_db", ["us", "ns", "sec", "sec_ts"], indirect=True)
+@pytest.mark.parametrize(
+    "setup_tw_aligned_db", ["us", "ns", "sec", "sec_ts", "us_ts"], indirect=True
+)
 def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
     """Stats scoped to a TimeWindowEvent yield per-window values whose event_instance_id
     joins to the natively computed event fact, for µs, ns and seconds-as-double time bases,
@@ -387,6 +415,52 @@ def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
 
     _assert_ids_join(spark, table_prefix)
     _assert_window_stats_match_samples(spark, schema, table_prefix)
+
+
+def _write_raw_channels(spark, schema: str) -> str:  # noqa: F811
+    """Write the aligned channels in the raw format (one ``timestamp`` per sample, no
+    ``tend``) next to the RLE table, and return the new table's name."""
+    table = "channels_raw"
+    spark.read.table(f"{schema}.channels").select(
+        "container_id", "channel_id", F.col("tstart").alias("timestamp"), "value"
+    ).write.format("delta").mode("overwrite").saveAsTable(f"{schema}.{table}")
+    return table
+
+
+@pytest.mark.parametrize("raw_encoder", [RawEncoder.RLE, RawEncoder.INTERVAL])
+@pytest.mark.parametrize("setup_tw_aligned_db", ["us", "us_ts"], indirect=True)
+def test_time_window_event_aggregation_join_raw(spark, setup_tw_aligned_db, raw_encoder):
+    """With data_type=RAW both encoders derive [tstart, tend) from the raw ``timestamp``
+    column without changing its unit, so windows over numeric or TIMESTAMP (epoch_unit="us")
+    container boundaries line up with the samples exactly as for RLE silver data."""
+    schema, window_length, epoch_unit = setup_tw_aligned_db
+    channels_table = _write_raw_channels(spark, schema)
+    time_base = schema.removeprefix(_ALIGNED_SCHEMA + "_")
+    table_prefix = f"time_window_raw_test_{time_base}_{raw_encoder.value.lower()}"
+    my_report = Report(
+        name="time_window_raw_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=_aligned_config(
+            schema,
+            table_prefix,
+            epoch_unit=epoch_unit,
+            raw_encoder=raw_encoder,
+            channels_table=channels_table,
+        ),
+    )
+
+    window_evt = TimeWindowEvent(name="ten_min", window_length=window_length)
+    my_report.add_event(window_evt)
+    page = Page(page_number=1)
+    my_report.add_page(page)
+    page.add_aggregation(_rpm_stats(my_report, window_evt))
+
+    my_report.determine_report()
+    my_report.persist_results()
+
+    _assert_ids_join(spark, table_prefix)
+    _assert_window_stats_match_samples(spark, schema, table_prefix, channels_table)
 
 
 def test_multiple_time_window_events_coexist(spark, basic_narrow_db):

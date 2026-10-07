@@ -126,12 +126,14 @@ so that solver code can always reference the same constants.
 override for the channel mapping (alias) table.
 - `channels` (`TableConfig`): Column mappings and filters for the channel data table.
 - `unit_conversion` (`TableConfig`): Column mappings and filters for the unit conversion table.
-- `epoch_unit` (`{"s", "ms", "us", "ns"} or None`): Epoch unit of the channel sample timestamps (``tstart`` / ``tend``).  When set,
-``TIMESTAMP``-typed container ``start_ts`` / ``stop_ts`` are converted to epoch
-numbers in this unit for container-boundary events (``ContainerEvent``,
-``TimeWindowEvent``) and for expressions that request them in the solve.  Only
-required for a ``TimeWindowEvent`` over ``TIMESTAMP`` boundaries; when unset,
-nothing is converted.
+- `epoch_unit` (`{"s", "ms", "us", "ns"} or None`): Epoch unit of the channel sample timestamps (``tstart`` / ``tend``, or
+``timestamp`` for RAW data).  When set, ``TIMESTAMP``-typed container
+``start_ts`` / ``stop_ts`` are converted to epoch numbers in this unit for
+container-boundary events (``ContainerEvent``, ``TimeWindowEvent``) and for
+expressions that request them in the solve.  Channel timestamps are never
+converted; they must already be epoch numbers.  Only required for a
+``TimeWindowEvent`` over ``TIMESTAMP`` boundaries; when unset, nothing is
+converted.
 
 #### from\_json
 
