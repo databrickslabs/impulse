@@ -331,7 +331,7 @@ class TimeWindowExpression(TimeSeriesExpression):
                     f"TimeWindowExpression needs epoch-number container boundaries, but "
                     f"{name} is {type(value).__name__}. For TIMESTAMP columns, set "
                     "solver_config.epoch_unit to the epoch unit of the channel sample "
-                    "timestamps so they are converted before the solve."
+                    "timestamps so start_ts / stop_ts are converted before the solve."
                 )
 
         # Mirror window_intervals_col exactly: convert to double *before* subtracting.  A

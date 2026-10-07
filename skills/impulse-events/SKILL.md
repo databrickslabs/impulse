@@ -157,8 +157,11 @@ or without channel data or a scoped aggregation. Pair it with an aggregation sco
 `StatsAggregator(..., event=...)`) to compute one statistic per window; those rows carry the same
 `event_instance_id` values as the windows (the id hashes container, event name and window position).
 Because the windows come from `container_metrics`, those boundaries must share the channel samples'
-time base for the per-window values to be meaningful. Containers with null, NaN or infinite
-boundaries get no windows.
+time base for the per-window values to be meaningful. If `container_metrics.start_ts`/`stop_ts` are
+`TIMESTAMP` columns, set `query_engine.solver_config.epoch_unit` to the unit of the channel
+timestamps (`tstart`/`tend`, or `timestamp` for RAW); only those two container columns are
+converted, never the channel timestamps. Containers with null, NaN or infinite boundaries get no
+windows.
 
 ## Output schema
 

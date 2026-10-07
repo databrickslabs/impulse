@@ -175,8 +175,8 @@ Top-level fields on `SolverConfig`:
   channel timestamps are never converted and must already be epoch numbers. Only needed when
   `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns **and** the report uses a
   `TimeWindowEvent`, whose windows must be in the samples' time base. Such a report fails with a
-  clear error until it is set. When set, `TIMESTAMP` boundaries are converted to epoch numbers in
-  that unit:
+  clear error until it is set. When set, `TIMESTAMP`-typed `container_metrics.start_ts`/`stop_ts`
+  are converted to epoch numbers in that unit:
   - `ContainerEvent` and `TimeWindowEvent` write `start_ts`/`end_ts` in that unit. With `"s"`, the
     values are identical to the default.
   - Expressions that request `start_ts`/`stop_ts` as container metrics (e.g. via

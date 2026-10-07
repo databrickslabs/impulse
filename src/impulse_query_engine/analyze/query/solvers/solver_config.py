@@ -138,14 +138,13 @@ class SolverConfig(BaseModel):
     unit_conversion : TableConfig
         Column mappings and filters for the unit conversion table.
     epoch_unit : {"s", "ms", "us", "ns"} or None
-        Epoch unit of the channel sample timestamps (``tstart`` / ``tend``, or
-        ``timestamp`` for RAW data).  When set, ``TIMESTAMP``-typed container
-        ``start_ts`` / ``stop_ts`` are converted to epoch numbers in this unit for
-        container-boundary events (``ContainerEvent``, ``TimeWindowEvent``) and for
-        expressions that request them in the solve.  Channel timestamps are never
-        converted; they must already be epoch numbers.  Only required for a
-        ``TimeWindowEvent`` over ``TIMESTAMP`` boundaries; when unset, nothing is
-        converted.
+        Epoch unit of the timestamps in the ``channels`` table (``tstart`` / ``tend``,
+        or ``timestamp`` for RAW data); these are never converted.  Only
+        ``TIMESTAMP``-typed ``start_ts`` / ``stop_ts`` of the ``container_metrics``
+        table are converted, into epoch numbers in this unit so they match the channel
+        timestamps.  ``ContainerEvent``, ``TimeWindowEvent`` and expressions that read
+        these columns see the converted values.  Only needed for a ``TimeWindowEvent``
+        over ``TIMESTAMP`` container boundaries; unset means nothing is converted.
     """
 
     project_id: str | None = None
@@ -514,5 +513,6 @@ class SolverConfig(BaseModel):
                     f"{owner} needs epoch-number container boundaries, but container_metrics "
                     f"column '{field.name}' has type {field.dataType.simpleString()}. Set "
                     "query_engine.solver_config.epoch_unit to the epoch unit of the channel "
-                    "sample timestamps (one of 's', 'ms', 'us', 'ns') so it is converted."
+                    "sample timestamps (one of 's', 'ms', 'us', 'ns') so that column is "
+                    "converted to epoch numbers in that unit."
                 )

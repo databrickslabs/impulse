@@ -124,6 +124,13 @@ rejected (use `drop_implausible_data`), any other channels filter warns.
 Top-level `project_id` (str, optional) applies an equality filter on the `project_id` column of every
 table that has one (`container_tags`, `container_metrics`, `channel_mapping`). Omit if not needed.
 
+Top-level `epoch_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional) is the epoch unit of the `channels`
+timestamps (`tstart`/`tend`, or `timestamp` with `data_type="RAW"`); those are never converted. Only
+`TIMESTAMP`-typed `container_metrics.start_ts`/`stop_ts` are converted, into epoch numbers in that
+unit, so `ContainerEvent` / `TimeWindowEvent` boundaries match the channel timestamps. Needed only
+for a `TimeWindowEvent` over `TIMESTAMP` boundaries; with `"ns"`, boundaries must lie between
+1677-09-21 and 2262-04-11 (the int64 nanosecond range).
+
 ```python
 "query_engine": {
     "solver": "DefaultSolver",
@@ -133,7 +140,9 @@ table that has one (`container_tags`, `container_metrics`, `channel_mapping`). O
             "column_name_mapping": {"entity_id": "container_id"},
             "filters": {"parent_id": "my_parent_id"}
         },
-        "container_metrics": {"column_name_mapping": {"start_dt": "tstart", "stop_dt": "tend"}},
+        "container_metrics": {
+            "column_name_mapping": {"measurement_start": "start_ts", "measurement_end": "stop_ts"}
+        },
         "channel_mapping": {"filters": {"toolbox_id": "my_toolbox"}}
     }
 }
