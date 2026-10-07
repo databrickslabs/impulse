@@ -128,10 +128,10 @@ override for the channel mapping (alias) table.
 - `unit_conversion` (`TableConfig`): Column mappings and filters for the unit conversion table.
 - `channel_time_unit` (`{"s", "ms", "us", "ns"} or None`): Time unit of the timestamps in the ``channels`` table (``tstart`` / ``tend``, or
 ``timestamp`` for RAW data).  Only used to compute ``TimeWindowEvent`` windows in
-that unit (see :meth:`with_window_bounds`); required when ``container_metrics``
-``start_ts`` / ``stop_ts`` are ``TIMESTAMP`` columns.  Nothing else is converted:
-channel timestamps, and the ``start_ts`` / ``stop_ts`` seen by UDFs,
-``ContainerEvent`` and ``measurement_dimension``, keep their original values.
+that unit (see ``solvers.utils.window_bounds.with_window_bounds``); required when
+``container_metrics`` ``start_ts`` / ``stop_ts`` are ``TIMESTAMP`` columns.  Nothing
+else is converted: channel timestamps, and the ``start_ts`` / ``stop_ts`` seen by
+UDFs, ``ContainerEvent`` and ``measurement_dimension``, keep their original values.
 - `channel_time_origin` (`{"epoch", "container_start"}`): Origin of the channel timestamps: absolute epoch (default), or relative to the
 container's ``start_ts``.  Like :attr:`channel_time_unit`, only used for the
 ``TimeWindowEvent`` windows.
@@ -238,8 +238,8 @@ def window_start_col() -> str
 
 Internal column name for the container start in the channel time frame.
 
-Added by :meth:`with_window_bounds`; prefixed so it cannot clash with a customer
-column.
+Added by ``solvers.utils.window_bounds.with_window_bounds``; prefixed so it cannot
+clash with a customer column.
 
 
 #### window\_stop\_col
@@ -250,8 +250,8 @@ def window_stop_col() -> str
 
 Internal column name for the container stop in the channel time frame.
 
-Added by :meth:`with_window_bounds`; prefixed so it cannot clash with a customer
-column.
+Added by ``solvers.utils.window_bounds.with_window_bounds``; prefixed so it cannot
+clash with a customer column.
 
 
 #### stop\_ts\_col
@@ -508,48 +508,6 @@ Such a filter runs before raw encoding and bridges intervals across dropped
 samples instead of splitting them; use drop_implausible_data instead. No-op
 when not raw.
 
-
-#### with\_window\_bounds
-
-```python
-def with_window_bounds(df: DataFrame) -> DataFrame
-```
-
-Add the container start/stop in the channel time frame, for ``TimeWindowEvent``.
-
-A ``TimeWindowEvent`` tiles each container into windows that must be in the same
-time frame as the channel timestamps (:attr:`channel_time_unit`,
-:attr:`channel_time_origin`).  This adds :attr:`window_start_col` /
-:attr:`window_stop_col`, derived from the raw ``start_ts`` / ``stop_ts``, which stay
-unchanged for UDFs, ``ContainerEvent`` and ``measurement_dimension``:
-
-- origin ``"epoch"``: ``TIMESTAMP`` boundaries as epoch numbers in
-  :attr:`channel_time_unit`; numeric boundaries converted from
-  :attr:`container_time_unit` to :attr:`channel_time_unit` (as they are when unset);
-- origin ``"container_start"``: ``0`` and ``stop_ts - start_ts``, converted the same
-  way (the difference is taken first, in the boundaries' own unit).
-
-``TIMESTAMP`` values are converted via ``unix_micros``, which is exact and
-independent of the session time zone; ``"s"`` / ``"ms"`` give doubles, ``"us"`` /
-``"ns"`` longs.  Numeric boundaries converted to a finer unit are multiplied by an
-integer (exact, keeping longs), to a coarser unit divided (doubles).  The event fact and the solve both call this, so their windows use
-the same bounds.  The types are checked on the schema, so a missing setting fails
-before any Spark job runs.
-
-**Arguments**:
-
-- `df` (`pyspark.sql.DataFrame`): Column-mapped ``container_metrics`` frame (or a projection of it) with
-``start_ts`` and ``stop_ts``.
-
-**Raises**:
-
-- `ValueError`: If ``start_ts`` / ``stop_ts`` are missing, are ``TIMESTAMP_NTZ`` or ``DATE``,
-mix ``TIMESTAMP`` and numeric types, or are ``TIMESTAMP`` while
-:attr:`channel_time_unit` is unset or :attr:`container_time_unit` is set.
-
-**Returns**:
-
-`pyspark.sql.DataFrame`: *df* with the two window-bound columns added.
 
 #### validate\_container\_time\_unit\_requires\_channel\_time\_unit
 

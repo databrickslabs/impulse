@@ -19,6 +19,7 @@ from impulse_query_engine.analyze.query.events.time_window_expression import (
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.analyze.query.solvers.utils.window_bounds import with_window_bounds
 from impulse_reporting.events.container_boundary_event import ContainerBoundaryEvent
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
@@ -152,8 +153,9 @@ class TimeWindowEvent(ContainerBoundaryEvent):
 
         Only includes the expression string, which encodes the attributes that affect the
         event results: ``window_length`` and the channel time frame (``channel_time_unit``,
-        ``channel_time_origin``, ``container_time_unit``; omitted while unset / default). Resizing the window or
-        changing the time frame therefore forces a full recompute in incremental mode.
+        ``channel_time_origin``, ``container_time_unit``; omitted while unset / default).
+        Resizing the window or changing the time frame therefore forces a full recompute in
+        incremental mode.
 
         Excludes: name, description, required_channels, max_windows_per_container,
         report_id
@@ -207,7 +209,8 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         Resolves the matching containers via the solver's filter pipeline (like
         ``ContainerEvent``) and computes each event's windows natively from the
         containers' ``start_ts`` / ``stop_ts`` in the channel time frame
-        (``SolverConfig.with_window_bounds``), so every filtered container gets windows.
+        (``solvers.utils.window_bounds.with_window_bounds``), so every filtered container
+        gets windows.
         Each window becomes one event instance (``start_ts < end_ts``) whose
         ``event_instance_id`` hashes its boundaries. The solve uses the same window function
         for scoped aggregations (see :func:`window_intervals_udf`), so the ids match.
@@ -238,7 +241,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         # The windows are computed in the channel time frame, from the same bounds the solve
         # uses for scoped aggregations (fails fast on the schema, e.g. when TIMESTAMP
         # boundaries lack solver_config.channel_time_unit).
-        container_metrics_df = solver.config.with_window_bounds(container_metrics_df)
+        container_metrics_df = with_window_bounds(container_metrics_df, solver.config)
         start_ts = f.col(solver.config.window_start_col)
         stop_ts = f.col(solver.config.window_stop_col)
 

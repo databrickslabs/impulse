@@ -17,8 +17,9 @@ from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfi
 from impulse_query_engine.model.series.intervals import Intervals
 
 # Reuse SolverConfig's internal column names for the container bounds in the channel time
-# frame (see SolverConfig.with_window_bounds) rather than re-declaring the literals here.
-# These are the keys under which the solve exposes them via ``SeriesCache.container_metrics``.
+# frame (see solvers.utils.window_bounds.with_window_bounds) rather than re-declaring the
+# literals here. These are the keys under which the solve exposes them via
+# ``SeriesCache.container_metrics``.
 # A default instance suffices since the names are config-invariant.
 _SOLVER_CONFIG = SolverConfig()
 
@@ -74,9 +75,9 @@ def tile_windows(
     :meth:`TimeWindowExpression.build` (scoped aggregations), the event fact through
     :func:`window_intervals_udf`.  ``event_instance_id`` hashes each window's boundaries, so
     both sides must produce identical windows, which a single function guarantees as long as
-    both pass in the same values.  Both read the same Spark-computed
-    bounds (``SolverConfig.with_window_bounds``), but pandas hands them over as ``int64`` or
-    ``float64`` (nulls force ``float64``), or as ``None`` / ``NaN``.  The bounds are
+    both pass in the same values.  Both read the same Spark-computed bounds
+    (``solvers.utils.window_bounds.with_window_bounds``), but pandas hands them over as
+    ``int64`` or ``float64`` (nulls force ``float64``), or as ``None`` / ``NaN``.  The bounds are
     therefore converted to ``float`` first: ``int64`` -> ``float64`` rounds to the nearest
     double on either path, so the arithmetic below runs on identical doubles.
 
@@ -171,10 +172,10 @@ class TimeWindowExpression(TimeSeriesExpression):
     The windows are derived purely from the container's ``start_ts`` / ``stop_ts`` metadata
     (no channel data), so the expression declares no selectors and instead requests the
     container bounds in the channel time frame via :meth:`required_container_metrics`
-    (computed by ``SolverConfig.with_window_bounds``).  Windows tile those bounds with a
-    fixed length ``window_length`` (expressed in the same time unit as the channel
-    timestamps); the final window is clamped to the stop bound when the last full window
-    would overrun it.
+    (computed by ``solvers.utils.window_bounds.with_window_bounds``).  Windows tile those
+    bounds with a fixed length ``window_length`` (expressed in the same time unit as the
+    channel timestamps); the final window is clamped to the stop bound when the last full
+    window would overrun it.
 
     Visual timeline (window_length = W)::
 
@@ -310,7 +311,7 @@ class TimeWindowExpression(TimeSeriesExpression):
         -------
         set of str
             The container start/stop in the channel time frame, which the solver derives
-            from ``start_ts`` / ``stop_ts`` (``SolverConfig.with_window_bounds``).
+            from ``start_ts`` / ``stop_ts`` (``solvers.utils.window_bounds.with_window_bounds``).
         """
         return {_SOLVER_CONFIG.window_start_col, _SOLVER_CONFIG.window_stop_col}
 

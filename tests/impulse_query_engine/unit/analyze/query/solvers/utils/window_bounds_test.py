@@ -1,5 +1,5 @@
 # pylint: disable=missing-function-docstring, redefined-outer-name
-"""Tests for SolverConfig.with_window_bounds.
+"""Tests for solvers.utils.window_bounds.with_window_bounds.
 
 ``TimeWindowEvent`` windows are computed in the channel time frame
 (``channel_time_unit`` / ``channel_time_origin``). ``with_window_bounds`` derives the container
@@ -15,6 +15,7 @@ import pytest
 from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
+from impulse_query_engine.analyze.query.solvers.utils.window_bounds import with_window_bounds
 from tests.conftest import spark  # noqa: F401  (pytest fixture)
 
 # 2025-07-03 07:41:41.483456 UTC
@@ -38,7 +39,7 @@ def _boundaries_df(spark: SparkSession):  # noqa: F811
 
 
 def _bounds(cfg: SolverConfig, df) -> dict:
-    out = cfg.with_window_bounds(df)
+    out = with_window_bounds(df, cfg)
     return {r.container_id: (r[_START], r[_STOP]) for r in out.collect()}
 
 
@@ -63,7 +64,7 @@ def test_epoch_origin_converts_timestamps_to_unit(
     previous_tz = spark.conf.get("spark.sql.session.timeZone")
     spark.conf.set("spark.sql.session.timeZone", session_tz)
     try:
-        out = SolverConfig(channel_time_unit=unit).with_window_bounds(_boundaries_df(spark))
+        out = with_window_bounds(_boundaries_df(spark), SolverConfig(channel_time_unit=unit))
         rows = {r.container_id: r for r in out.collect()}
     finally:
         spark.conf.set("spark.sql.session.timeZone", previous_tz)
@@ -132,7 +133,7 @@ def _ms_boundaries_df(spark: SparkSession):  # noqa: F811
 def test_numeric_ms_boundaries_converted_to_finer_channel_unit_exactly(spark):  # noqa: F811
     # Boundaries in epoch ms, channels in µs: an integer factor keeps the longs exact.
     cfg = SolverConfig(channel_time_unit="us", container_time_unit="ms")
-    out = cfg.with_window_bounds(_ms_boundaries_df(spark))
+    out = with_window_bounds(_ms_boundaries_df(spark), cfg)
     start_ms = _EPOCH_MICROS // 1000
     stop_ms = (_EPOCH_MICROS + _SPAN_MICROS) // 1000
     assert out.schema[_START].dataType == T.LongType()
@@ -152,7 +153,7 @@ def test_numeric_boundaries_converted_to_coarser_channel_unit(spark):  # noqa: F
         "container_id int, start_ts long, stop_ts long",
     )
     cfg = SolverConfig(channel_time_unit="ms", container_time_unit="us")
-    out = cfg.with_window_bounds(df)
+    out = with_window_bounds(df, cfg)
     assert out.schema[_START].dataType == T.DoubleType()
     assert _bounds(cfg, df) == {
         1: (_EPOCH_MICROS / 1000.0, (_EPOCH_MICROS + _SPAN_MICROS) / 1000.0)
@@ -169,7 +170,7 @@ def test_numeric_boundaries_unchanged_for_equal_or_unset_container_unit(spark): 
 def test_container_time_unit_rejected_for_timestamp_boundaries(spark):  # noqa: F811
     cfg = SolverConfig(channel_time_unit="s", container_time_unit="ms")
     with pytest.raises(ValueError, match="container_time_unit only applies to numeric"):
-        cfg.with_window_bounds(_boundaries_df(spark))
+        with_window_bounds(_boundaries_df(spark), cfg)
 
 
 def test_container_time_unit_requires_channel_time_unit():
@@ -182,7 +183,7 @@ def test_container_time_unit_requires_channel_time_unit():
 def test_raw_boundaries_stay_unchanged(spark):  # noqa: F811
     df = _boundaries_df(spark)
     cfg = SolverConfig(channel_time_unit="s", channel_time_origin="container_start")
-    out = cfg.with_window_bounds(df)
+    out = with_window_bounds(df, cfg)
     assert isinstance(out.schema["start_ts"].dataType, T.TimestampType)
     assert out.select("container_id", "start_ts", "stop_ts").collect() == df.collect()
 
@@ -190,7 +191,7 @@ def test_raw_boundaries_stay_unchanged(spark):  # noqa: F811
 def test_timestamp_boundaries_without_unit_rejected(spark):  # noqa: F811
     for origin in ("epoch", "container_start"):
         with pytest.raises(ValueError, match=r"TimeWindowEvent.*channel_time_unit"):
-            SolverConfig(channel_time_origin=origin).with_window_bounds(_boundaries_df(spark))
+            with_window_bounds(_boundaries_df(spark), SolverConfig(channel_time_origin=origin))
 
 
 @pytest.mark.parametrize(
@@ -202,15 +203,15 @@ def test_zone_less_types_rejected(spark, value, ddl):  # noqa: F811
         [(1, value, value)], f"container_id int, start_ts {ddl}, stop_ts {ddl}"
     )
     with pytest.raises(ValueError, match="start_ts"):
-        SolverConfig(channel_time_unit="s").with_window_bounds(df)
+        with_window_bounds(df, SolverConfig(channel_time_unit="s"))
 
 
 def test_mixed_and_missing_boundaries_rejected(spark):  # noqa: F811
     mixed = _boundaries_df(spark).withColumn("stop_ts", F.lit(1.0))
     with pytest.raises(ValueError, match="both be TIMESTAMP or both be numeric"):
-        SolverConfig(channel_time_unit="s").with_window_bounds(mixed)
+        with_window_bounds(mixed, SolverConfig(channel_time_unit="s"))
     with pytest.raises(ValueError, match="stop_ts"):
-        SolverConfig().with_window_bounds(_boundaries_df(spark).drop("stop_ts"))
+        with_window_bounds(_boundaries_df(spark).drop("stop_ts"), SolverConfig())
 
 
 def test_channel_time_settings_validated():

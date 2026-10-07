@@ -24,6 +24,7 @@ from .series_cache import SeriesCache
 from .solver_config import RawEncoder, SolverConfig
 from .utils.interval_encoder import IntervalEncoder
 from .utils.rle_encoder import RleEncoder
+from .utils.window_bounds import with_window_bounds
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
@@ -1310,7 +1311,7 @@ class DefaultSolver(QuerySolver):
                 # TimeWindowExpression reads the container bounds in the channel time
                 # frame, computed exactly like the TimeWindowEvent fact does. The raw
                 # start_ts/stop_ts stay unchanged for any other expression (e.g. UDFs).
-                metrics = self.config.with_window_bounds(metrics)
+                metrics = with_window_bounds(metrics, self.config)
             missing = [c for c in metric_cols if c not in metrics.columns]
             if missing:
                 raise ValueError(

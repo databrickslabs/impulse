@@ -109,8 +109,9 @@ Calculate definition hash for the time-window event.
 
 Only includes the expression string, which encodes the attributes that affect the
 event results: ``window_length`` and the channel time frame (``channel_time_unit``,
-``channel_time_origin``, ``container_time_unit``; omitted while unset / default). Resizing the window or
-changing the time frame therefore forces a full recompute in incremental mode.
+``channel_time_origin``, ``container_time_unit``; omitted while unset / default).
+Resizing the window or changing the time frame therefore forces a full recompute in
+incremental mode.
 
 Excludes: name, description, required_channels, max_windows_per_container,
 report_id
@@ -150,7 +151,8 @@ Extract the event fact table for the given list of TimeWindowEvent objects.
 Resolves the matching containers via the solver's filter pipeline (like
 ``ContainerEvent``) and computes each event's windows natively from the
 containers' ``start_ts`` / ``stop_ts`` in the channel time frame
-(``SolverConfig.with_window_bounds``), so every filtered container gets windows.
+(``solvers.utils.window_bounds.with_window_bounds``), so every filtered container
+gets windows.
 Each window becomes one event instance (``start_ts < end_ts``) whose
 ``event_instance_id`` hashes its boundaries. The solve uses the same window function
 for scoped aggregations (see :func:`window_intervals_udf`), so the ids match.
