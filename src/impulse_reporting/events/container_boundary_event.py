@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import zlib
+from collections.abc import Mapping
 
 from pyspark.sql import DataFrame, Row, SparkSession
 
@@ -20,7 +22,45 @@ class ContainerBoundaryEvent(Event):
     filtered container yields instances regardless of its channel data.  The report
     therefore excludes these event types from the solvable expressions and dispatches
     them with ``query`` / ``solver`` rather than ``solved_df``.
+
+    Subclasses set ``description`` and ``attributes`` (via :meth:`_normalize_attributes`),
+    and ``required_channels`` when they have any; :meth:`as_dict` writes them to
+    ``event_dimension``.
     """
+
+    required_channels: list[str] | None = None
+
+    @staticmethod
+    def _normalize_attributes(attributes: Mapping[str, str] | None) -> dict[str, str]:
+        """Return *attributes* with string keys and values (empty when ``None``)."""
+        return {str(k): str(v) for k, v in (attributes or {}).items()}
+
+    @staticmethod
+    def _sha256_long(text: str) -> int:
+        """SHA-256 of *text*, truncated to a signed 64-bit int (the ``definition_hash``
+        type)."""
+        hash_bytes = hashlib.sha256(text.encode()).digest()
+        return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
+
+    def as_dict(self) -> dict:
+        """Return the event's ``event_dimension`` row as a dictionary.
+
+        Returns
+        -------
+        dict
+            Event metadata keyed by the ``event_dimension`` column names.
+        """
+        return {
+            "event_id": self.get_id(),
+            "report_id": self.report_id,
+            "event_type": self.get_event_type_str(),
+            "event_name": self.name,
+            "event_description": self.description,
+            "required_channels": self.required_channels,
+            "event_expression": self.get_expression_str(),
+            "definition_hash": self.determine_definition_hash(),
+            "attributes": self.attributes,
+        }
 
     def get_id(self) -> int:
         """Return a unique identifier derived from the event name.

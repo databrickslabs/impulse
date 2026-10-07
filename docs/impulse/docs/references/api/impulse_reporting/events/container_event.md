@@ -74,18 +74,6 @@ so the name of the event is hashed.
 
 `int`: Hash value representing the computation definition.
 
-#### as\_dict
-
-```python
-def as_dict() -> dict
-```
-
-Return a dictionary representation of the event.
-
-**Returns**:
-
-`dict`: 
-
 #### determine\_events
 
 ```python

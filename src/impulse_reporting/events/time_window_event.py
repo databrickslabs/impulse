@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping
 
 import pyspark.sql.functions as f
@@ -96,13 +95,10 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         self.max_windows_per_container = self.expression.max_windows
         self.description = desc
         self.required_channels = required_channels
-        normalized_attributes: dict[str, str] = {}
-        if attributes is not None:
-            normalized_attributes = {str(k): str(v) for k, v in attributes.items()}
+        self.attributes = self._normalize_attributes(attributes)
         # Surface the window length for traceability in event_dimension, without
         # clobbering an explicit user-supplied attribute of the same key.
-        normalized_attributes.setdefault("window_length", str(self.window_length))
-        self.attributes = normalized_attributes
+        self.attributes.setdefault("window_length", str(self.window_length))
 
     def set_channel_time(
         self, unit: str | None, origin: str = "epoch", container_unit: str | None = None
@@ -165,32 +161,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         int
             Hash value representing the computation definition.
         """
-        hash_input = self.get_expression_str()
-
-        # Use SHA-256 and return as int (truncated to fit LongType)
-        hash_bytes = hashlib.sha256(hash_input.encode()).digest()
-        return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
-
-    def as_dict(self) -> dict:
-        """
-        Get a dictionary representation of the event.
-
-        Returns
-        -------
-        dict
-            Dictionary containing event metadata.
-        """
-        return {
-            "event_id": self.get_id(),
-            "report_id": self.report_id,
-            "event_type": self.get_event_type_str(),
-            "event_name": self.name,
-            "event_description": self.description,
-            "required_channels": self.required_channels,
-            "event_expression": self.get_expression_str(),
-            "definition_hash": self.determine_definition_hash(),
-            "attributes": self.attributes,
-        }
+        return self._sha256_long(self.get_expression_str())
 
     @classmethod
     def determine_events(

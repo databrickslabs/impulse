@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as f
@@ -44,10 +43,7 @@ class ContainerEvent(ContainerBoundaryEvent):
         """
         super().__init__(name)
         self.description = desc
-        normalized_attributes: dict[str, str] = {}
-        if attributes is not None:
-            normalized_attributes = {str(k): str(v) for k, v in attributes.items()}
-        self.attributes = normalized_attributes
+        self.attributes = self._normalize_attributes(attributes)
 
     # ------------------------------------------------------------------
     # Instance methods
@@ -85,28 +81,7 @@ class ContainerEvent(ContainerBoundaryEvent):
         int
             Hash value representing the computation definition.
         """
-        hash_input = self.name
-        hash_bytes = hashlib.sha256(hash_input.encode()).digest()
-        return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
-
-    def as_dict(self) -> dict:
-        """Return a dictionary representation of the event.
-
-        Returns
-        -------
-        dict
-        """
-        return {
-            "event_id": self.get_id(),
-            "report_id": self.report_id,
-            "event_type": self.get_event_type_str(),
-            "event_name": self.name,
-            "event_description": self.description,
-            "required_channels": None,
-            "event_expression": self.get_expression_str(),
-            "definition_hash": self.determine_definition_hash(),
-            "attributes": self.attributes,
-        }
+        return self._sha256_long(self.name)
 
     # ------------------------------------------------------------------
     # Class methods

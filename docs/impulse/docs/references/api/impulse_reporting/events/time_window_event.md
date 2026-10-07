@@ -120,18 +120,6 @@ report_id
 
 `int`: Hash value representing the computation definition.
 
-#### as\_dict
-
-```python
-def as_dict() -> dict
-```
-
-Get a dictionary representation of the event.
-
-**Returns**:
-
-`dict`: Dictionary containing event metadata.
-
 #### determine\_events
 
 ```python
