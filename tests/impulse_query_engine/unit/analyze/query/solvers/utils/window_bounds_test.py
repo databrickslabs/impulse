@@ -5,40 +5,59 @@
 (``channel_time_unit`` / ``channel_time_origin``). ``with_window_bounds`` derives the container
 start/stop in that frame as two extra columns and leaves the raw ``start_ts`` / ``stop_ts``
 untouched for everyone else (UDFs, ``ContainerEvent``, ``measurement_dimension``).
-"""
 
-import datetime as dt
+All frames are the ``basic_narrow_db`` fixture's ``container_metrics`` boundaries (epoch-ms
+longs), recast per test; container 2's boundaries are nulled to cover missing values.
+"""
 
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 import pytest
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 
 from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 from impulse_query_engine.analyze.query.solvers.utils.window_bounds import with_window_bounds
-from tests.conftest import spark  # noqa: F401  (pytest fixture)
+from impulse_query_engine.measurement_db import MeasurementDB
+from tests.conftest import basic_narrow_db, spark  # noqa: F401  (pytest fixtures)
 
-# 2025-07-03 07:41:41.483456 UTC
-_EPOCH_MICROS = 1_751_528_501_483_456
-# One hour and half a second later.
-_SPAN_MICROS = 3_600_500_000
 _START, _STOP = "__window_start", "__window_stop"
+_NULL_CONTAINER = 2
 
 
-def _boundaries_df(spark: SparkSession):  # noqa: F811
-    """container_metrics-like frame with TIMESTAMP boundaries (and a null row)."""
-    df = spark.createDataFrame(
-        [(1, _EPOCH_MICROS, _EPOCH_MICROS + _SPAN_MICROS), (2, None, None)],
-        "container_id int, start_us long, stop_us long",
+def _ms_boundaries(spark: SparkSession, db: MeasurementDB) -> DataFrame:  # noqa: F811
+    """The fixture's container boundaries (epoch-ms longs), container 2's set to null."""
+
+    def unless_null_container(name: str):
+        return F.when(F.col("container_id") != _NULL_CONTAINER, F.col(name)).alias(name)
+
+    return db.container_metrics(spark).select(
+        "container_id", unless_null_container("start_ts"), unless_null_container("stop_ts")
     )
+
+
+def _recast(df: DataFrame, cast) -> DataFrame:
+    """*df* with ``start_ts`` / ``stop_ts`` passed through *cast* (a Column -> Column)."""
     return df.select(
         "container_id",
-        F.timestamp_micros("start_us").alias("start_ts"),
-        F.timestamp_micros("stop_us").alias("stop_ts"),
+        cast(F.col("start_ts")).alias("start_ts"),
+        cast(F.col("stop_ts")).alias("stop_ts"),
     )
 
 
-def _bounds(cfg: SolverConfig, df) -> dict:
+def _timestamp_boundaries(spark: SparkSession, db: MeasurementDB) -> DataFrame:  # noqa: F811
+    return _recast(_ms_boundaries(spark, db), F.timestamp_millis)
+
+
+def _raw_ms(spark: SparkSession, db: MeasurementDB) -> dict:  # noqa: F811
+    """``{container_id: (start_ms, stop_ms)}`` of the containers with boundaries."""
+    return {
+        r.container_id: (r.start_ts, r.stop_ts)
+        for r in _ms_boundaries(spark, db).collect()
+        if r.start_ts is not None
+    }
+
+
+def _bounds(cfg: SolverConfig, df: DataFrame) -> dict:
     out = with_window_bounds(df, cfg)
     return {r.container_id: (r[_START], r[_STOP]) for r in out.collect()}
 
@@ -49,169 +68,169 @@ def test_window_bound_column_names():
 
 
 @pytest.mark.parametrize(
-    "unit, expected_type, expected_start",
+    "unit, expected_type, from_micros",
     [
-        ("s", T.DoubleType(), _EPOCH_MICROS / 1e6),
-        ("ms", T.DoubleType(), _EPOCH_MICROS / 1e3),
-        ("us", T.LongType(), _EPOCH_MICROS),
-        ("ns", T.LongType(), _EPOCH_MICROS * 1000),
+        ("s", T.DoubleType(), lambda us: us / 1e6),
+        ("ms", T.DoubleType(), lambda us: us / 1e3),
+        ("us", T.LongType(), lambda us: us),
+        ("ns", T.LongType(), lambda us: us * 1000),
     ],
 )
 @pytest.mark.parametrize("session_tz", ["UTC", "Europe/Berlin"])
 def test_epoch_origin_converts_timestamps_to_unit(
-    spark, unit, expected_type, expected_start, session_tz  # noqa: F811
+    spark, basic_narrow_db, unit, expected_type, from_micros, session_tz  # noqa: F811
 ):
     previous_tz = spark.conf.get("spark.sql.session.timeZone")
     spark.conf.set("spark.sql.session.timeZone", session_tz)
     try:
-        out = with_window_bounds(_boundaries_df(spark), SolverConfig(channel_time_unit=unit))
-        rows = {r.container_id: r for r in out.collect()}
+        df = _timestamp_boundaries(spark, basic_narrow_db)
+        out = with_window_bounds(df, SolverConfig(channel_time_unit=unit))
+        bounds = {r.container_id: (r[_START], r[_STOP]) for r in out.collect()}
     finally:
         spark.conf.set("spark.sql.session.timeZone", previous_tz)
 
     assert out.schema[_START].dataType == expected_type
-    assert rows[1][_START] == expected_start  # exact, independent of the session time zone
-    assert rows[2][_START] is None and rows[2][_STOP] is None
+    # Exact and independent of the session time zone.
+    for cid, (start_ms, stop_ms) in _raw_ms(spark, basic_narrow_db).items():
+        assert bounds[cid] == (from_micros(start_ms * 1000), from_micros(stop_ms * 1000))
+    assert bounds[_NULL_CONTAINER] == (None, None)
 
 
-def test_epoch_seconds_match_spark_cast_to_double(spark):  # noqa: F811
+def test_epoch_seconds_match_spark_cast_to_double(spark, basic_narrow_db):  # noqa: F811
     # "s" equals Spark's cast(timestamp as double), bit for bit.
-    df = _boundaries_df(spark)
+    df = _timestamp_boundaries(spark, basic_narrow_db)
     casted = {
-        r.container_id: (r.s, r.e)
-        for r in df.select(
-            "container_id",
-            F.col("start_ts").cast("double").alias("s"),
-            F.col("stop_ts").cast("double").alias("e"),
-        ).collect()
+        r.container_id: (r.start_ts, r.stop_ts)
+        for r in _recast(df, lambda c: c.cast("double")).collect()
     }
     assert _bounds(SolverConfig(channel_time_unit="s"), df) == casted
 
 
 @pytest.mark.parametrize(
-    "unit, expected_stop", [("s", 3600.5), ("ms", 3_600_500.0), ("us", _SPAN_MICROS)]
+    "unit, from_micros",
+    [("s", lambda us: us / 1e6), ("ms", lambda us: us / 1e3), ("us", lambda us: us)],
 )
 @pytest.mark.parametrize("session_tz", ["UTC", "Europe/Berlin"])
 def test_container_start_origin_gives_relative_bounds(
-    spark, unit, expected_stop, session_tz  # noqa: F811
+    spark, basic_narrow_db, unit, from_micros, session_tz  # noqa: F811
 ):
     previous_tz = spark.conf.get("spark.sql.session.timeZone")
     spark.conf.set("spark.sql.session.timeZone", session_tz)
     try:
         cfg = SolverConfig(channel_time_unit=unit, channel_time_origin="container_start")
-        bounds = _bounds(cfg, _boundaries_df(spark))
+        bounds = _bounds(cfg, _timestamp_boundaries(spark, basic_narrow_db))
     finally:
         spark.conf.set("spark.sql.session.timeZone", previous_tz)
 
-    assert bounds[1] == (0, expected_stop)
+    for cid, (start_ms, stop_ms) in _raw_ms(spark, basic_narrow_db).items():
+        assert bounds[cid] == (0, from_micros((stop_ms - start_ms) * 1000))
     # A null boundary leaves a null stop bound, so the container gets no windows.
-    assert bounds[2][1] is None
+    assert bounds[_NULL_CONTAINER][1] is None
 
 
-def test_numeric_boundaries_epoch_as_is_and_container_start_shifted(spark):  # noqa: F811
-    df = spark.createDataFrame(
-        [(1, 1000.5, 4601.0)], "container_id int, start_ts double, stop_ts double"
-    )
-    assert _bounds(SolverConfig(), df) == {1: (1000.5, 4601.0)}
+def test_numeric_boundaries_epoch_as_is_and_container_start_shifted(
+    spark, basic_narrow_db  # noqa: F811
+):
+    df = _ms_boundaries(spark, basic_narrow_db)
+    raw = _raw_ms(spark, basic_narrow_db)
+    epoch = _bounds(SolverConfig(), df)
+    assert all(epoch[cid] == bounds for cid, bounds in raw.items())
     # Shift only: numeric boundaries are already in the channels' unit, so no unit is needed.
-    assert _bounds(SolverConfig(channel_time_origin="container_start"), df) == {1: (0, 3600.5)}
+    relative = _bounds(SolverConfig(channel_time_origin="container_start"), df)
+    assert all(relative[cid] == (0, stop - start) for cid, (start, stop) in raw.items())
 
 
-def _ms_boundaries_df(spark: SparkSession):  # noqa: F811
-    """The TIMESTAMP boundaries of _boundaries_df as epoch-ms longs (container 1 only)."""
-    return (
-        _boundaries_df(spark)
-        .filter(F.col("container_id") == 1)
-        .select(
-            "container_id",
-            F.unix_millis("start_ts").alias("start_ts"),
-            F.unix_millis("stop_ts").alias("stop_ts"),
-        )
-    )
-
-
-def test_numeric_ms_boundaries_converted_to_finer_channel_unit_exactly(spark):  # noqa: F811
+def test_numeric_ms_boundaries_converted_to_finer_channel_unit_exactly(
+    spark, basic_narrow_db  # noqa: F811
+):
     # Boundaries in epoch ms, channels in µs: an integer factor keeps the longs exact.
+    df = _ms_boundaries(spark, basic_narrow_db)
+    raw = _raw_ms(spark, basic_narrow_db)
     cfg = SolverConfig(channel_time_unit="us", container_time_unit="ms")
-    out = with_window_bounds(_ms_boundaries_df(spark), cfg)
-    start_ms = _EPOCH_MICROS // 1000
-    stop_ms = (_EPOCH_MICROS + _SPAN_MICROS) // 1000
-    assert out.schema[_START].dataType == T.LongType()
-    assert _bounds(cfg, _ms_boundaries_df(spark)) == {1: (start_ms * 1000, stop_ms * 1000)}
+    assert with_window_bounds(df, cfg).schema[_START].dataType == T.LongType()
+    bounds = _bounds(cfg, df)
+    assert all(bounds[cid] == (start * 1000, stop * 1000) for cid, (start, stop) in raw.items())
 
     relative = SolverConfig(
         channel_time_unit="us", channel_time_origin="container_start", container_time_unit="ms"
     )
     # The difference is taken in ms first, then converted.
-    assert _bounds(relative, _ms_boundaries_df(spark)) == {1: (0, (stop_ms - start_ms) * 1000)}
+    bounds = _bounds(relative, df)
+    assert all(bounds[cid] == (0, (stop - start) * 1000) for cid, (start, stop) in raw.items())
 
 
 @pytest.mark.parametrize("ansi", ["true", "false"])
-def test_int_boundaries_widen_to_long_instead_of_overflowing(spark, ansi):  # noqa: F811
+def test_int_boundaries_widen_to_long_instead_of_overflowing(
+    spark, basic_narrow_db, ansi  # noqa: F811
+):
     """INT epoch seconds * 1000 exceeds int32. Spark keeps int * int as int, which raised
     ARITHMETIC_OVERFLOW under ANSI and silently wrapped to negative bounds without it."""
-    int_seconds = (
-        _boundaries_df(spark)
-        .filter(F.col("container_id") == 1)
-        .select(
-            "container_id",
-            F.unix_seconds("start_ts").cast("int").alias("start_ts"),
-            F.unix_seconds("stop_ts").cast("int").alias("stop_ts"),
-        )
+    int_seconds = _recast(
+        _ms_boundaries(spark, basic_narrow_db), lambda c: (c / F.lit(1000)).cast("int")
     )
-    start_s = _EPOCH_MICROS // 1_000_000
-    stop_s = (_EPOCH_MICROS + _SPAN_MICROS) // 1_000_000
+    raw_s = {
+        cid: (start // 1000, stop // 1000)
+        for cid, (start, stop) in _raw_ms(spark, basic_narrow_db).items()
+    }
     previous_ansi = spark.conf.get("spark.sql.ansi.enabled")
     spark.conf.set("spark.sql.ansi.enabled", ansi)
     try:
+        assert int_seconds.schema["start_ts"].dataType == T.IntegerType()
         cfg = SolverConfig(channel_time_unit="ms", container_time_unit="s")
-        out = with_window_bounds(int_seconds, cfg)
-        assert out.schema[_START].dataType == T.LongType()
-        assert _bounds(cfg, int_seconds) == {1: (start_s * 1000, stop_s * 1000)}
+        assert with_window_bounds(int_seconds, cfg).schema[_START].dataType == T.LongType()
+        bounds = _bounds(cfg, int_seconds)
+        assert all(bounds[cid] == (s * 1000, e * 1000) for cid, (s, e) in raw_s.items())
 
         relative = SolverConfig(
             channel_time_unit="ms", channel_time_origin="container_start", container_time_unit="s"
         )
-        assert _bounds(relative, int_seconds) == {1: (0, (stop_s - start_s) * 1000)}
+        bounds = _bounds(relative, int_seconds)
+        assert all(bounds[cid] == (0, (e - s) * 1000) for cid, (s, e) in raw_s.items())
     finally:
         spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
 
 
-def test_double_boundaries_keep_fractions_when_converted_to_finer_unit(spark):  # noqa: F811
-    df = spark.createDataFrame(
-        [(1, 1000.25, 4600.75)], "container_id int, start_ts double, stop_ts double"
-    )
+def test_double_boundaries_keep_fractions_when_converted_to_finer_unit(
+    spark, basic_narrow_db  # noqa: F811
+):
+    # Seconds as doubles (the fixture's ms values / 1000, so with a fractional part).
+    seconds = _recast(_ms_boundaries(spark, basic_narrow_db), lambda c: c / F.lit(1000.0))
     cfg = SolverConfig(channel_time_unit="ms", container_time_unit="s")
-    out = with_window_bounds(df, cfg)
-    assert out.schema[_START].dataType == T.DoubleType()
-    assert _bounds(cfg, df) == {1: (1_000_250.0, 4_600_750.0)}
+    assert with_window_bounds(seconds, cfg).schema[_START].dataType == T.DoubleType()
+    bounds = _bounds(cfg, seconds)
+    for cid, (start_ms, stop_ms) in _raw_ms(spark, basic_narrow_db).items():
+        assert bounds[cid] == ((start_ms / 1000.0) * 1000, (stop_ms / 1000.0) * 1000)
+        # Not truncated to whole seconds before the conversion.
+        assert bounds[cid][0] != (start_ms // 1000) * 1000
 
 
-def test_numeric_boundaries_converted_to_coarser_channel_unit(spark):  # noqa: F811
+def test_numeric_boundaries_converted_to_coarser_channel_unit(
+    spark, basic_narrow_db  # noqa: F811
+):
     # Boundaries in epoch µs, channels in ms: a division, giving doubles.
-    df = spark.createDataFrame(
-        [(1, _EPOCH_MICROS, _EPOCH_MICROS + _SPAN_MICROS)],
-        "container_id int, start_ts long, stop_ts long",
-    )
+    micros = _recast(_ms_boundaries(spark, basic_narrow_db), lambda c: c * F.lit(1000))
     cfg = SolverConfig(channel_time_unit="ms", container_time_unit="us")
-    out = with_window_bounds(df, cfg)
-    assert out.schema[_START].dataType == T.DoubleType()
-    assert _bounds(cfg, df) == {
-        1: (_EPOCH_MICROS / 1000.0, (_EPOCH_MICROS + _SPAN_MICROS) / 1000.0)
-    }
+    assert with_window_bounds(micros, cfg).schema[_START].dataType == T.DoubleType()
+    bounds = _bounds(cfg, micros)
+    for cid, (start_ms, stop_ms) in _raw_ms(spark, basic_narrow_db).items():
+        assert bounds[cid] == (float(start_ms), float(stop_ms))
 
 
-def test_numeric_boundaries_unchanged_for_equal_or_unset_container_unit(spark):  # noqa: F811
-    df = _ms_boundaries_df(spark)
+def test_numeric_boundaries_unchanged_for_equal_or_unset_container_unit(
+    spark, basic_narrow_db  # noqa: F811
+):
+    df = _ms_boundaries(spark, basic_narrow_db)
     raw = {r.container_id: (r.start_ts, r.stop_ts) for r in df.collect()}
     assert _bounds(SolverConfig(channel_time_unit="ms", container_time_unit="ms"), df) == raw
     assert _bounds(SolverConfig(channel_time_unit="us"), df) == raw
 
 
-def test_container_time_unit_rejected_for_timestamp_boundaries(spark):  # noqa: F811
+def test_container_time_unit_rejected_for_timestamp_boundaries(
+    spark, basic_narrow_db  # noqa: F811
+):
     cfg = SolverConfig(channel_time_unit="s", container_time_unit="ms")
     with pytest.raises(ValueError, match="container_time_unit only applies to numeric"):
-        with_window_bounds(_boundaries_df(spark), cfg)
+        with_window_bounds(_timestamp_boundaries(spark, basic_narrow_db), cfg)
 
 
 def test_container_time_unit_requires_channel_time_unit():
@@ -221,38 +240,37 @@ def test_container_time_unit_requires_channel_time_unit():
     assert (cfg.channel_time_unit, cfg.container_time_unit) == ("us", "ms")
 
 
-def test_raw_boundaries_stay_unchanged(spark):  # noqa: F811
-    df = _boundaries_df(spark)
+def test_raw_boundaries_stay_unchanged(spark, basic_narrow_db):  # noqa: F811
+    df = _timestamp_boundaries(spark, basic_narrow_db)
     cfg = SolverConfig(channel_time_unit="s", channel_time_origin="container_start")
     out = with_window_bounds(df, cfg)
     assert isinstance(out.schema["start_ts"].dataType, T.TimestampType)
     assert out.select("container_id", "start_ts", "stop_ts").collect() == df.collect()
 
 
-def test_timestamp_boundaries_without_unit_rejected(spark):  # noqa: F811
+def test_timestamp_boundaries_without_unit_rejected(spark, basic_narrow_db):  # noqa: F811
     for origin in ("epoch", "container_start"):
         with pytest.raises(ValueError, match=r"TimeWindowEvent.*channel_time_unit"):
-            with_window_bounds(_boundaries_df(spark), SolverConfig(channel_time_origin=origin))
+            with_window_bounds(
+                _timestamp_boundaries(spark, basic_narrow_db),
+                SolverConfig(channel_time_origin=origin),
+            )
 
 
-@pytest.mark.parametrize(
-    "value, ddl",
-    [(dt.datetime(2025, 7, 3, 7, 41, 41), "timestamp_ntz"), (dt.date(2025, 7, 3), "date")],
-)
-def test_zone_less_types_rejected(spark, value, ddl):  # noqa: F811
-    df = spark.createDataFrame(
-        [(1, value, value)], f"container_id int, start_ts {ddl}, stop_ts {ddl}"
-    )
+@pytest.mark.parametrize("zone_less_type", ["timestamp_ntz", "date"])
+def test_zone_less_types_rejected(spark, basic_narrow_db, zone_less_type):  # noqa: F811
+    df = _recast(_timestamp_boundaries(spark, basic_narrow_db), lambda c: c.cast(zone_less_type))
     with pytest.raises(ValueError, match="start_ts"):
         with_window_bounds(df, SolverConfig(channel_time_unit="s"))
 
 
-def test_mixed_and_missing_boundaries_rejected(spark):  # noqa: F811
-    mixed = _boundaries_df(spark).withColumn("stop_ts", F.lit(1.0))
+def test_mixed_and_missing_boundaries_rejected(spark, basic_narrow_db):  # noqa: F811
+    timestamps = _timestamp_boundaries(spark, basic_narrow_db)
+    mixed = timestamps.withColumn("stop_ts", F.unix_millis("stop_ts"))
     with pytest.raises(ValueError, match="both be TIMESTAMP or both be numeric"):
         with_window_bounds(mixed, SolverConfig(channel_time_unit="s"))
     with pytest.raises(ValueError, match="stop_ts"):
-        with_window_bounds(_boundaries_df(spark).drop("stop_ts"), SolverConfig())
+        with_window_bounds(timestamps.drop("stop_ts"), SolverConfig())
 
 
 def test_channel_time_settings_validated():
