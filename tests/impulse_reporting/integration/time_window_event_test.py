@@ -1,6 +1,7 @@
 """Integration tests for TimeWindowEvent with end-to-end Report usage."""
 
 import math
+from itertools import pairwise
 from unittest.mock import create_autospec
 
 import pyspark.sql.functions as F
@@ -486,7 +487,7 @@ def _assert_windows_tile_containers(rows, boundaries: dict, window_length: float
         windows = sorted((r.start_ts, r.end_ts) for r in rows if r.container_id == container_id)
         assert len(windows) == math.ceil((stop - start) / window_length), container_id
         assert windows[0][0] == start and windows[-1][1] == stop, (container_id, windows)
-        assert all(prev[1] == nxt[0] for prev, nxt in zip(windows, windows[1:])), container_id
+        assert all(prev[1] == nxt[0] for prev, nxt in pairwise(windows)), container_id
         assert all(e - s == window_length for s, e in windows[:-1]), container_id
         assert 0 < windows[-1][1] - windows[-1][0] <= window_length, container_id
 
