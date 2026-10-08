@@ -147,7 +147,8 @@ def explode_windows(
     Used by the reporting ``TimeWindowEvent`` for its event fact, so the event fact and the
     solve share one window implementation (:func:`tile_windows`).  The rows are built from
     numpy arrays in a ``mapInArrow``, in output batches of about 100,000 windows that never
-    split a container, so the Python worker's memory stays bounded however fine the windows.
+    split a container's windows of one event, so the Python worker's memory stays bounded by
+    the batch size and ``max_windows``, independent of the number of containers and events.
 
     Parameters
     ----------
@@ -194,8 +195,9 @@ def explode_windows(
 def _window_batches(batches, id_col, start_col, stop_col, windows, batch_windows):
     """Yield :func:`explode_windows` output batches for the input Arrow *batches*.
 
-    A batch is emitted once it holds at least *batch_windows* windows, after a complete
-    container, and at the end of each input batch.
+    A batch is emitted once it holds at least *batch_windows* windows, after a container's
+    complete windows of one event, and at the end of each input batch.  A batch therefore
+    holds at most ``batch_windows - 1`` plus one event's ``max_windows`` windows.
     """
     names = pa.array([name for name, _, _ in windows], pa.string())
     for batch in batches:
@@ -209,9 +211,9 @@ def _window_batches(batches, id_col, start_col, stop_col, windows, batch_windows
                 starts, ends = tile_windows(start, stop, length, max_windows)
                 parts.append((row, event, starts, ends))
                 pending += len(starts)
-            if pending >= batch_windows:
-                yield _record_batch(id_col, ids, names, parts)
-                parts, pending = [], 0
+                if pending >= batch_windows:
+                    yield _record_batch(id_col, ids, names, parts)
+                    parts, pending = [], 0
         if pending:
             yield _record_batch(id_col, ids, names, parts)
 

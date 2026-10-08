@@ -307,7 +307,7 @@ def _bounds_batch(ids, starts, stops) -> pa.RecordBatch:
     )
 
 
-def test_window_batches_flush_between_containers_and_per_input_batch():
+def test_window_batches_flush_between_events_and_per_input_batch():
     # Each container gives 4 "a" windows and 2 "b" windows.
     events = [("a", 10.0, 100), ("b", 20.0, 100)]
     first = _bounds_batch(["c0", "c1", "c2"], [0, 100, 200], [40, 140, 240])
@@ -320,18 +320,30 @@ def test_window_batches_flush_between_containers_and_per_input_batch():
             )
         )
 
-    batches = run(batch_windows=7)
-    # 6 windows after c0 (< 7), 12 after c1 -> flush; c2 flushed at the end of the input
-    # batch; c3 alone from the second input batch.
-    assert [b.num_rows for b in batches] == [12, 6, 6]
-    assert [sorted(set(b.column("k").to_pylist())) for b in batches] == [
-        ["c0", "c1"],
-        ["c2"],
-        ["c3"],
+    batches = run(batch_windows=9)
+    # 6 windows after c0, 10 after c1's "a" -> flush, before c1's "b"; c1's "b" and c2
+    # flushed at the end of the first input batch; c3 alone from the second one.
+    assert [b.num_rows for b in batches] == [10, 8, 6]
+    pairs = [
+        set(zip(b.column("k").to_pylist(), b.column("event_name").to_pylist(), strict=True))
+        for b in batches
+    ]
+    assert pairs == [
+        {("c0", "a"), ("c0", "b"), ("c1", "a")},
+        {("c1", "b"), ("c2", "a"), ("c2", "b")},
+        {("c3", "a"), ("c3", "b")},
     ]
     assert batches[0].schema.names == ["k", "event_name", "start_ts", "end_ts"]
     assert batches[0].schema.field("k").type == pa.string()
     assert batches[0].column("event_name").to_pylist()[:6] == ["a"] * 4 + ["b"] * 2
+
+    # Many events per container stay bounded: each flush adds at most one event's windows.
+    many = [(f"e{i}", 10.0, 100) for i in range(5)]
+    sizes = [
+        b.num_rows
+        for b in _window_batches(iter([first]), "k", "start_ts", "stop_ts", many, batch_windows=6)
+    ]
+    assert sizes == [8] * 7 + [4]
 
     # Batching only splits the stream; the rows are those of a single batch per input batch.
     unbatched = pa.Table.from_batches(run(batch_windows=10**9))
