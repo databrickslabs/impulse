@@ -208,6 +208,10 @@ def test_tile_windows_none_and_na_yield_empty():
 # ---------------------------------------------------------------------------
 # explode_windows: tile_windows on the event fact side (one row per window)
 # ---------------------------------------------------------------------------
+# Output names for the event name and window bounds (those of the event fact).
+_OUT = ("event_name", "start_ts", "end_ts")
+
+
 def _exploded(spark, rows, windows, ts_type="long", id_type="int"):  # noqa: F811
     """explode_windows over (k, start_ts, stop_ts) rows, as {(k, event_name): windows}."""
     # One partition, so all rows reach the function in one Arrow batch.
@@ -215,7 +219,7 @@ def _exploded(spark, rows, windows, ts_type="long", id_type="int"):  # noqa: F81
         rows, f"k {id_type}, start_ts {ts_type}, stop_ts {ts_type}"
     ).coalesce(1)
     out = explode_windows(
-        df, id_col="k", start_col="start_ts", stop_col="stop_ts", windows=windows
+        df, id_col="k", start_col="start_ts", stop_col="stop_ts", windows=windows, output_cols=_OUT
     )
     grouped = {}
     for r in out.collect():
@@ -270,7 +274,47 @@ def test_explode_windows_invalid_max_windows_raises(spark):  # noqa: F811
     df = spark.createDataFrame([(0, 0, 100)], "k int, start_ts long, stop_ts long")
     with pytest.raises(ValueError, match="max_windows must be a positive integer"):
         explode_windows(
-            df, id_col="k", start_col="start_ts", stop_col="stop_ts", windows=[("tw", 10, 0)]
+            df,
+            id_col="k",
+            start_col="start_ts",
+            stop_col="stop_ts",
+            windows=[("tw", 10, 0)],
+            output_cols=_OUT,
+        )
+
+
+def test_explode_windows_custom_output_cols(spark):  # noqa: F811
+    df = spark.createDataFrame([(0, 0, 25)], "k int, start_ts long, stop_ts long")
+    out = explode_windows(
+        df,
+        id_col="k",
+        start_col="start_ts",
+        stop_col="stop_ts",
+        windows=[("tw", 10, 100)],
+        output_cols=("ev", "ws", "we"),
+    )
+    assert out.schema.simpleString() == "struct<k:int,ev:string,ws:double,we:double>"
+    assert [tuple(r) for r in out.collect()] == [
+        (0, "tw", 0.0, 10.0),
+        (0, "tw", 10.0, 20.0),
+        (0, "tw", 20.0, 25.0),
+    ]
+
+
+@pytest.mark.parametrize(
+    "id_col, output_cols",
+    [("start_ts", ("event_name", "start_ts", "end_ts")), ("k", ("k", "ws", "we"))],
+)
+def test_explode_windows_colliding_output_cols_raise(spark, id_col, output_cols):  # noqa: F811
+    df = spark.createDataFrame([(0, 0, 25)], "k int, start_ts long, stop_ts long")
+    with pytest.raises(ValueError, match="four distinct output column names"):
+        explode_windows(
+            df,
+            id_col=id_col,
+            start_col="start_ts",
+            stop_col="stop_ts",
+            windows=[("tw", 10, 100)],
+            output_cols=output_cols,
         )
 
 
@@ -316,7 +360,13 @@ def test_window_batches_flush_between_events_and_per_input_batch():
     def run(batch_windows):
         return list(
             _window_batches(
-                iter([first, second]), "k", "start_ts", "stop_ts", events, batch_windows
+                iter([first, second]),
+                "k",
+                "start_ts",
+                "stop_ts",
+                events,
+                ("k", *_OUT),
+                batch_windows,
             )
         )
 
@@ -341,7 +391,9 @@ def test_window_batches_flush_between_events_and_per_input_batch():
     many = [(f"e{i}", 10.0, 100) for i in range(5)]
     sizes = [
         b.num_rows
-        for b in _window_batches(iter([first]), "k", "start_ts", "stop_ts", many, batch_windows=6)
+        for b in _window_batches(
+            iter([first]), "k", "start_ts", "stop_ts", many, ("k", *_OUT), batch_windows=6
+        )
     ]
     assert sizes == [8] * 7 + [4]
 

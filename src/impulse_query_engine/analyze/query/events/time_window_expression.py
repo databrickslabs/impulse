@@ -141,6 +141,7 @@ def explode_windows(
     start_col: str,
     stop_col: str,
     windows: list[tuple[str, float, int]],
+    output_cols: tuple[str, str, str],
 ) -> DataFrame:
     """One row per window of each container, for several window lengths in one pass.
 
@@ -155,51 +156,63 @@ def explode_windows(
     df : pyspark.sql.DataFrame
         One row per container, with *id_col* and the bounds in the channel time frame.
     id_col : str
-        Container id column; kept with its type (e.g. long or string) in the output.
+        Container id column; kept with its name and type (e.g. long or string) in the output.
     start_col, stop_col : str
         Container bound columns (numeric).
     windows : list of tuple
-        ``(name, window_length, max_windows)`` per event: the ``event_name`` of its rows,
-        the window length (in the unit of the bounds, strictly positive) and the maximum
-        number of windows per container. A container exceeding it fails the query with an
-        error naming the limit.
+        ``(name, window_length, max_windows)`` per event: the event name of its rows, the
+        window length (in the unit of the bounds, strictly positive) and the maximum number
+        of windows per container. A container exceeding it fails the query with an error
+        naming the limit.
+    output_cols : tuple of str
+        Names of the output columns for the event name, the window start and the window end.
 
     Returns
     -------
     pyspark.sql.DataFrame
-        Columns *id_col*, ``event_name`` (string), ``start_ts`` and ``end_ts`` (double); no
-        rows for a container whose bound is null, NaN or infinite, or whose span is not
-        strictly positive.
+        Columns *id_col* and *output_cols* (event name as string, window start and end as
+        double); no rows for a container whose bound is null, NaN or infinite, or whose span
+        is not strictly positive.
 
     Raises
     ------
     ValueError
-        If a ``max_windows`` is not a positive integer.
+        If a ``max_windows`` is not a positive integer, or *id_col* and *output_cols* are not
+        four distinct names.
     """
+    if len({id_col, *output_cols}) != 4:
+        raise ValueError(
+            f"explode_windows needs four distinct output column names, got id_col={id_col!r} "
+            f"and output_cols={output_cols!r}."
+        )
     windows = [(name, float(length), validate_max_windows(m)) for name, length, m in windows]
+    name_col, window_start_col, window_end_col = output_cols
     schema = T.StructType(
         [
             df.schema[id_col],
-            T.StructField("event_name", T.StringType()),
-            T.StructField("start_ts", T.DoubleType()),
-            T.StructField("end_ts", T.DoubleType()),
+            T.StructField(name_col, T.StringType()),
+            T.StructField(window_start_col, T.DoubleType()),
+            T.StructField(window_end_col, T.DoubleType()),
         ]
     )
+    column_names = schema.names
 
     def tile(batches):
-        yield from _window_batches(batches, id_col, start_col, stop_col, windows, _BATCH_WINDOWS)
+        yield from _window_batches(
+            batches, id_col, start_col, stop_col, windows, column_names, _BATCH_WINDOWS
+        )
 
     return df.select(id_col, start_col, stop_col).mapInArrow(tile, schema)
 
 
-def _window_batches(batches, id_col, start_col, stop_col, windows, batch_windows):
-    """Yield :func:`explode_windows` output batches for the input Arrow *batches*.
+def _window_batches(batches, id_col, start_col, stop_col, windows, column_names, batch_windows):
+    """Yield :func:`explode_windows` output batches named *column_names* for Arrow *batches*.
 
     A batch is emitted once it holds at least *batch_windows* windows, after a container's
     complete windows of one event, and at the end of each input batch.  A batch therefore
     holds at most ``batch_windows - 1`` plus one event's ``max_windows`` windows.
     """
-    names = pa.array([name for name, _, _ in windows], pa.string())
+    event_names = pa.array([name for name, _, _ in windows], pa.string())
     for batch in batches:
         ids = batch.column(id_col)
         bounds = zip(
@@ -212,13 +225,13 @@ def _window_batches(batches, id_col, start_col, stop_col, windows, batch_windows
                 parts.append((row, event, starts, ends))
                 pending += len(starts)
                 if pending >= batch_windows:
-                    yield _record_batch(id_col, ids, names, parts)
+                    yield _record_batch(column_names, ids, event_names, parts)
                     parts, pending = [], 0
         if pending:
-            yield _record_batch(id_col, ids, names, parts)
+            yield _record_batch(column_names, ids, event_names, parts)
 
 
-def _record_batch(id_col, ids, names, parts) -> pa.RecordBatch:
+def _record_batch(column_names, ids, event_names, parts) -> pa.RecordBatch:
     """Output batch for the ``(row, event, starts, ends)`` *parts* of one input batch."""
     counts = [len(starts) for _, _, starts, _ in parts]
     rows = np.repeat([row for row, _, _, _ in parts], counts)
@@ -226,11 +239,11 @@ def _record_batch(id_col, ids, names, parts) -> pa.RecordBatch:
     return pa.RecordBatch.from_arrays(
         [
             ids.take(rows),
-            names.take(events),
+            event_names.take(events),
             pa.array(np.concatenate([starts for _, _, starts, _ in parts])),
             pa.array(np.concatenate([ends for _, _, _, ends in parts])),
         ],
-        names=[id_col, "event_name", "start_ts", "end_ts"],
+        names=column_names,
     )
 
 

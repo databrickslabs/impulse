@@ -23,6 +23,10 @@ from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
+# Columns explode_windows adds next to container_id, named as the event fact and its
+# event_instance_id hash expect them.
+_WINDOW_COLS = ("event_name", "start_ts", "end_ts")
+
 
 class TimeWindowEvent(ContainerBoundaryEvent):
     """Event that divides each measurement container into consecutive fixed windows.
@@ -212,6 +216,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         # uses for scoped aggregations (fails fast on the schema, e.g. when TIMESTAMP
         # boundaries lack solver_config.channel_time_unit).
         container_metrics_df = with_window_bounds(container_metrics_df, solver.config)
+        event_name_col, start_ts_col, end_ts_col = _WINDOW_COLS
         windows_df = explode_windows(
             container_metrics_df,
             id_col=solver.config.container_id_col,
@@ -221,15 +226,21 @@ class TimeWindowEvent(ContainerBoundaryEvent):
                 (event.get_name(), event.window_length, event.max_windows_per_container)
                 for event in events
             ],
+            output_cols=_WINDOW_COLS,
         )
         return (
             windows_df.withColumn(
                 "event_instance_id",
-                generate_event_instance_id_column(event_type=TimeWindowEvent),
+                generate_event_instance_id_column(
+                    event_type=TimeWindowEvent,
+                    event_name_col=event_name_col,
+                    start_ts_col=start_ts_col,
+                    end_ts_col=end_ts_col,
+                ),
             )
             .withColumn(
                 "event_id",
-                ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
+                ReportEntityUtil.get_event_id_column(elements=events, element_name=event_name_col),
             )
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
         )
