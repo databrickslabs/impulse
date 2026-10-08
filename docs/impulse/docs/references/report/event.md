@@ -195,6 +195,99 @@ The expression **must** evaluate to a `PointsInTime`; otherwise construction rai
 
 ---
 
+## TimeWindowEvent
+
+A `TimeWindowEvent` divides each matching container into **consecutive fixed-duration windows** --
+one event instance per slice. Unlike `ContainerEvent` (one instance for the whole container), it
+produces repeated windows (e.g. one-minute, ten-minute, hourly, or daily segments) across every
+matching container. No signal expression is needed: the window boundaries are derived from the
+container's `start_ts` / `stop_ts` on the `container_metrics` table.
+
+```python
+from impulse_reporting.events.time_window_event import TimeWindowEvent
+
+ten_minute_windows = TimeWindowEvent(
+    name="ten_minute_windows",
+    window_length=600_000,  # in the same time unit as the underlying timestamps (see note)
+    desc="Ten-minute segments across each measurement",
+)
+my_report.add_event(ten_minute_windows)
+```
+
+### Parameters
+
+| Parameter           | Type                | Required | Description                                                                                                     |
+|---------------------|---------------------|----------|-----------------------------------------------------------------------------------------------------------------|
+| `name`              | `str`               | Yes      | Unique event name.                                                                                              |
+| `window_length`     | `float`             | Yes      | Fixed window length, **in the same time unit as the underlying timestamps** (e.g. milliseconds-since-epoch). Must be strictly positive and finite; validated at construction. |
+| `desc`              | `str`               | No       | Human-readable description.                                                                                     |
+| `required_channels` | `list[str]`         | No       | Channel names required for this event. Informational; stored in the event dimension table.                     |
+| `attributes`        | `Mapping[str, str]` | No       | Free-form key-value metadata. `window_length` is surfaced here automatically (without overriding a user key).  |
+| `max_windows_per_container` | `int`       | No       | Upper bound on the windows per container (default `1_000_000`). A container that would exceed it fails the report with an error naming the limit, which usually means `window_length` is in the wrong unit for the timestamps. Raise it for very long containers with short windows. Not part of the definition hash. |
+
+:::note
+`window_length` follows the same convention as `SequenceOfEvents.max_overlap`: it is expressed in
+the same time unit as the channel timestamps (microseconds-since-epoch in the sample data), not
+seconds or any derived unit. So 60 one-minute windows over millisecond timestamps use
+`window_length=60_000`.
+
+The windows are computed in the time frame of the channel timestamps, set by
+[`solver_config.channel_time_unit`, `channel_time_origin` and `container_time_unit`](../../config/configuration.md#solver-column-mappings-and-filters):
+
+- If `container_metrics.start_ts`/`stop_ts` are `TIMESTAMP` columns, set `channel_time_unit` to the
+  unit of the channel timestamps (`tstart`/`tend`, or `timestamp` for RAW data; e.g. `"s"`), and
+  `window_length` is expressed in it. Without it, the report fails with an error naming the
+  setting.
+- If the channel timestamps are relative to the container start (e.g. seconds since the
+  recording started), also set `channel_time_origin="container_start"`. The windows then run from
+  `0` to the container's duration (`stop_ts - start_ts` of `container_metrics`).
+- If numeric `container_metrics.start_ts`/`stop_ts` are in another unit than the channel
+  timestamps (e.g. epoch ms boundaries, µs samples), set `container_time_unit` to their unit
+  (e.g. `"ms"`) and `channel_time_unit` to the channels' (e.g. `"us"`). Otherwise no window
+  overlaps the samples.
+
+Only the windows use these settings: `ContainerEvent`, `measurement_dimension` and UDFs that read
+`container_metrics.start_ts`/`stop_ts` keep seeing the original values. The channel time frame is part of the
+event's definition (and of the aggregations scoped to it), so changing it recomputes them over all
+containers in incremental mode.
+:::
+
+### How it works
+
+1. The event resolves the matching containers through the report's container filters (like
+   `ContainerEvent`), reads `start_ts` and `stop_ts` from the `container_metrics` table, and
+   tiles that span, in the channel time frame, into consecutive windows of length
+   `window_length`. The window instances in `event_instance_fact` are in that frame too.
+2. The **final window is clamped** to the container's `stop_ts` when the last full window would
+   overrun it; any zero-length trailing slice is dropped (every window instance in
+   `event_instance_fact` satisfies `start_ts < end_ts`). Containers whose
+   `container_metrics.start_ts` or `stop_ts` is null, NaN or infinite get no windows.
+3. Each window becomes one **event instance**, written to the shared `event_instance_fact` table.
+   Its `event_instance_id` hashes the container, the event name and the window's start and end,
+   like for other interval events.
+4. An aggregation scoped to the event (`StatsAggregator(..., event=time_window_event)`) computes
+   its statistic **once per window** and joins back to those instances.
+
+:::note
+The windows are computed from `container_metrics` alone, so **every** container that matches the
+report's filters gets windows, whether or not it has channel data and whether or not an
+aggregation is scoped to the event. An aggregation scoped to the event uses the same window
+function in the query engine, so its per-window rows carry the same `event_instance_id` values.
+For the per-window values to be meaningful, the container boundaries (`container_metrics.start_ts`
+/ `stop_ts`) must share the channel samples' time base, or be converted into it with the settings
+above.
+:::
+
+:::note
+Window boundaries are stored in `event_instance_fact` as doubles (its `start_ts` / `end_ts`
+columns), like every other event type. Epoch timestamps in nanoseconds exceed the range doubles
+represent exactly, so their window boundaries are rounded to about 256 ns. The event and its
+aggregations use the same window function, so the rounding is the same on both sides and their
+`event_instance_id` values still match. If `window_length` is not a whole number in the channel
+unit (e.g. `0.2` or `1.7` over timestamps in seconds), or not a multiple of 256 ns for nanosecond
+epochs, rounding can add a final window only a few ulps long.
+:::
+
 ## Event output schema
 
 ### event_dimension
@@ -205,7 +298,7 @@ Stores event definitions (one row per event per report).
 |---------------------|---------------------|-----------------------------------------------------------------------------|
 | `event_id`          | `int`               | Unique event identifier (CRC32 hash of name + expression).                  |
 | `report_id`         | `int`               | Report identifier.                                                          |
-| `event_type`        | `str`               | `"BASIC_EVENT"`, `"CONTAINER_EVENT"`, `"SEQUENCE_OF_EVENTS"`, or `"POINTS_IN_TIME_EVENT"`. |
+| `event_type`        | `str`               | `"BASIC_EVENT"`, `"CONTAINER_EVENT"`, `"SEQUENCE_OF_EVENTS"`, `"POINTS_IN_TIME_EVENT"`, or `"TIME_WINDOW_EVENT"`. |
 | `event_name`        | `str`               | Event name.                                                                 |
 | `event_description` | `str`               | Event description.                                                          |
 | `required_channels` | `array[str]`        | Required channel names (null for `ContainerEvent`).                         |
@@ -232,9 +325,9 @@ Interval events satisfy `start_ts < end_ts`; `PointsInTimeEvent` instances are z
 
 ## Choosing between event types
 
-| Criterion                        | BasicEvent                                              | ContainerEvent                                    | SequenceOfEvents                                                          | PointsInTimeEvent                                          |
-|----------------------------------|---------------------------------------------------------|---------------------------------------------------|---------------------------------------------------------------------------|------------------------------------------------------------|
-| Requires a TSAL expression       | Yes (one)                                               | No                                                | Yes (ordered list)                                                        | Yes (one, must evaluate to `PointsInTime`)                 |
-| Multiple instances per container | Yes (one per matching interval)                         | No (always one per container)                     | Yes (one per joined sequence)                                             | Yes (one per instant)                                      |
-| Instance duration                | Interval (`start_ts < end_ts`)                          | Full container window                             | Interval (`start_ts < end_ts`)                                            | Zero (`start_ts == end_ts`)                                |
-| Use case                         | Signal-based conditions, operating bands, distance bins | Full-run aggregations, container-level statistics | State transitions and multi-step patterns where consecutive states overlap | Edge/instant events, e.g. `rising_edges()` / `falling_edges()` |
+| Criterion                        | BasicEvent                                              | ContainerEvent                                    | SequenceOfEvents                                                          | PointsInTimeEvent                                          | TimeWindowEvent                                             |
+|----------------------------------|---------------------------------------------------------|---------------------------------------------------|---------------------------------------------------------------------------|------------------------------------------------------------|-------------------------------------------------------------|
+| Requires a TSAL expression       | Yes (one)                                               | No                                                | Yes (ordered list)                                                        | Yes (one, must evaluate to `PointsInTime`)                 | No (needs a `window_length`)                                |
+| Multiple instances per container | Yes (one per matching interval)                         | No (always one per container)                     | Yes (one per joined sequence)                                             | Yes (one per instant)                                      | Yes (one per fixed window)                                  |
+| Instance duration                | Interval (`start_ts < end_ts`)                          | Full container window                             | Interval (`start_ts < end_ts`)                                            | Zero (`start_ts == end_ts`)                                | Fixed window (last clamped to container end)                |
+| Use case                         | Signal-based conditions, operating bands, distance bins | Full-run aggregations, container-level statistics | State transitions and multi-step patterns where consecutive states overlap | Edge/instant events, e.g. `rising_edges()` / `falling_edges()` | Repeated time segments (1-min / 10-min / hourly / daily)    |

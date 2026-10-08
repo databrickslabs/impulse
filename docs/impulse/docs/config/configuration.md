@@ -170,6 +170,36 @@ Top-level fields on `SolverConfig`:
   the `project_id` column (after column-name mapping) of every table it reads that carries one —
   `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured).
   Omit it if you don't need project-level scoping; the solver does not require it.
+- `channel_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional) and `channel_time_origin`
+  (`"epoch"` (default) | `"container_start"`): the time frame of the channel timestamps
+  (`tstart`/`tend`, or `timestamp` when `data_type = "RAW"`). `"epoch"` means absolute epoch
+  numbers; `"container_start"` means time relative to the container's start
+  (`container_metrics.start_ts`, e.g. seconds since the recording started). Channel timestamps are never converted; they must already be
+  numbers in that frame.
+
+- `container_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional): the unit of **numeric**
+  `container_metrics.start_ts`/`stop_ts`, when it differs from the channels' unit. For example,
+  boundaries in epoch ms and channel samples in epoch µs need `container_time_unit = "ms"` and
+  `channel_time_unit = "us"`. Requires `channel_time_unit`; not allowed for `TIMESTAMP`
+  boundaries, which carry their own unit. Unset means the numeric boundaries are already in the
+  channels' unit.
+
+  These settings are only used by `TimeWindowEvent`, whose windows must lie in the channel time
+  frame. It derives its window bounds from `container_metrics.start_ts`/`stop_ts`:
+  - origin `"epoch"`: `TIMESTAMP` boundaries as epoch numbers in `channel_time_unit`; numeric
+    boundaries converted from `container_time_unit` to `channel_time_unit` (as they are when
+    `container_time_unit` is unset);
+  - origin `"container_start"`: `0` to `stop_ts - start_ts`, converted the same way.
+
+  `channel_time_unit` is required when the boundaries are `TIMESTAMP` columns; a report with a
+  `TimeWindowEvent` fails with a clear error until it is set. `TIMESTAMP_NTZ` and `DATE` boundaries
+  are not supported. Everything else sees the original `container_metrics.start_ts`/`stop_ts`:
+  `ContainerEvent`, `measurement_dimension`, container filters, and UDFs that request them via
+  `apply(..., container_metrics=[...])` (a `TIMESTAMP` arrives there as a `pd.Timestamp`).
+
+  The channel time frame is part of the definition hash of every `TimeWindowEvent` and of the
+  aggregations scoped to it, so changing it recomputes them over all containers in incremental
+  mode instead of mixing time frames in the gold tables.
 
 Per-table sections (each a `TableConfig`):
 
@@ -192,7 +222,7 @@ Internal column names that mappings can target:
 | `tstart`, `tend`| Sample interval start/end on the `channels` table (RLE)  |
 | `timestamp`     | Raw sample timestamp on the `channels` table (RAW mode; encoded into `tstart`/`tend`) |
 | `is_plausible`  | Boolean plausibility flag on the `channels` table (RAW mode); consumed by `drop_implausible_data` |
-| `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` to derive event-fact start/end |
+| `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` and `TimeWindowEvent` to derive event-fact start/end. May be `TIMESTAMP` (see `channel_time_unit`) |
 | `value`         | Sample value (or attribute value on the EAV tag table)   |
 | `key`           | Attribute key on the EAV `container_tags` table          |
 | `priority`      | Tie-breaker column on the `channel_mapping` table        |

@@ -7,6 +7,7 @@ loaders:
       - impulse_reporting.events.basic_event
       - impulse_reporting.events.container_event
       - impulse_reporting.events.sequence_of_events
+      - impulse_reporting.events.time_window_event
       - impulse_reporting.aggregations.histogram
       - impulse_reporting.aggregations.histogram2d
       - impulse_reporting.aggregations.stats_aggregator

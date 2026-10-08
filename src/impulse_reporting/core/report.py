@@ -43,9 +43,11 @@ from impulse_reporting.core.report_utils import (
     split_by_hash_change,
     validate_full_recalculation_scope,
 )
+from impulse_reporting.events.container_boundary_event import ContainerBoundaryEvent
 from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.event import Event
 from impulse_reporting.events.event_types import EventType
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.incremental.container_detector import ContainerUpsertDetector
 from impulse_reporting.incremental.definition_hash_comparator import (
     DefinitionHashComparator,
@@ -414,6 +416,15 @@ class Report:
             )
         self.events.append(event)
         event.set_report_id(self.report_id)
+        if isinstance(event, TimeWindowEvent):
+            # The windows are computed in the channel time frame, so it is part of the
+            # event's (and its scoped aggregations') definition.
+            solver_config = self.solver.config
+            event.set_channel_time(
+                solver_config.channel_time_unit,
+                solver_config.channel_time_origin,
+                solver_config.container_time_unit,
+            )
 
     def get_events(self) -> list[Event]:
         """
@@ -1137,12 +1148,13 @@ class Report:
             )
         )
 
-        # Collect all solvable expressions (exclude ContainerEvent)
+        # Collect all solvable expressions. Container-boundary events (ContainerEvent,
+        # TimeWindowEvent) resolve from container_metrics, not the channel solve.
         all_changed_expressions = collect_solvable_expressions(
-            changed_events_by_type, EventType, exclude_cls=ContainerEvent
+            changed_events_by_type, EventType, exclude_cls=ContainerBoundaryEvent
         ) + collect_solvable_expressions(changed_aggs_by_type, AggregationType)
         all_unchanged_expressions = collect_solvable_expressions(
-            unchanged_events_by_type, EventType, exclude_cls=ContainerEvent
+            unchanged_events_by_type, EventType, exclude_cls=ContainerBoundaryEvent
         ) + collect_solvable_expressions(unchanged_aggs_by_type, AggregationType)
 
         # Centralized solve
@@ -1163,7 +1175,7 @@ class Report:
             self.query,
             self.solver,
             changed_pre_filtered_containers_df,
-            ContainerEvent,
+            ContainerBoundaryEvent,
         )
         unchanged_event_dfs = dispatch_events(
             self.spark,
@@ -1173,7 +1185,7 @@ class Report:
             self.query,
             self.solver,
             pre_filtered_containers_df,
-            ContainerEvent,
+            ContainerBoundaryEvent,
         )
 
         # Merge event results into {type: {"changed": df, "unchanged": df}} and

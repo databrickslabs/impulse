@@ -14,11 +14,14 @@ Covers both silver-layer shapes:
 """
 
 import pandas as pd
+import pyspark.sql.functions as F
 import pytest
 from pyspark.sql import SparkSession
 
 import impulse_query_engine.schema as S
+from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+from impulse_query_engine.analyze.query.events import TimeWindowExpression
 from impulse_query_engine.analyze.query.solvers.default_solver import (
     DefaultSolver,
     TimeSeriesCache,
@@ -329,3 +332,96 @@ def test_cache_reads_container_meta_from_surviving_row_only():
     )
     assert cache.container_tags == {"brand": "BMW"}
     assert cache.container_metrics["num_channels"] == 11
+
+
+def _timestamp_boundaries_db(basic_narrow_db: MeasurementDB) -> MeasurementDB:
+    """Clone of basic_narrow_db with start_ts / stop_ts (epoch ms) recast to TIMESTAMP."""
+    tables = dict(basic_narrow_db.config.debug_tables)
+    tables["container_metrics"] = (
+        tables["container_metrics"]
+        .withColumn("start_ts", F.timestamp_millis("start_ts"))
+        .withColumn("stop_ts", F.timestamp_millis("stop_ts"))
+    )
+    return MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+
+def _grab_start_ts(ts, container_metrics):
+    value = container_metrics["start_ts"]
+    if value is None:  # type-inference pass on the empty cache
+        return 0.0
+    # Like a customer UDF rebuilding absolute time: a pd.Timestamp (naive, in the session
+    # time zone, here UTC) becomes epoch microseconds (exact); anything else is flagged -1.
+    if not isinstance(value, pd.Timestamp):
+        return -1.0
+    return float((value - pd.Timestamp("1970-01-01")) // pd.Timedelta(microseconds=1))
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        SolverConfig(),
+        SolverConfig(channel_time_unit="ms"),
+        SolverConfig(channel_time_unit="ms", channel_time_origin="container_start"),
+    ],
+)
+def test_udf_gets_raw_timestamp_start_ts_regardless_of_channel_time(
+    spark: SparkSession, basic_narrow_db: MeasurementDB, config: SolverConfig
+):
+    """A UDF reading a TIMESTAMP start_ts always gets the absolute pd.Timestamp: the channel
+    time settings only shape TimeWindowEvent windows, never the raw container metrics."""
+    db = _timestamp_boundaries_db(basic_narrow_db)
+    query = db.query
+    previous_tz = spark.conf.get("spark.sql.session.timeZone")
+    spark.conf.set("spark.sql.session.timeZone", "UTC")
+    try:
+        result = query.select(
+            query.channel(channel_name="Engine RPM")
+            .apply(_grab_start_ts, container_metrics=["start_ts"])
+            .alias("start")
+        ).solve(spark, solver=DefaultSolver(spark, config=config))
+        rows = {row.container_id: row.start for row in result.collect()}
+    finally:
+        spark.conf.set("spark.sql.session.timeZone", previous_tz)
+
+    expected = {
+        r.container_id: float(r.us)
+        for r in db.container_metrics(spark)
+        .select("container_id", F.unix_micros("start_ts").alias("us"))
+        .collect()
+    }
+    assert rows and all(rows[cid] == expected[cid] for cid in rows), (rows, expected)
+
+
+def test_time_window_expression_and_udf_share_a_solve(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """In one solve, a TimeWindowExpression tiles the container in the channel time frame
+    (here relative ms) while a UDF still reads the absolute TIMESTAMP start_ts."""
+    db = _timestamp_boundaries_db(basic_narrow_db)
+    query = db.query
+    rpm = query.channel(channel_name="Engine RPM")
+    windows = StatsAggregator(
+        input_expressions=[rpm],
+        event_expression=TimeWindowExpression(10_000),
+        statistics=["mean"],
+    ).alias("windows")
+    config = SolverConfig(channel_time_unit="ms", channel_time_origin="container_start")
+    result = query.select(
+        windows, rpm.apply(_grab_start_ts, container_metrics=["start_ts"]).alias("start")
+    ).solve(spark, solver=DefaultSolver(spark, config=config))
+    rows = {row.container_id: row for row in result.collect()}
+
+    durations = {
+        r.container_id: float(r.d)
+        for r in basic_narrow_db.container_metrics(spark)
+        .select("container_id", (F.col("stop_ts") - F.col("start_ts")).alias("d"))
+        .collect()
+    }
+    assert rows
+    for container_id, row in rows.items():
+        event_timestamps = row.windows.event_timestamps
+        # Relative windows: from 0 to the container's duration in ms, 10 s apart.
+        assert event_timestamps[0] == [0.0, 10_000.0]
+        assert event_timestamps[-1][1] == durations[container_id]
+        assert len(event_timestamps) == -(-durations[container_id] // 10_000)
+        assert row.start > 0  # absolute epoch microseconds, not -1 (non-timestamp)
