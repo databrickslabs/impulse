@@ -5,7 +5,9 @@ import numbers
 
 import numpy as np
 import pandas as pd
-import pyspark.sql.functions as F
+import pyarrow as pa
+import pyspark.sql.types as T
+from pyspark.sql import DataFrame
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -34,6 +36,9 @@ _WINDOW_LIMIT_HINT = (
     "unit, that solver_config.container_time_unit is set, or raise the limit "
     "(TimeWindowEvent max_windows_per_container, TimeWindowExpression max_windows)."
 )
+
+# Windows after which explode_windows emits an output batch (between containers only).
+_BATCH_WINDOWS = 100_000
 
 
 def validate_max_windows(max_windows: int, param_name: str = "max_windows") -> int:
@@ -73,13 +78,14 @@ def tile_windows(
 
     The one window implementation behind ``TimeWindowEvent``: the solve calls it through
     :meth:`TimeWindowExpression.build` (scoped aggregations), the event fact through
-    :func:`window_intervals_udf`.  ``event_instance_id`` hashes each window's boundaries, so
+    :func:`explode_windows`.  ``event_instance_id`` hashes each window's boundaries, so
     both sides must produce identical windows, which a single function guarantees as long as
     both pass in the same values.  Both read the same Spark-computed bounds
-    (``solvers.utils.window_bounds.with_window_bounds``), but pandas hands them over as
-    ``int64`` or ``float64`` (nulls force ``float64``), or as ``None`` / ``NaN``.  The bounds are
-    therefore converted to ``float`` first: ``int64`` -> ``float64`` rounds to the nearest
-    double on either path, so the arithmetic below runs on identical doubles.
+    (``solvers.utils.window_bounds.with_window_bounds``), but receive them as Python or numpy
+    integers or floats (pandas turns long columns with nulls into ``float64``), or as
+    ``None`` / ``NaN``.  The bounds are therefore converted to ``float`` first: integer ->
+    double rounds to the nearest double on either path, so the arithmetic below runs on
+    identical doubles.
 
     Window ``i`` spans ``[start + i * W, min(start + (i + 1) * W, stop)]``, so the last one
     is clamped to *stop*; windows with ``start_i >= end_i`` (possible only through rounding)
@@ -128,46 +134,102 @@ def tile_windows(
     return starts[keep], ends[keep]
 
 
-def window_intervals_udf(window_length: float, max_windows: int = MAX_WINDOWS_PER_CONTAINER):
-    """Scalar pandas UDF giving each container's windows via :func:`tile_windows`.
+def explode_windows(
+    df: DataFrame,
+    *,
+    id_col: str,
+    start_col: str,
+    stop_col: str,
+    windows: list[tuple[str, float, int]],
+) -> DataFrame:
+    """One row per window of each container, for several window lengths in one pass.
 
-    Used by the reporting ``TimeWindowEvent`` for its event fact (one row per container), so
-    the event fact and the solve share one window implementation.
+    Used by the reporting ``TimeWindowEvent`` for its event fact, so the event fact and the
+    solve share one window implementation (:func:`tile_windows`).  The rows are built from
+    numpy arrays in a ``mapInArrow``, in output batches of about 100,000 windows that never
+    split a container, so the Python worker's memory stays bounded however fine the windows.
 
     Parameters
     ----------
-    window_length : float
-        Fixed window length, in the same unit as the bounds. Strictly positive.
-    max_windows : int, optional
-        Maximum number of windows per container (default
-        :data:`MAX_WINDOWS_PER_CONTAINER`). A container exceeding it fails the query with
-        an error naming the limit.
+    df : pyspark.sql.DataFrame
+        One row per container, with *id_col* and the bounds in the channel time frame.
+    id_col : str
+        Container id column; kept with its type (e.g. long or string) in the output.
+    start_col, stop_col : str
+        Container bound columns (numeric).
+    windows : list of tuple
+        ``(name, window_length, max_windows)`` per event: the ``event_name`` of its rows,
+        the window length (in the unit of the bounds, strictly positive) and the maximum
+        number of windows per container. A container exceeding it fails the query with an
+        error naming the limit.
 
     Returns
     -------
-    callable
-        A pandas UDF ``(start, stop) -> struct<starts: array<double>, ends: array<double>>``
-        with the window starts and ends, in order; empty when a bound is null, NaN or
-        infinite, or the span is not strictly positive.
+    pyspark.sql.DataFrame
+        Columns *id_col*, ``event_name`` (string), ``start_ts`` and ``end_ts`` (double); no
+        rows for a container whose bound is null, NaN or infinite, or whose span is not
+        strictly positive.
+
+    Raises
+    ------
+    ValueError
+        If a ``max_windows`` is not a positive integer.
     """
-    window_length = float(window_length)
-    max_windows = validate_max_windows(max_windows)
-
-    @F.pandas_udf("struct<starts: array<double>, ends: array<double>>")
-    def windows(start: pd.Series, stop: pd.Series) -> pd.DataFrame:
-        pairs = [
-            tile_windows(s, e, window_length, max_windows)
-            for s, e in zip(start, stop, strict=True)
+    windows = [(name, float(length), validate_max_windows(m)) for name, length, m in windows]
+    schema = T.StructType(
+        [
+            df.schema[id_col],
+            T.StructField("event_name", T.StringType()),
+            T.StructField("start_ts", T.DoubleType()),
+            T.StructField("end_ts", T.DoubleType()),
         ]
-        # object dtype keeps one array per row, also when all rows have equal window counts.
-        return pd.DataFrame(
-            {
-                "starts": pd.Series([p[0] for p in pairs], dtype=object),
-                "ends": pd.Series([p[1] for p in pairs], dtype=object),
-            }
-        )
+    )
 
-    return windows
+    def tile(batches):
+        yield from _window_batches(batches, id_col, start_col, stop_col, windows, _BATCH_WINDOWS)
+
+    return df.select(id_col, start_col, stop_col).mapInArrow(tile, schema)
+
+
+def _window_batches(batches, id_col, start_col, stop_col, windows, batch_windows):
+    """Yield :func:`explode_windows` output batches for the input Arrow *batches*.
+
+    A batch is emitted once it holds at least *batch_windows* windows, after a complete
+    container, and at the end of each input batch.
+    """
+    names = pa.array([name for name, _, _ in windows], pa.string())
+    for batch in batches:
+        ids = batch.column(id_col)
+        bounds = zip(
+            batch.column(start_col).to_pylist(), batch.column(stop_col).to_pylist(), strict=True
+        )
+        parts, pending = [], 0
+        for row, (start, stop) in enumerate(bounds):
+            for event, (_, length, max_windows) in enumerate(windows):
+                starts, ends = tile_windows(start, stop, length, max_windows)
+                parts.append((row, event, starts, ends))
+                pending += len(starts)
+            if pending >= batch_windows:
+                yield _record_batch(id_col, ids, names, parts)
+                parts, pending = [], 0
+        if pending:
+            yield _record_batch(id_col, ids, names, parts)
+
+
+def _record_batch(id_col, ids, names, parts) -> pa.RecordBatch:
+    """Output batch for the ``(row, event, starts, ends)`` *parts* of one input batch."""
+    counts = [len(starts) for _, _, starts, _ in parts]
+    rows = np.repeat([row for row, _, _, _ in parts], counts)
+    events = np.repeat([event for _, event, _, _ in parts], counts)
+    return pa.RecordBatch.from_arrays(
+        [
+            ids.take(rows),
+            names.take(events),
+            pa.array(np.concatenate([starts for _, _, starts, _ in parts])),
+            pa.array(np.concatenate([ends for _, _, _, ends in parts])),
+        ],
+        names=[id_col, "event_name", "start_ts", "end_ts"],
+    )
 
 
 class TimeWindowExpression(TimeSeriesExpression):
@@ -190,7 +252,7 @@ class TimeWindowExpression(TimeSeriesExpression):
     This is the query-engine counterpart of the reporting ``TimeWindowEvent``.  It evaluates
     to :class:`Intervals`, so it can scope a ``StatsAggregator`` (one statistic per window).
     The windows come from :func:`tile_windows`, which the reporting event fact also uses (via
-    :func:`window_intervals_udf`), so both produce the same windows in the same order.
+    :func:`explode_windows`), so both produce the same windows in the same order.
 
     Attributes
     ----------

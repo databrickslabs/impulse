@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-import pyspark.sql.functions as f
 from pyspark.sql import DataFrame, SparkSession
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -13,8 +12,8 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.events.time_window_expression import (
     MAX_WINDOWS_PER_CONTAINER,
     TimeWindowExpression,
+    explode_windows,
     validate_max_windows,
-    window_intervals_udf,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
@@ -34,7 +33,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
     container end.
 
     The event fact is computed from ``container_metrics`` alone (via
-    :func:`window_intervals_udf`), so every filtered container gets windows regardless of
+    :func:`explode_windows`), so every filtered container gets windows regardless of
     its channel data.  Aggregations scoped to this event evaluate the
     :class:`TimeWindowExpression` in the solve.  Both use the same window function
     (``tile_windows``), so they produce identical windows, and the timestamp-based
@@ -184,7 +183,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         gets windows.
         Each window becomes one event instance (``start_ts < end_ts``) whose
         ``event_instance_id`` hashes its boundaries. The solve uses the same window function
-        for scoped aggregations (see :func:`window_intervals_udf`), so the ids match.
+        for scoped aggregations (see :func:`explode_windows`), so the ids match.
 
         Parameters
         ----------
@@ -213,38 +212,18 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         # uses for scoped aggregations (fails fast on the schema, e.g. when TIMESTAMP
         # boundaries lack solver_config.channel_time_unit).
         container_metrics_df = with_window_bounds(container_metrics_df, solver.config)
-        start_ts = f.col(solver.config.window_start_col)
-        stop_ts = f.col(solver.config.window_stop_col)
-
-        # One (event_name, windows) struct per event, exploded in a single pass over the
-        # containers.
-        per_event = f.array(
-            *[
-                f.struct(
-                    f.lit(event.get_name()).alias("event_name"),
-                    window_intervals_udf(
-                        event.window_length, max_windows=event.max_windows_per_container
-                    )(start_ts, stop_ts).alias("windows"),
-                )
+        windows_df = explode_windows(
+            container_metrics_df,
+            id_col=solver.config.container_id_col,
+            start_col=solver.config.window_start_col,
+            stop_col=solver.config.window_stop_col,
+            windows=[
+                (event.get_name(), event.window_length, event.max_windows_per_container)
                 for event in events
-            ]
+            ],
         )
-
-        df = (
-            container_metrics_df.select(
-                f.col(solver.config.container_id_col).alias("container_id"),
-                f.explode(per_event).alias("event"),
-            )
-            .select(
-                "container_id",
-                f.col("event.event_name").alias("event_name"),
-                f.inline(
-                    f.arrays_zip(
-                        f.col("event.windows.starts").alias("start_ts"),
-                        f.col("event.windows.ends").alias("end_ts"),
-                    )
-                ),
-            )
+        return (
+            windows_df.withColumnRenamed(solver.config.container_id_col, "container_id")
             .withColumn(
                 "event_instance_id",
                 generate_event_instance_id_column(event_type=TimeWindowEvent),
@@ -255,4 +234,3 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             )
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
         )
-        return df
