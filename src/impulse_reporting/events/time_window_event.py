@@ -217,8 +217,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         stop_ts = f.col(solver.config.window_stop_col)
 
         # One (event_name, windows) struct per event, exploded in a single pass over the
-        # containers. The windows UDF only sees this container-level plan, never the
-        # channels table.
+        # containers.
         per_event = f.array(
             *[
                 f.struct(
@@ -239,10 +238,13 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             .select(
                 "container_id",
                 f.col("event.event_name").alias("event_name"),
-                f.explode(f.col("event.windows")).alias("event_instance"),
+                f.inline(
+                    f.arrays_zip(
+                        f.col("event.windows.starts").alias("start_ts"),
+                        f.col("event.windows.ends").alias("end_ts"),
+                    )
+                ),
             )
-            .withColumn("start_ts", f.col("event_instance").getItem(0))
-            .withColumn("end_ts", f.col("event_instance").getItem(1))
             .withColumn(
                 "event_instance_id",
                 generate_event_instance_id_column(event_type=TimeWindowEvent),

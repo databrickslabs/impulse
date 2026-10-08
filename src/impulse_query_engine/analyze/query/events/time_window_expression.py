@@ -131,9 +131,8 @@ def tile_windows(
 def window_intervals_udf(window_length: float, max_windows: int = MAX_WINDOWS_PER_CONTAINER):
     """Scalar pandas UDF giving each container's windows via :func:`tile_windows`.
 
-    Used by the reporting ``TimeWindowEvent`` for its event fact, on one row per container
-    (its plan reads only ``container_metrics`` / ``container_tags``, never the channels
-    table), so the event fact and the solve share one window implementation.
+    Used by the reporting ``TimeWindowEvent`` for its event fact (one row per container), so
+    the event fact and the solve share one window implementation.
 
     Parameters
     ----------
@@ -147,20 +146,25 @@ def window_intervals_udf(window_length: float, max_windows: int = MAX_WINDOWS_PE
     Returns
     -------
     callable
-        A pandas UDF ``(start, stop) -> array<array<double>>`` with one ``[start, end]`` pair
-        per window, in order; empty when a bound is null, NaN or infinite, or the span is not
-        strictly positive.
+        A pandas UDF ``(start, stop) -> struct<starts: array<double>, ends: array<double>>``
+        with the window starts and ends, in order; empty when a bound is null, NaN or
+        infinite, or the span is not strictly positive.
     """
     window_length = float(window_length)
     max_windows = validate_max_windows(max_windows)
 
-    @F.pandas_udf("array<array<double>>")
-    def windows(start: pd.Series, stop: pd.Series) -> pd.Series:
-        return pd.Series(
-            [
-                np.column_stack(tile_windows(s, e, window_length, max_windows)).tolist()
-                for s, e in zip(start, stop, strict=True)
-            ]
+    @F.pandas_udf("struct<starts: array<double>, ends: array<double>>")
+    def windows(start: pd.Series, stop: pd.Series) -> pd.DataFrame:
+        pairs = [
+            tile_windows(s, e, window_length, max_windows)
+            for s, e in zip(start, stop, strict=True)
+        ]
+        # object dtype keeps one array per row, also when all rows have equal window counts.
+        return pd.DataFrame(
+            {
+                "starts": pd.Series([p[0] for p in pairs], dtype=object),
+                "ends": pd.Series([p[1] for p in pairs], dtype=object),
+            }
         )
 
     return windows

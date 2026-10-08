@@ -208,10 +208,13 @@ def test_tile_windows_none_and_na_yield_empty():
 # window_intervals_udf: tile_windows on the event fact side (one row per container)
 # ---------------------------------------------------------------------------
 def _udf_windows(spark, rows, window_length, ts_type="long", **kwargs):  # noqa: F811
-    df = spark.createDataFrame(rows, f"k int, start_ts {ts_type}, stop_ts {ts_type}")
+    # One partition, so all rows reach the UDF in one Arrow batch.
+    df = spark.createDataFrame(rows, f"k int, start_ts {ts_type}, stop_ts {ts_type}").coalesce(1)
     windows = window_intervals_udf(window_length, **kwargs)
     out = df.select("k", windows(F.col("start_ts"), F.col("stop_ts")).alias("w"))
-    return out, {r.k: [list(p) for p in r.w] for r in out.collect()}
+    return out, {
+        r.k: [[s, e] for s, e in zip(r.w.starts, r.w.ends, strict=True)] for r in out.collect()
+    }
 
 
 def test_window_intervals_udf_edge_cases(spark):  # noqa: F811
@@ -227,7 +230,9 @@ def test_window_intervals_udf_edge_cases(spark):  # noqa: F811
     ]
     out, w = _udf_windows(spark, rows, 10)
 
-    assert out.schema["w"].dataType.simpleString() == "array<array<double>>"
+    assert out.schema["w"].dataType.simpleString() == (
+        "struct<starts:array<double>,ends:array<double>>"
+    )
     assert w[0] == [[float(s), float(s + 10)] for s in range(0, 100, 10)]
     assert w[1][-1] == [100.0, 105.0] and len(w[1]) == 11
     assert w[2] == [[1000.0, 1010.0]]
@@ -252,6 +257,15 @@ def test_window_intervals_udf_raises_beyond_max_windows(spark):  # noqa: F811
 def test_window_intervals_udf_invalid_max_windows_raises():
     with pytest.raises(ValueError, match="max_windows must be a positive integer"):
         window_intervals_udf(10, max_windows=0)
+
+
+def test_window_intervals_udf_uniform_and_empty_batches(spark):  # noqa: F811
+    # Equal window counts across a batch still give one array per row.
+    _, w = _udf_windows(spark, [(k, 100 * k, 100 * k + 30) for k in range(4)], 10)
+    assert w == {k: [[100.0 * k + s, 100.0 * k + s + 10] for s in (0, 10, 20)] for k in range(4)}
+    # A batch without any windows.
+    _, w = _udf_windows(spark, [(0, None, None), (1, 50, 50)], 10)
+    assert w == {0: [], 1: []}
 
 
 def _as_list(windows) -> list[tuple[float, float]]:
@@ -315,7 +329,10 @@ def test_event_fact_and_solve_windows_identical_across_input_dtypes(spark):  # n
             windows(F.col("start_ts"), F.col("stop_ts")).alias("w"),
             batch_dtype(F.col("start_ts")).alias("dtype"),
         ).collect()
-        return {r.k: _as_list(r.w) for r in out if r.k >= 0}, {r.dtype for r in out}
+        per_container = {
+            r.k: _as_list(zip(r.w.starts, r.w.ends, strict=True)) for r in out if r.k >= 0
+        }
+        return per_container, {r.dtype for r in out}
 
     without_nulls, dtypes_int = _event_fact(rows)
     with_null, dtypes_float = _event_fact([*rows, (-1, None, None)])
