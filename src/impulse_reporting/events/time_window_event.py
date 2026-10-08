@@ -32,12 +32,12 @@ class TimeWindowEvent(ContainerBoundaryEvent):
     span with windows of length ``window_length``.  The final slice is clamped to the
     container end.
 
-    The event fact is computed from ``container_metrics`` alone (via
-    :func:`explode_windows`), so every filtered container gets windows regardless of
-    its channel data.  Aggregations scoped to this event evaluate the
-    :class:`TimeWindowExpression` in the solve.  Both use the same window function
-    (``tile_windows``), so they produce identical windows, and the timestamp-based
-    ``event_instance_id`` (like for other interval events) matches on both sides.
+    The event fact is computed from ``container_metrics`` alone (via :func:`explode_windows`),
+    so every filtered container gets windows regardless of its channel data.  Aggregations
+    scoped to this event evaluate the :class:`TimeWindowExpression` in the solve.  Both use
+    the same window function (``tile_windows``), so they produce identical windows, and the
+    timestamp-based ``event_instance_id`` (like for other interval events) matches on both
+    sides.
     """
 
     def __init__(
@@ -183,7 +183,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
         gets windows.
         Each window becomes one event instance (``start_ts < end_ts``) whose
         ``event_instance_id`` hashes its boundaries. The solve uses the same window function
-        for scoped aggregations (see :func:`explode_windows`), so the ids match.
+        for scoped aggregations (see :func:`tile_windows`), so the ids match.
 
         Parameters
         ----------
@@ -223,8 +223,7 @@ class TimeWindowEvent(ContainerBoundaryEvent):
             ],
         )
         return (
-            windows_df.withColumnRenamed(solver.config.container_id_col, "container_id")
-            .withColumn(
+            windows_df.withColumn(
                 "event_instance_id",
                 generate_event_instance_id_column(event_type=TimeWindowEvent),
             )
