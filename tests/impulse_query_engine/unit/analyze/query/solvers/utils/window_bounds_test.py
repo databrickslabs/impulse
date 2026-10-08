@@ -271,6 +271,12 @@ def test_mixed_and_missing_boundaries_rejected(spark, basic_narrow_db):  # noqa:
         with_window_bounds(mixed, SolverConfig(channel_time_unit="s"))
     with pytest.raises(ValueError, match="stop_ts"):
         with_window_bounds(timestamps.drop("stop_ts"), SolverConfig())
+    # An unmapped physical name: the error lists it and points to the column mapping.
+    unmapped = timestamps.withColumnRenamed("stop_ts", "measurement_end")
+    with pytest.raises(
+        ValueError, match=r"'measurement_end'.*container_metrics\.column_name_mapping"
+    ):
+        with_window_bounds(unmapped, SolverConfig(channel_time_unit="s"))
 
 
 def test_channel_time_settings_validated():

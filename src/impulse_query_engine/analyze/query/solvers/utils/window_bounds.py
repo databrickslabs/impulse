@@ -63,7 +63,9 @@ def with_window_bounds(df: DataFrame, config: SolverConfig) -> DataFrame:
     if missing:
         raise ValueError(
             f"TimeWindowEvent needs the container_metrics columns {missing} to compute "
-            f"its windows. Available columns: {df.columns}"
+            f"its windows. Available columns: {df.columns}. If they have other physical "
+            "names, map them via "
+            "query_engine.solver_config.container_metrics.column_name_mapping."
         )
     for name, dtype in types.items():
         if isinstance(dtype, (T.TimestampNTZType, T.DateType)):
