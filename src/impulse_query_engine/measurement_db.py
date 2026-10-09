@@ -1,11 +1,9 @@
 import warnings
 
-from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame
 
-from impulse_query_engine import __version__
-from impulse_query_engine.telemetry import verify_workspace_client
-from .analyze.query.query_builder import QueryBuilder
+from .measurement_db_abstract import AbstractMeasurementDB
+from .measurement_db_registry import register_measurement_db
 
 
 class MeasurementDBConfig:
@@ -100,15 +98,8 @@ class MeasurementDBConfig:
         ]
 
 
-class MeasurementDB:
-    def __init__(self, config: MeasurementDBConfig, ws: WorkspaceClient):
-        self.config = config
-        self.ws = verify_workspace_client(ws, "databricks-impulse", __version__)
-
-    @property
-    def query(self):
-        return QueryBuilder(db=self)
-
+@register_measurement_db("MeasurementDB", MeasurementDBConfig)
+class MeasurementDB(AbstractMeasurementDB):
     def _current_delta_version(self, spark, uri: str) -> int | None:
         """Latest committed Delta version of ``uri``, or ``None`` if unpinnable.
 

@@ -13,13 +13,14 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db import AbstractMeasurementDB
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.channels.channel_types import ChannelType
 from impulse_reporting.config.config_parser import (
     ImpulseConfig,
     Solvers,
     DataType,
+    build_measurement_db_config,
 )
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report_utils import (
@@ -157,13 +158,13 @@ class Report:
         """
         return zlib.crc32(self.name.encode()) & 0x7FFFFFFF  # Ensures positive 32-bit int
 
-    def get_db(self) -> MeasurementDB:
+    def get_db(self) -> AbstractMeasurementDB:
         """
         Get the measurement database associated with this report.
 
         Returns
         -------
-        MeasurementDB
+        AbstractMeasurementDB
             The measurement database instance.
         """
         return self.db
@@ -215,10 +216,12 @@ class Report:
         return ImpulseConfig.model_validate(config_info)
 
     @staticmethod
-    def create_measurement_db(config: ImpulseConfig, ws: WorkspaceClient) -> MeasurementDB:
+    def create_measurement_db(config: ImpulseConfig, ws: WorkspaceClient) -> AbstractMeasurementDB:
         """
-        Create a measurement database based on the provided configuration.
+        Create the measurement database selected by ``query_engine.measurement_db``.
 
+        Builds the registered config class from the ``source`` tables plus
+        ``query_engine.measurement_db_config``, then the registered DB class.
         Maps the optional ``container_tags`` field from the Source config
         to the ``container_tags_table`` parameter expected by
         ``MeasurementDBConfig``.
@@ -232,18 +235,18 @@ class Report:
 
         Returns
         -------
-        MeasurementDB
+        AbstractMeasurementDB
             The measurement database instance.
         """
         source_dict = dict(config.source)
         # Map config field name to MeasurementDBConfig parameter name
         if "container_tags" in source_dict:
             source_dict["container_tags_table"] = source_dict.pop("container_tags")
-        measurement_db_config = MeasurementDBConfig(**source_dict, table_locations="unity_catalog")
-        return MeasurementDB(config=measurement_db_config, ws=ws)
+        db_cls, db_config = build_measurement_db_config(source_dict, config.query_engine)
+        return db_cls(db_config, ws)
 
     @staticmethod
-    def create_query_builder(db: MeasurementDB, config: ImpulseConfig) -> QueryBuilder:
+    def create_query_builder(db: AbstractMeasurementDB, config: ImpulseConfig) -> QueryBuilder:
         """
         Create a query builder based on the provided configuration and set container filters.
 
@@ -254,7 +257,7 @@ class Report:
 
         Parameters
         ----------
-        db : MeasurementDB
+        db : AbstractMeasurementDB
             The measurement database instance.
         config : ImpulseConfig
             The Impulse configuration.

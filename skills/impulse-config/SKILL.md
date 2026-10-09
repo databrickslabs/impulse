@@ -6,7 +6,8 @@ description: >
   "configure an Impulse report", set the source/sink tables, filter which containers are processed,
   choose RLE vs RAW, turn on incremental processing, run without writing (sinkless), remap column
   names, or scope by project. Covers source, unity_sink, container_filters, query_engine, solver_config,
-  incremental, full_recalculation, measurement_dimensions, and calculated_channels, all validated by Pydantic.
+  custom measurement DBs, incremental, full_recalculation, measurement_dimensions, and calculated_channels,
+  all validated by Pydantic.
 ---
 
 # Impulse — configuration
@@ -103,6 +104,8 @@ Omit entirely for `DefaultSolver` + `data_type="RLE"`.
 | `drop_implausible_data` | `false`            | Drop `channels` rows where `is_plausible = false`. **Requires `data_type="RAW"`** (RLE raises).   |
 | `max_channels_per_batch` | `500`             | Max distinct channels (`channel(...)` / `poi_channel(...)` selections) read per solve batch. Applies to events, aggregations, and calculated channels (counts their *input* channels). `batch_size` is a **deprecated alias** (warns; removed in a future release). |
 | `solver_config`         | `null`             | Per-table column mappings, per-table filters, and project scoping (below).                        |
+| `measurement_db`        | `"MeasurementDB"`  | Registered name of the MeasurementDB (the read seam). The default reads the silver tables directly; a custom one reshapes a different source schema at read time. See [Custom measurement DB](#custom-measurement-db). |
+| `measurement_db_config` | `null`             | Keyword args for the selected MeasurementDB's config class, merged with `source` (e.g. extra tables, prefilter keys). |
 
 ## solver_config (optional) — adapt to an existing layout
 
@@ -175,6 +178,27 @@ leaves a column under a non-default name, pass that same name as the `query.chan
 to `channel_mapping` so aliased selectors auto-convert during `solve()`. Constants in expressions over
 an aliased selector must then be in the target unit. Direct `channel(...)` selectors are never
 converted — conversion is a property of the alias.
+
+## Custom measurement DB
+
+`solver_config` only renames and filters columns. When the raw tables need *reshaping* to reach the
+silver model (unions, joins, a grain change, an EAV unpivot), register a custom MeasurementDB and select
+it by name — the stock solver then runs unchanged:
+
+```python
+"query_engine": {
+    "measurement_db": "MyMeasurementDB",
+    "measurement_db_config": {"session_table": "catalog.raw.sessions"},
+}
+```
+
+- `measurement_db` is a **registered name**; the package that registers it must be imported before the
+  config is parsed. Validation runs at load time — an unregistered name, a missing required argument, an
+  unknown key, or a key already present in `source` all raise.
+- `measurement_db_config` holds that implementation's own constructor kwargs, merged with `source`.
+- Implementing one (subclass `MeasurementDB` + `MeasurementDBConfig`, decorate with
+  `@register_measurement_db`, and declare any extra tables in `configured_table_uris()` so they are
+  pinned per run) is covered in the Impulse docs' *Custom measurement DB* section.
 
 ## incremental (optional)
 
