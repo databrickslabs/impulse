@@ -5,7 +5,6 @@ import numbers
 
 import numpy as np
 import pandas as pd
-import pyspark.sql.functions as F
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -73,13 +72,14 @@ def tile_windows(
 
     The one window implementation behind ``TimeWindowEvent``: the solve calls it through
     :meth:`TimeWindowExpression.build` (scoped aggregations), the event fact through
-    :func:`window_intervals_udf`.  ``event_instance_id`` hashes each window's boundaries, so
+    ``TimeWindowEvent.determine_events``.  ``event_instance_id`` hashes each window's boundaries, so
     both sides must produce identical windows, which a single function guarantees as long as
     both pass in the same values.  Both read the same Spark-computed bounds
-    (``solvers.utils.window_bounds.with_window_bounds``), but pandas hands them over as
-    ``int64`` or ``float64`` (nulls force ``float64``), or as ``None`` / ``NaN``.  The bounds are
-    therefore converted to ``float`` first: ``int64`` -> ``float64`` rounds to the nearest
-    double on either path, so the arithmetic below runs on identical doubles.
+    (``solvers.utils.window_bounds.with_window_bounds``), but receive them as Python or numpy
+    integers or floats (pandas turns long columns with nulls into ``float64``), or as
+    ``None`` / ``NaN``.  The bounds are therefore converted to ``float`` first: integer ->
+    double rounds to the nearest double on either path, so the arithmetic below runs on
+    identical doubles.
 
     Window ``i`` spans ``[start + i * W, min(start + (i + 1) * W, stop)]``, so the last one
     is clamped to *stop*; windows with ``start_i >= end_i`` (possible only through rounding)
@@ -128,48 +128,6 @@ def tile_windows(
     return starts[keep], ends[keep]
 
 
-def window_intervals_udf(window_length: float, max_windows: int = MAX_WINDOWS_PER_CONTAINER):
-    """Scalar pandas UDF giving each container's windows via :func:`tile_windows`.
-
-    Used by the reporting ``TimeWindowEvent`` for its event fact (one row per container), so
-    the event fact and the solve share one window implementation.
-
-    Parameters
-    ----------
-    window_length : float
-        Fixed window length, in the same unit as the bounds. Strictly positive.
-    max_windows : int, optional
-        Maximum number of windows per container (default
-        :data:`MAX_WINDOWS_PER_CONTAINER`). A container exceeding it fails the query with
-        an error naming the limit.
-
-    Returns
-    -------
-    callable
-        A pandas UDF ``(start, stop) -> struct<starts: array<double>, ends: array<double>>``
-        with the window starts and ends, in order; empty when a bound is null, NaN or
-        infinite, or the span is not strictly positive.
-    """
-    window_length = float(window_length)
-    max_windows = validate_max_windows(max_windows)
-
-    @F.pandas_udf("struct<starts: array<double>, ends: array<double>>")
-    def windows(start: pd.Series, stop: pd.Series) -> pd.DataFrame:
-        pairs = [
-            tile_windows(s, e, window_length, max_windows)
-            for s, e in zip(start, stop, strict=True)
-        ]
-        # object dtype keeps one array per row, also when all rows have equal window counts.
-        return pd.DataFrame(
-            {
-                "starts": pd.Series([p[0] for p in pairs], dtype=object),
-                "ends": pd.Series([p[1] for p in pairs], dtype=object),
-            }
-        )
-
-    return windows
-
-
 class TimeWindowExpression(TimeSeriesExpression):
     """Produce consecutive fixed-duration windows spanning a measurement container.
 
@@ -189,8 +147,8 @@ class TimeWindowExpression(TimeSeriesExpression):
 
     This is the query-engine counterpart of the reporting ``TimeWindowEvent``.  It evaluates
     to :class:`Intervals`, so it can scope a ``StatsAggregator`` (one statistic per window).
-    The windows come from :func:`tile_windows`, which the reporting event fact also uses (via
-    :func:`window_intervals_udf`), so both produce the same windows in the same order.
+    The windows come from :func:`tile_windows`, which the reporting event fact also uses (in
+    ``TimeWindowEvent.determine_events``), so both produce the same windows in the same order.
 
     Attributes
     ----------
