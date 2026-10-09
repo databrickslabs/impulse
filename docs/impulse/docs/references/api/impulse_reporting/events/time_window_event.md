@@ -19,8 +19,8 @@ event instance per fixed-duration slice, tiling the container's ``start_ts`` / `
 span with windows of length ``window_length``.  The final slice is clamped to the
 container end.
 
-The event fact is computed from ``container_metrics`` alone (via :func:`explode_windows`),
-so every filtered container gets windows regardless of its channel data.  Aggregations
+The event fact is computed from ``container_metrics`` alone (in a ``mapInArrow``), so
+every filtered container gets windows regardless of its channel data.  Aggregations
 scoped to this event evaluate the :class:`TimeWindowExpression` in the solve.  Both use
 the same window function (``tile_windows``), so they produce identical windows, and the
 timestamp-based ``event_instance_id`` (like for other interval events) matches on both
