@@ -292,6 +292,25 @@ def test_create_solver_key_value_store_with_solver_config():
     assert solver.config.project_id_col == "project_id"
 
 
+@pytest.mark.parametrize("enable_pushdown", [False, True])
+def test_create_solver_forwards_enable_pushdown(enable_pushdown):
+    """``query_engine.enable_pushdown`` decides whether the solver gets an optimizer."""
+    config = {
+        **DUMMY_KEY_VALUE_STORE_CONFIG,
+        "query_engine": {
+            **DUMMY_KEY_VALUE_STORE_CONFIG["query_engine"],
+            "enable_pushdown": enable_pushdown,
+        },
+    }
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=config,
+    )
+    assert (report.get_solver().optimizer is not None) is enable_pushdown
+
+
 def test_create_solver_delta_default_config():
     """DeltaSolver created without solver_config gets a default SolverConfig (no renames)."""
     from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver

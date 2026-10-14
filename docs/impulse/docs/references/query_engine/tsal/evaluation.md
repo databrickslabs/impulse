@@ -63,6 +63,11 @@ following per container:
    | `PointsInTimeSeries` | `ArrayType(ArrayType(DoubleType))` | `[[tstart, value], ...]`|
    | scalar               | `DoubleType`                       | the value               |
 
+With [Spark pushdown](../query_solvers.md#spark-pushdown-opt-in) enabled, some subtrees (e.g.
+`channel.resample(rate)`) are computed natively in Spark before step 1. The solver ships their
+results instead of the raw channel rows, and step 2 uses those results in place of evaluating the
+subtrees in pandas. The tree itself is unchanged, and so is every result.
+
 `toPandas()` deserializes the binary `SampleSeries` columns back into objects; the array-backed types
 are returned as nested lists. See the [Core Data Model](core_data_model.md) for the semantics of each
 result class, and [Query Solvers](../query_solvers.md) for the full solver pipeline and the

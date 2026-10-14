@@ -177,6 +177,10 @@ type) at execution time.
 distance_km = veh_spd.resample(1e6).cumtrapz() / 3600 / 1e6
 ```
 
+When downsampling large channels, `.resample(...)` on a physical channel can be computed in Spark
+before the data reaches the pandas evaluation — see
+[Spark pushdown](../query_solvers.md#spark-pushdown-opt-in).
+
 ### Filtering
 
 | Method              | Signature                         | Description                                                                                                                                                                                                                                                              |

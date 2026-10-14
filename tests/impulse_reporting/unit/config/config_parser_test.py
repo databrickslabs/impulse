@@ -516,6 +516,18 @@ def test_impulse_config_from_dict_no_query_engine_provided():
     assert config.query_engine.solver == Solvers.DEFAULT_SOLVER
 
 
+@pytest.mark.parametrize(
+    ("query_engine", "expected"), [({}, False), ({"enable_pushdown": True}, True)]
+)
+def test_impulse_config_enable_pushdown(query_engine, expected):
+    """Spark pushdown is opt-in."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "DefaultSolver", **query_engine},
+    }
+    assert ImpulseConfig.model_validate(config_json).query_engine.enable_pushdown is expected
+
+
 def test_impulse_config_from_dict_no_measurement_dim_provided():
     """Test ImpulseConfig with no measurement dimension info provided."""
     config_json = impulse_config_JSON.copy()

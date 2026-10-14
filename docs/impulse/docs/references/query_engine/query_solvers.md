@@ -126,6 +126,9 @@ Solver tuning lives under the `query_engine` section of your report config:
   — adapt the solver to a silver layer whose physical column names
   diverge from Impulse's internal names, scope reads by `project_id`, or
   apply per-table equality filters.
+- [`query_engine.enable_pushdown`](../../config/configuration.md#query_engine-optional)
+  — compute supported expressions natively in Spark before the pandas UDF
+  (see [Spark pushdown](#spark-pushdown-opt-in)). Off by default.
 
 If `query_engine` is omitted from your config entirely, the engine runs
 with `DefaultSolver` and `data_type = "RLE"`.
@@ -158,6 +161,47 @@ df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(s
 The reporting layer builds on this stage to persist derived channels to the gold layer — see
 [Channels](../report/channel.md).
 
+## Spark pushdown (opt-in)
+
+Every selection of a solve is evaluated in one pandas UDF per container, and by default the raw
+rows of every channel the selections reference are shipped into it. With pushdown enabled, a
+rule-based optimizer finds expression subtrees that Spark can compute natively, computes them
+**before** the UDF, and ships their (smaller) result instead of the raw rows.
+
+Supported today:
+
+| Expression                         | Computed in Spark as                                                      |
+|------------------------------------|---------------------------------------------------------------------------|
+| `channel.resample(sample_rate)`    | The resampled series, identical to `SampleSeries.resample`, on a physical `channel()` or `channel_with_alias()` selection |
+
+The subtree can sit anywhere in an expression, e.g. `veh_spd.resample(1e6).cumtrapz()`, inside a
+`CalculatedChannel`, an aggregation, or an event condition; only the pushed-down part runs in Spark.
+
+```python
+solver = DefaultSolver(spark, enable_pushdown=True)
+```
+
+In a report config, set `query_engine.enable_pushdown` to `true`.
+
+:::note When a channel is pushed down
+All selections of a solve share the raw data of their channels, so a channel is pushed down only
+if **every** use of it in the solve is a pushed-down subtree. If the same channel is also used in
+any other way, e.g. `rpm.resample(1e6)` next to `rpm.max()`, its raw rows are still needed: they are
+shipped as before and the resample runs in pandas. Results are the same either way.
+:::
+
+:::caution Intended for downsampling
+`resample` is pushed down regardless of the rate. A rate finer than the channel's native sample
+spacing (upsampling) produces **more** rows than the raw channel, so enable pushdown for workloads
+that downsample.
+:::
+
+Results match the pandas evaluation exactly for integer timestamp columns with an integral
+`sample_rate` (e.g. µs or ns epochs), and for double timestamps whose grid is exact in binary
+floating point. For double timestamps with a fractional rate such as `0.1`, the grid points can
+differ in the last bit from numpy builds that fuse multiply-add operations. The order of samples
+that share the same `tstart` is unspecified, as in the pandas evaluation.
+
 ## API reference
 
 Auto-generated symbol-level docs:
@@ -167,3 +211,6 @@ Auto-generated symbol-level docs:
   — abstract base class defining the six-stage solver pipeline.
 - [`SolverConfig`](../api/impulse_query_engine/analyze/query/solvers/solver_config.md)
   — per-table column mappings, filters, and project scoping.
+- [`QueryOptimizer`](../api/impulse_query_engine/analyze/query/optimizer/query_optimizer.md)
+  and [`PushdownRule`](../api/impulse_query_engine/analyze/query/optimizer/pushdown.md)
+  — the Spark pushdown optimizer and the interface for its rules.
