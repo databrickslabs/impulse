@@ -72,23 +72,23 @@ class MyMeasurementDB(MeasurementDB):
 
 Override one method per silver table you need to reshape; the rest fall back to the base read. Each
 override follows the same shape: call `super().<table>(spark)` for the raw, pinned read, then
-join / union / reshape into the silver frame the solver expects. `super().<table>(spark)` reads the
-table in the matching `source` slot, so point that slot at the raw table your override reshapes.
+join / union / reshape into the silver frame the solver expects.
 
-### Optional tables are switched on by their `source` slot
+### Optional tables must also be set in `source`
 
-`container_metrics`, `channel_metrics` and `channels` are always read. The other tables are only read
-when their `source` slot is set: the slot turns the table on, and your override reshapes what that slot
-reads. An override whose slot is empty is never called, and for some tables the solver then falls back
-without an error:
+Overriding the read of an optional table only takes effect if you also set that table in the
+report config's `source`. Otherwise the solver doesn't use the table, and your override is never
+called:
 
-| Override | Called when | If the slot is empty |
-|---|---|---|
-| `channel_tags()` | `source.channel_tags_table` is set | Channels are selected from columns on `channel_metrics` instead (wide mode). **No error.** |
-| `unit_conversion()` | `source.unit_conversion_table` is set (conversion also needs `source_unit` / `target_unit` on `channel_mapping`, see [Unit conversion](../config/configuration.md#unit-conversion-optional)) | Values are not converted. **No error.** |
-| `poi_channels()` | `has_poi_channels()` returns `True` (the base implementation checks `source.poi_channels_uri`) | POI data is not read. **No error.** |
-| `container_tags()` | `source.container_tags_table` is set | Containers are filtered on `container_metrics` columns (wide-only mode). Tag filters, and expressions that read container tags, raise an error. |
-| `channel_mapping()` | `source.channel_mapping_table` is set | `channel_with_alias()` raises an error. |
+- `container_tags()` needs `source.container_tags_table`
+- `channel_tags()` needs `source.channel_tags_table`
+- `channel_mapping()` needs `source.channel_mapping_table`
+- `unit_conversion()` needs `source.unit_conversion_table`
+- `poi_channels()` needs `source.poi_channels_uri`
+
+Set each entry to the raw table your override reshapes; `super().<table>(spark)` reads it. For
+channel tags, unit conversion and POI, a missing entry doesn't raise an error: the feature just
+isn't used.
 
 ## Rules
 

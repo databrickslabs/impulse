@@ -7,6 +7,7 @@ import pytest
 from databricks.sdk import WorkspaceClient
 
 import impulse_query_engine.measurement_db_registry as registry
+from impulse_query_engine import __version__
 from impulse_query_engine.measurement_db import (
     AbstractMeasurementDB,
     MeasurementDB,
@@ -44,6 +45,7 @@ def test_ws_is_the_verified_client():
     db = MeasurementDB(MeasurementDBConfig(), ws)
 
     assert db.ws is ws
+    assert ws.config._product_info == ("databricks-impulse", __version__)  # tagged as Impulse
     ws.clusters.select_spark_version.assert_called_once()  # the connectivity check ran
 
 
