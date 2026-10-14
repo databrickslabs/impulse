@@ -200,7 +200,14 @@ Results match the pandas evaluation exactly for integer timestamp columns with a
 `sample_rate` (e.g. µs or ns epochs), and for double timestamps whose grid is exact in binary
 floating point. For double timestamps with a fractional rate such as `0.1`, the grid points can
 differ in the last bit from numpy builds that fuse multiply-add operations. The order of samples
-that share the same `tstart` is unspecified, as in the pandas evaluation.
+that share the same `tstart` is unspecified, as in the pandas evaluation, and channels whose
+`[tstart, tend)` intervals overlap are not supported (the RLE and interval encoders never
+produce overlaps).
+
+Spark processes each channel in one pass over its samples, sorted by `tstart`: every sample is
+assigned the grid bucket it falls into, and only the last sample of each bucket emits rows (the
+grid points up to the next non-empty bucket). The memory per row is bounded by the grid points a
+single sample covers, not by the length of the channel.
 
 ## API reference
 

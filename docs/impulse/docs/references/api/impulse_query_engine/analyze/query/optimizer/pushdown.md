@@ -130,19 +130,25 @@ def to_spark(rows: DataFrame, variants: Mapping[int, Pushdown],
              config: SolverConfig) -> DataFrame
 ```
 
-Compute all *variants* of this rule in one pass.
+Replace the rows of this rule's *variants* with their derived rows.
+
+*rows* is read once and shared by all rules, so implementations must
+stay a single lineage (no self-joins or unions of *rows*) and keep its
+container partitioning (windows partitioned by container id, channel id
+and :data:`VARIANT_COL` reuse it).
 
 **Arguments**:
 
-- `rows` (`pyspark.sql.DataFrame`): Channel-data rows tagged with :data:`VARIANT_COL`, one copy per
-variant a channel needs; only ids in *variants* occur.
-- `variants` (`Mapping[int, Pushdown]`): Variant id to a representative pushdown carrying its parameters.
+- `rows` (`pyspark.sql.DataFrame`): All channel-data rows of the solve, tagged with :data:`VARIANT_COL`
+(one copy per variant a channel ships) and partitioned by container.
+- `variants` (`Mapping[int, Pushdown]`): This rule's variant ids, each with a representative pushdown carrying
+its parameters.
 - `config` (`SolverConfig`): Provides the internal column names.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: Derived rows with the container id, channel id, :data:`VARIANT_COL`,
-``tstart``, ``tend`` and ``value`` columns of *rows*, same types.
+`pyspark.sql.DataFrame`: *rows* with the same columns and types, the rows of *variants*
+replaced by derived rows and all other rows unchanged.
 
 #### decode
 
