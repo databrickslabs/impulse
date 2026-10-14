@@ -245,7 +245,9 @@ def _with_first_grid_index(
         )
         .withColumn(
             name,
-            estimate,
+            F.when((estimate > 0) & reached(estimate - 1), estimate - 1)
+            .when(~reached(estimate), estimate + 1)
+            .otherwise(estimate),
         )
         .withColumn(
             name,
