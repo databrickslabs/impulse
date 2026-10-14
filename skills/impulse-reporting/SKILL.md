@@ -93,7 +93,8 @@ report.persist_results()
 `determine_report()` validates that **every event referenced by an aggregation has been registered
 with `add_event()`** before computing — otherwise it raises. Register events even when an aggregation
 is the only thing that uses them. The aggregation must reference the registered object itself (a
-re-created event with the same name raises too), and `add_event()` rejects duplicate event names.
+re-created event with the same name raises too), and `add_event()` rejects duplicate event names,
+ignoring case.
 
 After `determine_report()`, computed results are also available on the report object without a write —
 `report.aggregation_dfs[...]` (used by `impulse-ml`) — which is what makes sinkless mode useful.

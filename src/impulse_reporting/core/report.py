@@ -406,8 +406,9 @@ class Report:
         ------
         ValueError
             If the event is a ContainerEvent and a ContainerEvent already exists in the report,
-            or if an event with the same name has already been added (event names identify
-            events in the fact and dimension tables).
+            or if an event with the same name, ignoring case, has already been added (event
+            names identify events in the fact and dimension tables and name the event's
+            column in the solved data, which Spark resolves case-insensitively).
         """
         if isinstance(event, ContainerEvent) and any(
             isinstance(e, ContainerEvent) for e in self.events
@@ -416,10 +417,15 @@ class Report:
                 "Only one ContainerEvent is allowed per report. "
                 "A ContainerEvent has already been added to this report."
             )
-        if any(e.get_name() == event.get_name() for e in self.events):
+        # lower() rather than casefold() mirrors Spark's case-insensitive column resolution.
+        existing = next(
+            (e for e in self.events if e.get_name().lower() == event.get_name().lower()), None
+        )
+        if existing is not None:
             raise ValueError(
-                f"An event named '{event.get_name()}' has already been added to this report. "
-                "Event names must be unique within a report."
+                f"Cannot add event '{event.get_name()}': an event named "
+                f"'{existing.get_name()}' has already been added to this report. "
+                "Event names must be unique within a report, ignoring case."
             )
         self.events.append(event)
         event.set_report_id(self.report_id)

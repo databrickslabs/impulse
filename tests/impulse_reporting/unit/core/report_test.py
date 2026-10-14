@@ -401,6 +401,38 @@ class TestAddEvent:
         with pytest.raises(ValueError, match="'rpm_event' has already been added"):
             report.add_event(event)
 
+    def test_duplicate_event_name_ignoring_case_raises_error(self):
+        # Spark resolves the solved event columns case-insensitively.
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="RPM_high", expr=ts_expr > 0))
+
+        with pytest.raises(
+            ValueError, match="Cannot add event 'rpm_high': an event named 'RPM_high'"
+        ):
+            report.add_event(BasicEvent(name="rpm_high", expr=ts_expr > 0))
+
+    def test_names_equal_only_under_casefold_are_distinct(self):
+        # Spark keeps these columns apart, so casefold() ("ß" == "ss") would over-reject.
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="Drehzahl_groß", expr=ts_expr > 0))
+        report.add_event(BasicEvent(name="Drehzahl_gross", expr=ts_expr > 0))
+
+        assert len(report.get_events()) == 2
+
     def test_second_container_event_keeps_container_event_error(self):
         report: Report = Report(
             name="my_report",

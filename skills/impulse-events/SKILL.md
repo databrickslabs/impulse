@@ -17,8 +17,8 @@ expression contains a UDF that declares `container_tags` / `container_metrics`, 
 injected as usual — the requirement propagates through the event.
 
 **Every event used by an aggregation must be registered with the report before computing.** Event
-names must be unique within a report, and the aggregation must be scoped to that registered object
-(not a re-created event with the same name):
+names must be unique within a report (ignoring case), and the aggregation must be scoped to that
+registered object (not a re-created event with the same name):
 
 ```python
 report.add_event(my_event)
