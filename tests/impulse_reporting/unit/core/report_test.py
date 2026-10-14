@@ -13,7 +13,9 @@ from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.event_types import EventType
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.persist.report_storage import SinkConfig
 
 DUMMY_CONFIG = {
@@ -351,6 +353,88 @@ def test_create_solver_delta_with_solver_config():
     assert solver.config.value_col == "value"
 
 
+class TestAddEvent:
+    """Tests for add_event method."""
+
+    def test_duplicate_event_name_raises_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="rpm_event", expr=ts_expr > 0))
+
+        with pytest.raises(ValueError, match="'rpm_event' has already been added"):
+            report.add_event(BasicEvent(name="rpm_event", expr=ts_expr > 100))
+
+        assert len(report.get_events()) == 1
+
+    def test_duplicate_event_name_of_other_type_raises_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="window", expr=ts_expr > 0))
+
+        with pytest.raises(ValueError, match="'window' has already been added"):
+            report.add_event(TimeWindowEvent(name="window", window_length=60_000))
+
+    def test_same_event_added_twice_raises_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        event = BasicEvent(name="rpm_event", expr=ts_expr > 0)
+        report.add_event(event)
+
+        with pytest.raises(ValueError, match="'rpm_event' has already been added"):
+            report.add_event(event)
+
+    def test_second_container_event_keeps_container_event_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        report.add_event(ContainerEvent(name="measurement"))
+
+        with pytest.raises(ValueError, match="Only one ContainerEvent is allowed per report"):
+            report.add_event(ContainerEvent(name="measurement"))
+
+    def test_distinct_event_names_are_all_registered(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        events = [
+            BasicEvent(name="rpm_event", expr=ts_expr > 0),
+            ContainerEvent(name="measurement"),
+            TimeWindowEvent(name="window", window_length=60_000),
+        ]
+        for event in events:
+            report.add_event(event)
+
+        assert report.get_events() == events
+        assert report.get_events_dict() == {event.get_name(): event for event in events}
+
+
 class TestValidateAggregationEvents:
     """Tests for _validate_aggregation_events method."""
 
@@ -567,6 +651,101 @@ class TestValidateAggregationEvents:
         report.add_page(page)
 
         report._validate_aggregation_events()
+
+    def test_same_name_different_definition_event_raises_error(self):
+        # The event fact would tile 60 s windows while the solve tiles 10 s windows.
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        report.add_event(TimeWindowEvent(name="w", window_length=60_000))
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        stats = StatsAggregator(
+            name="window_stats",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["mean"],
+            event=TimeWindowEvent(name="w", window_length=10_000),
+        )
+
+        page = Page(page_number=1)
+        page.add_aggregation(stats)
+        report.add_page(page)
+
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_aggregation_events()
+
+        error_msg = str(exc_info.value)
+        assert "window_stats" in error_msg
+        assert "'w' that is a different object" in error_msg
+
+    def test_same_name_identical_copy_event_raises_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="rpm_event", expr=ts_expr > 0))
+
+        hist = HistogramDuration(
+            name="test_histogram",
+            base_expr=ts_expr,
+            bins=[0.0, 100.0],
+            event=BasicEvent(name="rpm_event", expr=ts_expr > 0),
+        )
+
+        page = Page(page_number=1)
+        page.add_aggregation(hist)
+        report.add_page(page)
+
+        with pytest.raises(ValueError, match="'rpm_event' that is a different object"):
+            report._validate_aggregation_events()
+
+    def test_unregistered_and_copied_events_are_listed_together(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="registered_event", expr=ts_expr > 0))
+
+        copied = StatsAggregator(
+            name="copied_stats",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["min"],
+            event=BasicEvent(name="registered_event", expr=ts_expr > 0),
+        )
+        unregistered = StatsAggregator(
+            name="unregistered_stats",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["max"],
+            event=BasicEvent(name="other_event", expr=ts_expr > 0),
+        )
+
+        page = Page(page_number=1)
+        page.add_aggregation(copied)
+        page.add_aggregation(unregistered)
+        report.add_page(page)
+
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_aggregation_events()
+
+        error_msg = str(exc_info.value)
+        assert "'copied_stats' uses an event named 'registered_event'" in error_msg
+        assert "'unregistered_stats' uses event 'other_event'" in error_msg
+        assert "not added to the report" in error_msg
 
 
 class TestValidateFullRecalculationScope:

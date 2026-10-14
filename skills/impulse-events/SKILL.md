@@ -16,7 +16,9 @@ An event defines time windows within a recording that scope downstream aggregati
 expression contains a UDF that declares `container_tags` / `container_metrics`, those values are
 injected as usual — the requirement propagates through the event.
 
-**Every event used by an aggregation must be registered with the report before computing:**
+**Every event used by an aggregation must be registered with the report before computing.** Event
+names must be unique within a report, and the aggregation must be scoped to that registered object
+(not a re-created event with the same name):
 
 ```python
 report.add_event(my_event)

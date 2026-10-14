@@ -9,7 +9,8 @@ Events define time windows within measurement data that scope downstream aggrega
 time-series recordings into meaningful intervals -- for example, "engine RPM between 2000 and 5000".
 
 Every event used by an aggregation **must** be registered with the report via `add_event()` before `determine_report()`
-is called.
+is called. Event names must be unique within a report, and an aggregation must be scoped to the registered event
+object itself, not to another object with the same name.
 
 ```python
 my_report.add_event(my_event)
@@ -296,7 +297,7 @@ Stores event definitions (one row per event per report).
 
 | Column              | Type                | Description                                                                 |
 |---------------------|---------------------|-----------------------------------------------------------------------------|
-| `event_id`          | `int`               | Unique event identifier (CRC32 hash of name + expression).                  |
+| `event_id`          | `int`               | Unique event identifier (CRC32 hash of the event name).                     |
 | `report_id`         | `int`               | Report identifier.                                                          |
 | `event_type`        | `str`               | `"BASIC_EVENT"`, `"CONTAINER_EVENT"`, `"SEQUENCE_OF_EVENTS"`, `"POINTS_IN_TIME_EVENT"`, or `"TIME_WINDOW_EVENT"`. |
 | `event_name`        | `str`               | Event name.                                                                 |

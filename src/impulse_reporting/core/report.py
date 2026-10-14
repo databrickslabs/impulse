@@ -405,7 +405,9 @@ class Report:
         Raises
         ------
         ValueError
-            If the event is a ContainerEvent and a ContainerEvent already exists in the report.
+            If the event is a ContainerEvent and a ContainerEvent already exists in the report,
+            or if an event with the same name has already been added (event names identify
+            events in the fact and dimension tables).
         """
         if isinstance(event, ContainerEvent) and any(
             isinstance(e, ContainerEvent) for e in self.events
@@ -413,6 +415,11 @@ class Report:
             raise ValueError(
                 "Only one ContainerEvent is allowed per report. "
                 "A ContainerEvent has already been added to this report."
+            )
+        if any(e.get_name() == event.get_name() for e in self.events):
+            raise ValueError(
+                f"An event named '{event.get_name()}' has already been added to this report. "
+                "Event names must be unique within a report."
             )
         self.events.append(event)
         event.set_report_id(self.report_id)
@@ -535,34 +542,46 @@ class Report:
 
     def _validate_aggregation_events(self) -> None:
         """
-        Validate that all events used in aggregations are added to the report.
+        Validate that every aggregation's event is an event object added to the report.
+
+        The event must be the registered object itself, not another object with the same
+        name: the event fact is derived from the registered event, while the solve scopes the
+        aggregation to its own event, so a differing copy would produce mismatched rows.
 
         Raises
         ------
         ValueError
-            If an aggregation uses an event that was not added to the report via add_event().
+            If an aggregation uses an event that was not added to the report via add_event(),
+            or a different object with the name of a registered event.
         """
-        registered_events = set(self.events)
+        registered_event_ids = {id(event) for event in self.events}
         registered_event_names = {event.get_name() for event in self.events}
 
-        missing_events = []
+        unregistered_events = []
 
         for page in self.pages:
             for aggregation in page.aggregations:
                 event = aggregation.get_event()
-                if event is not None and event not in registered_events:
-                    event_name = event.get_name()
-                    if event_name not in registered_event_names:
-                        missing_events.append(
-                            f"Aggregation '{aggregation.get_name()}' uses event "
-                            f"'{event_name}' which was not added to the report."
-                        )
+                if event is None or id(event) in registered_event_ids:
+                    continue
+                event_name = event.get_name()
+                if event_name in registered_event_names:
+                    unregistered_events.append(
+                        f"Aggregation '{aggregation.get_name()}' uses an event named "
+                        f"'{event_name}' that is a different object from the one added to "
+                        "the report. Pass the registered event (e.g. "
+                        f"report.get_events_dict()['{event_name}'])."
+                    )
+                else:
+                    unregistered_events.append(
+                        f"Aggregation '{aggregation.get_name()}' uses event "
+                        f"'{event_name}' which was not added to the report."
+                    )
 
-        if missing_events:
+        if unregistered_events:
             error_message = (
-                "The following events are used in aggregations but were not added "
-                "to the report via add_event():\n"
-                + "\n".join(f"  - {msg}" for msg in missing_events)
+                "The following aggregations use events that were not added to the report "
+                "via add_event():\n" + "\n".join(f"  - {msg}" for msg in unregistered_events)
             )
             raise ValueError(error_message)
 
