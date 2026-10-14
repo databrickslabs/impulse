@@ -418,8 +418,8 @@ class TestAddEvent:
         ):
             report.add_event(BasicEvent(name="rpm_high", expr=ts_expr > 0))
 
-    def test_names_equal_only_under_casefold_are_distinct(self):
-        # Spark keeps these columns apart, so casefold() ("ß" == "ss") would over-reject.
+    def test_names_distinct_in_spark_are_allowed(self):
+        # Spark resolves these as two distinct columns, so both names are accepted.
         report: Report = Report(
             name="my_report",
             spark=None,

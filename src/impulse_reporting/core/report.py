@@ -417,7 +417,7 @@ class Report:
                 "Only one ContainerEvent is allowed per report. "
                 "A ContainerEvent has already been added to this report."
             )
-        # lower() rather than casefold() mirrors Spark's case-insensitive column resolution.
+        # Names are compared like Spark's case-insensitive column resolution.
         existing = next(
             (e for e in self.events if e.get_name().lower() == event.get_name().lower()), None
         )
@@ -588,8 +588,8 @@ class Report:
 
         if unregistered_events:
             error_message = (
-                "The following aggregations use events that were not added to the report "
-                "via add_event():\n" + "\n".join(f"  - {msg}" for msg in unregistered_events)
+                "The following aggregations reference events that are not registered with "
+                "this report:\n" + "\n".join(f"  - {msg}" for msg in unregistered_events)
             )
             raise ValueError(error_message)
 
