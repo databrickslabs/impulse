@@ -97,11 +97,11 @@ class ResamplePushdownRule(PushdownRule):
             F.col(VARIANT_COL),
         )
 
-        # Every window shares one partitioning and order (the pandas cache's tstart
-        # order), so the rows are sorted once and the container partitioning is kept.
+        # Pass 1, over each series in the pandas cache's tstart order.  Only running,
+        # whole-partition and neighbour windows (all linear in the series length);
+        # they share one sort and keep the container partitioning.
         ordered = Window.partitionBy(*key).orderBy(ts, te)
         running = ordered.rowsBetween(Window.unboundedPreceding, Window.currentRow)
-        following = ordered.rowsBetween(Window.currentRow, Window.unboundedFollowing)
         whole = ordered.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
         ts_d, te_d, block = F.col("_rs_ts"), F.col("_rs_te"), F.col("_rs_block")
         prev_te = F.lag(te_d).over(ordered)
@@ -113,29 +113,22 @@ class ResamplePushdownRule(PushdownRule):
             .withColumn("_rs_last_ts", F.last(ts_d).over(whole))
             .withColumn("_rs_last_te", F.last(te_d).over(whole))
             .withColumn("_rs_block", F.sum("_rs_break").over(running))
-        )
-        # Block bounds on every row: the block's first tstart and its largest tend.
-        # Blocks are numbered in order, so max(struct(±block, tend)) over the rows
-        # before / after the current one stays within the current block.
-        te_no_nan = _ignore_nan(te_d).alias("te")
-        df = (
-            df.withColumn(
+            .withColumn(
                 "_rs_t_min",
                 F.last(F.when(F.col("_rs_break") == 1, ts_d), ignorenulls=True).over(running),
             )
+            # Largest tend so far within the block (blocks are numbered in order); on
+            # the block's last row this is the block's t_max.
             .withColumn(
-                "_rs_t_max",
-                F.greatest(
-                    F.max(F.struct(block, te_no_nan)).over(running).getField("te"),
-                    F.max(F.struct(-block, te_no_nan)).over(following).getField("te"),
-                ),
+                "_rs_t_max_so_far",
+                F.max(F.struct(block, _ignore_nan(te_d).alias("te"))).over(running).getField("te"),
             )
             .withColumn("_rs_nblk", F.max(block).over(whole))
         )
 
         # numpy.arange(t_min, t_max + rate, rate): length ceil(((t_max + rate) - t_min) / rate),
         # filled as t_min, t_min + rate, then t_min + k * ((t_min + rate) - t_min).
-        t_min, t_max = F.col("_rs_t_min"), F.col("_rs_t_max")
+        t_min = F.col("_rs_t_min")
         delta = (t_min + rate) - t_min
 
         def grid_point(k: Column) -> Column:
@@ -146,28 +139,36 @@ class ResamplePushdownRule(PushdownRule):
             )
 
         resampled = F.col(VARIANT_COL).isin(sorted(variants)) & (F.col("_rs_n") >= 2)
+        df = _with_first_grid_index(
+            df, "_rs_c", ts_d, F.lit(False), resampled, grid_point, t_min, delta
+        )
+        c, next_c, next_block = F.col("_rs_c"), F.col("_rs_next_c"), F.lead(block).over(ordered)
+        df = (
+            df.withColumn("_rs_next_c", F.lead(c).over(ordered)).withColumn(
+                "_rs_block_end", next_block.isNull() | (next_block != block)
+            )
+            # Only the last sample of each bucket emits grid points.
+            .where(~resampled | F.col("_rs_block_end") | (next_c != c))
+        )
+
+        # Pass 2, over the remaining rows (about one per grid point): the block's
+        # t_max, and from it the number of grid points of the block.
+        t_max = F.max("_rs_t_max_so_far").over(Window.partitionBy(*key, "_rs_block"))
+        df = df.withColumn("_rs_t_max", t_max)
+        t_max = F.col("_rs_t_max")
         # The last block keeps a grid point at t_max when the series ends with a
         # zero-duration sample.
         inclusive = (block == F.col("_rs_nblk")) & (F.col("_rs_last_ts") == F.col("_rs_last_te"))
         length = F.greatest(F.ceil(((t_max + rate) - t_min) / rate), F.lit(0))
-
-        # Bucket of each sample, and the number of grid points of its block.
-        df = _with_first_grid_index(
-            df, "_rs_c", ts_d, F.lit(False), resampled, grid_point, t_min, delta
-        )
         df = _with_first_grid_index(
             df, "_rs_grid_end", t_max, inclusive, resampled, grid_point, t_min, delta
         )
-        c, n_grid = F.col("_rs_c"), F.least(F.col("_rs_grid_end"), length)
-
-        # The last sample of a bucket emits the grid points up to the next non-empty
-        # bucket of its block (or up to the block's end).
-        next_c, next_block = F.lead(c).over(ordered), F.lead(block).over(ordered)
+        n_grid = F.least(F.col("_rs_grid_end"), length)
+        # A bucket's last sample emits the grid points up to the next non-empty bucket
+        # of its block, or up to the block's end.
         df = df.withColumn(
             "_rs_c_stop",
-            F.when(next_block.isNull() | (next_block != block), n_grid).when(
-                next_c != c, F.least(next_c, n_grid)
-            ),
+            F.when(F.col("_rs_block_end"), n_grid).otherwise(F.least(next_c, n_grid)),
         )
 
         def element(kind: int, t: Column, tend: Column) -> Column:

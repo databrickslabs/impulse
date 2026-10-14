@@ -146,6 +146,17 @@ def test_ns_epoch_longs_above_2_pow_53(spark):
     _assert_same(actual[(1, 1, 1)], expected)
 
 
+def test_only_linear_window_frames(spark):
+    # Spark recomputes a ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING frame for every
+    # row (quadratic in the series length), so the rule must not use one.
+    schema = "container_id long, channel_id long, {} int, tstart long, tend long, value double"
+    df = spark.createDataFrame([(1, 1, 1, 0, 1, 1.0)], schema=schema.format(VARIANT_COL))
+    result = _RULE.to_spark(df, {1: _pushdown(1)}, _CONFIG)
+    plan = result._jdf.queryExecution().optimizedPlan().toString()
+    assert "specifiedwindowframe(RowFrame, currentrow$(), unboundedfollowing$())" not in plan
+    assert "specifiedwindowframe(RowFrame, unboundedpreceding$(), currentrow$())" in plan
+
+
 def test_ns_epoch_grid_on_sample_starts(spark):
     # Every fifth sample starts exactly on a grid point, the case where the bucket
     # index estimate needs its correction step.
