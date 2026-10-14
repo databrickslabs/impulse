@@ -558,30 +558,32 @@ class Report:
         ------
         ValueError
             If an aggregation uses an event that was not added to the report via add_event(),
-            or a different object with the name of a registered event.
+            or a different object with the name (ignoring case) of a registered event.
         """
-        registered_event_ids = {id(event) for event in self.events}
-        registered_event_names = {event.get_name() for event in self.events}
+        # Keyed like add_event's uniqueness check, so there is one event per key.
+        registered_events = {event.get_name().lower(): event for event in self.events}
 
         unregistered_events = []
 
         for page in self.pages:
             for aggregation in page.aggregations:
                 event = aggregation.get_event()
-                if event is None or id(event) in registered_event_ids:
+                if event is None:
                     continue
-                event_name = event.get_name()
-                if event_name in registered_event_names:
+                registered = registered_events.get(event.get_name().lower())
+                if registered is event:
+                    continue
+                if registered is not None:
                     unregistered_events.append(
                         f"Aggregation '{aggregation.get_name()}' uses an event named "
-                        f"'{event_name}' that is a different object from the one added to "
-                        "the report. Pass the registered event (e.g. "
-                        f"report.get_events_dict()['{event_name}'])."
+                        f"'{event.get_name()}' that is a different object from the registered "
+                        f"event '{registered.get_name()}'. Pass the registered event (e.g. "
+                        f"report.get_events_dict()[{registered.get_name()!r}])."
                     )
                 else:
                     unregistered_events.append(
                         f"Aggregation '{aggregation.get_name()}' uses event "
-                        f"'{event_name}' which was not added to the report."
+                        f"'{event.get_name()}' which was not added to the report."
                     )
 
         if unregistered_events:

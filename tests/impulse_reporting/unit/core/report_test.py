@@ -740,6 +740,39 @@ class TestValidateAggregationEvents:
         with pytest.raises(ValueError, match="'rpm_event' that is a different object"):
             report._validate_aggregation_events()
 
+    def test_name_differing_only_by_case_counts_as_copy(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="RPM_high", expr=ts_expr > 0))
+
+        stats = StatsAggregator(
+            name="rpm_stats",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["mean"],
+            event=BasicEvent(name="rpm_high", expr=ts_expr > 0),
+        )
+
+        page = Page(page_number=1)
+        page.add_aggregation(stats)
+        report.add_page(page)
+
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_aggregation_events()
+
+        error_msg = str(exc_info.value)
+        assert (
+            "'rpm_high' that is a different object from the registered event 'RPM_high'"
+            in error_msg
+        )
+        assert "report.get_events_dict()['RPM_high']" in error_msg
+
     def test_unregistered_and_copied_events_are_listed_together(self):
         report: Report = Report(
             name="my_report",
