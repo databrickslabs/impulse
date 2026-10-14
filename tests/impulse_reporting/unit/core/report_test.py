@@ -466,7 +466,7 @@ class TestValidateAggregationEvents:
 
         assert "test_event" in str(exc_info.value)
         assert "test_stats" in str(exc_info.value)
-        assert "not added to the report" in str(exc_info.value)
+        assert "uses event 'test_event' which was not added to the report" in str(exc_info.value)
 
     def test_histogram_event_not_registered_raises_error(self):
         report: Report = Report(
@@ -744,8 +744,10 @@ class TestValidateAggregationEvents:
 
         error_msg = str(exc_info.value)
         assert "'copied_stats' uses an event named 'registered_event'" in error_msg
-        assert "'unregistered_stats' uses event 'other_event'" in error_msg
-        assert "not added to the report" in error_msg
+        assert (
+            "'unregistered_stats' uses event 'other_event' which was not added to the report"
+            in error_msg
+        )
 
 
 class TestValidateFullRecalculationScope:
