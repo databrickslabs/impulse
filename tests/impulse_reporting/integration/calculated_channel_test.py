@@ -2,7 +2,7 @@
 """Integration tests: Report orchestration of calculated channels.
 
 Builds a Report against the autouse ``spark_catalog.silver`` fixtures, adds a
-calculated channel, runs determine_report + persist_results, and asserts real
+calculated channel, runs ``Report.run()``, and asserts real
 values land in the gold fact/dimension tables — then verifies incremental
 re-run behavior (idempotent unchanged upsert; changed-definition replace).
 """
@@ -89,8 +89,7 @@ def test_persist_calculated_channel_full(spark):
     # gold fact rows must be identical to the silver channel rows (see below).
     ch_pass = _add_channel(report, factor=1.0, name="speed_raw")
 
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
     assert spark.catalog.tableExists(_FACT)
     assert spark.catalog.tableExists(_DIM)
@@ -180,8 +179,7 @@ def test_batched_calculated_channels_union(spark):
     report.add_calculated_channel(ch_speed)
     report.add_calculated_channel(ch_rpm)
 
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
     # Union across batches is complete: both channels' rows land in the one fact.
     fact = spark.read.table(_FACT)
@@ -207,8 +205,7 @@ def test_incremental_unchanged_is_idempotent(spark):
         config=dict(_config(is_enabled=False)),
     )
     _add_channel(r1, factor=3.6)
-    r1.determine_report()
-    r1.persist_results()
+    r1.run()
     count_before = spark.read.table(_FACT).count()
 
     r2 = Report(
@@ -218,8 +215,7 @@ def test_incremental_unchanged_is_idempotent(spark):
         config=dict(_config(is_enabled=True)),
     )
     _add_channel(r2, factor=3.6)
-    r2.determine_report()
-    r2.persist_results()
+    r2.run()
 
     # Idempotent: unchanged definition + unchanged silver → row count stable.
     assert spark.read.table(_FACT).count() == count_before
@@ -243,8 +239,7 @@ def test_incremental_modified_container_fewer_rows_deletes_stale(spark):
         config=dict(_config(is_enabled=False)),
     )
     ch = _add_channel(r1, factor=3.6)
-    r1.determine_report()
-    r1.persist_results()
+    r1.run()
 
     fact_pre = spark.read.table(_FACT).filter(F.col("channel_id") == ch.get_id())
     c1_before = fact_pre.filter(F.col("container_id") == 1).count()
@@ -295,8 +290,7 @@ def test_incremental_modified_container_fewer_rows_deletes_stale(spark):
         )
         ch2 = _add_channel(r2, factor=3.6)
         assert ch2.get_id() == ch.get_id()  # unchanged definition
-        r2.determine_report()
-        r2.persist_results()
+        r2.run()
 
         fact_post = spark.read.table(_FACT).filter(F.col("channel_id") == ch.get_id())
         # Container 1 shrank to exactly 5 rows — no stale orphans survive.
@@ -327,8 +321,7 @@ def test_incremental_changed_definition_replaces(spark):
         config=dict(_config(is_enabled=False, calculated_channels=cc)),
     )
     ch1 = _add_channel(r1, factor=3.6)
-    r1.determine_report()
-    r1.persist_results()
+    r1.run()
     hash_before = (
         spark.read.table(_DIM)
         .filter(F.col("channel_id") == ch1.get_id())
@@ -352,8 +345,7 @@ def test_incremental_changed_definition_replaces(spark):
     )
     ch2 = _add_channel(r2, factor=3.7)
     assert ch2.get_id() == ch1.get_id()  # same identity → same entity id
-    r2.determine_report()
-    r2.persist_results()
+    r2.run()
 
     dim = spark.read.table(_DIM)
     hash_after = (
@@ -383,8 +375,7 @@ def test_incremental_identity_reorder_does_not_reprocess(spark):
         config=dict(_config(is_enabled=False)),
     )
     ch1 = _add_channel(r1, factor=3.6, identity={"channel_name": "speed_kmh", "data_key": "CALC"})
-    r1.determine_report()
-    r1.persist_results()
+    r1.run()
     count_before = spark.read.table(_FACT).count()
     hash_before = (
         spark.read.table(_DIM)
@@ -403,8 +394,7 @@ def test_incremental_identity_reorder_does_not_reprocess(spark):
     )
     ch2 = _add_channel(r2, factor=3.6, identity={"data_key": "CALC", "channel_name": "speed_kmh"})
     assert ch2.get_id() == ch1.get_id()
-    r2.determine_report()
-    r2.persist_results()
+    r2.run()
 
     # Stable hash → classified unchanged → idempotent upsert, no row growth.
     hash_after = (
@@ -467,8 +457,7 @@ def test_channel_metrics_not_emitted_by_default(spark):
         config=dict(_config(is_enabled=False)),
     )
     _add_channel(report, factor=3.6)
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
     assert spark.catalog.tableExists(_FACT)
     assert not spark.catalog.tableExists(_METRICS)
@@ -498,8 +487,7 @@ def test_channel_metrics_emitted_and_usable_as_impulse_source(spark):
     )
     report.add_calculated_channel(ch)
 
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
     assert spark.catalog.tableExists(_METRICS)
     metrics = spark.read.table(_METRICS)
@@ -586,8 +574,7 @@ def test_channel_metrics_incremental_is_idempotent(spark):
         config=dict(_config(is_enabled=False, calculated_channels=cc)),
     )
     _add_channel(r1, factor=3.6)
-    r1.determine_report()
-    r1.persist_results()
+    r1.run()
     count_before = spark.read.table(_METRICS).count()
     assert count_before > 0
 
@@ -598,8 +585,7 @@ def test_channel_metrics_incremental_is_idempotent(spark):
         config=dict(_config(is_enabled=True, calculated_channels=cc)),
     )
     _add_channel(r2, factor=3.6)
-    r2.determine_report()
-    r2.persist_results()
+    r2.run()
 
     assert spark.read.table(_METRICS).count() == count_before
 
@@ -620,8 +606,7 @@ def test_channel_metrics_custom_kpis(spark):
         ),
     )
     _add_channel(report, factor=3.6)
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
     metrics = spark.read.table(_METRICS)
     # Only the selected KPIs are present; the dropped defaults are absent.

@@ -71,10 +71,10 @@ Where gold tables are written. Output tables are named `{table_prefix}_{entity}`
 | `catalog`             | Yes      | Target catalog.    |
 | `schema`              | Yes      | Target schema.     |
 | `table_prefix`        | Yes      | Prefix for tables. |
-| `cleanup_temp_tables` | No       | Drop the batch-solving `__impulse_temp_*` tables from the schema after `persist_results()` succeeds. Defaults to `false`. Overridable per call via `persist_results(cleanup_temp_tables=...)`. |
+| `cleanup_temp_tables` | No       | Drop the batch-solving `__impulse_temp_*` tables from the schema after `run()` persists successfully. Defaults to `false`. Overridable per call via `run(cleanup_temp_tables=...)`. |
 
-**Sinkless mode:** omit `unity_sink` entirely. `determine_report()` still computes everything and
-exposes it on the report object, but `persist_results()` becomes a no-op. Use it for ad-hoc analysis,
+**Sinkless mode:** omit `unity_sink` entirely. `run()` still computes everything and exposes it on
+the report object, but writes nothing. Use it for ad-hoc analysis,
 ML feature extraction, notebooks, and tests. (See `impulse-analyze` and `impulse-ml`.)
 
 ## container_filters (optional)

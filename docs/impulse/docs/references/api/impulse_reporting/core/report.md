@@ -305,23 +305,14 @@ Get the list of calculated channels associated with the report.
 def persist_results(cleanup_temp_tables: bool | None = None)
 ```
 
-Persist report results using appropriate strategy based on definition changes.
+Deprecated: use :meth:`run`, which determines and persists in one call.
 
-Uses tracked state from determine_report() to decide persistence strategy:
-- Changed definitions: replaceWhere (atomic delete + insert)
-- Unchanged definitions: MERGE (upsert)
+Persists the results of a prior :meth:`determine_report` call; behavior is
+unchanged. Unlike :meth:`run`, it does not drain capped incremental batches.
 
 **Arguments**:
 
-- `cleanup_temp_tables` (`bool`): Whether to drop the batch-solving ``__impulse_temp_*`` tables from the
-sink schema after persistence completes successfully.
-- True/False: use this value, overriding the config flag.
-- None (default): fall back to ``config.unity_sink.cleanup_temp_tables``
-  (which itself defaults to False).
-
-**Returns**:
-
-`None`: 
+- `cleanup_temp_tables` (`bool | None`): Same as the :meth:`run` argument.
 
 #### run
 
@@ -333,35 +324,22 @@ def run(is_incremental: bool = None,
 
 Determine and persist a report, draining all container batches.
 
-Wraps :meth:`determine_report` + :meth:`persist_results` (both remain usable
-standalone). With ``max_containers_per_batch`` set on an incremental run, ``run()``
-loops: each iteration commits at most that many upserted containers, and the loop
-continues until a run observes at most that many remaining (the last batch clears
-the rest). After the first iteration all definition hashes are current, so later
-iterations recompute only unchanged entities over the next batch of new containers.
-Without a cap (or in full mode) it is a single determine+persist pass.
-
-**Arguments**:
-
-- `is_incremental` (`bool`): Forwarded to :meth:`determine_report` (config still overrides it).
-- `persist_results` (`bool`): When True (default), persist after determining and drain the batches. When
-False, run :meth:`determine_report` once without persisting (no iteration —
-nothing commits, so the batch cannot advance).
-- `cleanup_temp_tables` (`bool | None`): Forwarded to :meth:`persist_results`.
-
-#### determine\_report
-
-```python
-def determine_report(is_incremental: bool = None)
-```
-
-Determine and process events, aggregations, and container dimensions for the report.
-
-Results are accessible in the report's attributes.
+The entry point for executing a report. Computes events, aggregations, calculated
+channels, and container dimensions, then writes them to the gold layer. Computed
+results stay accessible on the report's attributes (e.g. ``aggregation_dfs``,
+``event_dfs``), so ``run(persist_results=False)`` is the compute-only path. Without
+a configured sink nothing is written.
 
 Supports incremental processing with definition-hash-based optimization:
 - Changed definitions trigger full reprocessing (all containers)
 - Unchanged definitions use incremental processing (only new/updated containers)
+
+With ``max_containers_per_batch`` set on an incremental run, ``run()`` loops: each
+iteration commits at most that many upserted containers, and the loop continues
+until a run observes at most that many remaining (the last batch clears the rest).
+After the first iteration all definition hashes are current, so later iterations
+recompute only unchanged entities over the next batch of new containers. Without a
+cap (or in full mode) it is a single determine+persist pass.
 
 **Arguments**:
 
@@ -370,8 +348,27 @@ config is provided.
 - True: Request incremental processing (if gold layer exists)
 - False: Force full processing
 - None: Use config value (default: full processing)
+- `persist_results` (`bool`): When True (default), persist after determining and drain the batches. When
+False, determine once without persisting (no iteration — nothing commits, so
+the batch cannot advance).
+- `cleanup_temp_tables` (`bool | None`): Whether to drop the batch-solving ``__impulse_temp_*`` tables from the
+sink schema after persistence completes successfully.
+- True/False: use this value, overriding the config flag.
+- None (default): fall back to ``config.unity_sink.cleanup_temp_tables``
+  (which itself defaults to False).
 
-**Returns**:
+#### determine\_report
 
-`None`: 
+```python
+def determine_report(is_incremental: bool = None)
+```
+
+Deprecated: use :meth:`run`, or ``run(persist_results=False)`` to compute only.
+
+Computes the report without persisting; results are accessible in the report's
+attributes and behavior is unchanged.
+
+**Arguments**:
+
+- `is_incremental` (`bool`): Same as the :meth:`run` argument.
 

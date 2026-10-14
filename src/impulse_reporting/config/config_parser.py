@@ -174,7 +174,7 @@ class UnitySink(BaseModel):
         Prefix to use for generated output table names.
     cleanup_temp_tables : bool
         When ``True``, the intermediate ``__impulse_temp_*`` tables written to this
-        sink during batch solving are dropped after ``persist_results()`` completes
+        sink during batch solving are dropped after ``Report.run()`` persists
         successfully. Defaults to ``False`` (temp tables are retained for inspection
         and only cleared at the start of the next report run).
 
@@ -634,7 +634,7 @@ class FullRecalculation(BaseModel):
     containers anyway.
 
     Names that do not match any registered entity are rejected at the start of
-    ``Report.determine_report`` (fail fast on typos / stale names).
+    ``Report.run`` (fail fast on typos / stale names).
 
     Attributes
     ----------

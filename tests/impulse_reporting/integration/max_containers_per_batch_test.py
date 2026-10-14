@@ -130,7 +130,7 @@ def _make_report(
 
 
 def _run(spark, silver_table, prefix, *, max_containers_per_batch=None, add_aggs=_add_light_aggs):
-    """Run ONE determine+persist pass (single batch) — the granular API, no run() loop."""
+    """Run ONE determine+persist pass (single batch) via the private steps, no run() loop."""
     report = _make_report(
         spark,
         silver_table,
@@ -138,8 +138,8 @@ def _run(spark, silver_table, prefix, *, max_containers_per_batch=None, add_aggs
         max_containers_per_batch=max_containers_per_batch,
         add_aggs=add_aggs,
     )
-    report.determine_report()
-    report.persist_results()
+    report._determine_report()
+    report._persist_results()
 
 
 def _container_ids(spark, prefix):
@@ -269,8 +269,7 @@ def test_full_mode_container_chunked_solve_matches_uncapped(spark, uncapped_base
         config=dict(config),
     )
     _add_light_aggs(report)
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
     assert _container_ids(spark, "fullcap") == [
         1,
@@ -302,7 +301,7 @@ def _sinkless_hist(spark, *, max_containers_per_batch):
         ),
     )
     _add_light_aggs(report)
-    report.determine_report()
+    report.run(persist_results=False)
     return report.aggregation_dfs["HISTOGRAM"]["changed"]
 
 

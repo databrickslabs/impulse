@@ -80,7 +80,7 @@ Defines where gold-layer tables are written.
 | `catalog`             | `str`  | Yes      | Target catalog name.                  |
 | `schema`              | `str`  | Yes      | Target schema name.                   |
 | `table_prefix`        | `str`  | Yes      | Prefix for all generated table names. |
-| `cleanup_temp_tables` | `bool` | No       | Drop the batch-solving `__impulse_temp_*` tables from this schema after `persist_results()` completes successfully. Defaults to `false`. Overridable per call via `persist_results(cleanup_temp_tables=...)`. |
+| `cleanup_temp_tables` | `bool` | No       | Drop the batch-solving `__impulse_temp_*` tables from this schema after `run()` persists successfully. Defaults to `false`. Overridable per call via `run(cleanup_temp_tables=...)`. |
 
 Output tables are named `{table_prefix}_{entity}` (e.g.
 `my_report_histogram_fact`).
@@ -88,9 +88,9 @@ Output tables are named `{table_prefix}_{entity}` (e.g.
 ### Sinkless reports
 
 `unity_sink` is optional. When omitted, the report runs in **sinkless
-mode**: `determine_report()` still computes events, aggregations, and
-container dimensions and exposes them on the report object, but
-`persist_results()` becomes a no-op. Useful for ad-hoc analysis,
+mode**: `run()` still computes events, aggregations, and container
+dimensions and exposes them on the report object, but writes nothing.
+Useful for ad-hoc analysis,
 notebooks, and tests where writing to Unity Catalog is not desired.
 
 ---

@@ -71,8 +71,7 @@ def _run(spark, container_metrics_table, *, is_enabled):  # noqa: F811
         config=_config(container_metrics_table, is_enabled=is_enabled),
     )
     add_aggs_to_report(report)
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
 
 def _container_ids(spark):  # noqa: F811

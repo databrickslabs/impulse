@@ -600,7 +600,7 @@ class TestDispatchEvents:
         assert "BASIC_EVENT" not in event_dfs
 
     def test_metadata_not_computed_in_dispatch(self):
-        """dispatch_events does not compute metadata (done separately in determine_report)."""
+        """dispatch_events does not compute metadata (done separately in _determine_report)."""
 
         class FakeContainerBase:
             pass

@@ -1,5 +1,6 @@
 import json
 import logging
+import warnings
 import zlib
 from typing import Any
 from databricks.sdk import WorkspaceClient
@@ -68,6 +69,17 @@ from impulse_reporting.util.report_entity_util import ReportEntityUtil
 from impulse_query_engine.telemetry import log_telemetry, telemetry_logger
 
 logger = logging.getLogger(__name__)
+
+_DETERMINE_REPORT_DEPRECATION_MSG = (
+    "Report.determine_report() is deprecated; use Report.run() instead "
+    "(run(persist_results=False) computes without writing). "
+    "determine_report() will be removed in a future release."
+)
+_PERSIST_RESULTS_DEPRECATION_MSG = (
+    "Report.persist_results() is deprecated; use Report.run() instead, which determines and "
+    "persists in one call and drains capped incremental batches. "
+    "persist_results() will be removed in a future release."
+)
 
 
 class Report:
@@ -617,10 +629,25 @@ class Report:
 
     @telemetry_logger("report", "persist_results")
     def persist_results(self, cleanup_temp_tables: bool | None = None):
+        """Deprecated: use :meth:`run`, which determines and persists in one call.
+
+        Persists the results of a prior :meth:`determine_report` call; behavior is
+        unchanged. Unlike :meth:`run`, it does not drain capped incremental batches.
+
+        Parameters
+        ----------
+        cleanup_temp_tables : bool | None, optional
+            Same as the :meth:`run` argument.
+        """
+        # stacklevel=3 skips the telemetry_logger wrapper so the warning points at the caller.
+        warnings.warn(_PERSIST_RESULTS_DEPRECATION_MSG, FutureWarning, stacklevel=3)
+        self._persist_results(cleanup_temp_tables)
+
+    def _persist_results(self, cleanup_temp_tables: bool | None = None):
         """
         Persist report results using appropriate strategy based on definition changes.
 
-        Uses tracked state from determine_report() to decide persistence strategy:
+        Uses tracked state from :meth:`_determine_report` to decide persistence strategy:
         - Changed definitions: replaceWhere (atomic delete + insert)
         - Unchanged definitions: MERGE (upsert)
 
@@ -640,7 +667,7 @@ class Report:
         if not self._has_sink:
             return
 
-        # Use tracked state from determine_report
+        # Use tracked state from _determine_report
         changed_aggregation_ids = getattr(self, "_changed_aggregation_ids", {})
         changed_event_ids = getattr(self, "_changed_event_ids", {})
         changed_channel_ids = getattr(self, "_changed_channel_ids", {})
@@ -660,7 +687,7 @@ class Report:
         """Resolve whether to drop temp tables: explicit arg wins, else config flag.
 
         ``self.config.unity_sink`` is guaranteed non-None when called, since
-        ``persist_results`` returns early unless a sink is configured.
+        ``_persist_results`` returns early unless a sink is configured.
         """
         if cleanup is not None:
             return cleanup
@@ -713,7 +740,6 @@ class Report:
             uri = writer.get_output_uri()
             writer.write(self.channel_mapping_resolution_dimension_df, uri=uri)
 
-    @telemetry_logger("report", "determine_report")
     def _persist_incremental(
         self,
         changed_aggregation_ids: dict[str, list[int]],
@@ -988,24 +1014,41 @@ class Report:
     ):
         """Determine and persist a report, draining all container batches.
 
-        Wraps :meth:`determine_report` + :meth:`persist_results` (both remain usable
-        standalone). With ``max_containers_per_batch`` set on an incremental run, ``run()``
-        loops: each iteration commits at most that many upserted containers, and the loop
-        continues until a run observes at most that many remaining (the last batch clears
-        the rest). After the first iteration all definition hashes are current, so later
-        iterations recompute only unchanged entities over the next batch of new containers.
-        Without a cap (or in full mode) it is a single determine+persist pass.
+        The entry point for executing a report. Computes events, aggregations, calculated
+        channels, and container dimensions, then writes them to the gold layer. Computed
+        results stay accessible on the report's attributes (e.g. ``aggregation_dfs``,
+        ``event_dfs``), so ``run(persist_results=False)`` is the compute-only path. Without
+        a configured sink nothing is written.
+
+        Supports incremental processing with definition-hash-based optimization:
+        - Changed definitions trigger full reprocessing (all containers)
+        - Unchanged definitions use incremental processing (only new/updated containers)
+
+        With ``max_containers_per_batch`` set on an incremental run, ``run()`` loops: each
+        iteration commits at most that many upserted containers, and the loop continues
+        until a run observes at most that many remaining (the last batch clears the rest).
+        After the first iteration all definition hashes are current, so later iterations
+        recompute only unchanged entities over the next batch of new containers. Without a
+        cap (or in full mode) it is a single determine+persist pass.
 
         Parameters
         ----------
         is_incremental : bool, optional
-            Forwarded to :meth:`determine_report` (config still overrides it).
+            Hint for processing mode. Overwritten by config when incremental
+            config is provided.
+            - True: Request incremental processing (if gold layer exists)
+            - False: Force full processing
+            - None: Use config value (default: full processing)
         persist_results : bool, optional
             When True (default), persist after determining and drain the batches. When
-            False, run :meth:`determine_report` once without persisting (no iteration —
-            nothing commits, so the batch cannot advance).
+            False, determine once without persisting (no iteration — nothing commits, so
+            the batch cannot advance).
         cleanup_temp_tables : bool | None, optional
-            Forwarded to :meth:`persist_results`.
+            Whether to drop the batch-solving ``__impulse_temp_*`` tables from the
+            sink schema after persistence completes successfully.
+            - True/False: use this value, overriding the config flag.
+            - None (default): fall back to ``config.unity_sink.cleanup_temp_tables``
+              (which itself defaults to False).
 
         Notes
         -----
@@ -1017,10 +1060,10 @@ class Report:
         """
         previous_batch_ids = None
         while True:
-            self.determine_report(is_incremental)
+            self._determine_report(is_incremental)
             if not persist_results:
                 return
-            self.persist_results(cleanup_temp_tables)
+            self._persist_results(cleanup_temp_tables)
             # Stop once a run processed the remainder (uncapped upserted <= cap); also
             # covers no cap / full mode, where the flag stays False.
             if not self._more_batches_pending:
@@ -1044,22 +1087,29 @@ class Report:
 
     @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
-        """
-        Determine and process events, aggregations, and container dimensions for the report.
-        Results are accessible in the report's attributes.
+        """Deprecated: use :meth:`run`, or ``run(persist_results=False)`` to compute only.
 
-        Supports incremental processing with definition-hash-based optimization:
-        - Changed definitions trigger full reprocessing (all containers)
-        - Unchanged definitions use incremental processing (only new/updated containers)
+        Computes the report without persisting; results are accessible in the report's
+        attributes and behavior is unchanged.
 
         Parameters
         ----------
         is_incremental : bool, optional
-            Hint for processing mode. Overwritten by config when incremental
-            config is provided.
-            - True: Request incremental processing (if gold layer exists)
-            - False: Force full processing
-            - None: Use config value (default: full processing)
+            Same as the :meth:`run` argument.
+        """
+        # stacklevel=3 skips the telemetry_logger wrapper so the warning points at the caller.
+        warnings.warn(_DETERMINE_REPORT_DEPRECATION_MSG, FutureWarning, stacklevel=3)
+        self._determine_report(is_incremental)
+
+    def _determine_report(self, is_incremental: bool = None):
+        """
+        Determine and process events, aggregations, and container dimensions for the report.
+        Results are accessible in the report's attributes; :meth:`run` documents the modes.
+
+        Parameters
+        ----------
+        is_incremental : bool, optional
+            Processing-mode hint, see :meth:`run`.
 
         Returns
         -------

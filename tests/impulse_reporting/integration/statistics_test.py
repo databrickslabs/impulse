@@ -63,7 +63,7 @@ def test_statistics_basic_report(spark):
     my_first_page.add_aggregation(stats2)
 
     # Determine content of all pages
-    my_report.determine_report()
+    my_report.run(persist_results=False)
     agg_dfs = my_report.aggregation_dfs
     agg_metadata_dfs = my_report.aggregation_metadata_dfs
 
@@ -183,7 +183,7 @@ def test_statistics_with_multiple_selections(spark):
     my_first_page.add_aggregation(multi_stats)
 
     # Determine content of all pages
-    my_report.determine_report()
+    my_report.run(persist_results=False)
     agg_dfs = my_report.aggregation_dfs
     agg_metadata_dfs = my_report.aggregation_metadata_dfs
 
@@ -250,7 +250,7 @@ def test_statistics_mixed_with_histogram(spark):
     my_first_page.add_aggregation(rpm_hist)
 
     # Determine content of all pages
-    my_report.determine_report()
+    my_report.run(persist_results=False)
     agg_dfs = my_report.aggregation_dfs
     agg_metadata_dfs = my_report.aggregation_metadata_dfs
 
@@ -305,11 +305,8 @@ def test_persist_statistics_report(spark):
     )
     my_first_page.add_aggregation(stats)
 
-    # Determine content of all pages
-    my_report.determine_report()
-
-    # Persist the report
-    my_report.persist_results()
+    # Determine and persist the report
+    my_report.run()
 
     # Verify tables exist
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_stats_aggregator_fact")
@@ -377,11 +374,8 @@ def test_persist_statistics_with_events(spark):
     )
     my_first_page.add_aggregation(stats)
 
-    # Determine content of all pages
-    my_report.determine_report()
-
-    # Persist the report
-    my_report.persist_results()
+    # Determine and persist the report
+    my_report.run()
 
     # Verify all expected tables exist
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_stats_aggregator_fact")

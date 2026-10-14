@@ -74,7 +74,7 @@ def test_container_event_in_report(spark, basic_narrow_db):
     my_report.add_event(container_evt)
 
     # Determine report content
-    my_report.determine_report()
+    my_report.run(persist_results=False)
 
     # Access event DataFrames
     event_dfs = my_report.event_dfs
@@ -187,8 +187,7 @@ def test_container_event_with_basic_event(spark, basic_narrow_db):
     my_report.add_event(basic_evt)
 
     # Determine report content
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
     event_dfs = my_report.event_dfs
 
     # Both event types should exist
@@ -270,7 +269,7 @@ def test_sequence_of_events_without_max_overlap_in_report(spark, basic_narrow_db
     )
     my_report.add_event(sequence_evt)
 
-    my_report.determine_report()
+    my_report.run(persist_results=False)
 
     event_dfs = my_report.event_dfs
 

@@ -71,11 +71,10 @@ Every measurement data analysis follows a recognizable pattern:
 
 Impulse's **Report** orchestrator standardizes this entire workflow. A JSON configuration defines the data
 source and sink. Events and aggregations are declared as composable objects.
-Two method calls execute the full pipeline:
+One method call executes the full pipeline:
 
 ```python
-my_report.determine_report()  # compute all events and aggregations
-my_report.persist_results()  # write results to the Gold layer
+my_report.run()  # compute all events and aggregations and write them to the Gold layer
 ```
 
 This reduces a typical analysis from hundreds of lines of ad-hoc Spark code to a concise, declarative report definition.
