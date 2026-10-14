@@ -1381,6 +1381,36 @@ def test_impulse_config_measurement_db_config_rejected_at_parse_time(
         )
 
 
+@pytest.mark.parametrize(
+    ("query_engine", "misspelled_key"),
+    [
+        # Selector typo: would otherwise silently fall back to the built-in MeasurementDB.
+        (
+            {"measurment_db": "SessionDB", "measurement_db_config": {"session_table": "t"}},
+            "measurment_db",
+        ),
+        ({"measurment_db": "SessionDB"}, "measurment_db"),
+        # Settings-key typo: would otherwise silently drop the custom DB's settings.
+        (
+            {"measurement_db": "SessionDB", "measurment_db_config": {"session_table": "t"}},
+            "measurment_db_config",
+        ),
+        # Any other query_engine key: would otherwise silently fall back to its default.
+        ({"data_typ": "RAW"}, "data_typ"),
+    ],
+)
+def test_impulse_config_misspelled_query_engine_key_rejected(
+    session_db_registered, query_engine, misspelled_key
+):
+    """``QueryEngine`` forbids unknown keys, so a typo fails at parse time and names the key."""
+    with pytest.raises(ValidationError) as exc_info:
+        ImpulseConfig.model_validate({**impulse_config_JSON, "query_engine": query_engine})
+
+    assert [(err["loc"], err["type"]) for err in exc_info.value.errors()] == [
+        (("query_engine", misspelled_key), "extra_forbidden")
+    ]
+
+
 # ---------------------------------------------------------------------------
 # build_measurement_db_config — the config_parser factory that resolves the
 # selected implementation and builds its config object, merging the ``source``

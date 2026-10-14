@@ -4,8 +4,11 @@ from unittest.mock import create_autospec
 import pytest
 from databricks.sdk import WorkspaceClient
 
+import impulse_query_engine.measurement_db_registry as registry
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.aggregations.histogram import HistogramDuration
 from impulse_reporting.aggregations.histogram2d import Histogram2DDuration
@@ -168,6 +171,25 @@ def test_report_init():
     assert report.name == "test_report"
     assert report.pages == []
     assert report.aggregation_dfs == {}
+
+
+def test_report_init_fails_loudly_for_custom_db_skipping_super_init(monkeypatch):
+    """A custom DB that skips ``super().__init__`` fails when the Report reads ``db.ws``."""
+
+    class SkipsSuperInitDB(MeasurementDB):
+        def __init__(self, config, ws):
+            self.config = config  # forgets super().__init__(config, ws)
+
+    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+    register_measurement_db("SkipsSuperInitDB", MeasurementDBConfig)(SkipsSuperInitDB)
+
+    with pytest.raises(TypeError, match=r"SkipsSuperInitDB\.__init__ must call super\(\)"):
+        Report(
+            name="test_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config={**DUMMY_CONFIG, "query_engine": {"measurement_db": "SkipsSuperInitDB"}},
+        )
 
 
 def test_set_config():

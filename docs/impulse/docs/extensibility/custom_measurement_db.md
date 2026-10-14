@@ -22,7 +22,7 @@ used and behaviour is unchanged.
 |---|---|
 | Column names, or narrow-EAV vs. wide layout | `DefaultSolver` + [`solver_config`](../config/configuration.md#solver-column-mappings-and-filters) — no code |
 | Different tables, unions, joins, grain changes, EAV unpivots, or a pre-reshape row filter | **A custom MeasurementDB** (this page) |
-| Query planning / execution the config cannot express | A change to the solver in Impulse (solvers are not customer-pluggable as of now) |
+| Query planning / execution the config cannot express | Implementation of a custom solver (see [Custom solvers](../data_model/ingestion.md#custom-solvers)) |
 
 ## Select it in the report config
 
@@ -72,7 +72,23 @@ class MyMeasurementDB(MeasurementDB):
 
 Override one method per silver table you need to reshape; the rest fall back to the base read. Each
 override follows the same shape: call `super().<table>(spark)` for the raw, pinned read, then
-join / union / reshape into the silver frame the solver expects.
+join / union / reshape into the silver frame the solver expects. `super().<table>(spark)` reads the
+table in the matching `source` slot, so point that slot at the raw table your override reshapes.
+
+### Optional tables are switched on by their `source` slot
+
+`container_metrics`, `channel_metrics` and `channels` are always read. The other tables are only read
+when their `source` slot is set: the slot turns the table on, and your override reshapes what that slot
+reads. An override whose slot is empty is never called, and for some tables the solver then falls back
+without an error:
+
+| Override | Called when | If the slot is empty |
+|---|---|---|
+| `channel_tags()` | `source.channel_tags_table` is set | Channels are selected from columns on `channel_metrics` instead (wide mode). **No error.** |
+| `unit_conversion()` | `source.unit_conversion_table` is set (conversion also needs `source_unit` / `target_unit` on `channel_mapping`, see [Unit conversion](../config/configuration.md#unit-conversion-optional)) | Values are not converted. **No error.** |
+| `poi_channels()` | `has_poi_channels()` returns `True` (the base implementation checks `source.poi_channels_uri`) | POI data is not read. **No error.** |
+| `container_tags()` | `source.container_tags_table` is set | Containers are filtered on `container_metrics` columns (wide-only mode). Tag filters, and expressions that read container tags, raise an error. |
+| `channel_mapping()` | `source.channel_mapping_table` is set | `channel_with_alias()` raises an error. |
 
 ## Rules
 
@@ -84,6 +100,9 @@ join / union / reshape into the silver frame the solver expects.
 - **Keep the config `__init__` free of side effects** — it is constructed once to validate the config
   at parse time and once more to build the DB.
 - **Keep the DB constructor signature `__init__(self, config, ws)`** — Impulse builds it as `db_cls(config, ws)`.
+- **If you override the DB `__init__`, call `super().__init__(config, ws)`.** The base initializer
+  stores the config and verifies the workspace client; reading `db.ws` (which `Report` and `db.query`
+  do) raises a `TypeError` if it was skipped. Don't assign `self.ws` yourself.
 - **Your DB owns correctness.** Impulse does not validate the frames a custom DB returns; it must
   provide the columns, types, row grain, and time unit the solver expects. The built-in `MeasurementDB`
   and the schemas in `impulse_query_engine/schema.py` are the reference.

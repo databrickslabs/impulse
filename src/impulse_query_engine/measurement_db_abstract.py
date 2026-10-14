@@ -22,7 +22,21 @@ class AbstractMeasurementDB(ABC):
 
     def __init__(self, config: "MeasurementDBConfig", ws: WorkspaceClient):
         self.config = config
-        self.ws = verify_workspace_client(ws, "databricks-impulse", __version__)
+        self._ws = verify_workspace_client(ws, "databricks-impulse", __version__)
+
+    @property
+    def ws(self) -> WorkspaceClient:
+        """The verified workspace client; ``Report`` and ``QueryBuilder`` read it from here.
+
+        Raises ``TypeError`` if a subclass ``__init__`` didn't call ``super().__init__(config, ws)``,
+        which would otherwise lose the client verification without any error.
+        """
+        try:
+            return self._ws
+        except AttributeError:
+            raise TypeError(
+                f"{type(self).__name__}.__init__ must call super().__init__(config, ws)"
+            ) from None
 
     @property
     def query(self) -> QueryBuilder:

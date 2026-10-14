@@ -6,7 +6,7 @@ from enum import Enum, StrEnum
 from typing import Annotated, Any, Self
 
 import pydantic
-from pydantic import AfterValidator, BaseModel, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, field_validator, model_validator, ConfigDict
 
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
 from impulse_query_engine.measurement_db import AbstractMeasurementDB, MeasurementDBConfig
@@ -409,6 +409,10 @@ class QueryEngine(BaseModel):
     - RLE channel data must contain 'container_id', 'channel_id', 'tstart', 'tend', 'value' columns
     - RAW channel data must contain 'container_id', 'channel_id', 'timestamp', 'value' columns
     """
+
+    # added to prevent misspelled args being silently accepted, which could have side effects
+    # (default measurement db silently used)
+    model_config = ConfigDict(extra="forbid")
 
     solver: Solvers = Solvers.DEFAULT_SOLVER
     data_type: DataType = DataType.RLE

@@ -1,7 +1,10 @@
 # pylint: disable=missing-function-docstring
 """Tests for the ``AbstractMeasurementDB`` contract and the name registry."""
 
+from unittest.mock import create_autospec
+
 import pytest
+from databricks.sdk import WorkspaceClient
 
 import impulse_query_engine.measurement_db_registry as registry
 from impulse_query_engine.measurement_db import (
@@ -34,6 +37,38 @@ def test_incomplete_implementation_cannot_be_instantiated():
 
     with pytest.raises(TypeError, match="abstract"):
         Incomplete(MeasurementDBConfig(), ws=None)
+
+
+def test_ws_is_the_verified_client():
+    ws = create_autospec(WorkspaceClient)
+    db = MeasurementDB(MeasurementDBConfig(), ws)
+
+    assert db.ws is ws
+    ws.clusters.select_spark_version.assert_called_once()  # the connectivity check ran
+
+
+def test_subclass_skipping_super_init_fails_loudly_on_ws():
+    class SkipsSuperInit(MeasurementDB):
+        def __init__(self, config, ws):
+            self.config = config  # forgets super().__init__(config, ws)
+
+    db = SkipsSuperInit(MeasurementDBConfig(), create_autospec(WorkspaceClient))
+
+    expected = r"SkipsSuperInit\.__init__ must call super\(\)\.__init__\(config, ws\)"
+    with pytest.raises(TypeError, match=expected):
+        _ = db.ws
+    with pytest.raises(TypeError, match=expected):  # standalone path: QueryBuilder reads db.ws
+        _ = db.query
+
+
+def test_subclass_cannot_assign_ws_itself():
+    class AssignsWs(MeasurementDB):
+        def __init__(self, config, ws):
+            self.config = config
+            self.ws = ws  # would bypass verify_workspace_client
+
+    with pytest.raises(AttributeError, match="has no setter"):
+        AssignsWs(MeasurementDBConfig(), create_autospec(WorkspaceClient))
 
 
 def test_register_rejects_non_subclass():
