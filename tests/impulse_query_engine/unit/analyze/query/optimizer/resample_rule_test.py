@@ -101,6 +101,7 @@ _CASES = {
     "nan_and_null_values": ([0, 1, 2, 3], [1, 2, 3, 4], [1.0, np.nan, None, 4.0], 1),
     "grid_off_sample_boundaries": ([0, 3, 7, 12], [3, 7, 12, 20], [1, 2, 3, 4], 4),
     "rate_beyond_block": ([0, 1, 2], [1, 2, 3], [1, 2, 3], 10),
+    "grid_on_sample_starts": (list(range(10)), list(range(1, 11)), list(range(10)), 3),
 }
 
 
@@ -143,6 +144,18 @@ def test_ns_epoch_longs_above_2_pow_53(spark):
     expected = _expected((tstarts, tends, values), rate)
     assert len(expected) < len(tstarts) / 5
     _assert_same(actual[(1, 1, 1)], expected)
+
+
+def test_ns_epoch_grid_on_sample_starts(spark):
+    # Every fifth sample starts exactly on a grid point, the case where the bucket
+    # index estimate needs its correction step.
+    base = 1_700_000_000_123_456_789
+    times = [base + i * 10_000_000 for i in range(301)]
+    tstarts, tends = times[:-1], times[1:]
+    values = [float(i) for i in range(300)]
+    rate = 50_000_000
+    actual = _resample_in_spark(spark, {(1, 1, 1): (tstarts, tends, values)}, {1: rate})
+    _assert_same(actual[(1, 1, 1)], _expected((tstarts, tends, values), rate))
 
 
 def test_integer_time_columns(spark):

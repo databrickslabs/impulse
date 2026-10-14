@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import numbers
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 import pyspark.sql.functions as F
@@ -36,6 +36,12 @@ class ResamplePushdownRule(PushdownRule):
     ``numpy.arange``), each grid point holding the value of the last sample that
     starts at or before it.  Meant for downsampling: a rate finer than the native
     sample spacing yields more rows than the raw channel.
+
+    Each sample is assigned the bucket ``c`` of the first grid point at or after its
+    ``tstart``.  The last sample of a bucket holds the value of grid points
+    ``c, c + 1, …`` up to the next non-empty bucket, so only those samples emit rows
+    and every row carries just the grid points it covers.  Values are looked up
+    within a block; this matches the pandas evaluation unless intervals overlap.
 
     Grid points are computed as ``t_min + k * delta`` in IEEE double arithmetic.
     numpy builds that fuse this into a multiply-add can differ by one ulp for
@@ -78,7 +84,7 @@ class ResamplePushdownRule(PushdownRule):
         self, rows: DataFrame, variants: Mapping[int, Pushdown], config: SolverConfig
     ) -> DataFrame:
         cid, ch = config.container_id_col, config.channel_id_col
-        ts, te, val = config.tstart_col, config.tend_col, config.value_col
+        ts, te = config.tstart_col, config.tend_col
         key = [cid, ch, VARIANT_COL]
         rate = F.try_element_at(
             F.create_map(
@@ -91,13 +97,13 @@ class ResamplePushdownRule(PushdownRule):
             F.col(VARIANT_COL),
         )
 
-        # All per-channel state comes from windows sharing one partitioning and order
-        # (the pandas cache's tstart order), so the rows are sorted once and the
-        # incoming container partitioning is kept.
+        # Every window shares one partitioning and order (the pandas cache's tstart
+        # order), so the rows are sorted once and the container partitioning is kept.
         ordered = Window.partitionBy(*key).orderBy(ts, te)
         running = ordered.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        following = ordered.rowsBetween(Window.currentRow, Window.unboundedFollowing)
         whole = ordered.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
-        ts_d, te_d = F.col("_rs_ts"), F.col("_rs_te")
+        ts_d, te_d, block = F.col("_rs_ts"), F.col("_rs_te"), F.col("_rs_block")
         prev_te = F.lag(te_d).over(ordered)
         df = (
             rows.withColumn("_rs_ts", F.col(ts).cast("double"))
@@ -107,12 +113,11 @@ class ResamplePushdownRule(PushdownRule):
             .withColumn("_rs_last_ts", F.last(ts_d).over(whole))
             .withColumn("_rs_last_te", F.last(te_d).over(whole))
             .withColumn("_rs_block", F.sum("_rs_break").over(running))
-            .withColumn(
-                "_rs_block_end", F.coalesce(F.lead("_rs_break").over(ordered), F.lit(1)) == 1
-            )
         )
-        # Block bounds as seen on the block's last row: its first tstart, and the
-        # largest tend so far within the block (blocks are numbered in order).
+        # Block bounds on every row: the block's first tstart and its largest tend.
+        # Blocks are numbered in order, so max(struct(±block, tend)) over the rows
+        # before / after the current one stays within the current block.
+        te_no_nan = _ignore_nan(te_d).alias("te")
         df = (
             df.withColumn(
                 "_rs_t_min",
@@ -120,89 +125,135 @@ class ResamplePushdownRule(PushdownRule):
             )
             .withColumn(
                 "_rs_t_max",
-                F.max(F.struct(F.col("_rs_block"), _ignore_nan(te_d).alias("te")))
-                .over(running)
-                .getField("te"),
+                F.greatest(
+                    F.max(F.struct(block, te_no_nan)).over(running).getField("te"),
+                    F.max(F.struct(-block, te_no_nan)).over(following).getField("te"),
+                ),
             )
-            .withColumn("_rs_nblk", F.max("_rs_block").over(whole))
+            .withColumn("_rs_nblk", F.max(block).over(whole))
         )
 
         # numpy.arange(t_min, t_max + rate, rate): length ceil(((t_max + rate) - t_min) / rate),
         # filled as t_min, t_min + rate, then t_min + k * ((t_min + rate) - t_min).
         t_min, t_max = F.col("_rs_t_min"), F.col("_rs_t_max")
-        length = F.ceil(((t_max + rate) - t_min) / rate)
         delta = (t_min + rate) - t_min
+
+        def grid_point(k: Column) -> Column:
+            return (
+                F.when(k == 0, t_min)
+                .when(k == 1, t_min + rate)
+                .otherwise(t_min + k.cast("double") * delta)
+            )
+
+        resampled = F.col(VARIANT_COL).isin(sorted(variants)) & (F.col("_rs_n") >= 2)
         # The last block keeps a grid point at t_max when the series ends with a
         # zero-duration sample.
-        inclusive = (F.col("_rs_block") == F.col("_rs_nblk")) & (
-            F.col("_rs_last_ts") == F.col("_rs_last_te")
+        inclusive = (block == F.col("_rs_nblk")) & (F.col("_rs_last_ts") == F.col("_rs_last_te"))
+        length = F.greatest(F.ceil(((t_max + rate) - t_min) / rate), F.lit(0))
+
+        # Bucket of each sample, and the number of grid points of its block.
+        df = _with_first_grid_index(
+            df, "_rs_c", ts_d, F.lit(False), resampled, grid_point, t_min, delta
         )
-        resampled = F.col(VARIANT_COL).isin(sorted(variants)) & (F.col("_rs_n") >= 2)
-        grid_points = F.filter(
-            F.transform(
-                F.sequence(F.lit(0).cast("long"), length - 1),
-                lambda k: F.when(k == 0, t_min)
-                .when(k == 1, t_min + rate)
-                .otherwise(t_min + k.cast("double") * delta),
-            ),
-            lambda g: (g < t_max) | (inclusive & (g == t_max)),
+        df = _with_first_grid_index(
+            df, "_rs_grid_end", t_max, inclusive, resampled, grid_point, t_min, delta
         )
+        c, n_grid = F.col("_rs_c"), F.least(F.col("_rs_grid_end"), length)
+
+        # The last sample of a bucket emits the grid points up to the next non-empty
+        # bucket of its block (or up to the block's end).
+        next_c, next_block = F.lead(c).over(ordered), F.lead(block).over(ordered)
         df = df.withColumn(
-            "_rs_grid",
-            F.when(resampled & F.col("_rs_block_end") & (length > 0), grid_points),
+            "_rs_c_stop",
+            F.when(next_block.isNull() | (next_block != block), n_grid).when(
+                next_c != c, F.least(next_c, n_grid)
+            ),
         )
 
-        # One output element per row: the row itself for series this rule leaves
-        # alone (kind 2), otherwise the sample (kind 0) plus, on a block's last row,
-        # the block's grid points (kind 1).  Fewer than two samples: returned as-is.
         def element(kind: int, t: Column, tend: Column) -> Column:
             return F.struct(
-                F.lit(kind).alias("kind"), t.alias("t"), tend.cast("double").alias("tend")
+                F.lit(kind).alias("kind"),
+                t.cast("double").alias("t"),
+                tend.cast("double").alias("tend"),
             )
 
+        c_stop = F.col("_rs_c_stop")
         grid = F.transform(
-            F.col("_rs_grid"),
-            lambda g, i: element(
-                1, g, F.coalesce(F.try_element_at(F.col("_rs_grid"), i + 2), t_max)
+            F.sequence(c, c_stop - 1),
+            lambda k: element(
+                1,
+                grid_point(k),
+                F.when(k == n_grid - 1, t_max).otherwise(grid_point(k + 1)),
             ),
         )
-        no_tend = F.lit(None).cast("double")
-        elements = (
-            F.when(~resampled, F.array(element(2, ts_d, no_tend)))
-            .when(
-                F.col("_rs_grid").isNotNull(), F.concat(F.array(element(0, ts_d, no_tend)), grid)
-            )
-            .otherwise(F.array(element(0, ts_d, no_tend)))
-        )
+        no_time = F.lit(None)
+        # Series this rule leaves alone keep their row (kind 2); of the resampled
+        # series only the grid points survive (kind 1).  explode drops the rest.
+        elements = F.when(~resampled, F.array(element(2, no_time, no_time))).when(c_stop > c, grid)
         df = df.withColumn("_rs_e", F.explode(elements))
-        kind, t = F.col("_rs_e.kind"), F.col("_rs_e.t")
 
-        # Previous-value lookup: each grid point takes the value of the last sample (in
-        # channel order) starting at or before it.  Samples sort before grid points at
-        # equal times; the struct keeps null values distinguishable from "no sample".
-        as_of = (
-            Window.partitionBy(*key)
-            .orderBy(t, kind, ts, te)
-            .rowsBetween(Window.unboundedPreceding, Window.currentRow)
-        )
-        previous = F.last(F.when(kind == 0, F.struct(F.col(val).alias("value"))), ignorenulls=True)
-        df = df.withColumn("_rs_previous", previous.over(as_of)).where(kind != 0)
-
-        is_grid = kind == 1
+        is_grid = F.col("_rs_e.kind") == 1
         derived = {
-            ts: t.cast(rows.schema[ts].dataType),
+            ts: F.col("_rs_e.t").cast(rows.schema[ts].dataType),
             te: F.col("_rs_e.tend").cast(rows.schema[te].dataType),
-            # Beyond the last sample's end the pandas interpolation yields NaN.
-            val: F.when(t > F.col("_rs_last_te"), F.lit(None))
-            .otherwise(F.col("_rs_previous.value"))
-            .cast(rows.schema[val].dataType),
         }
         return df.select(
             *[
-                F.when(is_grid, derived[c]).otherwise(F.col(c)).alias(c) if c in derived else c
-                for c in rows.columns
+                (
+                    F.when(is_grid, derived[col]).otherwise(F.col(col)).alias(col)
+                    if col in derived
+                    else col
+                )
+                for col in rows.columns
             ]
         )
+
+
+def _with_first_grid_index(
+    df: DataFrame,
+    name: str,
+    x: Column,
+    strict: Column,
+    active: Column,
+    grid_point: Callable[[Column], Column],
+    t_min: Column,
+    delta: Column,
+) -> DataFrame:
+    """Add *name*: the smallest ``k >= 0`` with ``grid_point(k) >= x`` (``> x`` if *strict*).
+
+    Estimated from ``(x - t_min) / delta`` and corrected by one step against the
+    exact grid points; a result that still is not exact raises instead of
+    misplacing a sample.  Only evaluated where *active*.
+    """
+
+    def reached(k: Column) -> Column:
+        g = grid_point(k)
+        return F.when(strict, g > x).otherwise(g >= x)
+
+    estimate, k = F.col(f"{name}_estimate"), F.col(name)
+    return (
+        df.withColumn(
+            f"{name}_estimate",
+            F.when(
+                active,
+                F.when(delta > 0, F.greatest(F.ceil((x - t_min) / delta), F.lit(0))).otherwise(
+                    F.raise_error(
+                        F.lit("resample: sample_rate is below the resolution of the timestamps")
+                    )
+                ),
+            ),
+        )
+        .withColumn(
+            name,
+            estimate,
+        )
+        .withColumn(
+            name,
+            F.when(~active, F.lit(None))
+            .when(reached(k) & ((k == 0) | ~reached(k - 1)), k)
+            .otherwise(F.raise_error(F.lit("resample: grid index could not be determined"))),
+        )
+    )
 
 
 def _sample_rate(args: tuple, kwargs: dict[str, Any]) -> float | None:
