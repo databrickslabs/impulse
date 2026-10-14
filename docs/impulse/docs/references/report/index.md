@@ -43,7 +43,7 @@ Either `config` or `config_path` must be provided.
 | `add_event(event)`                  | Registers an `Event` with the report. All events used by aggregations must be registered. Event names must be unique (ignoring case). | `event`: `Event` instance.                                                                      |
 | `add_calculated_channel(channel)`   | Registers a [`CalculatedChannel`](./channel.md) with the report.                                                              | `channel`: `CalculatedChannel` instance.                                                        |
 | `get_calculated_channels()`         | Returns the list of registered calculated channels.                                                                           | --                                                                                              |
-| `run(is_incremental, persist_results, cleanup_temp_tables)` | Computes all events, aggregations, calculated channels, and container dimensions and writes them (fact and dimension tables) to the configured Gold layer sink. Results are also stored on the report object. On a capped incremental run it loops until all containers are processed. | `is_incremental`: `bool` or `None`. Mode hint; overridden by `config.incremental` when present. See [Incremental processing](#incremental-processing). `persist_results`: `bool`, default `True`. `False` computes without writing. `cleanup_temp_tables`: `bool` or `None`. When truthy, drops the batch-solving `__impulse_temp_*` tables after a successful write; `None` (default) falls back to `config.unity_sink.cleanup_temp_tables`. |
+| `run(is_incremental, persist_results, cleanup_temp_tables)` | Computes all events, aggregations, calculated channels, and container dimensions and writes them (fact and dimension tables) to the configured Gold layer sink. With `persist_results=False`, results are kept on the report object instead. On a capped incremental run it loops until all containers are processed, stopping early with a warning if a batch makes no forward progress. | `is_incremental`: `bool` or `None`. Mode hint; overridden by `config.incremental` when present. See [Incremental processing](#incremental-processing). `persist_results`: `bool`, default `True`. `False` computes without writing. `cleanup_temp_tables`: `bool` or `None`. When truthy, drops the batch-solving `__impulse_temp_*` tables after a successful write; `None` (default) falls back to `config.unity_sink.cleanup_temp_tables`. |
 
 ### Execution workflow
 
@@ -58,7 +58,8 @@ my_report.run()
 ```
 
 `run()` validates that every event referenced by an aggregation has been registered with `add_event()`
-before computation begins.
+before computation begins. The aggregation must reference the registered event object itself; a re-created event with
+the same name is rejected.
 
 :::note Deprecated: `determine_report()` / `persist_results()`
 The two-step `determine_report()` + `persist_results()` still works but emits a `FutureWarning` and will be
@@ -66,8 +67,7 @@ removed in a future release. Replace the pair with `run()`, and a standalone `de
 `run(persist_results=False)`. Unlike `run()`, a single `determine_report()` + `persist_results()` pass does not
 drain a capped incremental run. The `persist_results` argument of `run()` is a flag and is unrelated to the
 deprecated method of the same name.
-::: The aggregation must reference the registered event object itself; a re-created event with
-the same name is rejected.
+:::
 
 ### Sinkless mode
 

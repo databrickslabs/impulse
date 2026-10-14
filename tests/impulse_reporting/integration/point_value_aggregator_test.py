@@ -70,11 +70,13 @@ def test_persist_point_value_aggregator(spark):
     )
     page.add_aggregation(pva)
 
-    my_report.run()
+    my_report._determine_report()
 
     assert "POINT_VALUE_AGGREGATOR" in my_report.aggregation_dfs
     assert my_report.aggregation_dfs["POINT_VALUE_AGGREGATOR"]["changed"].count() > 0
     assert my_report.aggregation_metadata_dfs["POINT_VALUE_AGGREGATOR"].count() == 1
+
+    my_report._persist_results()
 
     fact = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_fact")
     dim = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_dimension")

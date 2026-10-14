@@ -307,8 +307,8 @@ def persist_results(cleanup_temp_tables: bool | None = None)
 
 Deprecated: use :meth:`run`, which determines and persists in one call.
 
-Persists the results of a prior :meth:`determine_report` call; behavior is
-unchanged. Unlike :meth:`run`, it does not drain capped incremental batches.
+Persists the results of a prior :meth:`determine_report` call. Unlike :meth:`run`,
+it does not drain capped incremental batches.
 
 **Arguments**:
 
@@ -325,10 +325,15 @@ def run(is_incremental: bool = None,
 Determine and persist a report, draining all container batches.
 
 The entry point for executing a report. Computes events, aggregations, calculated
-channels, and container dimensions, then writes them to the gold layer. Computed
-results stay accessible on the report's attributes (e.g. ``aggregation_dfs``,
-``event_dfs``), so ``run(persist_results=False)`` is the compute-only path. Without
-a configured sink nothing is written.
+channels, and container dimensions, then writes them to the gold layer. Without a
+configured sink nothing is written.
+
+``run(persist_results=False)`` is the compute-only path: results are left on the
+report's attributes (e.g. ``aggregation_dfs``, ``event_dfs``) for inspection. These
+are lazy DataFrames, so after a persisting run read the gold tables instead: an
+incremental run's attributes re-detect containers against the updated gold, a capped
+run's hold only the last batch, and ``cleanup_temp_tables`` drops the temp tables
+they read from.
 
 Supports incremental processing with definition-hash-based optimization:
 - Changed definitions trigger full reprocessing (all containers)
@@ -366,7 +371,7 @@ def determine_report(is_incremental: bool = None)
 Deprecated: use :meth:`run`, or ``run(persist_results=False)`` to compute only.
 
 Computes the report without persisting; results are accessible in the report's
-attributes and behavior is unchanged.
+attributes.
 
 **Arguments**:
 

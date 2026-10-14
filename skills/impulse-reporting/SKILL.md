@@ -93,8 +93,10 @@ the only thing that uses them. The aggregation must reference the registered obj
 re-created event with the same name raises too), and `add_event()` rejects duplicate event names,
 ignoring case.
 
-After `run()`, computed results are also available on the report object — `report.aggregation_dfs[...]`
-(used by `impulse-ml`) — which is what makes sinkless mode useful.
+With `run(persist_results=False)` (or no sink), computed results stay on the report object —
+`report.aggregation_dfs[...]` (used by `impulse-ml`) — which is what makes sinkless mode useful. They
+are lazy DataFrames: after a persisting run, read the gold tables instead (incremental results re-detect
+against the updated gold, and a capped run keeps only its last batch).
 
 `determine_report()` + `persist_results()` are deprecated (they warn) — use `run()`. The
 `persist_results=` flag of `run()` is unrelated to the deprecated method of the same name.
@@ -112,7 +114,8 @@ configured, call `run(persist_results=False)`. Good for notebooks, tests, and fe
 Reuses prior results for unchanged definitions and reprocesses only containers that are new or updated
 in silver. Turn it on via `incremental.enabled` in config (see `impulse-config`) or pass
 `is_incremental=True` to `run()`. With `query_engine.max_containers_per_batch` set, `run()` commits at
-most that many upserted containers per iteration and loops until all are processed.
+most that many upserted containers per iteration and loops until all are processed (if a batch makes
+no forward progress it logs a warning and stops early).
 
 **Mode resolution** (in order):
 

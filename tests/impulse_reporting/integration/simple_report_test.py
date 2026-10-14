@@ -686,8 +686,8 @@ def test_persist_report_with_events(spark):
     )
     my_first_page.add_aggregation(hist5)
 
-    # Determine and persist the report
-    my_report.run()
+    # Determine content of all pages
+    my_report._determine_report()
 
     agg_dfs = my_report.aggregation_dfs
     agg_metadata_dfs = my_report.aggregation_metadata_dfs
@@ -702,6 +702,8 @@ def test_persist_report_with_events(spark):
 
     assert event_dfs["BASIC_EVENT"]["changed"].count() > 0
     assert event_metadata_dfs["BASIC_EVENT"].count() > 0
+
+    my_report._persist_results()
 
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_event_dimension")
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_event_instance_fact")

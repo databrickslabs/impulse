@@ -70,7 +70,7 @@ report.run(persist_results=False)   # computes in parallel across containers; no
 
 ## 2. Read the computed statistics
 
-After `run()`, the results live on the report under `aggregation_dfs`, keyed by
+After `run(persist_results=False)`, the results live on the report under `aggregation_dfs`, keyed by
 aggregation type. `StatsAggregator` results are under `"STATS_AGGREGATOR"`, returned as a bundle keyed
 by whether the rows were freshly computed (`"changed"`) or reused from a prior incremental run
 (`"unchanged"`). In a fresh sinkless run take `"changed"`:

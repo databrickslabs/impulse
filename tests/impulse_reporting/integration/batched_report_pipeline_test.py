@@ -324,7 +324,7 @@ def _temp_tables(spark: SparkSession) -> set[str]:
     }
 
 
-def test_persist_results_retains_temp_tables_by_default(spark, cleanup_gold):
+def test_persist_retains_temp_tables_by_default(spark, cleanup_gold):
     """Default behavior: the current run's temp tables survive persistence."""
     report, _ = _build_batched_report(spark)
 
@@ -340,7 +340,7 @@ def test_persist_results_retains_temp_tables_by_default(spark, cleanup_gold):
     assert _temp_tables(spark)
 
 
-def test_persist_results_cleans_temp_tables_when_param_true(spark, cleanup_gold):
+def test_persist_cleans_temp_tables_when_param_true(spark, cleanup_gold):
     """cleanup_temp_tables=True drops temp tables after a successful write."""
     report, _ = _build_batched_report(spark)
 
