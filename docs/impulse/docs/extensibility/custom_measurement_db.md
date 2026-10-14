@@ -84,7 +84,8 @@ called:
 - `channel_tags()` needs `source.channel_tags_table`
 - `channel_mapping()` needs `source.channel_mapping_table`
 - `unit_conversion()` needs `source.unit_conversion_table`
-- `poi_channels()` needs `source.poi_channels_uri`
+- `poi_channels()` needs `has_poi_channels()` to return `True`; the base implementation checks
+  `source.poi_channels_uri`
 
 Set each entry to the raw table your override reshapes; `super().<table>(spark)` reads it. For
 channel tags, unit conversion and POI, a missing entry doesn't raise an error: the feature just
