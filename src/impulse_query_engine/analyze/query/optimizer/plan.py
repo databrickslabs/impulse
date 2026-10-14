@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 import pyspark.sql.functions as F
 from pyspark.sql import Column
@@ -106,13 +107,55 @@ class PushdownPlan:
             return None
         return None
 
+    def native_targets(
+        self, selections: Iterable[Any]
+    ) -> dict[int, dict[int, list[tuple[int, bool]]]] | None:
+        """Sources of calculated channels that are pushed down as a whole.
+
+        Parameters
+        ----------
+        selections : Iterable
+            The selections of a ``solve_calculated_channels`` call.
+
+        Returns
+        -------
+        dict or None
+            ``{variant: {selector_id: [(channel_id, uses_alias), ...]}}``: the
+            calculated channels (by output ``channel_id``) whose rows are the
+            given variant's rows of the channel resolved for ``selector_id``.
+            ``None`` unless every selection is a ``CalculatedChannel`` whose
+            whole expression is a pushdown emitting its result rows.
+        """
+        from impulse_query_engine.analyze.query.channels.calculated_channel import (
+            CalculatedChannel,
+        )
+
+        selections = list(selections)
+        if not selections:
+            return None
+        targets: dict[int, dict[int, list[tuple[int, bool]]]] = {}
+        for selection in selections:
+            if not isinstance(selection, CalculatedChannel):
+                return None
+            hit = self.lookup(selection.expr)
+            if hit is None or not hit[0].rule.emits_result_rows(hit[0]):
+                return None
+            pushdown, variant = hit
+            by_selector = targets.setdefault(variant, {})
+            by_selector.setdefault(pushdown.selector.selector_id, []).append(
+                (selection.channel_id, pushdown.selector.uses_alias)
+            )
+        return targets
+
     def channel_variants(self, selector_ids: Column) -> Column:
         """Variant ids a matched channel ships, given its ``selector_ids`` array.
 
         A channel ships only its raw data (``[0]``) unless every one of its
         selectors is pushed down; then it ships the derived variants instead.
         """
-        ids = F.transform(selector_ids, lambda sid: sid.cast("long"))
+        ids = F.filter(
+            F.transform(selector_ids, lambda sid: sid.cast("long")), lambda sid: sid.isNotNull()
+        )
         pushed = sorted(self.variants_by_selector)
         needs_raw = F.exists(ids, lambda sid: ~sid.isin(pushed)) | (F.size(ids) == 0)
         mapping = F.create_map(
@@ -125,8 +168,13 @@ class PushdownPlan:
                 )
             ]
         )
+        no_variants = F.array().cast("array<int>")
         derived = F.array_distinct(
-            F.flatten(F.transform(ids, lambda sid: F.try_element_at(mapping, sid)))
+            F.flatten(
+                F.transform(
+                    ids, lambda sid: F.coalesce(F.try_element_at(mapping, sid), no_variants)
+                )
+            )
         )
         return F.when(F.coalesce(needs_raw, F.lit(True)), F.array(F.lit(RAW_VARIANT))).otherwise(
             derived

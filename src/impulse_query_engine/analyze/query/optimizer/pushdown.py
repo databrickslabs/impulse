@@ -146,3 +146,15 @@ class PushdownRule(abc.ABC):
     def decode(self, rows: pd.DataFrame, pushdown: Pushdown, cache: TimeSeriesCache) -> Any:
         """Build the subtree's result from one container/channel/variant slice."""
         return cache.to_sample_series(rows, uses_alias=pushdown.selector.uses_alias)
+
+    def emits_result_rows(self, pushdown: Pushdown) -> bool:
+        """Whether *pushdown*'s derived rows are its result's samples as they are.
+
+        Holds when the result is a :class:`SampleSeries` built by the default
+        :meth:`decode`: the variant's rows, with values multiplied by the
+        conversion factor for aliased selectors, are then exactly the result, so
+        it can be emitted without the pandas evaluation.
+        """
+        return (
+            type(self).decode is PushdownRule.decode and self.result_type(pushdown) is SampleSeries
+        )

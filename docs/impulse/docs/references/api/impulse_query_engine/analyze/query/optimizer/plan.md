@@ -76,6 +76,28 @@ def lookup(node: TimeSeriesExpression) -> tuple[Pushdown, int] | None
 Return ``(pushdown, variant)`` when *node* is a pushed-down subtree.
 
 
+#### native\_targets
+
+```python
+def native_targets(
+    selections: Iterable[Any]
+) -> dict[int, dict[int, list[tuple[int, bool]]]] | None
+```
+
+Sources of calculated channels that are pushed down as a whole.
+
+**Arguments**:
+
+- `selections` (`Iterable`): The selections of a ``solve_calculated_channels`` call.
+
+**Returns**:
+
+`dict or None`: ``{variant: {selector_id: [(channel_id, uses_alias), ...]}}``: the
+calculated channels (by output ``channel_id``) whose rows are the
+given variant's rows of the channel resolved for ``selector_id``.
+``None`` unless every selection is a ``CalculatedChannel`` whose
+whole expression is a pushdown emitting its result rows.
+
 #### channel\_variants
 
 ```python

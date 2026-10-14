@@ -160,3 +160,14 @@ def decode(rows: pd.DataFrame, pushdown: Pushdown,
 Build the subtree's result from one container/channel/variant slice.
 
 
+#### emits\_result\_rows
+
+```python
+def emits_result_rows(pushdown: Pushdown) -> bool
+```
+
+Whether *pushdown*'s derived rows are its result's samples as they are.
+
+Holds when the result is a :class:`SampleSeries` built by the default
+
+

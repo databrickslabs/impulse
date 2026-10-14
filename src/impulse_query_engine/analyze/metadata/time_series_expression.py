@@ -796,8 +796,12 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
     @property
     def selector_id(self) -> int:
         # series_type / value_type keep distinct-typed selections of the same tag
-        # apart; CONTINUOUS uses the bare ``str(expr)`` hash for back-compat.
+        # apart, and an aliased selection resolves differently from a direct one on
+        # the same tags; a direct CONTINUOUS selection uses the bare ``str(expr)``
+        # hash for back-compat.
         if self._series_type is SeriesType.CONTINUOUS:
+            if self._uses_alias:
+                return zlib.crc32(f"alias|{self._expr}".encode())
             return zlib.crc32(str(self._expr).encode())
         return zlib.crc32(f"{self._series_type}|{self._expr}|{self._value_type}".encode())
 
@@ -868,7 +872,8 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             if self._series_type is SeriesType.POINTS_IN_TIME:
                 return PointsInTimeSeries.empty(value_type=self._value_type)
             return SampleSeries.empty()
-        # TODO: select candidate
+        # DefaultSolver resolves a selector to at most one channel per container;
+        # other solvers may pass several candidates, of which the first is used.
         mid = candidates.container_id.iloc[0]
         cid = candidates.channel_id.iloc[0]
         # The selector is the source of truth for the series type: pass it to the

@@ -145,6 +145,8 @@ Every selection must be a [`CalculatedChannel`](../report/channel.md) (identity 
 need not match across selections), and each wrapped expression must evaluate to a `SampleSeries`. The stage reuses the same
 metadata filter pipeline as `solve()` to resolve the input channels, then runs a grouped-map UDF per
 container. Only `DefaultSolver` implements it — the base `QuerySolver` raises `NotImplementedError`.
+The `channel_id` column of `channels` must be an integer or long column to hold the calculated
+channels' ids.
 
 ```python
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
@@ -208,6 +210,15 @@ Spark processes each channel in one pass over its samples, sorted by `tstart`: e
 assigned the grid bucket it falls into, and only the last sample of each bucket emits rows (the
 grid points up to the next non-empty bucket). The memory per row is bounded by the grid points a
 single sample covers, not by the length of the channel.
+
+### Calculated channels without the pandas UDF
+
+When every calculated channel of a `solve_calculated_channels` call (in a report: of a solve
+batch) is a pushed-down expression as a whole, e.g.
+`CalculatedChannel(veh_spd.resample(1e6), {...})`, its rows are produced entirely in Spark and no
+pandas UDF runs. If any calculated channel of the call needs the pandas evaluation, e.g.
+`veh_spd.resample(1e6) * 3.6`, all of them are evaluated in the UDF as usual; their pushed-down
+parts still run in Spark. Either way the rows are identical.
 
 ## API reference
 

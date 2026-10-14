@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pyspark.sql import DataFrame, Window
+from pyspark.sql import Column, DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
@@ -618,6 +618,10 @@ class DefaultSolver(QuerySolver):
         columns, the result is restricted to the candidate containers, and
         ``selector_ids`` is computed from the matching selectors.
 
+        In both modes a selector resolves to at most one channel per container:
+        when several channels of a container match, the lowest ``channel_id``
+        is kept.
+
         Parameters
         ----------
         spark : SparkSession
@@ -654,10 +658,7 @@ class DefaultSolver(QuerySolver):
                 on=[container_id_col, channel_id_col],
                 how="inner",
             )
-            metrics = metrics.withColumn("selector_ids", F.array(F.col("selector_id"))).drop(
-                "selector_id"
-            )
-            return metrics.select(container_id_col, channel_id_col, "selector_ids")
+            return self._one_channel_per_selector(metrics)
 
         # Wide mode: selectors apply directly to channel_metrics columns.
         channel_metrics_df = channel_metrics_df.where(self._build_expr(selectors))
@@ -666,10 +667,28 @@ class DefaultSolver(QuerySolver):
             on=[container_id_col],
             how="inner",
         )
-        result = result.withColumn(
-            "selector_ids", F.array(self._build_selector_id_expr(selectors))
+        result = result.withColumn("selector_id", self._build_selector_id_expr(selectors))
+        return self._one_channel_per_selector(result)
+
+    def _one_channel_per_selector(self, matches: DataFrame) -> DataFrame:
+        """Keep the lowest matching ``channel_id`` per container and direct selector.
+
+        *matches* carries one ``selector_id`` per ``(container_id, channel_id)``
+        row (the first selector matching the channel).  Returns
+        ``(container_id, channel_id, selector_ids)`` with one row per container
+        and selector.
+        """
+        container_id_col = self.config.container_id_col
+        channel_id_col = self.config.channel_id_col
+        return (
+            matches.groupBy(container_id_col, "selector_id")
+            .agg(F.min(channel_id_col).alias(channel_id_col))
+            .select(
+                container_id_col,
+                channel_id_col,
+                F.array(F.col("selector_id")).alias("selector_ids"),
+            )
         )
-        return result.select(container_id_col, channel_id_col, "selector_ids")
 
     def filter_aliased_channel_metrics(
         self, spark, db: MeasurementDB, container_df, selectors
@@ -801,8 +820,9 @@ class DefaultSolver(QuerySolver):
                 resolved = resolved.withColumn(source_unit_col, F.col("_map_source_unit"))
             resolved = resolved.withColumn(target_unit_col, F.col("_map_target_unit"))
 
+        # Ties in priority (e.g. no priorities configured) go to the lowest channel_id.
         dedup_window = Window.partitionBy(container_id_col, channel_alias_col).orderBy(
-            F.col(alias_priority_col).asc_nulls_last()
+            F.col(alias_priority_col).asc_nulls_last(), F.col(channel_id_col).asc()
         )
         resolved = resolved.withColumn("_rank", F.row_number().over(dedup_window))
         resolved = resolved.where(F.col("_rank") == 1).drop("_rank")
@@ -885,7 +905,20 @@ class DefaultSolver(QuerySolver):
         ]
         if has_unit_cols:
             aliased_solve_cols.extend([source_unit_col, target_unit_col])
-        aliased_for_union = aliased_channel_metrics_df.select(*aliased_solve_cols)
+        # An aliased selector matching several aliases of a container resolves to
+        # one channel, like a direct selector: best alias priority, then lowest
+        # channel_id.
+        per_selector = Window.partitionBy(
+            self.config.container_id_col, F.col("selector_ids")[0]
+        ).orderBy(
+            F.col(self.config.alias_priority_col).asc_nulls_last(),
+            F.col(self.config.channel_id_col).asc(),
+        )
+        aliased_for_union = (
+            aliased_channel_metrics_df.withColumn("_rank", F.row_number().over(per_selector))
+            .where(F.col("_rank") == 1)
+            .select(*aliased_solve_cols)
+        )
 
         merged = channel_metrics_df.unionByName(
             aliased_for_union, allowMissingColumns=has_unit_cols
@@ -1621,9 +1654,23 @@ class DefaultSolver(QuerySolver):
         -------
         pyspark.sql.DataFrame
             Narrow DataFrame of calculated-channel samples.
+
+        Notes
+        -----
+        When every selection is a pushdown as a whole (see
+        :meth:`PushdownPlan.native_targets`), the rows are produced in Spark from
+        the derived rows and no pandas UDF runs.
         """
         col_map = self.config.col_map
         q, joined_df, container_count, plan = self._prepare_channels_join(query, channels_df)
+        self._validate_calculated_channel_id_type(q)
+
+        targets = plan.native_targets(selections) if plan is not None else None
+        if targets is not None:
+            logger.info("Calculated channels solved natively in Spark, without the pandas UDF")
+            native = self._native_calculated_channel_rows(joined_df, q, targets)
+            return self._attach_identity(native, selections)
+
         container_tag_cols, container_metric_cols = self._container_meta_cols(query)
 
         schema = self._build_calculated_channels_udf_schema(q)
@@ -1647,8 +1694,14 @@ class DefaultSolver(QuerySolver):
             container_meta_cols=[*container_tag_cols, *container_metric_cols],
         )
 
-        # Identity is constant per channel_id, so attach it here via a
-        # channel_id-keyed CASE instead of the UDF shipping a copy per row.
+        return self._attach_identity(res, selections)
+
+    def _attach_identity(self, rows: DataFrame, selections) -> DataFrame:
+        """Add the ``identity`` map of each calculated channel to its rows.
+
+        Identity is constant per channel_id, so it is attached via a
+        channel_id-keyed CASE instead of being shipped with every row.
+        """
         channel_id_col = self.config.channel_id_col
         identity_expr = None
         for cc in selections:
@@ -1659,4 +1712,123 @@ class DefaultSolver(QuerySolver):
                 if identity_expr is None
                 else identity_expr.when(branch, id_map)
             )
-        return res.withColumn("identity", identity_expr)
+        return rows.withColumn("identity", identity_expr)
+
+    def _validate_calculated_channel_id_type(self, channels_q: DataFrame) -> None:
+        """Raise unless the channel-data ``channel_id`` can hold calculated-channel ids.
+
+        :attr:`CalculatedChannel.channel_id` is a 31-bit integer, which only fits
+        ``IntegerType`` and ``LongType`` columns.
+        """
+        dtype = channels_q.schema[self.config.channel_id_col].dataType
+        if not isinstance(dtype, T.IntegerType | T.LongType):
+            raise ValueError(
+                "Calculated channels need an integer or long channel_id column, got "
+                f"{dtype.simpleString()}."
+            )
+
+    def _native_calculated_channel_rows(
+        self,
+        joined_df: DataFrame,
+        channels_q: DataFrame,
+        targets: dict[int, dict[int, list[tuple[int, bool]]]],
+    ) -> DataFrame:
+        """Calculated-channel rows taken directly from the pushed-down rows.
+
+        *targets* (:meth:`PushdownPlan.native_targets`) maps each variant and
+        selector to the calculated channels built from them.  Every derived row
+        is emitted once per such channel, so the result equals the pandas
+        evaluation: values get the conversion factor for aliased selectors, and
+        the round-trip through float64 and Arrow is mirrored (integral times via
+        double, NaN as null).
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            ``[container_id, channel_id, tstart, tend, value]`` as typed by
+            :meth:`_build_calculated_channels_udf_schema`.
+        """
+        cfg = self.config
+        cid, ch = cfg.container_id_col, cfg.channel_id_col
+        ts, te, val, conv = cfg.tstart_col, cfg.tend_col, cfg.value_col, cfg.conversion_factor_col
+        target_type = T.ArrayType(
+            T.StructType(
+                [
+                    T.StructField("_cc_channel_id", T.LongType()),
+                    T.StructField("_cc_uses_alias", T.BooleanType()),
+                ]
+            )
+        )
+        by_variant = F.create_map(
+            *[
+                item
+                for variant, by_selector in sorted(targets.items())
+                for item in (
+                    F.lit(variant),
+                    F.create_map(
+                        *[
+                            entry
+                            for selector_id, channels in sorted(by_selector.items())
+                            for entry in (
+                                F.lit(selector_id).cast("long"),
+                                F.array(
+                                    *[
+                                        F.struct(
+                                            F.lit(channel_id).cast("long").alias("_cc_channel_id"),
+                                            F.lit(uses_alias).alias("_cc_uses_alias"),
+                                        )
+                                        for channel_id, uses_alias in channels
+                                    ]
+                                ),
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        by_selector = F.try_element_at(by_variant, F.col(VARIANT_COL))
+        selector_ids = F.array_distinct(
+            F.filter(
+                F.transform("selector_ids", lambda sid: sid.cast("long")),
+                lambda sid: sid.isNotNull(),
+            )
+        )
+        no_targets = F.array().cast(target_type)
+        channel_targets = F.flatten(
+            F.transform(
+                selector_ids,
+                lambda sid: F.coalesce(F.try_element_at(by_selector, sid), no_targets),
+            )
+        )
+        has_conversion = conv in joined_df.columns
+        rows = joined_df.where(F.col(VARIANT_COL) != RAW_VARIANT).select(
+            cid,
+            ts,
+            te,
+            val,
+            *([conv] if has_conversion else []),
+            F.inline(channel_targets),
+        )
+
+        value = F.col(val).cast("double")
+        if has_conversion:
+            factor = F.col(conv)
+            value = F.when(F.col("_cc_uses_alias") & factor.isNotNull(), value * factor).otherwise(
+                value
+            )
+
+        def as_udf_output(col: Column, dtype: T.DataType) -> Column:
+            # The UDF emits float64 arrays; Arrow casts them back and masks NaN as null.
+            col = col.cast("double")
+            if isinstance(dtype, T.IntegralType):
+                return col.cast(dtype)
+            return F.when(F.isnan(col), F.lit(None)).otherwise(col).cast(dtype)
+
+        schema = channels_q.schema
+        return rows.select(
+            cid,
+            F.col("_cc_channel_id").cast(schema[ch].dataType).alias(ch),
+            as_udf_output(F.col(ts), schema[ts].dataType).alias(ts),
+            as_udf_output(F.col(te), schema[te].dataType).alias(te),
+            as_udf_output(value, T.DoubleType()).alias(val),
+        )
