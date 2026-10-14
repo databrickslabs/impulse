@@ -238,7 +238,10 @@ Add an event to the report.
 
 **Raises**:
 
-- `ValueError`: If the event is a ContainerEvent and a ContainerEvent already exists in the report.
+- `ValueError`: If the event is a ContainerEvent and a ContainerEvent already exists in the report,
+or if an event with the same name, ignoring case, has already been added (event
+names identify events in the fact and dimension tables and name the event's
+column in the solved data, which Spark resolves case-insensitively).
 
 **Returns**:
 

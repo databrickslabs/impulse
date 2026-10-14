@@ -40,7 +40,7 @@ Either `config` or `config_path` must be provided.
 | `get_solver()`                      | Returns the active `QuerySolver`.                                                                                              | --                                                                                              |
 | `get_sink_config()`                 | Returns the active `SinkConfig` (e.g. `UnitySinkConfig` with `catalog_name`, `schema_name`, `table_prefix`).                   | --                                                                                              |
 | `add_page(page)`                    | Adds a `Page` to the report.                                                                                                   | `page`: `Page` instance.                                                                        |
-| `add_event(event)`                  | Registers an `Event` with the report. All events used by aggregations must be registered.                                      | `event`: `Event` instance.                                                                      |
+| `add_event(event)`                  | Registers an `Event` with the report. All events used by aggregations must be registered. Event names must be unique (ignoring case). | `event`: `Event` instance.                                                                      |
 | `add_calculated_channel(channel)`   | Registers a [`CalculatedChannel`](./channel.md) with the report.                                                              | `channel`: `CalculatedChannel` instance.                                                        |
 | `get_calculated_channels()`         | Returns the list of registered calculated channels.                                                                           | --                                                                                              |
 | `determine_report(is_incremental)`  | Computes all events, aggregations, calculated channels, and container dimensions. Results are stored on the report object.     | `is_incremental`: `bool` or `None`. Mode hint; overridden by `config.incremental` when present. See [Incremental processing](#incremental-processing). |
@@ -62,7 +62,8 @@ my_report.persist_results()
 ```
 
 `determine_report()` validates that every event referenced by an aggregation has been registered with `add_event()`
-before computation begins.
+before computation begins. The aggregation must reference the registered event object itself; a re-created event with
+the same name is rejected.
 
 ### Sinkless mode
 
