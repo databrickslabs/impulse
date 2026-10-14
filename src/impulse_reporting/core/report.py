@@ -627,7 +627,6 @@ class Report:
             },
         )
 
-    @telemetry_logger("report", "persist_results")
     def persist_results(self, cleanup_temp_tables: bool | None = None):
         """Deprecated: use :meth:`run`, which determines and persists in one call.
 
@@ -639,10 +638,10 @@ class Report:
         cleanup_temp_tables : bool | None, optional
             Same as the :meth:`run` argument.
         """
-        # stacklevel=3 skips the telemetry_logger wrapper so the warning points at the caller.
-        warnings.warn(_PERSIST_RESULTS_DEPRECATION_MSG, FutureWarning, stacklevel=3)
+        warnings.warn(_PERSIST_RESULTS_DEPRECATION_MSG, FutureWarning, stacklevel=2)
         self._persist_results(cleanup_temp_tables)
 
+    @telemetry_logger("report", "persist_results")
     def _persist_results(self, cleanup_temp_tables: bool | None = None):
         """
         Persist report results using appropriate strategy based on definition changes.
@@ -1086,7 +1085,6 @@ class Report:
                 return
             previous_batch_ids = current_batch_ids
 
-    @telemetry_logger("report", "determine_report")
     def determine_report(self, is_incremental: bool = None):
         """Deprecated: use :meth:`run`, or ``run(persist_results=False)`` to compute only.
 
@@ -1098,10 +1096,10 @@ class Report:
         is_incremental : bool, optional
             Same as the :meth:`run` argument.
         """
-        # stacklevel=3 skips the telemetry_logger wrapper so the warning points at the caller.
-        warnings.warn(_DETERMINE_REPORT_DEPRECATION_MSG, FutureWarning, stacklevel=3)
+        warnings.warn(_DETERMINE_REPORT_DEPRECATION_MSG, FutureWarning, stacklevel=2)
         self._determine_report(is_incremental)
 
+    @telemetry_logger("report", "determine_report")
     def _determine_report(self, is_incremental: bool = None):
         """
         Determine and process events, aggregations, and container dimensions for the report.

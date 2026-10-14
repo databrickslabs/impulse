@@ -1046,3 +1046,34 @@ class TestDeprecatedEntryPoints:
 
         mock_determine.assert_called_once_with(False)
         mock_persist.assert_called_once_with(False)
+
+
+# ============================================================================
+# Tests: run() telemetry
+# ============================================================================
+class TestRunTelemetry:
+    """run() logs its own tag plus the per-step tags carried by the private methods."""
+
+    def test_run_logs_run_and_step_tags(self, spark):
+        report = _build_report(spark)
+
+        with (
+            patch.object(report, "_gold_layer_exists", return_value=True),
+            patch.object(report, "_group_events_by_type", return_value={}),
+            patch.object(report, "_group_aggregations_by_type", return_value={}),
+            patch(
+                "impulse_reporting.core.report.ContainerDimension.get_dimension",
+                return_value=None,
+            ),
+            patch.object(report, "_persist_full") as mock_full,
+            patch("impulse_query_engine.telemetry.log_telemetry") as mock_log,
+        ):
+            report.run(is_incremental=False)
+
+        mock_full.assert_called_once()
+        tags = [(c.args[1], c.args[2]) for c in mock_log.call_args_list]
+        assert tags == [
+            ("report", "run"),
+            ("report", "determine_report"),
+            ("report", "persist_results"),
+        ]
