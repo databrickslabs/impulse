@@ -157,7 +157,7 @@ cc = CalculatedChannel(
   {"channel_name": "speed_kmh", "data_key": "CALC"},
 )
 df = db.query.select(cc).solve_calculated_channels(spark, solver=DefaultSolver(spark))
-# df: [container_id, channel_id, tstart, tend, value, channel_name, data_key]
+# df: [container_id, channel_id, tstart, tend, value, identity]
 ```
 
 The reporting layer builds on this stage to persist derived channels to the gold layer — see

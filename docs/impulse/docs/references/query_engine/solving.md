@@ -34,13 +34,16 @@ result = db.query.select(
   against an empty cache**. This infers every result's type, and with it the schema of the output
   DataFrame, before any data is read (see
   [Planning: type inference before solve](tsal/evaluation.md#planning-type-inference-before-solve)).
+  `solve_calculated_channels()` skips this step: its results are always sample rows.
 - With pushdown enabled, the optimizer also picks the subtrees Spark computes natively in
   stage 4 (see stage 4 for the example).
 
 ## 2. Resolve channels (metadata tables)
 
 The solver finds the physical channels each expression reads, using only the metadata tables. No
-sample data is read in this stage.
+sample data is read in this stage. It covers the first five stages of the `QuerySolver` pipeline
+(container tags, container metrics, channel tags, channel metrics, alias resolution); the sixth,
+`solve`, covers stages 3 to 5 here.
 
 1. **Containers.** `container_tags` (optional) and `container_metrics` select the containers of
    the configured project that match the query's container filters. Incremental report runs pass
@@ -49,13 +52,13 @@ sample data is read in this stage.
    matched against the channel attributes on `channel_tags` (optional, EAV) or `channel_metrics`.
    A selector resolves to at most one channel per container, the one with the lowest `channel_id`
    (see [Channel selection](tsal/defining_expressions.md#channel-selection)).
-3. **Aliases.** Selectors written with `channel_with_alias(...)` are resolved through
-   `channel_mapping` (optional), by alias priority. A configured `unit_conversion` table adds each
-   channel's conversion factor.
+3. **Aliases.** Alongside the direct selectors, selectors written with `channel_with_alias(...)`
+   are resolved through `channel_mapping` (optional), by alias priority.
 4. **Container metadata.** Container tags and metrics that expressions read are attached.
 
-The result is a small table of channel matches: `container_id`, `channel_id`, the `selector_ids`
-of the selectors that read the channel, and its `conversion_factor`.
+The result is a small table of channel matches: `container_id`, `channel_id` and the
+`selector_ids` of the selectors that read the channel, plus the container metadata and, for
+aliased channels, their source and target units.
 
 ## 3. Load channel data (Spark)
 
@@ -63,16 +66,19 @@ of the selectors that read the channel, and its `conversion_factor`.
   `channel_id`, `tstart`, `tend` and `value`. Raw data is first encoded into RLE or interval
   samples; points-in-time data from `poi_channels` is added when an expression selects POI
   channels.
-- The samples are joined with the channel matches from stage 2, so every row knows which
-  selectors read it.
+- Conversion factors for aliased channels are looked up in `unit_conversion` (optional).
+- The samples are joined with the channel matches from stage 2, which keeps only the matched
+  channels and attaches their selector ids, conversion factors and container metadata. With
+  pushdown, the rows first carry only which results they feed; the rest is attached after
+  stage 4.
 
 ## 4. Compute subtrees natively (Spark pushdown, opt-in)
 
 Pushed-down subtrees are computed **in Spark, before any pandas code runs**, and only the rest of
 each expression is left for the pandas UDF. The optimizer is rule-based: each rule computes one
 kind of subtree on the rows of one channel, e.g. `resample(...)` or filter conditions such as
-`veh_spd > 0`. All rules share one pass over the channel data, which runs in parallel per channel
-chunk (see
+`veh_spd > 0`. All rules share the same reads of the channel data; rules that need a channel's
+samples in order run in parallel per chunk of the channel (see
 [How Spark runs pushed-down subtrees](query_solvers.md#how-spark-runs-pushed-down-subtrees)).
 
 The example expression forms this tree (`event` is used twice, so it appears twice):
@@ -117,9 +123,10 @@ as before.
   samples ②. Every other leaf loads its channel from the cache as a `SampleSeries` (or
   `PointsInTimeSeries` for POI channels), multiplied by the conversion factor for aliased
   selectors, and each operation then works on its children's results.
-- Each result is serialized into its output column: `SampleSeries` as binary, `Intervals` and
-  points as arrays, scalars as doubles (see
+- Each result is encoded for the output. `solve()` serializes it into its column: `SampleSeries`
+  as binary, `Intervals` and points as arrays, histograms as structs, scalars as doubles (see
   [From expression to result](tsal/evaluation.md#from-expression-to-result)).
+  `solve_calculated_channels()` emits the samples of each calculated channel as rows.
 
 ## Results
 
@@ -135,9 +142,10 @@ and no pandas UDF runs (see
 [Calculated channels without the pandas UDF](query_solvers.md#calculated-channels-without-the-pandas-udf)).
 
 :::note Where the work happens
-Stages 2 to 4 are distributed Spark jobs; stage 4 even splits each channel into chunks that run
-in parallel. Stage 5 runs in parallel across containers, but each container is evaluated in a
-single task: the more channels and samples a container's expressions read, the more memory that
-task needs. Every pushed-down subtree moves work from stage 5 into stage 4 and shrinks the rows
-that reach stage 5.
+Stages 2 to 4 are distributed Spark jobs; for rules that need samples in order, stage 4 even
+splits each channel into chunks that run in parallel. Stage 5 runs in parallel across containers,
+but each container is evaluated in a single task: the more channels and samples a container's
+expressions read, the more memory that task needs. Every pushed-down subtree moves work from
+stage 5 into stage 4 and usually reduces the rows that reach stage 5 (resampling to a finer rate
+than the channel's own adds rows).
 :::

@@ -52,7 +52,7 @@
 
   <rect class="box" x="320" y="58" width="280" height="56" rx="8"/>
   <text class="title" x="460" y="81" text-anchor="middle">Infer result types</text>
-  <text class="sub" x="460" y="99" text-anchor="middle">build each expression on an empty cache</text>
+  <text class="sub" x="460" y="99" text-anchor="middle">solve(): build on an empty cache</text>
 
   <rect class="pushdown" x="630" y="58" width="270" height="56" rx="8"/>
   <text class="title" x="765" y="81" text-anchor="middle">Plan pushdowns (opt-in)</text>
@@ -86,7 +86,7 @@
 
   <rect class="box optional" x="736" y="188" width="158" height="52" rx="8"/>
   <text class="mono" x="815" y="210" text-anchor="middle">channel_mapping</text>
-  <text class="sub" x="815" y="228" text-anchor="middle">aliases, unit factors</text>
+  <text class="sub" x="815" y="228" text-anchor="middle">alias resolution</text>
 
   <path class="flow" d="M198,214 L212,214"/>
   <path class="flow" d="M372,214 L386,214"/>
@@ -94,7 +94,7 @@
   <path class="flow" d="M720,214 L734,214"/>
 
   <rect class="pill" x="190" y="256" width="560" height="32" rx="16"/>
-  <text class="pill-text" x="470" y="277" text-anchor="middle">channel matches: container_id · channel_id · selector_ids · conversion_factor</text>
+  <text class="pill-text" x="470" y="277" text-anchor="middle">channel matches: container_id · channel_id · selector_ids</text>
   <path class="flow" d="M815,240 L815,272 L752,272"/>
 
   <!-- 3 Load channel data -->
@@ -103,21 +103,26 @@
   <text class="badge-text" x="44" y="342" text-anchor="middle">3</text>
   <text class="stage-title" x="62" y="343">Load channel data · Spark, channels table</text>
 
-  <rect class="box" x="40" y="358" width="250" height="56" rx="8"/>
-  <text class="mono" x="165" y="381" text-anchor="middle">channels</text>
-  <text class="sub" x="165" y="399" text-anchor="middle">column mapping, filters</text>
+  <rect class="box" x="40" y="358" width="200" height="56" rx="8"/>
+  <text class="mono" x="140" y="381" text-anchor="middle">channels</text>
+  <text class="sub" x="140" y="399" text-anchor="middle">column mapping, filters</text>
 
-  <rect class="box optional" x="320" y="358" width="250" height="56" rx="8"/>
-  <text class="title" x="445" y="381" text-anchor="middle">Raw mode: encode</text>
-  <text class="sub" x="445" y="399" text-anchor="middle">RLE or intervals; POI union</text>
+  <rect class="box optional" x="260" y="358" width="200" height="56" rx="8"/>
+  <text class="title" x="360" y="381" text-anchor="middle">Raw mode: encode</text>
+  <text class="sub" x="360" y="399" text-anchor="middle">RLE or intervals</text>
 
-  <rect class="box" x="600" y="358" width="300" height="56" rx="8"/>
-  <text class="title" x="750" y="381" text-anchor="middle">Join channel matches</text>
-  <text class="sub" x="750" y="399" text-anchor="middle">every row knows the selectors that read it</text>
+  <rect class="box optional" x="480" y="358" width="200" height="56" rx="8"/>
+  <text class="title" x="580" y="381" text-anchor="middle">Add POI channels</text>
+  <text class="sub" x="580" y="399" text-anchor="middle">when POI channels are selected</text>
 
-  <path class="flow" d="M290,386 L318,386"/>
-  <path class="flow" d="M570,386 L598,386"/>
-  <path class="flow" d="M700,288 L700,356"/>
+  <rect class="box" x="700" y="358" width="200" height="56" rx="8"/>
+  <text class="title" x="800" y="381" text-anchor="middle">Join channel matches</text>
+  <text class="sub" x="800" y="399" text-anchor="middle">keep matched channels</text>
+
+  <path class="flow" d="M240,386 L258,386"/>
+  <path class="flow" d="M460,386 L478,386"/>
+  <path class="flow" d="M680,386 L698,386"/>
+  <path class="flow" d="M740,288 L740,356"/>
 
   <!-- 4 Compute subtrees natively (pushdown) -->
   <rect x="20" y="450" width="900" height="200" rx="12" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.4" stroke-dasharray="7 4"/>
@@ -157,8 +162,8 @@
   <text class="sub" x="795" y="535" text-anchor="middle">e.g. resample(…) or filter</text>
   <text class="sub" x="795" y="551" text-anchor="middle">conditions like veh_spd &gt; 0</text>
   <text class="sub" x="795" y="575" text-anchor="middle">each reads one channel;</text>
-  <text class="sub" x="795" y="591" text-anchor="middle">one shared pass,</text>
-  <text class="sub" x="795" y="607" text-anchor="middle">parallel per channel chunk</text>
+  <text class="sub" x="795" y="591" text-anchor="middle">all share the reads</text>
+  <text class="sub" x="795" y="607" text-anchor="middle">of the channel data</text>
 
   <path class="flow-green" d="M660,563 L688,563"/>
 
@@ -202,8 +207,8 @@
   <text class="sub" x="270" y="852" text-anchor="middle">Precomputed results arrive ready-made; pandas evaluates only the rest.</text>
 
   <rect class="box" x="520" y="784" width="380" height="56" rx="8"/>
-  <text class="title" x="710" y="807" text-anchor="middle">Serialize each result</text>
-  <text class="sub" x="710" y="825" text-anchor="middle">SampleSeries → binary, others → arrays or doubles</text>
+  <text class="title" x="710" y="807" text-anchor="middle">Encode each result</text>
+  <text class="sub" x="710" y="825" text-anchor="middle">solve(): serialized value · calculated channels: rows</text>
 
   <path class="flow" d="M720,738 L702,738"/>
   <path class="flow" d="M520,738 L502,738"/>
