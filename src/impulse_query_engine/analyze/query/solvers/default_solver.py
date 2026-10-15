@@ -1801,7 +1801,10 @@ class DefaultSolver(QuerySolver):
             )
         )
         has_conversion = conv in joined_df.columns
-        rows = joined_df.where(F.col(VARIANT_COL) != RAW_VARIANT).select(
+        # Raw rows (variant 0) have no targets, so inline drops them.  Not filtering
+        # them explicitly keeps the filter out of the pushdown rules' summaries, which
+        # would otherwise stop sharing one read of the channel data.
+        rows = joined_df.select(
             cid,
             ts,
             te,

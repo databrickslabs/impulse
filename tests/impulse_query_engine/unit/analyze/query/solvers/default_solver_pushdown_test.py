@@ -1,6 +1,7 @@
 # pylint: disable=missing-function-docstring
 """DefaultSolver with ``enable_pushdown``: identical results, fewer rows into the UDF."""
 
+import re
 from collections import Counter
 
 import numpy as np
@@ -18,6 +19,7 @@ from impulse_query_engine.analyze.query.optimizer import (
     PushdownPlan,
     QueryOptimizer,
     ResamplePushdownRule,
+    query_optimizer,
 )
 from impulse_query_engine.analyze.query.solvers.default_solver import (
     DefaultSolver,
@@ -51,6 +53,30 @@ def _unit_conversion_config() -> SolverConfig:
         container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
         channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
     )
+
+
+@pytest.fixture
+def small_chunks(monkeypatch):
+    """Resample in chunks of a few samples, so every channel spans many chunks."""
+    monkeypatch.setattr(
+        query_optimizer, "default_rules", lambda: (ResamplePushdownRule(chunk_rows=7),)
+    )
+
+
+def channel_data_scans(df) -> list[str]:
+    """Columns of each channels-table scan in the final plan of the executed *df*."""
+    final = df._jdf.queryExecution().executedPlan().toString().split("== Initial Plan ==")[0]
+    return sorted(
+        re.sub(r"#\d+L?", "", columns)
+        for columns in re.findall(r"FileScan parquet \S+\.channels\[([^\]]*)\]", final)
+    )
+
+
+#: One full read for the rows, one narrow read shared by the resample summaries.
+CHANNEL_DATA_SCANS = [
+    "container_id,channel_id,tstart,tend",
+    "container_id,channel_id,tstart,tend,value",
+]
 
 
 @pytest.fixture
@@ -102,6 +128,7 @@ def _derived_rows(pdf: pd.DataFrame, col: str) -> int:
     return sum(len(s) for s in pdf[col])
 
 
+@pytest.mark.usefixtures("small_chunks")
 class TestIdenticalResults:
     def test_resample_only(self, spark: SparkSession, key_value_store_db, udf_rows):
         off, on = _solve_both(
@@ -116,6 +143,18 @@ class TestIdenticalResults:
         rows_off, rows_on = udf_rows
         assert set(rows_on) == {(5, 1)}
         assert rows_on[(5, 1)] == _derived_rows(off, "rpm") < rows_off[(5, None)] / 5
+
+    def test_reads_the_channel_data_once_plus_one_narrow_read(
+        self, spark: SparkSession, key_value_store_db
+    ):
+        q = key_value_store_db.query
+        result = q.select(
+            q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm"),
+            q.channel(channel_name="Vehicle Speed Sensor").max().alias("speed_max"),
+        ).solve(spark, solver=DefaultSolver(spark, config=_kvs_config(), enable_pushdown=True))
+        rows = result.collect()  # executes result's own plan, which the check reads
+        assert rows and all(row["speed_max"] > 0 for row in rows)
+        assert channel_data_scans(result) == CHANNEL_DATA_SCANS
 
     def test_raw_use_of_the_same_channel_ships_raw_rows_only(
         self, spark: SparkSession, key_value_store_db, udf_rows

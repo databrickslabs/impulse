@@ -1,6 +1,8 @@
 # pylint: disable=missing-function-docstring
 """Parity of the Spark ``resample`` pushdown with ``SampleSeries.resample``."""
 
+import re
+
 import numpy as np
 import numpy.testing as nptest
 import pyspark.sql.types as T
@@ -22,7 +24,7 @@ def _pushdown(rate):
     return _RULE.match(selector.resample(rate))
 
 
-def _resample_in_spark(spark, series_by_key, rates, time_type=T.LongType()):
+def _resample_in_spark(spark, series_by_key, rates, time_type=T.LongType(), chunk_rows=None):
     """Run the rule on ``{(cid, ch, variant): (tstarts, tends, values)}``.
 
     Returns ``{(cid, ch, variant): SampleSeries}`` built like the pandas cache does.
@@ -44,7 +46,8 @@ def _resample_in_spark(spark, series_by_key, rates, time_type=T.LongType()):
         for ts, te, v in zip(tstarts, tends, values, strict=True)
     ]
     df = spark.createDataFrame(rows, schema=schema)
-    result = _RULE.to_spark(df, {vid: _pushdown(rate) for vid, rate in rates.items()}, _CONFIG)
+    rule = _RULE if chunk_rows is None else ResamplePushdownRule(chunk_rows=chunk_rows)
+    result = rule.to_spark(df, {vid: _pushdown(rate) for vid, rate in rates.items()}, _CONFIG)
     assert result.schema == df.schema
 
     pdf = result.toPandas()
@@ -112,7 +115,10 @@ def test_resample_matches_sample_series(spark, name):
     _assert_same(actual[(1, 1, 1)], _expected((tstarts, tends, values), rate))
 
 
-def test_all_cases_in_one_pass_and_other_variants_unchanged(spark):
+# Few samples per chunk put chunk boundaries at gaps, inside buckets and next to
+# zero-duration samples, with empty chunks in between.
+@pytest.mark.parametrize("chunk_rows", [None, 1, 2, 3])
+def test_all_cases_in_one_pass_and_other_variants_unchanged(spark, chunk_rows):
     series = {}
     expected = {}
     for i, (tstarts, tends, values, _rate) in enumerate(_CASES.values()):
@@ -126,13 +132,14 @@ def test_all_cases_in_one_pass_and_other_variants_unchanged(spark):
             expected[(i, 7, vid)] = SampleSeries(
                 tstarts, tends, [np.nan if v is None else v for v in values]
             )
-    actual = _resample_in_spark(spark, series, {1: 1, 2: 2})
+    actual = _resample_in_spark(spark, series, {1: 1, 2: 2}, chunk_rows=chunk_rows)
     assert actual.keys() == expected.keys()
     for key, exp in expected.items():
         _assert_same(actual[key], exp)
 
 
-def test_ns_epoch_longs_above_2_pow_53(spark):
+@pytest.mark.parametrize("chunk_rows", [None, 7])
+def test_ns_epoch_longs_above_2_pow_53(spark, chunk_rows):
     rng = np.random.default_rng(7)
     base = 1_700_000_000_123_456_789
     steps = rng.integers(9_000_000, 11_000_000, size=500)  # ~10 ms, jittered
@@ -140,7 +147,9 @@ def test_ns_epoch_longs_above_2_pow_53(spark):
     tstarts, tends = times[:-1].tolist(), times[1:].tolist()
     values = rng.normal(size=500).tolist()
     rate = 100_000_000  # 100 ms
-    actual = _resample_in_spark(spark, {(1, 1, 1): (tstarts, tends, values)}, {1: rate})
+    actual = _resample_in_spark(
+        spark, {(1, 1, 1): (tstarts, tends, values)}, {1: rate}, chunk_rows=chunk_rows
+    )
     expected = _expected((tstarts, tends, values), rate)
     assert len(expected) < len(tstarts) / 5
     _assert_same(actual[(1, 1, 1)], expected)
@@ -157,7 +166,82 @@ def test_only_linear_window_frames(spark):
     assert "specifiedwindowframe(RowFrame, unboundedpreceding$(), currentrow$())" in plan
 
 
-def test_ns_epoch_grid_on_sample_starts(spark):
+def _random_series(rng, n):
+    """Integral samples with gaps, zero-duration samples and NaN values, in tstart order."""
+    tstarts, tends, values = [], [], []
+    t, after_point = 0, False
+    for _ in range(n):
+        if rng.random() < 0.15:
+            t += int(rng.integers(1, 6))
+        duration = 0 if not after_point and rng.random() < 0.1 else int(rng.integers(1, 5))
+        tstarts.append(t)
+        tends.append(t + duration)
+        values.append(np.nan if rng.random() < 0.1 else float(rng.integers(0, 100)))
+        t, after_point = t + duration, duration == 0
+    return tstarts, tends, values
+
+
+def test_random_series_across_chunk_sizes(spark):
+    rng = np.random.default_rng(3)
+    rates = {1: 1, 2: 3, 3: 7}
+    series, expected = {}, {}
+    for cid, n in enumerate([1, 2, 40, 60, 60, 80]):
+        tstarts, tends, values = _random_series(rng, n)
+        for vid, rate in rates.items():
+            series[(cid, 1, vid)] = (tstarts, tends, values)
+            expected[(cid, 1, vid)] = _expected((tstarts, tends, values), rate)
+        series[(cid, 1, 0)] = (tstarts, tends, values)
+        expected[(cid, 1, 0)] = SampleSeries(tstarts, tends, values)
+    assert sum(len(e) for e in expected.values()) > 0
+    for chunk_rows in (1, 2, 3, 5, 8, 13):
+        actual = _resample_in_spark(spark, series, rates, chunk_rows=chunk_rows)
+        assert actual.keys() == expected.keys()
+        for key, exp in expected.items():
+            _assert_same(actual[key], exp)
+
+
+def _top_level_items(text):
+    items, depth, start = [], 0, 0
+    for i, char in enumerate(text):
+        depth += {"(": 1, ")": -1}.get(char, 0)
+        if char == "," and depth == 0:
+            items.append(text[start:i].strip())
+            start = i + 1
+    return [*items, text[start:].strip()]
+
+
+def test_windows_over_samples_are_chunked(spark):
+    # Spark buffers a whole window partition, so no window over the samples may be
+    # partitioned by the series alone; only the chunk summaries are.
+    schema = "container_id long, channel_id long, {} int, tstart long, tend long, value double"
+    df = spark.createDataFrame([(1, 1, 1, 0, 1, 1.0)], schema=schema.format(VARIANT_COL))
+    result = _RULE.to_spark(df, {1: _pushdown(1)}, _CONFIG)
+    plan = result._jdf.queryExecution().optimizedPlan().toString()
+    specs = re.findall(r"windowspecdefinition\((.*?), specifiedwindowframe", plan)
+    series_key = ["container_id", "channel_id", VARIANT_COL]
+    seen = set()
+    for spec in specs:
+        items = _top_level_items(re.sub(r"#\d+L?", "", spec))
+        partition = [item for item in items if not item.endswith(("NULLS FIRST", "NULLS LAST"))]
+        order = [item.split(" ")[0] for item in items[len(partition) :]]
+        seen.add((tuple(partition), tuple(order)))
+        if partition == series_key:
+            assert order == ["_rs_chunk"]
+        else:
+            assert partition[:3] == series_key
+            assert {"_rs_chunk", "_rs_block"} & set(partition)
+    assert any(order[-2:] == ("tstart", "tend") for _, order in seen)
+    assert any(partition == tuple(series_key) for partition, _ in seen)
+
+
+@pytest.mark.parametrize("chunk_rows", [0, -1, 1.5, True])
+def test_chunk_rows_must_be_a_positive_integer(chunk_rows):
+    with pytest.raises((TypeError, ValueError), match="chunk_rows"):
+        ResamplePushdownRule(chunk_rows=chunk_rows)
+
+
+@pytest.mark.parametrize("chunk_rows", [None, 7])
+def test_ns_epoch_grid_on_sample_starts(spark, chunk_rows):
     # Every fifth sample starts exactly on a grid point, the case where the bucket
     # index estimate needs its correction step.
     base = 1_700_000_000_123_456_789
@@ -165,29 +249,42 @@ def test_ns_epoch_grid_on_sample_starts(spark):
     tstarts, tends = times[:-1], times[1:]
     values = [float(i) for i in range(300)]
     rate = 50_000_000
-    actual = _resample_in_spark(spark, {(1, 1, 1): (tstarts, tends, values)}, {1: rate})
-    _assert_same(actual[(1, 1, 1)], _expected((tstarts, tends, values), rate))
-
-
-def test_integer_time_columns(spark):
-    tstarts, tends, values, rate = _CASES["where_gap_rate_2"]
     actual = _resample_in_spark(
-        spark, {(1, 1, 1): (tstarts, tends, values)}, {1: rate}, time_type=T.IntegerType()
+        spark, {(1, 1, 1): (tstarts, tends, values)}, {1: rate}, chunk_rows=chunk_rows
     )
     _assert_same(actual[(1, 1, 1)], _expected((tstarts, tends, values), rate))
 
 
-def test_seconds_as_double_with_binary_exact_rate(spark):
+@pytest.mark.parametrize("chunk_rows", [None, 2])
+def test_integer_time_columns(spark, chunk_rows):
+    tstarts, tends, values, rate = _CASES["where_gap_rate_2"]
+    actual = _resample_in_spark(
+        spark,
+        {(1, 1, 1): (tstarts, tends, values)},
+        {1: rate},
+        time_type=T.IntegerType(),
+        chunk_rows=chunk_rows,
+    )
+    _assert_same(actual[(1, 1, 1)], _expected((tstarts, tends, values), rate))
+
+
+@pytest.mark.parametrize("chunk_rows", [None, 2])
+def test_seconds_as_double_with_binary_exact_rate(spark, chunk_rows):
     tstarts = [10.0, 10.25, 11.0, 12.5, 14.0]
     tends = [10.25, 11.0, 12.5, 14.0, 14.0]
     values = [1.0, 2.0, 3.0, 4.0, 5.0]
     actual = _resample_in_spark(
-        spark, {(1, 1, 1): (tstarts, tends, values)}, {1: 0.75}, time_type=T.DoubleType()
+        spark,
+        {(1, 1, 1): (tstarts, tends, values)},
+        {1: 0.75},
+        time_type=T.DoubleType(),
+        chunk_rows=chunk_rows,
     )
     _assert_same(actual[(1, 1, 1)], _expected((tstarts, tends, values), 0.75))
 
 
-def test_seconds_as_double_with_fractional_rate(spark):
+@pytest.mark.parametrize("chunk_rows", [None, 7])
+def test_seconds_as_double_with_fractional_rate(spark, chunk_rows):
     # 0.1 is not binary-exact: grid points may differ from numpy by one ulp where
     # numpy fuses the multiply-add. Sample boundaries stay clear of the grid, so the
     # values must match exactly.
@@ -196,7 +293,11 @@ def test_seconds_as_double_with_fractional_rate(spark):
     tstarts, tends = times[:-1].tolist(), times[1:].tolist()
     values = rng.normal(size=400).tolist()
     actual = _resample_in_spark(
-        spark, {(1, 1, 1): (tstarts, tends, values)}, {1: 0.1}, time_type=T.DoubleType()
+        spark,
+        {(1, 1, 1): (tstarts, tends, values)},
+        {1: 0.1},
+        time_type=T.DoubleType(),
+        chunk_rows=chunk_rows,
     )[(1, 1, 1)]
     expected = _expected((tstarts, tends, values), 0.1)
     assert len(actual) == len(expected)

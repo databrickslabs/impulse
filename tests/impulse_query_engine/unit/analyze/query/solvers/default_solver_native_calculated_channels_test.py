@@ -20,6 +20,11 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
 )
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from tests.conftest import spark
+from tests.impulse_query_engine.unit.analyze.query.solvers.default_solver_pushdown_test import (
+    CHANNEL_DATA_SCANS,
+    channel_data_scans,
+    small_chunks,
+)
 
 RATE = 1e7  # 10 s in µs; the fixture channels are sampled roughly every 0.9 s
 _KVS_SCHEMA = "spark_catalog.silver_key_value_store"
@@ -95,6 +100,7 @@ def _solve_both(spark, db, make_channels, udf_calls, **solver_kwargs) -> pd.Data
     return _assert_same(native, udf), native
 
 
+@pytest.mark.usefixtures("small_chunks")
 class TestNativeCalculatedChannels:
     def test_resampled_channels_skip_the_udf(self, spark, key_value_store_db, udf_calls):
         def channels(q):
@@ -116,6 +122,7 @@ class TestNativeCalculatedChannels:
         assert rows["channel_id"].nunique() == 2
         plan = native._jdf.queryExecution().executedPlan().toString()
         assert "FlatMapGroupsInPandas" not in plan
+        assert channel_data_scans(native) == CHANNEL_DATA_SCANS
 
     def test_same_expression_under_two_identities_and_two_rates(
         self, spark, key_value_store_db, udf_calls

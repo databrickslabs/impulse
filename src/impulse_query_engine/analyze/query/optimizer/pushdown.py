@@ -120,10 +120,13 @@ class PushdownRule(abc.ABC):
     ) -> DataFrame:
         """Replace the rows of this rule's *variants* with their derived rows.
 
-        *rows* is read once and shared by all rules, so implementations must
-        stay a single lineage (no self-joins or unions of *rows*) and keep its
-        container partitioning (windows partitioned by container id, channel id
-        and :data:`VARIANT_COL` reuse it).
+        *rows* is shared by all rules and partitioned by container; the result
+        must keep that partitioning (windows partitioned by container id,
+        channel id and :data:`VARIANT_COL` reuse it).  Implementations must not
+        union *rows* or join it to a non-broadcast frame.  Small summaries
+        derived from *rows* (per series or per chunk) may be broadcast-joined
+        back; Spark reads the channel data again for them, so summaries should
+        read only the key and time columns to share one narrow read.
 
         Parameters
         ----------

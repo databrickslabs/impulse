@@ -43,13 +43,31 @@ class ResamplePushdownRule(PushdownRule):
     and every row carries just the grid points it covers.  Values are looked up
     within a block; this matches the pandas evaluation unless intervals overlap.
 
+    Every series is cut into equal time slices (chunks) holding about *chunk_rows*
+    samples on average, and the windows over samples run per chunk, so a worker
+    holds one chunk of a series at a time instead of the whole series.  Gaps at
+    chunk boundaries, the block a chunk starts in and that block's start are
+    resolved from one summary row per chunk.
+
     Grid points are computed as ``t_min + k * delta`` in IEEE double arithmetic.
     numpy builds that fuse this into a multiply-add can differ by one ulp for
     fractional grids (e.g. seconds-as-double with a rate of ``0.1``); integral
     grids are exact.
+
+    Parameters
+    ----------
+    chunk_rows : int, optional
+        Average number of samples per chunk (default 100 000).
     """
 
     name = "resample"
+
+    def __init__(self, chunk_rows: int = 100_000):
+        if isinstance(chunk_rows, bool) or not isinstance(chunk_rows, numbers.Integral):
+            raise TypeError(f"chunk_rows must be an integer, got {chunk_rows!r}")
+        if chunk_rows < 1:
+            raise ValueError(f"chunk_rows must be positive, got {chunk_rows}")
+        self.chunk_rows = int(chunk_rows)
 
     def match(self, node: TimeSeriesExpression) -> Pushdown | None:
         if (
@@ -96,34 +114,104 @@ class ResamplePushdownRule(PushdownRule):
             ),
             F.col(VARIANT_COL),
         )
+        ts_d, te_d = F.col(ts).cast("double"), F.col(te).cast("double")
+        # The pandas cache's sample order.
+        order = F.struct(ts, te)
 
-        # Pass 1, over each series in the pandas cache's tstart order.  Only running,
-        # whole-partition and neighbour windows (all linear in the series length);
-        # they share one sort and keep the container partitioning.
-        ordered = Window.partitionBy(*key).orderBy(ts, te)
-        running = ordered.rowsBetween(Window.unboundedPreceding, Window.currentRow)
-        whole = ordered.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
-        ts_d, te_d, block = F.col("_rs_ts"), F.col("_rs_te"), F.col("_rs_block")
-        prev_te = F.lag(te_d).over(ordered)
+        # Series boundaries.  This summary and the chunk summary below read only the
+        # key and time columns, so Spark serves both from one extra narrow read.
+        series = rows.groupBy(*key).agg(
+            F.min(ts_d).alias("_rs_first"),
+            F.max(_ignore_nan(te_d)).alias("_rs_end"),
+            F.count(F.lit(1)).alias("_rs_n"),
+        )
+        df = rows.join(F.broadcast(series), on=key)
+
+        # Equal time slices of about chunk_rows samples; monotone in tstart, so the
+        # chunks of a series follow its sample order.
+        first, end = F.col("_rs_first"), F.col("_rs_end")
+        n_chunks = F.ceil(F.col("_rs_n") / F.lit(self.chunk_rows))
+        df = df.withColumn(
+            "_rs_chunk",
+            F.when(
+                end > first,
+                F.least(F.floor((ts_d - first) / (end - first) * n_chunks), n_chunks - 1),
+            ).otherwise(F.lit(0).cast("long")),
+        )
+
+        # Pass 1, per chunk: only running and neighbour windows (linear in the chunk
+        # size), sharing one sort and the container partitioning.  A chunk splits into
+        # segments at its gaps; segment 0 continues whatever block the previous chunk
+        # ended in, which the chunk summary resolves.
+        in_chunk = Window.partitionBy(*key, "_rs_chunk").orderBy(ts, te)
+        running = in_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        prev_te = F.lag(te_d).over(in_chunk)
+        is_break = F.col("_rs_break") == 1
         df = (
-            rows.withColumn("_rs_ts", F.col(ts).cast("double"))
-            .withColumn("_rs_te", F.col(te).cast("double"))
-            .withColumn("_rs_break", (prev_te.isNull() | ((ts_d - prev_te) != 0)).cast("long"))
-            .withColumn("_rs_n", F.count(F.lit(1)).over(whole))
-            .withColumn("_rs_last_ts", F.last(ts_d).over(whole))
-            .withColumn("_rs_last_te", F.last(te_d).over(whole))
-            .withColumn("_rs_block", F.sum("_rs_break").over(running))
-            .withColumn(
-                "_rs_t_min",
-                F.last(F.when(F.col("_rs_break") == 1, ts_d), ignorenulls=True).over(running),
+            df.withColumn(
+                "_rs_break",
+                F.when(F.row_number().over(in_chunk) == 1, F.lit(0).cast("long")).otherwise(
+                    (prev_te.isNull() | ((ts_d - prev_te) != 0)).cast("long")
+                ),
             )
-            # Largest tend so far within the block (blocks are numbered in order); on
-            # the block's last row this is the block's t_max.
+            .withColumn("_rs_seg", F.sum("_rs_break").over(running))
             .withColumn(
-                "_rs_t_max_so_far",
-                F.max(F.struct(block, _ignore_nan(te_d).alias("te"))).over(running).getField("te"),
+                "_rs_seg_t_min", F.last(F.when(is_break, ts_d), ignorenulls=True).over(running)
             )
-            .withColumn("_rs_nblk", F.max(block).over(whole))
+            # Largest tend so far within the segment (segments are numbered in order).
+            .withColumn(
+                "_rs_seg_t_max",
+                F.max(F.struct(F.col("_rs_seg"), _ignore_nan(te_d).alias("te")))
+                .over(running)
+                .getField("te"),
+            )
+            .withColumn("_rs_next_ts", F.lead(ts_d).over(in_chunk))
+            .withColumn("_rs_next_break", F.lead("_rs_break").over(in_chunk))
+        )
+
+        # One summary row per chunk, scanned in chunk order: whether the chunk starts
+        # a block, the block of its segment 0 and that block's start, plus the number
+        # of blocks and the last sample of the series.
+        chunks = df.groupBy(*key, "_rs_chunk").agg(
+            F.min_by(ts_d, order).alias("_rs_head_ts"),
+            F.max_by(F.struct(ts_d.alias("ts"), te_d.alias("te")), order).alias("_rs_tail"),
+            F.sum("_rs_break").alias("_rs_inner_breaks"),
+            F.max(F.when(is_break, ts_d)).alias("_rs_last_start"),
+        )
+        by_chunk = Window.partitionBy(*key).orderBy("_rs_chunk")
+        all_chunks = by_chunk.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+        head_ts, head_break = F.col("_rs_head_ts"), F.col("_rs_head_break") == 1
+        prev_tail_te = F.lag(F.col("_rs_tail.te")).over(by_chunk)
+        last_start = F.coalesce(F.col("_rs_last_start"), F.when(head_break, head_ts))
+        chunks = (
+            chunks.withColumn(
+                "_rs_head_break",
+                (prev_tail_te.isNull() | ((head_ts - prev_tail_te) != 0)).cast("long"),
+            )
+            .withColumn("_rs_breaks", F.col("_rs_head_break") + F.col("_rs_inner_breaks"))
+            .withColumn(
+                "_rs_block_base",
+                F.sum("_rs_breaks").over(
+                    by_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+                )
+                - F.col("_rs_inner_breaks"),
+            )
+            .withColumn(
+                "_rs_head_t_min",
+                F.when(head_break, head_ts).otherwise(
+                    F.last(last_start, ignorenulls=True).over(
+                        by_chunk.rowsBetween(Window.unboundedPreceding, -1)
+                    )
+                ),
+            )
+            .withColumn("_rs_nblk", F.sum("_rs_breaks").over(all_chunks))
+            .withColumn("_rs_last", F.last("_rs_tail").over(all_chunks))
+            .select(*key, "_rs_chunk", "_rs_block_base", "_rs_head_t_min", "_rs_nblk", "_rs_last")
+        )
+        df = (
+            df.join(F.broadcast(chunks), on=[*key, "_rs_chunk"])
+            .withColumn("_rs_block", F.col("_rs_block_base") + F.col("_rs_seg"))
+            .withColumn("_rs_t_min", F.coalesce(F.col("_rs_seg_t_min"), F.col("_rs_head_t_min")))
         )
 
         # numpy.arange(t_min, t_max + rate, rate): length ceil(((t_max + rate) - t_min) / rate),
@@ -139,26 +227,44 @@ class ResamplePushdownRule(PushdownRule):
             )
 
         resampled = F.col(VARIANT_COL).isin(sorted(variants)) & (F.col("_rs_n") >= 2)
+        next_in_block = F.coalesce(F.col("_rs_next_break") == 0, F.lit(False))
         df = _with_first_grid_index(
             df, "_rs_c", ts_d, F.lit(False), resampled, grid_point, t_min, delta
         )
-        c, next_c, next_block = F.col("_rs_c"), F.col("_rs_next_c"), F.lead(block).over(ordered)
-        df = (
-            df.withColumn("_rs_next_c", F.lead(c).over(ordered)).withColumn(
-                "_rs_block_end", next_block.isNull() | (next_block != block)
-            )
-            # Only the last sample of each bucket emits grid points.
-            .where(~resampled | F.col("_rs_block_end") | (next_c != c))
+        df = _with_first_grid_index(
+            df,
+            "_rs_next_sample_c",
+            F.col("_rs_next_ts"),
+            F.lit(False),
+            resampled & next_in_block,
+            grid_point,
+            t_min,
+            delta,
         )
+        c = F.col("_rs_c")
+        # Only the last sample of each bucket emits grid points.  A chunk's last sample
+        # is kept too: its bucket may continue in the next chunk.
+        df = df.where(~resampled | ~next_in_block | (F.col("_rs_next_sample_c") != c))
 
-        # Pass 2, over the remaining rows (about one per grid point): the block's
-        # t_max, and from it the number of grid points of the block.
-        t_max = F.max("_rs_t_max_so_far").over(Window.partitionBy(*key, "_rs_block"))
-        df = df.withColumn("_rs_t_max", t_max)
-        t_max = F.col("_rs_t_max")
+        # Pass 2, over the remaining rows of each block (about one per grid point): the
+        # next non-empty bucket, and the block's t_max (each segment's last sample
+        # carries its maximum).  A chunk's last sample whose bucket continues in the
+        # next chunk is followed by its own bucket and emits nothing.  Rows this rule
+        # leaves alone stay grouped by chunk.
+        in_block = Window.partitionBy(
+            *key, "_rs_block", F.when(~resampled, F.col("_rs_chunk"))
+        ).orderBy("_rs_c", ts, te)
+        whole_block = in_block.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+        df = df.withColumn("_rs_next_c", F.lead("_rs_c").over(in_block)).withColumn(
+            "_rs_t_max", F.max("_rs_seg_t_max").over(whole_block)
+        )
+        next_c, t_max = F.col("_rs_next_c"), F.col("_rs_t_max")
+        block_end = next_c.isNull()
         # The last block keeps a grid point at t_max when the series ends with a
         # zero-duration sample.
-        inclusive = (block == F.col("_rs_nblk")) & (F.col("_rs_last_ts") == F.col("_rs_last_te"))
+        inclusive = (F.col("_rs_block") == F.col("_rs_nblk")) & (
+            F.col("_rs_last.ts") == F.col("_rs_last.te")
+        )
         length = F.greatest(F.ceil(((t_max + rate) - t_min) / rate), F.lit(0))
         df = _with_first_grid_index(
             df, "_rs_grid_end", t_max, inclusive, resampled, grid_point, t_min, delta
@@ -167,8 +273,7 @@ class ResamplePushdownRule(PushdownRule):
         # A bucket's last sample emits the grid points up to the next non-empty bucket
         # of its block, or up to the block's end.
         df = df.withColumn(
-            "_rs_c_stop",
-            F.when(F.col("_rs_block_end"), n_grid).otherwise(F.least(next_c, n_grid)),
+            "_rs_c_stop", F.when(block_end, n_grid).otherwise(F.least(next_c, n_grid))
         )
 
         def element(kind: int, t: Column, tend: Column) -> Column:

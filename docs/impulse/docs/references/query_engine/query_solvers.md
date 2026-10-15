@@ -206,10 +206,18 @@ that share the same `tstart` is unspecified, as in the pandas evaluation, and ch
 `[tstart, tend)` intervals overlap are not supported (the RLE and interval encoders never
 produce overlaps).
 
-Spark processes each channel in one pass over its samples, sorted by `tstart`: every sample is
-assigned the grid bucket it falls into, and only the last sample of each bucket emits rows (the
-grid points up to the next non-empty bucket). The memory per row is bounded by the grid points a
-single sample covers, not by the length of the channel.
+Spark cuts each channel into chunks: equal time slices that hold about 100 000 samples on
+average. It processes one chunk at a time, sorted by `tstart`: every sample is assigned the grid
+bucket it falls into, and only the last sample of each bucket emits rows (the grid points up to
+the next non-empty bucket). What crosses a chunk boundary comes from one summary row per chunk:
+whether a gap starts there, and which block (and block start) the chunk continues. A task
+therefore holds one chunk of a channel, plus the resampled rows of one continuous block, rather
+than the whole channel. If the sampling density varies strongly within a channel, a chunk can hold
+more samples.
+
+The summaries need the channel's time columns a second time, so with pushdown Spark reads the
+channel data twice: once in full, and once with only `container_id`, `channel_id`, `tstart` and
+`tend`. The full rows are still shuffled only once.
 
 ### Calculated channels without the pandas UDF
 
