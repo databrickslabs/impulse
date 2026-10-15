@@ -3,6 +3,15 @@ sidebar_label: query_solver
 title: impulse_query_engine.analyze.query.solvers.query_solver
 ---
 
+## SolverBuildContext
+
+```python
+class SolverBuildContext()
+```
+
+Everything a report passes to a solver when it builds one (see ``QuerySolver.from_config``).
+
+
 ## QuerySolver
 
 ```python
@@ -19,6 +28,18 @@ filter_channel_metrics -> filter_candidates -> solve.
 columns** needed for container dimensions and event bounds (e.g.
 ``container_id``, ``start_ts``/``stop_ts`` or ``start_dt``/``stop_dt``),
 not only ``container_id``.
+
+
+#### from\_config
+
+```python
+def from_config(cls, ctx: SolverBuildContext) -> QuerySolver
+```
+
+Build the solver from what a report provides (see ``register_solver``).
+
+The base implementation passes only ``ctx.solver_config``. Override it when the
+constructor needs more, e.g. the Spark session or the RAW-data flags.
 
 
 #### scoped\_container\_metrics

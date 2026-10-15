@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import abc
 from abc import ABC
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.column import Column
 
 if TYPE_CHECKING:
@@ -16,7 +17,18 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
 
-from .solver_config import SolverConfig
+from .solver_config import RawEncoder, SolverConfig
+
+
+@dataclass(frozen=True, slots=True)
+class SolverBuildContext:
+    """Everything a report passes to a solver when it builds one (see ``QuerySolver.from_config``)."""
+
+    spark: SparkSession
+    solver_config: SolverConfig | None = None
+    is_raw_data: bool = False
+    drop_implausible_data: bool = False
+    raw_encoder: RawEncoder | None = None
 
 
 class QuerySolver(ABC):
@@ -34,6 +46,15 @@ class QuerySolver(ABC):
 
     def __init__(self, config: SolverConfig = None):
         self.config = config or SolverConfig()
+
+    @classmethod
+    def from_config(cls, ctx: SolverBuildContext) -> QuerySolver:
+        """Build the solver from what a report provides (see ``register_solver``).
+
+        The base implementation passes only ``ctx.solver_config``. Override it when the
+        constructor needs more, e.g. the Spark session or the RAW-data flags.
+        """
+        return cls(config=ctx.solver_config)
 
     @staticmethod
     def _apply_column_mapping(df: DataFrame, mapping: dict[str, str]) -> DataFrame:

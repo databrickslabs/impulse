@@ -1,14 +1,24 @@
 import os
 import re
 import warnings
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Self
 
 import pydantic
-from pydantic import AfterValidator, BaseModel, field_validator, model_validator, ConfigDict
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
+from impulse_query_engine.analyze.query.solvers.solver_registry import resolve_solver
 from impulse_query_engine.measurement_db import AbstractMeasurementDB, MeasurementDBConfig
 from impulse_query_engine.measurement_db_registry import resolve_measurement_db
 from impulse_reporting.channels.calculated_channel_kpis import DEFAULT_KPIS, KPI_BUILDERS
@@ -90,10 +100,12 @@ class DataType(StrEnum):
     RLE = "RLE"
 
 
-class Solvers(Enum):
+class Solvers(StrEnum):
     """
-    Enumeration of available solver types for the query engine.
+    Names of the built-in solvers.
 
+    ``query_engine.solver`` takes any registered solver name (see
+    ``register_solver``); these are the names Impulse registers itself.
     ``DEFAULT_SOLVER`` is the single, unified solver. ``DELTA_SOLVER`` and
     ``KEY_VALUE_STORE_SOLVER`` are **deprecated aliases** kept so that existing
     report configs continue to deserialize; both now resolve to the same
@@ -359,14 +371,31 @@ _BATCH_SIZE_DEPRECATION_MSG = (
 _PYDANTIC_DIR = os.path.dirname(pydantic.__file__)
 
 
+def _registered_in(resolve: Callable[[str], object]) -> AfterValidator:
+    """Field validator: the name must be registered (*resolve* raises ``KeyError`` otherwise)."""
+
+    def check(name: str) -> str:
+        try:
+            resolve(name)
+        except KeyError as exc:
+            raise ValueError(exc.args[0]) from None
+        return name
+
+    return AfterValidator(check)
+
+
 class QueryEngine(BaseModel):
     """
     Configuration for the query engine solver.
 
     Parameters
     ----------
-    solver : Solvers, default=Solvers.DEFAULT_SOLVER
-        The solver type to use for query execution.
+    solver : str, default="DefaultSolver"
+        Registered name of the solver to use for query execution. Impulse
+        registers ``"DefaultSolver"`` (``"DeltaSolver"`` and
+        ``"KeyValueStoreSolver"`` are deprecated aliases); a custom solver
+        registered with ``register_solver`` is selected by its name. An
+        unregistered name fails when the config is loaded.
     raw_encoder : RawEncoder, optional, default=None
         Encoder used to convert RAW point data into intervals.  ``RLE``
         collapses consecutive equal-valued samples into runs; ``INTERVAL``
@@ -389,7 +418,9 @@ class QueryEngine(BaseModel):
           ``column_name_mapping`` and ``filters`` dicts.
 
         When omitted, all default column names are used and no
-        project/toolbox filtering is applied.
+        project/toolbox filtering is applied.  It is validated with the
+        config class the selected solver registered, so a custom solver can
+        add its own settings to a ``SolverConfig`` subclass.
     measurement_db : str, default="MeasurementDB"
         Registered name of the MeasurementDB implementation to use.
     measurement_db_config : dict, optional
@@ -414,12 +445,13 @@ class QueryEngine(BaseModel):
     # (default measurement db silently used)
     model_config = ConfigDict(extra="forbid")
 
-    solver: Solvers = Solvers.DEFAULT_SOLVER
+    solver: Annotated[str, _registered_in(resolve_solver)] = Solvers.DEFAULT_SOLVER.value
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
-    solver_config: SolverConfig | None = None
-    measurement_db: str = "MeasurementDB"
+    # validate_default: a custom config class may require settings even when solver_config is omitted
+    solver_config: SolverConfig | None = Field(default=None, validate_default=True)
+    measurement_db: Annotated[str, _registered_in(resolve_measurement_db)] = "MeasurementDB"
     measurement_db_config: dict[str, Any] | None = None
     max_channels_per_batch: int = 500
     max_containers_per_batch: int | None = None
@@ -454,6 +486,31 @@ class QueryEngine(BaseModel):
             data = dict(data)
             data["max_channels_per_batch"] = data.pop("batch_size")
         return data
+
+    @field_validator("solver_config", mode="before")
+    @classmethod
+    def _validate_with_registered_config_cls(cls, value: Any, info: ValidationInfo) -> Any:
+        """Validate ``solver_config`` with the config class the selected solver registered.
+
+        A custom solver can register a ``SolverConfig`` subclass with its own settings, so the
+        solver receives a typed config and missing or invalid settings fail when the config is
+        loaded.
+        """
+        if "solver" not in info.data:  # an unregistered solver name is already reported
+            return value
+        name = info.data["solver"]
+        config_cls = resolve_solver(name).config_cls
+        if config_cls is SolverConfig:
+            return value  # validated as the declared field type
+        try:
+            # from_attributes: a plain SolverConfig instance is re-validated as config_cls
+            return config_cls.model_validate({} if value is None else value, from_attributes=True)
+        except pydantic.ValidationError as exc:
+            # Flatten the nested errors; raised as-is, pydantic would collapse their locations.
+            details = "; ".join(
+                f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in exc.errors()
+            )
+            raise ValueError(f"invalid settings for solver {name!r}: {details}") from None
 
     @property
     def batch_size(self) -> int:
@@ -679,7 +736,7 @@ def build_measurement_db_config(
         **(query_engine.measurement_db_config or {}),
         table_locations="unity_catalog",
     )
-    return registration.db_cls, db_config
+    return registration.impl_cls, db_config
 
 
 class ImpulseConfig(BaseModel):
@@ -798,11 +855,12 @@ class ImpulseConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_measurement_db(self) -> Self:
-        """Build the selected MeasurementDB implementation's config class once, so an unregistered
-        ``measurement_db`` or a missing, unknown or duplicated key fails when the config is parsed.
+        """Build the selected MeasurementDB implementation's config class once, so a missing,
+        unknown or duplicated key fails when the config is parsed (an unregistered
+        ``measurement_db`` is already rejected on the field).
         """
         try:
             build_measurement_db_config(dict(self.source), self.query_engine)
-        except (KeyError, TypeError) as exc:
+        except TypeError as exc:
             raise ValueError(f"query_engine.measurement_db: {exc.args[0]}") from exc
         return self

@@ -3,7 +3,7 @@ import warnings
 import pytest
 from pydantic import ValidationError
 
-import impulse_query_engine.measurement_db_registry as registry
+from impulse_query_engine.analyze.query.solvers import DefaultSolver, SolverConfig, register_solver
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.config.config_parser import (
@@ -16,6 +16,7 @@ from impulse_reporting.config.config_parser import (
     IncrementalConfig,
     ImpulseConfig,
     MetricFilter,
+    QueryEngine,
     RawEncoder,
     Solvers,
     TagFilter,
@@ -621,7 +622,7 @@ def test_impulse_config_key_value_store_solver_no_project_id_accepted():
 
 
 def test_impulse_config_basic_narrow_solver_rejected():
-    """BasicNarrowSolver has been removed; the string is no longer a valid enum value."""
+    """BasicNarrowSolver has been removed; the name is no longer a registered solver."""
     config_json = impulse_config_JSON.copy()
     config_json["query_engine"] = {"solver": "BasicNarrowSolver"}
     with pytest.raises(ValidationError):
@@ -633,6 +634,86 @@ def test_impulse_config_solver_config_none_by_default():
     config_json = impulse_config_JSON.copy()
     config = ImpulseConfig.model_validate(config_json)
     assert config.query_engine.solver_config is None
+
+
+class _ExcludeContainersConfig(SolverConfig):
+    excluded_container_ids: list[int]  # required custom setting
+
+
+class _ExcludeContainersSolver(DefaultSolver): ...
+
+
+@pytest.fixture
+def custom_solver_registered(isolated_registries):
+    register_solver("ExcludeContainersSolver", _ExcludeContainersConfig)(_ExcludeContainersSolver)
+
+
+def _with_query_engine(query_engine: dict) -> dict:
+    return {**impulse_config_JSON, "query_engine": query_engine}
+
+
+def test_impulse_config_custom_solver_gets_its_typed_solver_config(custom_solver_registered):
+    config = ImpulseConfig.model_validate(
+        _with_query_engine(
+            {
+                "solver": "ExcludeContainersSolver",
+                "solver_config": {"excluded_container_ids": [3], "project_id": "p1"},
+            }
+        )
+    )
+
+    assert config.query_engine.solver == "ExcludeContainersSolver"
+    assert type(config.query_engine.solver_config) is _ExcludeContainersConfig
+    assert config.query_engine.solver_config.excluded_container_ids == [3]
+    assert config.query_engine.solver_config.project_id == "p1"  # base settings still apply
+
+
+_INVALID_EXCLUDE_SETTINGS = r"invalid settings for solver 'ExcludeContainersSolver': "
+
+
+@pytest.mark.parametrize(
+    ("query_engine", "key", "error"),
+    [
+        (
+            {"solver": "NotRegistered"},
+            "solver",
+            r"Unknown solver 'NotRegistered'; registered: \[.*'DefaultSolver'.*\]"
+            r".*Import the package that registers it",
+        ),
+        # A required custom setting is reported whether solver_config is empty or omitted.
+        (
+            {"solver": "ExcludeContainersSolver", "solver_config": {}},
+            "solver_config",
+            _INVALID_EXCLUDE_SETTINGS + "excluded_container_ids: Field required",
+        ),
+        (
+            {"solver": "ExcludeContainersSolver"},
+            "solver_config",
+            _INVALID_EXCLUDE_SETTINGS + "excluded_container_ids: Field required",
+        ),
+        (
+            {"solver": "ExcludeContainersSolver", "solver_config": {"excluded_container_ids": 3}},
+            "solver_config",
+            _INVALID_EXCLUDE_SETTINGS + "excluded_container_ids: Input should be a valid list",
+        ),
+    ],
+)
+def test_impulse_config_solver_rejected_at_parse_time(
+    custom_solver_registered, query_engine, key, error
+):
+    with pytest.raises(ValidationError, match=error) as exc_info:
+        ImpulseConfig.model_validate(_with_query_engine(query_engine))
+
+    [reported] = exc_info.value.errors()  # one error, on the key that is wrong
+    assert reported["loc"] == ("query_engine", key)
+
+
+def test_query_engine_revalidates_base_solver_config_for_custom_solver(custom_solver_registered):
+    # In Python a user may pass a plain SolverConfig; the custom solver's settings still get checked.
+    with pytest.raises(
+        ValidationError, match=_INVALID_EXCLUDE_SETTINGS + "excluded_container_ids: Field required"
+    ):
+        QueryEngine(solver="ExcludeContainersSolver", solver_config=SolverConfig())
 
 
 def test_is_valid_table_name_valid_inputs():
@@ -1344,8 +1425,7 @@ def test_calculated_channels_unknown_kpi_rejected():
 
 
 @pytest.fixture
-def session_db_registered(monkeypatch):
-    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+def session_db_registered(isolated_registries):
     register_measurement_db("SessionDB", _SessionDBConfig)(MeasurementDB)
 
 
@@ -1379,6 +1459,14 @@ def test_impulse_config_measurement_db_config_rejected_at_parse_time(
         ImpulseConfig.model_validate(
             _add_custom_measurement_db_to_report_config(custom_measurement_db_name, extra)
         )
+
+
+def test_impulse_config_unregistered_measurement_db_reported_on_its_key():
+    with pytest.raises(ValidationError) as exc_info:
+        ImpulseConfig.model_validate(_add_custom_measurement_db_to_report_config("NotRegistered"))
+
+    [reported] = exc_info.value.errors()
+    assert reported["loc"] == ("query_engine", "measurement_db")
 
 
 @pytest.mark.parametrize(
@@ -1445,8 +1533,7 @@ class _AcmeDB(MeasurementDB): ...
 
 
 @pytest.fixture
-def acme_db_registered(monkeypatch):
-    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+def acme_db_registered(isolated_registries):
     register_measurement_db("AcmeDB", _AcmeDBConfig)(_AcmeDB)
 
 

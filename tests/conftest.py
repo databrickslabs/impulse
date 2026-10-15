@@ -11,6 +11,8 @@ from delta import configure_spark_with_delta_pip
 from pyspark.sql import SparkSession
 
 import impulse_query_engine.schema as S
+from impulse_query_engine import measurement_db_registry
+from impulse_query_engine.analyze.query.solvers import solver_registry
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 
 
@@ -67,6 +69,13 @@ def spark(tmp_path_factory, worker_id) -> SparkSession:
 def mock_workspace_client():
     """Return a mock WorkspaceClient for telemetry in tests."""
     return create_autospec(WorkspaceClient)
+
+
+@pytest.fixture
+def isolated_registries(monkeypatch):
+    """Drop the solver and MeasurementDB registrations a test makes (the registries are global)."""
+    for registry in (solver_registry._REGISTRY, measurement_db_registry._REGISTRY):
+        monkeypatch.setattr(registry, "_entries", dict(registry._entries))
 
 
 @pytest.fixture
