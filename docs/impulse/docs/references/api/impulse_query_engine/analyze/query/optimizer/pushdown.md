@@ -81,16 +81,19 @@ class PushdownRule(abc.ABC)
 
 Recognizes a subtree and computes it in Spark ahead of the pandas UDF.
 
-A rule's derived rows use the channel-data shape
-``(container_id, channel_id, variant, tstart, tend, value)``; :meth:`decode`
-turns one container/channel/variant slice of them back into the object the
-original subtree evaluates to.  The result must equal evaluating the subtree
-in pandas on the same channel data.
+Planning and decoding run in Python: :meth:`match` recognizes the subtree,
 
 
 #### name
 
 Unique rule name, part of every :attr:`Pushdown.variant_key`.
+
+
+#### ordered
+
+Whether the rule needs its series in order (neighbours, runs, series
+
+facts).  Per-sample rules set ``False`` and skip the series scan.
 
 
 #### match
@@ -123,35 +126,57 @@ def result_type(pushdown: Pushdown) -> type
 Core-model class :meth:`decode` returns for *pushdown*.
 
 
-#### to\_spark
+#### runs
 
 ```python
-def to_spark(rows: DataFrame, variants: Mapping[int, Pushdown],
-             config: SolverConfig) -> DataFrame
+def runs() -> Mapping[str, RunBreak]
 ```
 
-Replace the rows of this rule's *variants* with their derived rows.
+Run definitions beyond the built-in continuous blocks, by name.
 
-*rows* is shared by all rules and partitioned by container; the result
-must keep that partitioning (windows partitioned by container id,
-channel id and :data:`VARIANT_COL` reuse it).  Implementations must not
-union *rows* or join it to a non-broadcast frame.  Small summaries
-derived from *rows* (per series or per chunk) may be broadcast-joined
-back; Spark reads the channel data again for them, so summaries should
-read only the key and time columns to share one narrow read.
+Each maps ``(prev, cur)`` samples to whether ``cur`` starts a new run;
 
-**Arguments**:
 
-- `rows` (`pyspark.sql.DataFrame`): All channel-data rows of the solve, tagged with :data:`VARIANT_COL`
-(one copy per variant a channel ships) and partitioned by container.
-- `variants` (`Mapping[int, Pushdown]`): This rule's variant ids, each with a representative pushdown carrying
-its parameters.
-- `config` (`SolverConfig`): Provides the internal column names.
+#### row\_columns
+
+```python
+def row_columns(ctx: SeriesContext) -> Mapping[str, Column]
+```
+
+Columns computed for every sample, in order; refer to them via ``ctx.col``.
+
+
+#### keep
+
+```python
+def keep(ctx: SeriesContext) -> Column
+```
+
+Whether a sample can emit rows; the others are dropped early.
+
+
+#### kept\_columns
+
+```python
+def kept_columns(ctx: SeriesContext) -> Mapping[str, Column]
+```
+
+Columns computed for the kept samples, in order (``ctx.block_end`` available).
+
+
+#### emit
+
+```python
+def emit(ctx: SeriesContext) -> Column
+```
+
+The derived rows of a kept sample.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: *rows* with the same columns and types, the rows of *variants*
-replaced by derived rows and all other rows unchanged.
+`Column`: An array of :data:`~.context.ELEMENT_TYPE` structs built with
+:meth:`SeriesContext.element`; empty or null emits nothing.  Times
+left out keep the sample's own ``tstart`` / ``tend``.
 
 #### decode
 

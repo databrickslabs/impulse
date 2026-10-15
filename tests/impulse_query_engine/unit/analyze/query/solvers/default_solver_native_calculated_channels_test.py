@@ -12,6 +12,7 @@ import pytest
 from pyspark.sql import DataFrame
 
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+from impulse_query_engine.analyze.query.optimizer import ResamplePushdownRule, query_optimizer
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     ChannelMappingConfig,
@@ -20,9 +21,13 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
 )
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from tests.conftest import spark
+from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers import DiffRule
 from tests.impulse_query_engine.unit.analyze.query.solvers.default_solver_pushdown_test import (
-    CHANNEL_DATA_SCANS,
+    PUSHED_SCANS,
+    SAMPLE_SHUFFLE,
     channel_data_scans,
+    container_shuffles_of_channel_data,
+    shuffles,
     small_chunks,
 )
 
@@ -122,7 +127,35 @@ class TestNativeCalculatedChannels:
         assert rows["channel_id"].nunique() == 2
         plan = native._jdf.queryExecution().executedPlan().toString()
         assert "FlatMapGroupsInPandas" not in plan
-        assert channel_data_scans(native) == CHANNEL_DATA_SCANS
+        assert channel_data_scans(native) == PUSHED_SCANS
+        # The samples are shuffled by series and chunk, never by container.
+        assert len([e for e in shuffles(native) if e.startswith(SAMPLE_SHUFFLE)]) == 1
+        assert container_shuffles_of_channel_data(native) == 0
+
+    def test_two_rules_share_the_reads(self, spark, key_value_store_db, udf_calls, monkeypatch):
+        monkeypatch.setattr(
+            query_optimizer, "default_rules", lambda: (ResamplePushdownRule(), DiffRule())
+        )
+
+        def channels(q):
+            return [
+                CalculatedChannel(
+                    q.channel(channel_name="Engine RPM").resample(RATE), {"channel_name": "rpm"}
+                ),
+                CalculatedChannel(
+                    q.channel(channel_name="Vehicle Speed Sensor").diff(),
+                    {"channel_name": "speed_diff"},
+                ),
+            ]
+
+        rows, native = _solve_both(
+            spark, key_value_store_db, channels, udf_calls, config=_kvs_config()
+        )
+        assert udf_calls == [1, 0]
+        assert rows["channel_id"].nunique() == 2
+        assert rows["value"].ne(0).any()
+        assert channel_data_scans(native) == PUSHED_SCANS
+        assert len([e for e in shuffles(native) if e.startswith(SAMPLE_SHUFFLE)]) == 1
 
     def test_same_expression_under_two_identities_and_two_rates(
         self, spark, key_value_store_db, udf_calls

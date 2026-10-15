@@ -7,8 +7,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pyspark.sql import DataFrame
+from pyspark.sql import Column
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
@@ -21,6 +22,8 @@ if TYPE_CHECKING:
 
     from impulse_query_engine.analyze.query.solvers.default_solver import TimeSeriesCache
     from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
+
+    from .context import RunBreak, SeriesContext
 
 #: Column tagging each channel-data row with the series variant it belongs to.
 VARIANT_COL = "__impulse_variant"
@@ -88,15 +91,30 @@ class Pushdown:
 class PushdownRule(abc.ABC):
     """Recognizes a subtree and computes it in Spark ahead of the pandas UDF.
 
-    A rule's derived rows use the channel-data shape
-    ``(container_id, channel_id, variant, tstart, tend, value)``; :meth:`decode`
-    turns one container/channel/variant slice of them back into the object the
-    original subtree evaluates to.  The result must equal evaluating the subtree
-    in pandas on the same channel data.
+    Planning and decoding run in Python: :meth:`match` recognizes the subtree,
+    :meth:`decode` turns one container/channel/variant slice of the derived rows
+    back into the object the subtree evaluates to.  The result must equal
+    evaluating the subtree in pandas on the same channel data.
+
+    The Spark side is a set of hooks returning columns, evaluated by the shared
+    pushdown pipeline (:mod:`.pipeline`) for the samples of the rule's variants,
+    one series (channel and variant) at a time, with a :class:`SeriesContext`:
+
+    1. :meth:`row_columns` per sample;
+    2. :meth:`keep` selects the samples that go on;
+    3. :meth:`kept_columns` per kept sample;
+    4. :meth:`emit` the derived rows of a kept sample.
+
+    Rules never handle DataFrames, so every rule shares the pipeline's reads and
+    shuffles.  Derived rows have the channel-data shape
+    ``(container_id, channel_id, variant, tstart, tend, value)``.
     """
 
     #: Unique rule name, part of every :attr:`Pushdown.variant_key`.
     name: ClassVar[str]
+    #: Whether the rule needs its series in order (neighbours, runs, series
+    #: facts).  Per-sample rules set ``False`` and skip the series scan.
+    ordered: ClassVar[bool] = True
 
     @abc.abstractmethod
     def match(self, node: TimeSeriesExpression) -> Pushdown | None:
@@ -114,36 +132,36 @@ class PushdownRule(abc.ABC):
         """Core-model class :meth:`decode` returns for *pushdown*."""
         return SampleSeries
 
+    def runs(self) -> Mapping[str, RunBreak]:
+        """Run definitions beyond the built-in continuous blocks, by name.
+
+        Each maps ``(prev, cur)`` samples to whether ``cur`` starts a new run;
+        :meth:`SeriesContext.run` then describes the sample's run.
+        """
+        return {}
+
+    def row_columns(self, ctx: SeriesContext) -> Mapping[str, Column]:
+        """Columns computed for every sample, in order; refer to them via ``ctx.col``."""
+        return {}
+
+    def keep(self, ctx: SeriesContext) -> Column:
+        """Whether a sample can emit rows; the others are dropped early."""
+        return F.lit(True)
+
+    def kept_columns(self, ctx: SeriesContext) -> Mapping[str, Column]:
+        """Columns computed for the kept samples, in order (``ctx.block_end`` available)."""
+        return {}
+
     @abc.abstractmethod
-    def to_spark(
-        self, rows: DataFrame, variants: Mapping[int, Pushdown], config: SolverConfig
-    ) -> DataFrame:
-        """Replace the rows of this rule's *variants* with their derived rows.
-
-        *rows* is shared by all rules and partitioned by container; the result
-        must keep that partitioning (windows partitioned by container id,
-        channel id and :data:`VARIANT_COL` reuse it).  Implementations must not
-        union *rows* or join it to a non-broadcast frame.  Small summaries
-        derived from *rows* (per series or per chunk) may be broadcast-joined
-        back; Spark reads the channel data again for them, so summaries should
-        read only the key and time columns to share one narrow read.
-
-        Parameters
-        ----------
-        rows : pyspark.sql.DataFrame
-            All channel-data rows of the solve, tagged with :data:`VARIANT_COL`
-            (one copy per variant a channel ships) and partitioned by container.
-        variants : Mapping[int, Pushdown]
-            This rule's variant ids, each with a representative pushdown carrying
-            its parameters.
-        config : SolverConfig
-            Provides the internal column names.
+    def emit(self, ctx: SeriesContext) -> Column:
+        """The derived rows of a kept sample.
 
         Returns
         -------
-        pyspark.sql.DataFrame
-            *rows* with the same columns and types, the rows of *variants*
-            replaced by derived rows and all other rows unchanged.
+        Column
+            An array of :data:`~.context.ELEMENT_TYPE` structs built with
+            :meth:`SeriesContext.element`; empty or null emits nothing.  Times
+            left out keep the sample's own ``tstart`` / ``tend``.
         """
 
     def decode(self, rows: pd.DataFrame, pushdown: Pushdown, cache: TimeSeriesCache) -> Any:

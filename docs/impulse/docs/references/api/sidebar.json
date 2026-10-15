@@ -32,6 +32,8 @@
                 },
                 {
                   "items": [
+                    "references/api/impulse_query_engine/analyze/query/optimizer/context",
+                    "references/api/impulse_query_engine/analyze/query/optimizer/pipeline",
                     "references/api/impulse_query_engine/analyze/query/optimizer/plan",
                     "references/api/impulse_query_engine/analyze/query/optimizer/pushdown",
                     "references/api/impulse_query_engine/analyze/query/optimizer/query_optimizer",

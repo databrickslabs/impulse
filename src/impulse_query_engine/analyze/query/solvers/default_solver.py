@@ -23,6 +23,7 @@ from impulse_query_engine.analyze.query.optimizer import (
     PushdownContext,
     PushdownPlan,
     QueryOptimizer,
+    apply_pushdowns,
 )
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
@@ -1199,7 +1200,7 @@ class DefaultSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count, plan = self._prepare_channels_join(query, channels_df)
+        q, joined_df, container_count, plan, _ = self._prepare_channels_join(query, channels_df)
         container_tag_cols, container_metric_cols = self._container_meta_cols(query)
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
@@ -1224,8 +1225,8 @@ class DefaultSolver(QuerySolver):
         )
 
     def _prepare_channels_join(
-        self, query, channels_df
-    ) -> tuple[DataFrame, DataFrame, int, PushdownPlan | None]:
+        self, query, channels_df, native_selections=None
+    ) -> tuple[DataFrame, DataFrame, int, PushdownPlan | None, dict | None]:
         """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
 
         Applies optional per-channel unit conversion, reads and column-maps the
@@ -1248,15 +1249,20 @@ class DefaultSolver(QuerySolver):
             Query object containing database and filter information.
         channels_df : pyspark.sql.DataFrame
             Channel-match DataFrame from the filter pipeline.
+        native_selections : list, optional
+            Calculated-channel selections that may be solved without the UDF
+            (see :meth:`PushdownPlan.native_targets`).
 
         Returns
         -------
-        tuple[DataFrame, DataFrame, int, PushdownPlan or None]
-            ``(channels_q, joined_df, container_count, plan)`` — the column-mapped
-            channel-data DataFrame (authoritative for output ``container_id`` /
-            ``channel_id`` types), the join fed to the grouped-map UDF, the
-            number of distinct containers, and the pushdown plan the UDF must
-            receive (``None`` when nothing is pushed down).
+        tuple[DataFrame, DataFrame, int, PushdownPlan or None, dict or None]
+            ``(channels_q, joined_df, container_count, plan, native_targets)`` —
+            the column-mapped channel-data DataFrame (authoritative for output
+            ``container_id`` / ``channel_id`` types), the join fed to the
+            grouped-map UDF, the number of distinct containers, the pushdown
+            plan the UDF must receive (``None`` when nothing is pushed down),
+            and the native targets of *native_selections* (``None`` unless
+            they are solved natively; ``joined_df`` then holds no raw rows).
         """
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
@@ -1304,14 +1310,19 @@ class DefaultSolver(QuerySolver):
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         plan = self._plan_pushdowns(query, q) if container_count > 0 else None
         channel_data = q
+        targets = None
         if plan is not None:
-            channel_data = self._apply_pushdowns(q, channels_df, plan, container_count)
+            if native_selections is not None:
+                targets = plan.native_targets(native_selections)
+            # Raw rows are only read by the UDF, for selectors that are not pushed down.
+            include_raw = targets is None and bool(plan.raw_selector_ids)
+            channel_data = self._apply_pushdowns(q, channels_df, plan, include_raw)
 
         joined_df = channel_data.join(
             F.broadcast(channels_df),
             on=[self.config.container_id_col, self.config.channel_id_col],
         )
-        return q, joined_df, container_count, plan
+        return q, joined_df, container_count, plan, targets
 
     def _plan_pushdowns(self, query, channels_q: DataFrame) -> PushdownPlan | None:
         """Plan the pushdowns for *query*, or ``None`` when disabled or nothing applies."""
@@ -1330,30 +1341,24 @@ class DefaultSolver(QuerySolver):
         channels_q: DataFrame,
         channels_df: DataFrame,
         plan: PushdownPlan,
-        container_count: int,
+        include_raw: bool,
     ) -> DataFrame:
         """Replace raw channel data with the derived rows of *plan* where possible.
 
         Each matched channel is tagged with the variants it ships
         (:meth:`PushdownPlan.channel_variants`): its raw data (variant ``0``)
         while any of its selectors still needs it, otherwise the derived
-        variants of its selectors, computed by their rules.  The result carries
-        a :data:`VARIANT_COL` column and keeps the channel-data columns and types.
-
-        The channel data is read once and partitioned by container exactly like
-        :meth:`_apply_grouped_map` does, so the rules' per-channel windows and
-        the grouped-map UDF share a single shuffle.
+        variants of its selectors, computed by their rules (see
+        :func:`~impulse_query_engine.analyze.query.optimizer.apply_pushdowns`).
+        The result carries a :data:`VARIANT_COL` column and keeps the
+        channel-data columns and types; raw rows are kept only if *include_raw*.
         """
         key = [self.config.container_id_col, self.config.channel_id_col]
         variants = channels_df.select(
             *key, F.explode(plan.channel_variants(F.col("selector_ids"))).alias(VARIANT_COL)
         )
-        rows = channels_q.join(F.broadcast(variants), on=key).repartition(
-            container_count, self.config.container_id_col
-        )
-        for rule, rule_variants in plan.variants_by_rule():
-            rows = rule.to_spark(rows, rule_variants, self.config)
-        return rows
+        rows = channels_q.join(F.broadcast(variants), on=key)
+        return apply_pushdowns(rows, plan, self.config, include_raw=include_raw)
 
     @staticmethod
     def _query_contains_poi_selections(selections: Iterable[Any]) -> bool:
@@ -1662,10 +1667,11 @@ class DefaultSolver(QuerySolver):
         the derived rows and no pandas UDF runs.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count, plan = self._prepare_channels_join(query, channels_df)
+        q, joined_df, container_count, plan, targets = self._prepare_channels_join(
+            query, channels_df, native_selections=selections
+        )
         self._validate_calculated_channel_id_type(q)
 
-        targets = plan.native_targets(selections) if plan is not None else None
         if targets is not None:
             logger.info("Calculated channels solved natively in Spark, without the pandas UDF")
             native = self._native_calculated_channel_rows(joined_df, q, targets)
@@ -1801,9 +1807,8 @@ class DefaultSolver(QuerySolver):
             )
         )
         has_conversion = conv in joined_df.columns
-        # Raw rows (variant 0) have no targets, so inline drops them.  Not filtering
-        # them explicitly keeps the filter out of the pushdown rules' summaries, which
-        # would otherwise stop sharing one read of the channel data.
+        # joined_df holds no raw rows here; any other row without targets is
+        # dropped by inline.
         rows = joined_df.select(
             cid,
             ts,

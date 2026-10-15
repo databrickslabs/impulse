@@ -206,18 +206,24 @@ that share the same `tstart` is unspecified, as in the pandas evaluation, and ch
 `[tstart, tend)` intervals overlap are not supported (the RLE and interval encoders never
 produce overlaps).
 
-Spark cuts each channel into chunks: equal time slices that hold about 100 000 samples on
-average. It processes one chunk at a time, sorted by `tstart`: every sample is assigned the grid
-bucket it falls into, and only the last sample of each bucket emits rows (the grid points up to
-the next non-empty bucket). What crosses a chunk boundary comes from one summary row per chunk:
-whether a gap starts there, and which block (and block start) the chunk continues. A task
-therefore holds one chunk of a channel, plus the resampled rows of one continuous block, rather
-than the whole channel. If the sampling density varies strongly within a channel, a chunk can hold
-more samples.
+#### How Spark runs pushed-down subtrees
 
-The summaries need the channel's time columns a second time, so with pushdown Spark reads the
-channel data twice: once in full, and once with only `container_id`, `channel_id`, `tstart` and
-`tend`. The full rows are still shuffled only once.
+All pushed-down subtrees of a solve share one pass over the channel data:
+
+- Spark cuts each pushed channel into chunks, equal time slices of about 100 000 samples on
+  average, and processes the chunks in parallel. A task holds one chunk at a time, not a whole
+  channel or container; with strongly varying sampling density a chunk can hold more samples.
+- Within a chunk the samples are ordered by `tstart`, then `tend`, then value; samples with equal
+  times are ordered by value. For `resample`, each sample is assigned the grid bucket it falls
+  into, and only the last sample of each bucket emits rows: the grid points up to the next
+  sample's bucket.
+- What crosses a chunk boundary (neighbouring samples, gaps, the start and end of a continuous
+  block) comes from one summary row per chunk.
+
+The channel data is read **twice**, however many expressions are pushed down: once in full, and
+once with only `container_id`, `channel_id`, `tstart` and `tend` (the channel boundaries that
+define the chunks). Channels that are also used outside pushed-down subtrees, e.g. `rpm.max()`
+next to `spd.resample(1e6)`, are read once more for their raw rows.
 
 ### Calculated channels without the pandas UDF
 
@@ -239,4 +245,7 @@ Auto-generated symbol-level docs:
   — per-table column mappings, filters, and project scoping.
 - [`QueryOptimizer`](../api/impulse_query_engine/analyze/query/optimizer/query_optimizer.md)
   and [`PushdownRule`](../api/impulse_query_engine/analyze/query/optimizer/pushdown.md)
-  — the Spark pushdown optimizer and the interface for its rules.
+  — the Spark pushdown optimizer and the interface for its rules;
+  [`pipeline`](../api/impulse_query_engine/analyze/query/optimizer/pipeline.md) and
+  [`SeriesContext`](../api/impulse_query_engine/analyze/query/optimizer/context.md) — how rules
+  run in Spark and what they can use.

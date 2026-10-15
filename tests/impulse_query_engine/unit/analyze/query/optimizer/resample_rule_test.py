@@ -11,53 +11,34 @@ import pytest
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.optimizer import VARIANT_COL, ResamplePushdownRule
-from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from tests.conftest import spark
+from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers import (
+    CONFIG,
+    DiffRule,
+    channel_rows,
+    plan_for,
+    random_series,
+    run,
+)
+from impulse_query_engine.analyze.query.optimizer import apply_pushdowns
 
 _RULE = ResamplePushdownRule()
-_CONFIG = SolverConfig()
+_X = TimeSeriesSelector(TagSelector("channel_name") == "x")
 
 
 def _pushdown(rate):
-    selector = TimeSeriesSelector(TagSelector("channel_name") == "x")
-    return _RULE.match(selector.resample(rate))
+    return _RULE.match(_X.resample(rate))
 
 
 def _resample_in_spark(spark, series_by_key, rates, time_type=T.LongType(), chunk_rows=None):
-    """Run the rule on ``{(cid, ch, variant): (tstarts, tends, values)}``.
+    """Resample ``{(cid, ch, variant): (tstarts, tends, values)}`` at ``{variant: rate}``.
 
-    Returns ``{(cid, ch, variant): SampleSeries}`` built like the pandas cache does.
+    Variant 0 rows are raw rows.  Returns ``{(cid, ch, variant): SampleSeries}``
+    built like the pandas cache does.
     """
-    schema = T.StructType(
-        [
-            T.StructField("container_id", T.LongType()),
-            T.StructField("channel_id", T.LongType()),
-            T.StructField(VARIANT_COL, T.IntegerType()),
-            T.StructField("tstart", time_type),
-            T.StructField("tend", time_type),
-            T.StructField("value", T.DoubleType()),
-        ]
-    )
-    to_time = int if isinstance(time_type, T.IntegralType) else float
-    rows = [
-        (cid, ch, vid, to_time(ts), to_time(te), None if v is None else float(v))
-        for (cid, ch, vid), (tstarts, tends, values) in series_by_key.items()
-        for ts, te, v in zip(tstarts, tends, values, strict=True)
-    ]
-    df = spark.createDataFrame(rows, schema=schema)
-    rule = _RULE if chunk_rows is None else ResamplePushdownRule(chunk_rows=chunk_rows)
-    result = rule.to_spark(df, {vid: _pushdown(rate) for vid, rate in rates.items()}, _CONFIG)
-    assert result.schema == df.schema
-
-    pdf = result.toPandas()
-    out = {}
-    for key, group in pdf.groupby(["container_id", "channel_id", VARIANT_COL]):
-        group = group.sort_values("tstart", kind="stable")
-        out[tuple(int(k) for k in key)] = SampleSeries(
-            group["tstart"], group["tend"], group["value"].astype(np.float64)
-        )
-    return out
+    pushdowns = {vid: _pushdown(rate) for vid, rate in rates.items()}
+    return run(spark, series_by_key, pushdowns, time_type=time_type, chunk_size=chunk_rows)
 
 
 def _expected(series, rate):
@@ -118,7 +99,7 @@ def test_resample_matches_sample_series(spark, name):
 # Few samples per chunk put chunk boundaries at gaps, inside buckets and next to
 # zero-duration samples, with empty chunks in between.
 @pytest.mark.parametrize("chunk_rows", [None, 1, 2, 3])
-def test_all_cases_in_one_pass_and_other_variants_unchanged(spark, chunk_rows):
+def test_all_cases_in_one_pass_and_raw_rows_unchanged(spark, chunk_rows):
     series = {}
     expected = {}
     for i, (tstarts, tends, values, _rate) in enumerate(_CASES.values()):
@@ -126,12 +107,11 @@ def test_all_cases_in_one_pass_and_other_variants_unchanged(spark, chunk_rows):
         for vid, r in ((1, 1), (2, 2)):
             series[(i, 7, vid)] = (tstarts, tends, values)
             expected[(i, 7, vid)] = _expected((tstarts, tends, values), r)
-        # Raw rows (variant 0) and another rule's variant pass through untouched.
-        for vid in (0, 3):
-            series[(i, 7, vid)] = (tstarts, tends, values)
-            expected[(i, 7, vid)] = SampleSeries(
-                tstarts, tends, [np.nan if v is None else v for v in values]
-            )
+        # Raw rows (variant 0) pass through untouched.
+        series[(i, 7, 0)] = (tstarts, tends, values)
+        expected[(i, 7, 0)] = SampleSeries(
+            tstarts, tends, [np.nan if v is None else v for v in values]
+        )
     actual = _resample_in_spark(spark, series, {1: 1, 2: 2}, chunk_rows=chunk_rows)
     assert actual.keys() == expected.keys()
     for key, exp in expected.items():
@@ -158,27 +138,9 @@ def test_ns_epoch_longs_above_2_pow_53(spark, chunk_rows):
 def test_only_linear_window_frames(spark):
     # Spark recomputes a ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING frame for every
     # row (quadratic in the series length), so the rule must not use one.
-    schema = "container_id long, channel_id long, {} int, tstart long, tend long, value double"
-    df = spark.createDataFrame([(1, 1, 1, 0, 1, 1.0)], schema=schema.format(VARIANT_COL))
-    result = _RULE.to_spark(df, {1: _pushdown(1)}, _CONFIG)
-    plan = result._jdf.queryExecution().optimizedPlan().toString()
+    plan = _optimized_plan(spark)
     assert "specifiedwindowframe(RowFrame, currentrow$(), unboundedfollowing$())" not in plan
     assert "specifiedwindowframe(RowFrame, unboundedpreceding$(), currentrow$())" in plan
-
-
-def _random_series(rng, n):
-    """Integral samples with gaps, zero-duration samples and NaN values, in tstart order."""
-    tstarts, tends, values = [], [], []
-    t, after_point = 0, False
-    for _ in range(n):
-        if rng.random() < 0.15:
-            t += int(rng.integers(1, 6))
-        duration = 0 if not after_point and rng.random() < 0.1 else int(rng.integers(1, 5))
-        tstarts.append(t)
-        tends.append(t + duration)
-        values.append(np.nan if rng.random() < 0.1 else float(rng.integers(0, 100)))
-        t, after_point = t + duration, duration == 0
-    return tstarts, tends, values
 
 
 def test_random_series_across_chunk_sizes(spark):
@@ -186,7 +148,7 @@ def test_random_series_across_chunk_sizes(spark):
     rates = {1: 1, 2: 3, 3: 7}
     series, expected = {}, {}
     for cid, n in enumerate([1, 2, 40, 60, 60, 80]):
-        tstarts, tends, values = _random_series(rng, n)
+        tstarts, tends, values = random_series(rng, n)
         for vid, rate in rates.items():
             series[(cid, 1, vid)] = (tstarts, tends, values)
             expected[(cid, 1, vid)] = _expected((tstarts, tends, values), rate)
@@ -210,13 +172,16 @@ def _top_level_items(text):
     return [*items, text[start:].strip()]
 
 
+def _optimized_plan(spark) -> str:
+    df = channel_rows(spark, {(1, 1, 1): ([0, 1], [1, 2], [1.0, 2.0])})
+    result = apply_pushdowns(df, plan_for({1: _pushdown(1)}), CONFIG, include_raw=False)
+    return result._jdf.queryExecution().optimizedPlan().toString()
+
+
 def test_windows_over_samples_are_chunked(spark):
     # Spark buffers a whole window partition, so no window over the samples may be
     # partitioned by the series alone; only the chunk summaries are.
-    schema = "container_id long, channel_id long, {} int, tstart long, tend long, value double"
-    df = spark.createDataFrame([(1, 1, 1, 0, 1, 1.0)], schema=schema.format(VARIANT_COL))
-    result = _RULE.to_spark(df, {1: _pushdown(1)}, _CONFIG)
-    plan = result._jdf.queryExecution().optimizedPlan().toString()
+    plan = _optimized_plan(spark)
     specs = re.findall(r"windowspecdefinition\((.*?), specifiedwindowframe", plan)
     series_key = ["container_id", "channel_id", VARIANT_COL]
     seen = set()
@@ -226,18 +191,29 @@ def test_windows_over_samples_are_chunked(spark):
         order = [item.split(" ")[0] for item in items[len(partition) :]]
         seen.add((tuple(partition), tuple(order)))
         if partition == series_key:
-            assert order == ["_rs_chunk"]
+            assert order == ["_pd_chunk"]
         else:
-            assert partition[:3] == series_key
-            assert {"_rs_chunk", "_rs_block"} & set(partition)
-    assert any(order[-2:] == ("tstart", "tend") for _, order in seen)
+            assert partition == [*series_key, "_pd_chunk"]
+    assert any(order == ("tstart", "tend", "value") for _, order in seen)
     assert any(partition == tuple(series_key) for partition, _ in seen)
+    # Photon runs window aggregates over structs row-based.
+    assert not re.search(r"(max|min)\(struct\(", plan)
 
 
-@pytest.mark.parametrize("chunk_rows", [0, -1, 1.5, True])
-def test_chunk_rows_must_be_a_positive_integer(chunk_rows):
-    with pytest.raises((TypeError, ValueError), match="chunk_rows"):
-        ResamplePushdownRule(chunk_rows=chunk_rows)
+def test_resample_and_diff_in_one_pass(spark):
+    rng = np.random.default_rng(5)
+    series, expected = {}, {}
+    for cid in range(3):
+        samples = random_series(rng, 50)
+        series[(cid, 1, 1)] = series[(cid, 1, 2)] = samples
+        expected[(cid, 1, 1)] = _expected(samples, 3)
+        expected[(cid, 1, 2)] = SampleSeries(*samples).diff()
+    pushdowns = {1: _pushdown(3), 2: DiffRule().match(_X.diff())}
+    for chunk_size in (2, 7):
+        actual = run(spark, series, pushdowns, chunk_size=chunk_size)
+        assert actual.keys() == expected.keys()
+        for key, exp in expected.items():
+            _assert_same(actual[key], exp)
 
 
 @pytest.mark.parametrize("chunk_rows", [None, 7])

@@ -22,22 +22,40 @@ sample spacing yields more rows than the raw channel.
 
 Each sample is assigned the bucket ``c`` of the first grid point at or after its
 ``tstart``.  The last sample of a bucket holds the value of grid points
-``c, c + 1, …`` up to the next non-empty bucket, so only those samples emit rows
+``c, c + 1, …`` up to the next sample's bucket, so only those samples are kept
 and every row carries just the grid points it covers.  Values are looked up
 within a block; this matches the pandas evaluation unless intervals overlap.
-
-Every series is cut into equal time slices (chunks) holding about *chunk_rows*
-samples on average, and the windows over samples run per chunk, so a worker
-holds one chunk of a series at a time instead of the whole series.  Gaps at
-chunk boundaries, the block a chunk starts in and that block's start are
-resolved from one summary row per chunk.
 
 Grid points are computed as ``t_min + k * delta`` in IEEE double arithmetic.
 numpy builds that fuse this into a multiply-add can differ by one ulp for
 fractional grids (e.g. seconds-as-double with a rate of ``0.1``); integral
 grids are exact.
 
-**Arguments**:
 
-- `chunk_rows` (`int`): Average number of samples per chunk (default 100 000).
+## \_Grid
+
+```python
+class _Grid()
+```
+
+The numpy.arange grid of the sample's block.
+
+``numpy.arange(t_min, t_max + rate, rate)`` has length
+``ceil(((t_max + rate) - t_min) / rate)`` and is filled as ``t_min``,
+``t_min + rate``, then ``t_min + k * ((t_min + rate) - t_min)``.
+
+
+#### first\_index
+
+```python
+def first_index(name: str, x: Column, strict: Column,
+                active: Column) -> dict[str, Column]
+```
+
+Columns ending in *name*: the smallest ``k >= 0`` with ``point(k) >= x`` (``> x`` if *strict*).
+
+Estimated from ``(x - t_min) / delta`` and corrected by one step against the
+exact grid points; a result that still is not exact raises instead of
+misplacing a sample.  Only evaluated where *active*.
+
 

@@ -19,7 +19,7 @@ from impulse_query_engine.analyze.query.optimizer import (
     PushdownPlan,
     QueryOptimizer,
     ResamplePushdownRule,
-    query_optimizer,
+    pipeline,
 )
 from impulse_query_engine.analyze.query.solvers.default_solver import (
     DefaultSolver,
@@ -57,26 +57,59 @@ def _unit_conversion_config() -> SolverConfig:
 
 @pytest.fixture
 def small_chunks(monkeypatch):
-    """Resample in chunks of a few samples, so every channel spans many chunks."""
-    monkeypatch.setattr(
-        query_optimizer, "default_rules", lambda: (ResamplePushdownRule(chunk_rows=7),)
-    )
+    """Run the pushdown pipeline in chunks of a few samples, so channels span many chunks."""
+    monkeypatch.setattr(pipeline, "CHUNK_ROWS", 7)
+
+
+def _final_plan(df) -> str:
+    """The final physical plan of *df*, which must have been executed (e.g. collected)."""
+    return df._jdf.queryExecution().executedPlan().toString().split("== Initial Plan ==")[0]
 
 
 def channel_data_scans(df) -> list[str]:
     """Columns of each channels-table scan in the final plan of the executed *df*."""
-    final = df._jdf.queryExecution().executedPlan().toString().split("== Initial Plan ==")[0]
     return sorted(
         re.sub(r"#\d+L?", "", columns)
-        for columns in re.findall(r"FileScan parquet \S+\.channels\[([^\]]*)\]", final)
+        for columns in re.findall(r"FileScan parquet \S+\.channels\[([^\]]*)\]", _final_plan(df))
     )
 
 
-#: One full read for the rows, one narrow read shared by the resample summaries.
-CHANNEL_DATA_SCANS = [
+def shuffles(df) -> list[str]:
+    """Partitionings of the shuffles in the final plan of the executed *df* (reuses once)."""
+    return [
+        re.sub(r"#\d+L?", "", e)
+        for e in re.findall(r"(?<=- )Exchange (\w+\([^)]*\))", _final_plan(df))
+    ]
+
+
+def container_shuffles_of_channel_data(df) -> int:
+    """Shuffles by container alone that read the channels table, in the executed *df*."""
+    lines = _final_plan(df).splitlines()
+
+    def depth(line: str) -> int:
+        return len(line) - len(line.lstrip(" :+-"))
+
+    count = 0
+    for i, line in enumerate(lines):
+        if re.search(r"- Exchange hashpartitioning\(container_id#\d+L?, \d+\)", line):
+            subtree = []
+            for below in lines[i + 1 :]:
+                if depth(below) <= depth(line):
+                    break
+                subtree.append(below)
+            count += any(re.search(r"FileScan parquet \S+\.channels\[", b) for b in subtree)
+    return count
+
+
+#: Pushed channels: one full read, and one narrow read for the series boundaries.
+PUSHED_SCANS = [
     "container_id,channel_id,tstart,tend",
     "container_id,channel_id,tstart,tend,value",
 ]
+#: Channels also used raw add one read.
+MIXED_SCANS = sorted([*PUSHED_SCANS, "container_id,channel_id,tstart,tend,value"])
+#: The one shuffle of the pushed samples: by series and chunk.
+SAMPLE_SHUFFLE = f"hashpartitioning(container_id, channel_id, {VARIANT_COL}, _pd_chunk"
 
 
 @pytest.fixture
@@ -144,17 +177,29 @@ class TestIdenticalResults:
         assert set(rows_on) == {(5, 1)}
         assert rows_on[(5, 1)] == _derived_rows(off, "rpm") < rows_off[(5, None)] / 5
 
-    def test_reads_the_channel_data_once_plus_one_narrow_read(
+    def test_pushed_channels_are_read_twice_and_shuffled_by_chunk(
         self, spark: SparkSession, key_value_store_db
     ):
+        q = key_value_store_db.query
+        result = q.select(q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm")).solve(
+            spark, solver=DefaultSolver(spark, config=_kvs_config(), enable_pushdown=True)
+        )
+        assert len(result.collect()) > 0  # executes result's own plan, which the checks read
+        assert channel_data_scans(result) == PUSHED_SCANS
+        samples = [e for e in shuffles(result) if "_pd_chunk" in e]
+        assert len(samples) == 1 and samples[0].startswith(SAMPLE_SHUFFLE)
+        # The grouped-map UDF still groups the shipped rows by container.
+        assert container_shuffles_of_channel_data(result) == 1
+
+    def test_channels_used_raw_add_one_read(self, spark: SparkSession, key_value_store_db):
         q = key_value_store_db.query
         result = q.select(
             q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm"),
             q.channel(channel_name="Vehicle Speed Sensor").max().alias("speed_max"),
         ).solve(spark, solver=DefaultSolver(spark, config=_kvs_config(), enable_pushdown=True))
-        rows = result.collect()  # executes result's own plan, which the check reads
+        rows = result.collect()
         assert rows and all(row["speed_max"] > 0 for row in rows)
-        assert channel_data_scans(result) == CHANNEL_DATA_SCANS
+        assert channel_data_scans(result) == MIXED_SCANS
 
     def test_raw_use_of_the_same_channel_ships_raw_rows_only(
         self, spark: SparkSession, key_value_store_db, udf_rows
