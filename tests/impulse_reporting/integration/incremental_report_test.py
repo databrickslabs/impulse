@@ -62,9 +62,7 @@ def test_incremental_in_report_case_1(spark):
 
     add_aggs_to_report(my_report)
     # Determine content of all pages
-    my_report.determine_report()
-
-    my_report.persist_results()
+    my_report.run()
 
     meas_df_pre = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")
 
@@ -80,9 +78,7 @@ def test_incremental_in_report_case_1(spark):
     add_aggs_to_report(my_report)
 
     # Determine content of all pages
-    my_report.determine_report()
-
-    my_report.persist_results()
+    my_report.run()
 
     meas_df_post_case_1 = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")
 
@@ -104,9 +100,7 @@ def test_incremental_in_report_case_2(spark):
     add_aggs_to_report(my_report)
 
     # # Determine content of all pages
-    my_report.determine_report()
-
-    my_report.persist_results()
+    my_report.run()
 
     meas_df_post_case_2 = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")
 
@@ -124,8 +118,7 @@ def test_incremental_in_report_case_3(spark):
     )
     add_aggs_to_report(my_report)
 
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     # Save state before case 3 for comparison
     meas_df_pre_case3 = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")
@@ -172,8 +165,7 @@ def test_incremental_in_report_case_3(spark):
         config=dict(set_config("container_metrics_inc_1_2_modified", True)),
     )
     add_aggs_to_report(my_report)
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     meas_df_post_case_3 = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")
     assert meas_df_post_case_3.count() == 2
@@ -226,9 +218,7 @@ def test_incremental_in_report_case_4(spark):
 
     add_aggs_to_report(my_report)
     # # Determine content of all pages
-    my_report.determine_report()
-
-    my_report.persist_results()
+    my_report.run()
 
     # Save histogram dimension and facts before the definition change
     hist_dim_pre_case4 = spark.read.table("spark_catalog.gold.evaluation_histogram_dimension")
@@ -288,8 +278,7 @@ def test_incremental_in_report_case_4(spark):
     )
 
     add_aggs_to_report_changed_bins(my_report)
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     meas_df_post_case_4 = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")
     assert meas_df_post_case_4.count() == 2  # No container changes
@@ -356,8 +345,7 @@ def test_incremental_in_report_case_5(spark):
 
     add_aggs_to_report(my_report)
 
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     meas_df_pre_case_5 = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")
     assert meas_df_pre_case_5.count() == 2
@@ -408,8 +396,7 @@ def test_incremental_in_report_case_5(spark):
     )
     add_aggs_to_report_changed_bins(my_report)
 
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     meas_df_post_case_5 = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")
     assert meas_df_post_case_5.count() == 3  # Container 3 added
@@ -492,8 +479,7 @@ def test_incremental_scoped_full_recalculation(spark):
         config=dict(set_config("container_metrics_inc_1_2", False)),
     )
     add_aggs_to_report(report_1)
-    report_1.determine_report()
-    report_1.persist_results()
+    report_1.run()
 
     hist_dim = spark.read.table("spark_catalog.gold.evaluation_histogram_dimension")
     rpm_vid = hist_dim.where(F.col("name") == "rpm_hist_p1").select("visual_id").collect()[0][0]
@@ -564,8 +550,7 @@ def test_incremental_scoped_full_recalculation(spark):
             config=dict(config_2),
         )
         add_aggs_to_report(report_2)
-        report_2.determine_report()
-        report_2.persist_results()
+        report_2.run()
 
         hist_fact_post = spark.read.table("spark_catalog.gold.evaluation_histogram_fact")
 
@@ -745,8 +730,7 @@ def test_incremental_cross_type_event_definition_change(spark):
     )
     page.add_aggregation(hist)
 
-    report_1.determine_report()
-    report_1.persist_results()
+    report_1.run()
 
     event_fact_run1 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
     basic_event_id = basic_event.get_id()
@@ -785,8 +769,7 @@ def test_incremental_cross_type_event_definition_change(spark):
     )
     page2.add_aggregation(hist2)
 
-    report_2.determine_report()
-    report_2.persist_results()
+    report_2.run()
 
     event_fact_run2 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
 
@@ -831,8 +814,7 @@ def test_incremental_long_seeded_event_fact_accepts_double_event(spark):
             event=pit_event,
         )
     )
-    report_1.determine_report()
-    report_1.persist_results()
+    report_1.run()
 
     event_fact_run1 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
     pit_event_id = pit_event.get_id()
@@ -877,8 +859,7 @@ def test_incremental_long_seeded_event_fact_accepts_double_event(spark):
             event=basic_event,
         )
     )
-    report_2.determine_report()
-    report_2.persist_results()
+    report_2.run()
 
     event_fact_run2 = spark.read.table("spark_catalog.gold.evaluation_event_instance_fact")
     basic_event_id = basic_event.get_id()
@@ -1008,8 +989,7 @@ def test_incremental_modified_container_multi_family_shrink_deletes_stale(spark)
         ),
     )
     calc, event, stats = _add_multi_family(r1)
-    r1.determine_report()
-    r1.persist_results()
+    r1.run()
 
     # Baseline container-1 counts (exact) + byte-identical snapshots of 2 & 3.
     assert _rows(spark, _CC_FACT, "channel_id", calc.get_id(), 1) == 50
@@ -1057,8 +1037,7 @@ def test_incremental_modified_container_multi_family_shrink_deletes_stale(spark)
         assert calc2.get_id() == calc.get_id()
         assert event2.get_id() == event.get_id()
         assert stats2.get_id() == stats.get_id()
-        r2.determine_report()
-        r2.persist_results()
+        r2.run()
 
         # Container 1 shrank on every fact table — no stale orphans survive.
         assert _rows(spark, _CC_FACT, "channel_id", calc.get_id(), 1) == 5

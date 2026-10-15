@@ -89,7 +89,7 @@ def _run_histogram_report(
         )
     )
 
-    report.determine_report()
+    report.run(persist_results=False)
     return report.aggregation_dfs["HISTOGRAM"]["changed"]
 
 

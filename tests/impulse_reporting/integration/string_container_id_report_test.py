@@ -90,10 +90,9 @@ def test_persist_report_string_container_id(spark, setup_string_cid_db):
         )
     )
 
-    report.determine_report()
-    report.persist_results()
+    report.run()
     # Second persist merges string-keyed rows into the existing gold tables (Delta MERGE).
-    report.persist_results()
+    report._persist_results()
 
     histogram_fact = spark.read.table("spark_catalog.gold.evaluation_histogram_fact")
     measurement_dimension = spark.read.table("spark_catalog.gold.evaluation_measurement_dimension")

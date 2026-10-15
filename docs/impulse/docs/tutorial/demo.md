@@ -280,22 +280,21 @@ my_report.add_calculated_channel(avg_temp_channel)
 - `identity` is any non-empty dict (keys are arbitrary, e.g. `channel_name` / `data_key`); it seeds the
   deterministic `channel_id` and is stored on `calculated_channel_dimension` (as a `map`, joined to the
   fact via `channel_id`) — not repeated on every fact row.
-- Registration mirrors events: `add_calculated_channel()` before `determine_report()`.
+- Registration mirrors events: `add_calculated_channel()` before `run()`.
 
 ---
 
 ## Step 5: Compute and persist
 
-Two calls execute the full pipeline:
+One call executes the full pipeline:
 
 ```python
-my_report.determine_report()
-my_report.persist_results()
+my_report.run()
 ```
 
-- `determine_report()` resolves all TSAL expressions, computes event instances, runs all aggregations, and solves
-  calculated channels across all containers matched by the configuration.
-- `persist_results()` writes fact and dimension tables to the Gold layer in Unity Catalog.
+`run()` resolves all TSAL expressions, computes event instances, runs all aggregations, and solves calculated
+channels across all containers matched by the configuration. It then writes fact and dimension tables to the Gold
+layer in Unity Catalog. To compute without writing, call `run(persist_results=False)`.
 
 ---
 

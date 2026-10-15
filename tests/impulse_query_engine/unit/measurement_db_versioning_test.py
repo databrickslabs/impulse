@@ -54,6 +54,28 @@ def test_pin_versions_freezes_snapshot(spark, pin_schema):  # noqa: F811
     assert db.container_metrics(spark).count() == 10
 
 
+def test_pin_versions_pins_extra_table_declared_by_config_subclass(
+    spark, pin_schema
+):  # noqa: F811
+    # A custom read seam declares its extra tables via ``configured_table_uris``; the inherited
+    # ``pin_versions`` then pins them together with the silver tables.
+    extra = f"{pin_schema}.sessions"
+    spark.range(3).toDF("session_id").write.format("delta").mode("overwrite").saveAsTable(extra)
+
+    class ConfigWithExtra(MeasurementDBConfig):
+        def configured_table_uris(self) -> list[str]:
+            return super().configured_table_uris() + [extra]
+
+    cfg = ConfigWithExtra(table_locations="unity_catalog")
+    db = _db(cfg)
+    db.pin_versions(spark)
+    assert cfg.pinned_versions == {extra: 0}
+
+    spark.range(3, 5).toDF("session_id").write.format("delta").mode("append").saveAsTable(extra)
+
+    assert db._read_table(spark, extra).count() == 3
+
+
 def test_pin_versions_freezes_snapshot_path_mode(spark, tmp_path):  # noqa: F811
     # Path mode (``external_locations``): reads and version resolution go through
     # the filesystem path rather than a catalog name.

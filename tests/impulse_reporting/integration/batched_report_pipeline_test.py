@@ -272,7 +272,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
         "SELECT 1 AS stale_id"
     )
 
-    report.determine_report()
+    report.run(persist_results=False)
 
     temp_tables = {
         row.tableName
@@ -324,14 +324,14 @@ def _temp_tables(spark: SparkSession) -> set[str]:
     }
 
 
-def test_persist_results_retains_temp_tables_by_default(spark, cleanup_gold):
-    """Default behavior: the current run's temp tables survive persist_results()."""
+def test_persist_retains_temp_tables_by_default(spark, cleanup_gold):
+    """Default behavior: the current run's temp tables survive persistence."""
     report, _ = _build_batched_report(spark)
 
-    report.determine_report()
+    report._determine_report()
     assert _temp_tables(spark)  # temp tables created during solving
 
-    report.persist_results()
+    report._persist_results()
 
     # Gold facts written with real values, and temp tables still present.
     assert (
@@ -340,14 +340,14 @@ def test_persist_results_retains_temp_tables_by_default(spark, cleanup_gold):
     assert _temp_tables(spark)
 
 
-def test_persist_results_cleans_temp_tables_when_param_true(spark, cleanup_gold):
-    """persist_results(cleanup_temp_tables=True) drops temp tables after a successful write."""
+def test_persist_cleans_temp_tables_when_param_true(spark, cleanup_gold):
+    """cleanup_temp_tables=True drops temp tables after a successful write."""
     report, _ = _build_batched_report(spark)
 
-    report.determine_report()
+    report._determine_report()
     assert _temp_tables(spark)
 
-    report.persist_results(cleanup_temp_tables=True)
+    report._persist_results(cleanup_temp_tables=True)
 
     # Assert on the persisted gold fact table (not the report's lazy DataFrames, which
     # read from the now-dropped temp tables). Persistence completed before cleanup ran.
@@ -356,7 +356,7 @@ def test_persist_results_cleans_temp_tables_when_param_true(spark, cleanup_gold)
     assert not _temp_tables(spark)
 
 
-def test_persist_results_param_overrides_config_flag(spark, cleanup_gold):
+def test_run_cleanup_param_overrides_config_flag(spark, cleanup_gold):
     """Explicit param wins over config: config True but param False retains temp tables."""
     config = ImpulseConfig(
         source=Source(
@@ -375,13 +375,12 @@ def test_persist_results_param_overrides_config_flag(spark, cleanup_gold):
     report, _ = _build_batched_report(spark)
     report.config = config
 
-    report.determine_report()
-    report.persist_results(cleanup_temp_tables=False)
+    report.run(cleanup_temp_tables=False)
 
     assert _temp_tables(spark)
 
 
-def test_persist_results_config_flag_cleans_temp_tables(spark, cleanup_gold):
+def test_run_config_flag_cleans_temp_tables(spark, cleanup_gold):
     """When param is None, the config flag drives cleanup."""
     config = ImpulseConfig(
         source=Source(
@@ -400,7 +399,6 @@ def test_persist_results_config_flag_cleans_temp_tables(spark, cleanup_gold):
     report, _ = _build_batched_report(spark)
     report.config = config
 
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
     assert not _temp_tables(spark)

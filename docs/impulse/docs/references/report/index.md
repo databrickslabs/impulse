@@ -43,8 +43,7 @@ Either `config` or `config_path` must be provided.
 | `add_event(event)`                  | Registers an `Event` with the report. All events used by aggregations must be registered. Event names must be unique (ignoring case). | `event`: `Event` instance.                                                                      |
 | `add_calculated_channel(channel)`   | Registers a [`CalculatedChannel`](./channel.md) with the report.                                                              | `channel`: `CalculatedChannel` instance.                                                        |
 | `get_calculated_channels()`         | Returns the list of registered calculated channels.                                                                           | --                                                                                              |
-| `determine_report(is_incremental)`  | Computes all events, aggregations, calculated channels, and container dimensions. Results are stored on the report object.     | `is_incremental`: `bool` or `None`. Mode hint; overridden by `config.incremental` when present. See [Incremental processing](#incremental-processing). |
-| `persist_results(cleanup_temp_tables)` | Writes all computed results (fact and dimension tables) to the configured Gold layer sink.                                  | `cleanup_temp_tables`: `bool` or `None`. When truthy, drops the batch-solving `__impulse_temp_*` tables after a successful write; `None` (default) falls back to `config.unity_sink.cleanup_temp_tables`. |
+| `run(is_incremental, persist_results, cleanup_temp_tables)` | Computes all events, aggregations, calculated channels, and container dimensions and writes them (fact and dimension tables) to the configured Gold layer sink. With `persist_results=False`, results are kept on the report object instead. On a capped incremental run it loops until all containers are processed, stopping early with a warning if a batch makes no forward progress. | `is_incremental`: `bool` or `None`. Mode hint; overridden by `config.incremental` when present. See [Incremental processing](#incremental-processing). `persist_results`: `bool`, default `True`. `False` computes without writing. `cleanup_temp_tables`: `bool` or `None`. When truthy, drops the batch-solving `__impulse_temp_*` tables after a successful write; `None` (default) falls back to `config.unity_sink.cleanup_temp_tables`. |
 
 ### Execution workflow
 
@@ -54,22 +53,28 @@ Either `config` or `config_path` must be provided.
 my_report.add_event(my_event)
 my_report.add_page(page)
 
-# 3. Compute
-my_report.determine_report()
-
-# 4. Persist
-my_report.persist_results()
+# 3. Compute and persist
+my_report.run()
 ```
 
-`determine_report()` validates that every event referenced by an aggregation has been registered with `add_event()`
+`run()` validates that every event referenced by an aggregation has been registered with `add_event()`
 before computation begins. The aggregation must reference the registered event object itself; a re-created event with
 the same name is rejected.
 
+:::note Deprecated: `determine_report()` / `persist_results()`
+The two-step `determine_report()` + `persist_results()` still works but emits a `FutureWarning` and will be
+removed in a future release. Replace the pair with `run()`, and a standalone `determine_report()` with
+`run(persist_results=False)`. Unlike `run()`, a single `determine_report()` + `persist_results()` pass does not
+drain a capped incremental run. The `persist_results` argument of `run()` is a flag and is unrelated to the
+deprecated method of the same name.
+:::
+
 ### Sinkless mode
 
-If no `unity_sink` is configured, the report runs without persistence. `determine_report()` still computes events,
-aggregations, and dimensions and exposes them on the report object, but `persist_results()` becomes a no-op. This is
-useful for ad-hoc analysis, notebooks, and tests where writing to Unity Catalog is not desired.
+If no `unity_sink` is configured, the report runs without persistence. `run()` still computes events,
+aggregations, and dimensions and exposes them on the report object, but writes nothing. To compute without writing
+while a sink is configured, call `run(persist_results=False)`. This is useful for ad-hoc analysis, notebooks, and
+tests where writing to Unity Catalog is not desired.
 
 ---
 
@@ -81,7 +86,7 @@ validated using Pydantic models. See
 
 ## Incremental processing
 
-Incremental processing lets `determine_report()` skip containers and
+Incremental processing lets `run()` skip containers and
 definitions it already handled on a prior run. Turn it on via
 `incremental.enabled` in config (see
 [Configuration › incremental](../../config/configuration.md#incremental-optional)),
@@ -100,7 +105,7 @@ or pass `is_incremental=True` at call time.
 
 1. No gold layer yet? Run full. Nothing to compare against.
 2. `config.incremental` set? `config.incremental.enabled` wins.
-3. Otherwise the `is_incremental` argument to `determine_report()` wins.
+3. Otherwise the `is_incremental` argument to `run()` wins.
 4. Neither set? Run full.
 
 The first run of a new report is always full. Subsequent runs pick up where the last one left off.

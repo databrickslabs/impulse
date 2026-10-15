@@ -97,7 +97,7 @@ def test_time_window_event_in_report(spark, basic_narrow_db):
     )
     my_report.add_event(window_evt)
 
-    my_report.determine_report()
+    my_report.run(persist_results=False)
 
     event_dfs = my_report.event_dfs
     assert "TIME_WINDOW_EVENT" in event_dfs
@@ -430,8 +430,7 @@ def test_time_window_event_aggregation_join(spark, setup_tw_aligned_db):
     my_report.add_page(page)
     page.add_aggregation(_rpm_stats(my_report, window_evt))
 
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     _assert_ids_join(spark, table_prefix)
     _assert_window_stats_match_samples(spark, schema, table_prefix)
@@ -490,8 +489,7 @@ def test_time_window_event_aggregation_join_raw(spark, setup_tw_aligned_db, raw_
     my_report.add_page(page)
     page.add_aggregation(_rpm_stats(my_report, window_evt))
 
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     _assert_ids_join(spark, table_prefix)
     _assert_window_stats_match_samples(spark, schema, table_prefix, channels_table)
@@ -553,8 +551,7 @@ def test_multiple_time_window_events_coexist(spark, setup_tw_aligned_db):
     page.add_aggregation(_rpm_stats(my_report, evt_short, name="rpm_stats_ten_min"))
     page.add_aggregation(_rpm_stats(my_report, evt_long, name="rpm_stats_thirty_min"))
 
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     event_fact = spark.read.table(f"spark_catalog.gold.{table_prefix}_event_instance_fact")
     event_rows = event_fact.collect()
@@ -643,7 +640,7 @@ def test_time_window_event_covers_containers_without_aggregated_channel(
     my_report.add_page(page)
     page.add_aggregation(_rpm_stats(my_report, window_evt))
 
-    my_report.determine_report()
+    my_report.run(persist_results=False)
 
     rows = my_report.event_dfs["TIME_WINDOW_EVENT"]["changed"].collect()
     _assert_windows_for_all_containers(rows)
@@ -667,7 +664,7 @@ def test_standalone_time_window_event_covers_all_containers(spark, basic_narrow_
     )
     my_report.add_event(TimeWindowEvent(name="ten_sec", window_length=WINDOW_LENGTH))
 
-    my_report.determine_report()
+    my_report.run(persist_results=False)
 
     rows = my_report.event_dfs["TIME_WINDOW_EVENT"]["changed"].collect()
     _assert_windows_for_all_containers(rows)
@@ -713,8 +710,7 @@ def test_time_window_event_ids_join_after_incremental_run(spark, setup_tw_aligne
         page = Page(page_number=1)
         report.add_page(page)
         page.add_aggregation(_rpm_stats(report, window_evt, statistics))
-        report.determine_report()
-        report.persist_results()
+        report.run()
 
     _run(cm_run_1, is_incremental=False, statistics=("min", "max", "mean"))
 
@@ -762,7 +758,7 @@ def test_time_window_event_timestamp_boundaries_require_channel_time_unit(
     my_report.add_event(TimeWindowEvent(name="ten_min", window_length=window_length))
 
     with pytest.raises(ValueError, match=r"TimeWindowEvent.*channel_time_unit"):
-        my_report.determine_report()
+        my_report.run(persist_results=False)
 
 
 @pytest.mark.parametrize(
@@ -786,8 +782,7 @@ def test_container_event_timestamp_boundaries(spark, setup_tw_aligned_db, channe
         config=_aligned_config(schema, table_prefix, channel_time=channel_time),
     )
     my_report.add_event(ContainerEvent(name="full_container"))
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     expected = {
         r.container_id: (r.s, r.e)
@@ -854,8 +849,7 @@ def test_channel_time_change_recomputes_time_window_event_only(spark, setup_tw_a
         report.add_page(page)
         stats = _rpm_stats(report, window_evt)
         page.add_aggregation(stats)
-        report.determine_report()
-        report.persist_results()
+        report.run()
         return report, window_evt, container_evt, stats
 
     def _event_rows(event_id: int):
@@ -941,8 +935,7 @@ def test_udf_reads_absolute_start_ts_next_to_relative_time_window_event(
             event=window_evt,
         )
         page.add_aggregation(absolute_start)
-        report.determine_report()
-        report.persist_results()
+        report.run()
     finally:
         spark.conf.set("spark.sql.session.timeZone", previous_tz)
 

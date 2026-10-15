@@ -77,8 +77,7 @@ page.add_aggregation(
 report.add_page(page)
 
 # Compute and persist to the Gold-layer star schema.
-report.determine_report()
-report.persist_results()
+report.run()
 ```
 
 ## AI Assistant Skills

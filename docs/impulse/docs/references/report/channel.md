@@ -23,7 +23,7 @@ those values are injected as usual — the requirement propagates through the ca
 :::
 
 Every calculated channel used in a report **must** be registered with the report via
-`add_calculated_channel()` before `determine_report()` is called.
+`add_calculated_channel()` before `run()` is called.
 
 ```python
 my_report.add_calculated_channel(my_channel)

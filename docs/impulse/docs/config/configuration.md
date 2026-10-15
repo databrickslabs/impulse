@@ -80,7 +80,7 @@ Defines where gold-layer tables are written.
 | `catalog`             | `str`  | Yes      | Target catalog name.                  |
 | `schema`              | `str`  | Yes      | Target schema name.                   |
 | `table_prefix`        | `str`  | Yes      | Prefix for all generated table names. |
-| `cleanup_temp_tables` | `bool` | No       | Drop the batch-solving `__impulse_temp_*` tables from this schema after `persist_results()` completes successfully. Defaults to `false`. Overridable per call via `persist_results(cleanup_temp_tables=...)`. |
+| `cleanup_temp_tables` | `bool` | No       | Drop the batch-solving `__impulse_temp_*` tables from this schema after `run()` persists successfully. Defaults to `false`. Overridable per call via `run(cleanup_temp_tables=...)`. |
 
 Output tables are named `{table_prefix}_{entity}` (e.g.
 `my_report_histogram_fact`).
@@ -88,9 +88,9 @@ Output tables are named `{table_prefix}_{entity}` (e.g.
 ### Sinkless reports
 
 `unity_sink` is optional. When omitted, the report runs in **sinkless
-mode**: `determine_report()` still computes events, aggregations, and
-container dimensions and exposes them on the report object, but
-`persist_results()` becomes a no-op. Useful for ad-hoc analysis,
+mode**: `run()` still computes events, aggregations, and container
+dimensions and exposes them on the report object, but writes nothing.
+Useful for ad-hoc analysis,
 notebooks, and tests where writing to Unity Catalog is not desired.
 
 ---
@@ -143,11 +143,17 @@ Two independent filter families:
 | `max_containers_per_batch` | `int`       | `null`                   | Caps how many containers are solved at once, to bound per-solve memory. `null` disables the cap; when set it must be `>= 1`. On an **incremental** run, `Report.run()` commits at most this many upserted containers per iteration and loops until the population is drained (see [incremental](#incremental-optional)). On a **full** run, and when a changed definition recomputes over all containers, the population is split into chunks of about this size and solved chunk by chunk. Chunk sizes are approximate (the cap is a memory heuristic, not an exact bound). |
 | `enable_pushdown`       | `bool`         | `false`                  | When `true`, supported expression subtrees (currently `channel.resample(rate)` on a physical channel) are computed natively in Spark before the pandas evaluation, so fewer rows are shipped to it. A channel is only pushed down when every use of it in a solve batch is; results are unchanged. Meant for downsampling: upsampling produces more rows than the raw channel. See [Spark pushdown](../references/query_engine/query_solvers.md#spark-pushdown-opt-in). |
 | `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` to scope reads by project — it is applied to `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured), so it works in both narrow EAV and wide-only data models. Omit it when you don't need project scoping. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
+| `measurement_db`        | `str`          | `"MeasurementDB"`        | Registered name of the MeasurementDB implementation to use. The default is the built-in reader; a custom implementation can reshape a different source schema at read time. See [Custom measurement DB](../extensibility/custom_measurement_db.md). |
+| `measurement_db_config` | `dict`         | `null`                   | Keyword arguments for that implementation's config class, merged with the `source` tables (e.g. extra source tables, prefilter keys). |
 
 If `query_engine` is omitted, the default is `DefaultSolver` with
 `data_type = "RLE"`.
 
----
+Unknown keys under `query_engine` are rejected when the config is loaded: a misspelled key such as
+`"measurment_db"` fails with `Extra inputs are not permitted` instead of being silently ignored.
+
+For a source schema that needs reshaping beyond column renames, select your own read seam — see
+[Custom measurement DB](../extensibility/custom_measurement_db.md).
 
 ## Solver column mappings and filters
 

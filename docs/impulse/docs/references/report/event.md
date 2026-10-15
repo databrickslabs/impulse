@@ -8,7 +8,7 @@ title: Events
 Events define time windows within measurement data that scope downstream aggregations. An event segments continuous
 time-series recordings into meaningful intervals -- for example, "engine RPM between 2000 and 5000".
 
-Every event used by an aggregation **must** be registered with the report via `add_event()` before `determine_report()`
+Every event used by an aggregation **must** be registered with the report via `add_event()` before `run()`
 is called. Event names must be unique within a report (ignoring case), and an aggregation must be scoped to the
 registered event object itself, not to another object with the same name.
 

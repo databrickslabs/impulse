@@ -30,14 +30,14 @@ def test_persist_points_in_time_event(spark):
     )
     my_report.add_event(pit_event)
 
-    my_report.determine_report()
+    my_report._determine_report()
 
     event_dfs = my_report.event_dfs
     event_metadata_dfs = my_report.event_metadata_dfs
     assert event_dfs["POINTS_IN_TIME_EVENT"]["changed"].count() > 0
     assert event_metadata_dfs["POINTS_IN_TIME_EVENT"].count() > 0
 
-    my_report.persist_results()
+    my_report._persist_results()
 
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_event_instance_fact")
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_event_dimension")
