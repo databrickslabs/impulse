@@ -1,0 +1,239 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="1010" viewBox="0 0 980 1010" role="img" aria-labelledby="title desc">
+  <title id="title">How a query is solved</title>
+  <desc id="desc">Five stages: plan on the driver, resolve channels from the metadata tables, load the channel data, compute pushed-down subtrees natively in Spark, and evaluate the rest of each container's expressions in a pandas UDF, which consumes the precomputed subtree results. Example: eng_rpm.where(event).histogram2d(veh_spd.where(event), bins) with event = veh_spd &gt; 0. Spark computes the event intervals and the filtered veh_spd samples; the UDF filters the raw eng_rpm rows to the event and computes the 2D histogram. Calculated channels that are pushed down entirely skip the UDF.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1e293b; }
+      .stage-title { font-size: 15px; font-weight: 700; }
+      .badge-text { font-size: 12px; font-weight: 700; fill: #ffffff; }
+      .title { font-size: 13px; font-weight: 600; }
+      .mono { font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace; font-size: 12.5px; font-weight: 600; }
+      .mono-sub { font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; fill: #334155; }
+      .sub { font-size: 11.5px; fill: #475569; }
+      .label { font-size: 11px; fill: #475569; font-style: italic; }
+      .green { fill: #15803d; }
+      .faded { fill: #94a3b8; }
+      .pill-text { font-size: 12.5px; fill: #0e7490; font-weight: 600; }
+      .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.2; }
+      .optional { stroke-dasharray: 5 3; }
+      .pushdown { fill: #f0fdf4; stroke: #16a34a; stroke-width: 1.2; stroke-dasharray: 5 3; }
+      .pill { fill: #ffffff; stroke: #0891b2; stroke-width: 1.2; }
+      .node { fill: #ede9fe; stroke: #7c3aed; stroke-width: 1; }
+      .node-native { fill: #dcfce7; stroke: #16a34a; stroke-width: 1.2; }
+      .node-faded { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 3 2; }
+      .node-raw { fill: #ffffff; stroke: #64748b; stroke-width: 1.2; }
+      .node-rest { fill: #faf5ff; stroke: #a78bfa; stroke-width: 1; stroke-dasharray: 4 2; }
+      .rest { fill: #7c3aed; }
+      .join { stroke: #475569; stroke-width: 1.5; fill: none; }
+      .output { fill: #f8fafc; stroke: #334155; stroke-width: 1.4; }
+      .flow { stroke: #475569; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+      .flow-green { stroke: #16a34a; stroke-width: 1.5; fill: none; marker-end: url(#arrow-green); }
+      .bypass { stroke: #16a34a; stroke-width: 1.5; fill: none; stroke-dasharray: 6 4; marker-end: url(#arrow-green); }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="1010" rx="14" fill="#ffffff"/>
+
+  <!-- 1 Plan -->
+  <rect x="20" y="20" width="900" height="112" rx="12" fill="#eef2ff" stroke="#6366f1" stroke-width="1.2"/>
+  <circle cx="44" cy="40" r="11" fill="#6366f1"/>
+  <text class="badge-text" x="44" y="44" text-anchor="middle">1</text>
+  <text class="stage-title" x="62" y="45">Plan · driver</text>
+
+  <rect class="box" x="40" y="58" width="250" height="56" rx="8"/>
+  <text class="mono" x="165" y="81" text-anchor="middle">query.select(e1, …, en)</text>
+  <text class="mono-sub" x="165" y="99" text-anchor="middle">.solve(spark, solver)</text>
+
+  <rect class="box" x="320" y="58" width="280" height="56" rx="8"/>
+  <text class="title" x="460" y="81" text-anchor="middle">Infer result types</text>
+  <text class="sub" x="460" y="99" text-anchor="middle">build each expression on an empty cache</text>
+
+  <rect class="pushdown" x="630" y="58" width="270" height="56" rx="8"/>
+  <text class="title" x="765" y="81" text-anchor="middle">Plan pushdowns (opt-in)</text>
+  <text class="sub" x="765" y="99" text-anchor="middle">QueryOptimizer picks subtrees for Spark</text>
+
+  <path class="flow" d="M290,86 L318,86"/>
+  <path class="flow" d="M600,86 L628,86"/>
+  <path class="flow" d="M470,132 L470,148"/>
+
+  <!-- 2 Resolve channels -->
+  <rect x="20" y="150" width="900" height="150" rx="12" fill="#ecfeff" stroke="#0891b2" stroke-width="1.2"/>
+  <circle cx="44" cy="170" r="11" fill="#0891b2"/>
+  <text class="badge-text" x="44" y="174" text-anchor="middle">2</text>
+  <text class="stage-title" x="62" y="175">Resolve channels · Spark, metadata tables (no sample data)</text>
+
+  <rect class="box optional" x="40" y="188" width="158" height="52" rx="8"/>
+  <text class="mono" x="119" y="210" text-anchor="middle">container_tags</text>
+  <text class="sub" x="119" y="228" text-anchor="middle">container filters</text>
+
+  <rect class="box" x="214" y="188" width="158" height="52" rx="8"/>
+  <text class="mono" x="293" y="210" text-anchor="middle">container_metrics</text>
+  <text class="sub" x="293" y="228" text-anchor="middle">project, metric filters</text>
+
+  <rect class="box optional" x="388" y="188" width="158" height="52" rx="8"/>
+  <text class="mono" x="467" y="210" text-anchor="middle">channel_tags</text>
+  <text class="sub" x="467" y="228" text-anchor="middle">channel tags (EAV)</text>
+
+  <rect class="box" x="562" y="188" width="158" height="52" rx="8"/>
+  <text class="mono" x="641" y="210" text-anchor="middle">channel_metrics</text>
+  <text class="sub" x="641" y="228" text-anchor="middle">match each selector</text>
+
+  <rect class="box optional" x="736" y="188" width="158" height="52" rx="8"/>
+  <text class="mono" x="815" y="210" text-anchor="middle">channel_mapping</text>
+  <text class="sub" x="815" y="228" text-anchor="middle">aliases, unit factors</text>
+
+  <path class="flow" d="M198,214 L212,214"/>
+  <path class="flow" d="M372,214 L386,214"/>
+  <path class="flow" d="M546,214 L560,214"/>
+  <path class="flow" d="M720,214 L734,214"/>
+
+  <rect class="pill" x="190" y="256" width="560" height="32" rx="16"/>
+  <text class="pill-text" x="470" y="277" text-anchor="middle">channel matches: container_id · channel_id · selector_ids · conversion_factor</text>
+  <path class="flow" d="M815,240 L815,272 L752,272"/>
+
+  <!-- 3 Load channel data -->
+  <rect x="20" y="318" width="900" height="114" rx="12" fill="#fffbeb" stroke="#d97706" stroke-width="1.2"/>
+  <circle cx="44" cy="338" r="11" fill="#d97706"/>
+  <text class="badge-text" x="44" y="342" text-anchor="middle">3</text>
+  <text class="stage-title" x="62" y="343">Load channel data · Spark, channels table</text>
+
+  <rect class="box" x="40" y="358" width="250" height="56" rx="8"/>
+  <text class="mono" x="165" y="381" text-anchor="middle">channels</text>
+  <text class="sub" x="165" y="399" text-anchor="middle">column mapping, filters</text>
+
+  <rect class="box optional" x="320" y="358" width="250" height="56" rx="8"/>
+  <text class="title" x="445" y="381" text-anchor="middle">Raw mode: encode</text>
+  <text class="sub" x="445" y="399" text-anchor="middle">RLE or intervals; POI union</text>
+
+  <rect class="box" x="600" y="358" width="300" height="56" rx="8"/>
+  <text class="title" x="750" y="381" text-anchor="middle">Join channel matches</text>
+  <text class="sub" x="750" y="399" text-anchor="middle">every row knows the selectors that read it</text>
+
+  <path class="flow" d="M290,386 L318,386"/>
+  <path class="flow" d="M570,386 L598,386"/>
+  <path class="flow" d="M700,288 L700,356"/>
+
+  <!-- 4 Compute subtrees natively (pushdown) -->
+  <rect x="20" y="450" width="900" height="200" rx="12" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.4" stroke-dasharray="7 4"/>
+  <circle cx="44" cy="470" r="11" fill="#16a34a"/>
+  <text class="badge-text" x="44" y="474" text-anchor="middle">4</text>
+  <text class="stage-title" x="62" y="475">Compute subtrees natively · Spark pushdown (opt-in)</text>
+
+  <path class="flow" d="M470,432 L470,448"/>
+
+  <rect class="box" x="40" y="490" width="620" height="146" rx="8"/>
+  <text class="title" x="350" y="509" text-anchor="middle">Split the expression at its pushed-down subtrees</text>
+  <text class="mono-sub" x="350" y="528" text-anchor="middle">eng_rpm<tspan class="rest">.where(</tspan><tspan class="green">veh_spd &gt; 0</tspan><tspan class="rest">).histogram2d(</tspan><tspan class="green">veh_spd.where(veh_spd &gt; 0)</tspan><tspan class="rest">, bins)</tspan></text>
+
+  <rect class="node-raw" x="60" y="538" width="240" height="22" rx="11"/>
+  <text class="mono-sub" x="180" y="553" text-anchor="middle">eng_rpm</text>
+  <rect x="52" y="563" width="256" height="63" rx="10" fill="none" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <rect class="node-native" x="60" y="568" width="240" height="22" rx="11"/>
+  <text class="mono-sub" x="180" y="583" text-anchor="middle">① veh_spd &gt; 0</text>
+  <rect class="node-native" x="60" y="598" width="240" height="22" rx="11"/>
+  <text class="mono-sub" x="180" y="613" text-anchor="middle">② veh_spd.where(veh_spd &gt; 0)</text>
+
+  <path class="join" d="M300,549 L326,549 L326,564"/>
+  <path class="join" d="M300,579 L326,579 L326,564"/>
+  <path class="flow" d="M326,564 L346,564"/>
+  <rect class="node-rest" x="348" y="553" width="100" height="22" rx="11"/>
+  <text class="mono-sub rest" x="398" y="568" text-anchor="middle">.where(·)</text>
+
+  <path class="join" d="M448,564 L470,564 L470,587"/>
+  <path class="join" d="M308,609 L470,609 L470,587"/>
+  <path class="flow" d="M470,587 L488,587"/>
+  <rect class="node-rest" x="490" y="576" width="150" height="22" rx="11"/>
+  <text class="mono-sub rest" x="565" y="591" text-anchor="middle">.histogram2d(…)</text>
+  <text class="label rest" x="565" y="620" text-anchor="middle">rest: pandas UDF</text>
+
+  <rect class="pushdown" x="690" y="490" width="210" height="146" rx="8"/>
+  <text class="title" x="795" y="513" text-anchor="middle">Rules</text>
+  <text class="sub" x="795" y="535" text-anchor="middle">e.g. resample(…) or filter</text>
+  <text class="sub" x="795" y="551" text-anchor="middle">conditions like veh_spd &gt; 0</text>
+  <text class="sub" x="795" y="575" text-anchor="middle">each reads one channel;</text>
+  <text class="sub" x="795" y="591" text-anchor="middle">one shared pass,</text>
+  <text class="sub" x="795" y="607" text-anchor="middle">parallel per channel chunk</text>
+
+  <path class="flow-green" d="M660,563 L688,563"/>
+
+  <!-- 5 Evaluate per container -->
+  <rect x="20" y="668" width="900" height="210" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.2"/>
+  <circle cx="44" cy="688" r="11" fill="#7c3aed"/>
+  <text class="badge-text" x="44" y="692" text-anchor="middle">5</text>
+  <text class="stage-title" x="62" y="693">Evaluate per container · pandas UDF (GROUPED_MAP)</text>
+
+  <path class="flow-green" d="M470,650 L470,666"/>
+  <text class="label green" x="482" y="662">results of pushed-down subtrees (derived rows) and raw rows still needed</text>
+
+  <rect class="box" x="720" y="710" width="180" height="56" rx="8"/>
+  <text class="title" x="810" y="733" text-anchor="middle">Group by container</text>
+  <text class="sub" x="810" y="751" text-anchor="middle">repartition by container_id</text>
+
+  <rect class="box" x="520" y="710" width="180" height="56" rx="8"/>
+  <text class="mono" x="610" y="733" text-anchor="middle">TimeSeriesCache</text>
+  <text class="sub" x="610" y="751" text-anchor="middle">one container's rows</text>
+
+  <rect class="box" x="40" y="710" width="460" height="152" rx="8"/>
+  <text class="title" x="270" y="730" text-anchor="middle">Evaluate the rest of the expression</text>
+  <rect class="node-raw" x="56" y="744" width="150" height="24" rx="12"/>
+  <text class="mono-sub" x="131" y="760" text-anchor="middle">eng_rpm</text>
+  <rect class="node-native" x="56" y="776" width="150" height="24" rx="12"/>
+  <text class="mono-sub" x="131" y="792" text-anchor="middle">① event intervals</text>
+  <rect class="node-native" x="56" y="808" width="150" height="24" rx="12"/>
+  <text class="mono-sub" x="131" y="824" text-anchor="middle">② filtered veh_spd</text>
+
+  <path class="join" d="M206,756 L226,756 L226,772"/>
+  <path class="join" d="M206,788 L226,788 L226,772"/>
+  <path class="flow" d="M226,772 L244,772"/>
+  <rect class="node" x="246" y="760" width="90" height="24" rx="12"/>
+  <text class="mono-sub" x="291" y="776" text-anchor="middle">.where(·)</text>
+
+  <path class="join" d="M336,772 L356,772 L356,796"/>
+  <path class="join" d="M206,820 L356,820 L356,796"/>
+  <path class="flow" d="M356,796 L372,796"/>
+  <rect class="node" x="374" y="784" width="118" height="24" rx="12"/>
+  <text class="mono-sub" x="433" y="800" text-anchor="middle">.histogram2d(…)</text>
+  <text class="sub" x="270" y="852" text-anchor="middle">Precomputed results arrive ready-made; pandas evaluates only the rest.</text>
+
+  <rect class="box" x="520" y="784" width="380" height="56" rx="8"/>
+  <text class="title" x="710" y="807" text-anchor="middle">Serialize each result</text>
+  <text class="sub" x="710" y="825" text-anchor="middle">SampleSeries → binary, others → arrays or doubles</text>
+
+  <path class="flow" d="M720,738 L702,738"/>
+  <path class="flow" d="M520,738 L502,738"/>
+  <path class="flow" d="M500,812 L518,812"/>
+
+  <!-- Results -->
+  <path class="flow" d="M600,840 L600,882 L250,882 L250,898"/>
+  <path class="flow" d="M800,840 L800,898"/>
+
+  <rect class="output" x="40" y="900" width="420" height="64" rx="10"/>
+  <text class="mono" x="250" y="926" text-anchor="middle">solve() · toPandas()</text>
+  <text class="sub" x="250" y="945" text-anchor="middle">one row per container, one column per selected expression</text>
+
+  <rect class="output" x="480" y="900" width="420" height="64" rx="10"/>
+  <text class="mono" x="690" y="926" text-anchor="middle">solve_calculated_channels()</text>
+  <text class="sub" x="690" y="945" text-anchor="middle">rows: container_id, channel_id, tstart, tend, value, identity</text>
+
+  <!-- Native calculated channels skip the UDF -->
+  <path class="bypass" d="M900,563 L948,563 L948,932 L902,932"/>
+  <text class="sub green" x="962" y="748" text-anchor="middle" transform="rotate(-90 962 748)">native: every calculated channel pushed down</text>
+
+  <!-- Legend -->
+  <rect class="box optional" x="40" y="980" width="26" height="14" rx="3"/>
+  <text class="sub" x="74" y="991">optional table or opt-in step</text>
+  <rect class="node-native" x="250" y="980" width="26" height="14" rx="7"/>
+  <text class="sub" x="284" y="991">computed natively in Spark</text>
+  <rect class="node-raw" x="450" y="980" width="26" height="14" rx="7"/>
+  <text class="sub" x="484" y="991">raw channel rows</text>
+  <rect class="node" x="600" y="980" width="26" height="14" rx="7"/>
+  <text class="sub" x="634" y="991">evaluated in pandas</text>
+  <path d="M780,987 L812,987" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="6 4" fill="none"/>
+  <text class="sub" x="820" y="991">no pandas UDF</text>
+</svg>
