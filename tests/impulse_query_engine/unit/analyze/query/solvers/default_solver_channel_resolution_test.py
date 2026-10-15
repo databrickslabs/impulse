@@ -14,7 +14,10 @@ import pyspark.sql.functions as F
 import pytest
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
-from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    SeriesType,
+    TimeSeriesSelector,
+)
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     ChannelMappingConfig,
@@ -180,4 +183,13 @@ def test_aliased_and_direct_selectors_on_the_same_tags_have_distinct_ids():
     direct = TimeSeriesSelector(expr)
     aliased = TimeSeriesSelector(expr, uses_alias=True)
     assert direct.selector_id == zlib.crc32(str(expr).encode())
+    assert aliased.selector_id != direct.selector_id
+
+
+def test_aliased_and_direct_poi_selectors_on_the_same_tags_have_distinct_ids():
+    expr = TagSelector("channel_name") == "Fault Code"
+    direct = TimeSeriesSelector(expr, series_type=SeriesType.POINTS_IN_TIME)
+    aliased = TimeSeriesSelector(expr, uses_alias=True, series_type=SeriesType.POINTS_IN_TIME)
+    expected_direct = f"{SeriesType.POINTS_IN_TIME}|{expr}|{direct._value_type}"
+    assert direct.selector_id == zlib.crc32(expected_direct.encode())
     assert aliased.selector_id != direct.selector_id

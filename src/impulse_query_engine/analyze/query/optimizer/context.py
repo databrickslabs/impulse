@@ -47,7 +47,7 @@ BLOCK_END = "_pd_block_end"
 
 def run_col(run: str, name: str) -> str:
     """Name of the pipeline column *name* of the run *run*."""
-    return f"_pd_run_{run}_{name}"
+    return f"_pd_run__{run}__{name}"
 
 
 @dataclass(frozen=True)
@@ -159,7 +159,7 @@ class SeriesContext:
 
     def name(self, column: str) -> str:
         """Pipeline name of the rule's column *column*."""
-        return f"_pd_{self._rule.name}_{column}"
+        return f"_pd_rule__{self._rule.name}__{column}"
 
     def col(self, column: str) -> Column:
         """The rule's column *column*, defined by an earlier hook entry."""

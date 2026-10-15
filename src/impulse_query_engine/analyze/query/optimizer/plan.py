@@ -12,6 +12,7 @@ from pyspark.sql import Column
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
 
 from .pushdown import RAW_VARIANT, Pushdown, PushdownRule
+from .traversal import match_node
 
 
 @dataclass(frozen=True, eq=False)
@@ -88,23 +89,31 @@ class PushdownPlan:
         return frozenset(self.variants_by_selector)
 
     def variants_by_rule(self) -> list[tuple[PushdownRule, dict[int, Pushdown]]]:
-        """Group the variants by the rule that computes them."""
+        """Group the variants by the rule that computes them.
+
+        Raises
+        ------
+        ValueError
+            If two different rules share a name: their pipeline columns would
+            collide.
+        """
         groups: dict[str, tuple[PushdownRule, dict[int, Pushdown]]] = {}
         for variant, pushdown in self.pushdowns_by_variant.items():
             rule = pushdown.rule
-            groups.setdefault(rule.name, (rule, {}))[1][variant] = pushdown
+            group = groups.setdefault(rule.name, (rule, {}))
+            if group[0] is not rule:
+                raise ValueError(f"two different pushdown rules are named {rule.name!r}")
+            group[1][variant] = pushdown
         return list(groups.values())
 
     def lookup(self, node: TimeSeriesExpression) -> tuple[Pushdown, int] | None:
         """Return ``(pushdown, variant)`` when *node* is a pushed-down subtree."""
-        for rule in self.rules:
-            pushdown = rule.match(node)
-            if pushdown is None:
-                continue
-            variant = self.variant_ids.get(pushdown.variant_key)
-            if variant in self.variants_by_selector.get(pushdown.selector.selector_id, ()):
-                return pushdown, variant
+        pushdown = match_node(node, self.rules)
+        if pushdown is None:
             return None
+        variant = self.variant_ids.get(pushdown.variant_key)
+        if variant in self.variants_by_selector.get(pushdown.selector.selector_id, ()):
+            return pushdown, variant
         return None
 
     def native_targets(

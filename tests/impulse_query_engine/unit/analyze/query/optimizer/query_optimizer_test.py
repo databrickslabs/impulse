@@ -21,10 +21,13 @@ from impulse_query_engine.analyze.query.events.sequence_of_events_expression imp
     SequenceOfEventsExpression,
 )
 from impulse_query_engine.analyze.query.optimizer import (
+    Pushdown,
     PushdownContext,
+    PushdownPlan,
     QueryOptimizer,
     ResamplePushdownRule,
 )
+from impulse_query_engine.analyze.query.optimizer.traversal import discover
 from impulse_query_engine.model.series.intervals import Intervals
 
 _LONG = PushdownContext(T.LongType(), T.LongType())
@@ -128,6 +131,64 @@ class TestDiscovery:
         over_counted = _Opaque({"a": resampled, "b": resampled}, reported=[rpm])
         hidden_raw_use = _Opaque({"a": rpm.resample(1e6)}, reported=[rpm, rpm])
         assert _plan(over_counted, hidden_raw_use).is_empty
+
+
+class _MatchesAnyNode(ResamplePushdownRule):
+    """Claims every non-selector node that reads exactly one selector, of any type."""
+
+    name = "any_node"
+
+    def match(self, node):
+        if isinstance(node, TimeSeriesSelector) or not isinstance(node, TimeSeriesExpression):
+            return None
+        selectors = node.get_selectors()
+        if len(selectors) != 1:
+            return None
+        return Pushdown(rule=self, selector=selectors[0], params=(), consumed=tuple(selectors))
+
+    def supports(self, pushdown, context):
+        return True
+
+
+class TestOnlyOperationsArePushedDown:
+    # Only TimeSeriesOp.build serves precomputed results; other node types must
+    # keep their raw rows.
+    def test_aggregation_node_is_not_a_candidate(self, rpm):
+        found, leaves = discover(HistogramDuration(rpm, bins=[0, 1000]), [_MatchesAnyNode()])
+        assert found == []
+        assert [s.selector_id for s in leaves] == [rpm.selector_id]
+
+    def test_udf_node_is_not_a_candidate_but_its_arguments_are(self, rpm):
+        found, _ = discover(rpm.resample(1e6).apply(lambda s: s), [_MatchesAnyNode()])
+        assert [node.operation for node, _ in found] == ["resample"]
+
+    def test_lookup_ignores_other_node_types(self, rpm):
+        rule = _MatchesAnyNode()
+        plan = QueryOptimizer([rule]).optimize([rpm.resample(1e6)], _LONG)
+        assert plan.lookup(rpm.resample(1e6)) is not None
+        assert plan.lookup(HistogramDuration(rpm, bins=[0, 1000])) is None
+
+
+class TestRuleNames:
+    @pytest.mark.parametrize("name", ["Bad", "a__b", "_x", "x_", "1x", ""])
+    def test_invalid_rule_names_are_rejected(self, name):
+        rule = type("_Named", (ResamplePushdownRule,), {"name": name})()
+        with pytest.raises(ValueError, match="rule name"):
+            QueryOptimizer([rule])
+
+    def test_rule_names_must_be_unique(self):
+        with pytest.raises(ValueError, match="unique"):
+            QueryOptimizer([ResamplePushdownRule(), ResamplePushdownRule()])
+
+    def test_plan_rejects_two_rules_sharing_a_name(self, rpm, spd):
+        first, second = ResamplePushdownRule(), ResamplePushdownRule()
+        plan = PushdownPlan.build(
+            (first, second),
+            [first.match(rpm.resample(1e6)), second.match(spd.resample(2e6))],
+            [rpm.selector_id, spd.selector_id],
+        )
+        with pytest.raises(ValueError, match="two different pushdown rules"):
+            plan.variants_by_rule()
 
 
 class _Opaque(TimeSeriesExpression):

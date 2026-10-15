@@ -211,6 +211,47 @@ class TestNativeCalculatedChannels:
         by_channel = rows.groupby("channel_id")["value"].sum()
         assert len(by_channel) == 2 and by_channel.iloc[0] != by_channel.iloc[1]
 
+    def test_nan_conversion_factor_leaves_values_unconverted(
+        self, spark, unit_conversion_dataframes, mock_workspace_client, udf_calls
+    ):
+        # vehicle_speed converts km/h to m/s; a NaN km/h factor must be skipped like
+        # the pandas evaluation does, not turn every value into null.
+        tables = dict(unit_conversion_dataframes)
+        tables["unit_conversion"] = tables["unit_conversion"].withColumn(
+            "conversion_factor",
+            F.when(F.col("unit") == "km/h", F.lit(float("nan"))).otherwise(
+                F.col("conversion_factor").cast("double")
+            ),
+        )
+        cfg = MeasurementDBConfig.for_debug(tables)
+        cfg.channel_mapping_table = "channel_mapping"
+        cfg.unit_conversion_table = "unit_conversion"
+        db = MeasurementDB(cfg, ws=mock_workspace_client)
+
+        def channels(q):
+            return [
+                CalculatedChannel(
+                    q.channel_with_alias(channel_alias="vehicle_speed").resample(RATE),
+                    {"channel_name": "speed_aliased"},
+                ),
+                CalculatedChannel(
+                    q.channel(channel_name="Vehicle Speed Sensor").resample(RATE),
+                    {"channel_name": "speed_raw"},
+                ),
+            ]
+
+        rows, _ = _solve_both(spark, db, channels, udf_calls, config=_unit_conversion_config())
+        assert udf_calls == [1, 0]
+        aliased, raw = (
+            rows[rows["identity"] == (("channel_name", name),)]
+            for name in ("speed_aliased", "speed_raw")
+        )
+        same_samples = aliased.merge(raw, on=["container_id", "tstart", "tend"])
+        assert len(same_samples) > 0 and same_samples["value_x"].notna().all()
+        pd.testing.assert_series_equal(
+            same_samples["value_x"], same_samples["value_y"], check_names=False
+        )
+
     def test_raw_data(self, spark, setup_raw_channels_db, mock_workspace_client, udf_calls):
         tables = {
             name: spark.read.table(f"spark_catalog.silver_raw.{name}")

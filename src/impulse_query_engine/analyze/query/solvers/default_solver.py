@@ -1821,9 +1821,9 @@ class DefaultSolver(QuerySolver):
         value = F.col(val).cast("double")
         if has_conversion:
             factor = F.col(conv)
-            value = F.when(F.col("_cc_uses_alias") & factor.isNotNull(), value * factor).otherwise(
-                value
-            )
+            # Like TimeSeriesCache.to_sample_series: a null or NaN factor leaves values as they are.
+            applies = F.col("_cc_uses_alias") & factor.isNotNull() & ~F.isnan(factor)
+            value = F.when(applies, value * factor).otherwise(value)
 
         def as_udf_output(col: Column, dtype: T.DataType) -> Column:
             # The UDF emits float64 arrays; Arrow casts them back and masks NaN as null.

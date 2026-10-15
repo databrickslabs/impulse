@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -29,6 +30,23 @@ if TYPE_CHECKING:
 VARIANT_COL = "__impulse_variant"
 #: Variant id of the unmodified (raw) channel data.
 RAW_VARIANT = 0
+
+_NAME = re.compile(r"[a-z][a-z0-9]*(_[a-z0-9]+)*")
+
+
+def check_name(kind: str, name: str) -> str:
+    """Return *name* if it is a valid rule, rule column or run name, else raise.
+
+    Names are lowercase letters, digits and single underscores, starting with a
+    letter.  Pipeline columns join them with ``__``, which a name never contains,
+    so names of different rules cannot collide.
+    """
+    if not isinstance(name, str) or not _NAME.fullmatch(name):
+        raise ValueError(
+            f"{kind} name {name!r} must consist of lowercase letters, digits and single "
+            "underscores, starting with a letter"
+        )
+    return name
 
 
 @dataclass(frozen=True)
@@ -110,7 +128,8 @@ class PushdownRule(abc.ABC):
     ``(container_id, channel_id, variant, tstart, tend, value)``.
     """
 
-    #: Unique rule name, part of every :attr:`Pushdown.variant_key`.
+    #: Unique rule name, part of every :attr:`Pushdown.variant_key`; lowercase
+    #: letters, digits and single underscores (see :func:`check_name`).
     name: ClassVar[str]
     #: Whether the rule needs its series in order (neighbours, runs, series
     #: facts).  Per-sample rules set ``False`` and skip the series scan.
@@ -136,12 +155,17 @@ class PushdownRule(abc.ABC):
         """Run definitions beyond the built-in continuous blocks, by name.
 
         Each maps ``(prev, cur)`` samples to whether ``cur`` starts a new run;
-        :meth:`SeriesContext.run` then describes the sample's run.
+        :meth:`SeriesContext.run` then describes the sample's run.  Names follow
+        :func:`check_name` and only need to be unique within the rule.
         """
         return {}
 
     def row_columns(self, ctx: SeriesContext) -> Mapping[str, Column]:
-        """Columns computed for every sample, in order; refer to them via ``ctx.col``."""
+        """Columns computed for every sample, in order; refer to them via ``ctx.col``.
+
+        Column names follow :func:`check_name` and only need to be unique within
+        the rule.
+        """
         return {}
 
     def keep(self, ctx: SeriesContext) -> Column:

@@ -15,7 +15,12 @@ import pytest
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
-from impulse_query_engine.analyze.query.optimizer import VARIANT_COL, Pushdown, apply_pushdowns
+from impulse_query_engine.analyze.query.optimizer import (
+    VARIANT_COL,
+    Pushdown,
+    SeriesPipeline,
+    apply_pushdowns,
+)
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from tests.conftest import spark
 from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers import (
@@ -24,6 +29,7 @@ from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers im
     OffsetRule,
     ProbeRule,
     channel_rows,
+    chunk_rows,
     plan_for,
     random_series,
     run,
@@ -159,9 +165,11 @@ def test_diff_matches_sample_series(spark):
             nptest.assert_array_equal(actual[key].values, exp.values)
 
 
+_OFFSET = OffsetRule()
+
+
 def _offset(value: float) -> Pushdown:
-    rule = OffsetRule()
-    return Pushdown(rule=rule, selector=_X, params=(("offset", value),), consumed=(_X,))
+    return Pushdown(rule=_OFFSET, selector=_X, params=(("offset", value),), consumed=(_X,))
 
 
 def test_per_sample_rules_share_the_row_branch_with_raw_rows(spark):
@@ -233,3 +241,56 @@ def test_one_shuffle_of_the_samples(spark):
     assert all(e.startswith(f"hashpartitioning({key}") for e in exchanges)
     # One full read, shared by the chunk pass and its summaries, and the boundaries.
     assert len(re.findall(r"Scan ExistingRDD", final)) == 2
+
+
+def _values_by_tend(df) -> dict:
+    return {row["tend"]: row["value"] for row in df.collect()}
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, None])
+def test_null_and_nan_tstarts_keep_their_place_in_the_series(spark, chunk_size):
+    # Spark orders a null tstart first and a NaN tstart last; their chunks must too.
+    nan = float("nan")
+    samples = ([None, 0.0, 1.0, 2.0, 3.0, 4.0, nan], [0.5, 1, 2, 3, 4, 5, 5.5], [1.0] * 7)
+    df = channel_rows(spark, {(1, 1, 1): samples, (1, 1, 2): samples}, time_type=T.DoubleType())
+    prev = ProbeRule("prev_start", lambda ctx: ctx.prev.tstart).pushdown(_X)
+    nxt = ProbeRule("next_start", lambda ctx: ctx.next.tstart).pushdown(_X)
+    with chunk_rows(chunk_size):
+        result = apply_pushdowns(df, plan_for({1: prev, 2: nxt}), CONFIG, include_raw=False)
+        by_variant = {v: _values_by_tend(result.where(F.col(VARIANT_COL) == v)) for v in (1, 2)}
+    expected_prev = {0.5: None, 1.0: None, 2.0: 0.0, 3.0: 1.0, 4.0: 2.0, 5.0: 3.0, 5.5: 4.0}
+    expected_next = {0.5: 0.0, 1.0: 1.0, 2.0: 2.0, 3.0: 3.0, 4.0: 4.0, 5.0: nan, 5.5: None}
+    for actual, expected in ((by_variant[1], expected_prev), (by_variant[2], expected_next)):
+        assert actual.keys() == expected.keys()
+        nptest.assert_array_equal(_as_float(actual.values()), _as_float(expected.values()))
+
+
+def test_series_without_a_finite_tend_is_still_chunked(spark):
+    nan = float("nan")
+    samples = ([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], [nan] * 6, [1.0] * 6)
+    df = channel_rows(spark, {(1, 1, 1): samples}, time_type=T.DoubleType())
+    rule = DiffRule()
+    with chunk_rows(2):
+        chunks = SeriesPipeline([(rule, {1: rule.match(_X.diff())})], CONFIG)._chunked(df)
+        assert chunks.select("_pd_chunk").distinct().count() == 3
+
+
+def test_rule_names_cannot_collide_with_pipeline_columns(spark):
+    # The rule column "ts" of a rule named "prev" once overwrote the pipeline's prev tstart.
+    rule = ProbeRule("prev", lambda ctx: ctx.prev.tstart)
+    rule.row_columns = lambda ctx: {"ts": ctx.value * 100}
+    samples = ([0, 1, 2], [1, 2, 3], [1.0, 2.0, 3.0])
+    actual = run(spark, {(1, 1, 1): samples}, {1: rule.pushdown(_X)}, chunk_size=1)
+    nptest.assert_array_equal(actual[(1, 1, 1)].values, [np.nan, 0.0, 1.0])
+
+
+@pytest.mark.parametrize("hook", ["row_columns", "runs"])
+def test_invalid_rule_column_and_run_names_are_rejected(spark, hook):
+    rule = ProbeRule("bad_names", lambda ctx: ctx.value)
+    if hook == "row_columns":
+        rule.row_columns = lambda ctx: {"Bad__name": ctx.value}
+    else:
+        rule._runs = {"Bad__name": _value_change}
+    df = channel_rows(spark, {(1, 1, 1): ([0], [1], [1.0])})
+    with pytest.raises(ValueError, match="name 'Bad__name'"):
+        apply_pushdowns(df, plan_for({1: rule.pushdown(_X)}), CONFIG)

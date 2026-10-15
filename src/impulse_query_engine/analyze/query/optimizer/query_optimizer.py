@@ -9,7 +9,7 @@ from typing import Any
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
 
 from .plan import PushdownPlan
-from .pushdown import Pushdown, PushdownContext, PushdownRule
+from .pushdown import Pushdown, PushdownContext, PushdownRule, check_name
 from .resample_rule import ResamplePushdownRule
 from .traversal import discover
 
@@ -39,6 +39,10 @@ class QueryOptimizer:
         self.rules: tuple[PushdownRule, ...] = (
             tuple(rules) if rules is not None else default_rules()
         )
+        names = [check_name("rule", rule.name) for rule in self.rules]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"pushdown rule names must be unique: {duplicates}")
 
     def optimize(self, selections: Iterable[Any], context: PushdownContext) -> PushdownPlan:
         """Build the pushdown plan for the *selections* of one solve call.

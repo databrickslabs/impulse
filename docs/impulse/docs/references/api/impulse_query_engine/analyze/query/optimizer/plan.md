@@ -66,6 +66,10 @@ def variants_by_rule() -> list[tuple[PushdownRule, dict[int, Pushdown]]]
 
 Group the variants by the rule that computes them.
 
+**Raises**:
+
+- `ValueError`: If two different rules share a name: their pipeline columns would
+collide.
 
 #### lookup
 

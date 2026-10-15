@@ -45,7 +45,14 @@ def _expressions_in(values: Iterable) -> Iterator[TimeSeriesExpression]:
 
 
 def match_node(node: TimeSeriesExpression, rules: Sequence[PushdownRule]) -> Pushdown | None:
-    """Return the first rule's pushdown for *node*, or ``None``."""
+    """Return the first rule's pushdown for *node*, or ``None``.
+
+    Only plain :class:`TimeSeriesOp` nodes can be pushed down: their ``build``
+    serves precomputed results from the cache, other node types (UDFs,
+    aggregations, events, …) would evaluate on missing raw rows instead.
+    """
+    if type(node) is not TimeSeriesOp:
+        return None
     for rule in rules:
         pushdown = rule.match(node)
         if pushdown is not None:

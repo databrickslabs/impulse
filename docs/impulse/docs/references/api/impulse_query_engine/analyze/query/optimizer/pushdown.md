@@ -16,6 +16,19 @@ Column tagging each channel-data row with the series variant it belongs to.
 Variant id of the unmodified (raw) channel data.
 
 
+#### check\_name
+
+```python
+def check_name(kind: str, name: str) -> str
+```
+
+Return *name* if it is a valid rule, rule column or run name, else raise.
+
+Names are lowercase letters, digits and single underscores, starting with a
+letter.  Pipeline columns join them with ``__``, which a name never contains,
+so names of different rules cannot collide.
+
+
 ## PushdownContext
 
 ```python
@@ -86,7 +99,9 @@ Planning and decoding run in Python: :meth:`match` recognizes the subtree,
 
 #### name
 
-Unique rule name, part of every :attr:`Pushdown.variant_key`.
+Unique rule name, part of every :attr:`Pushdown.variant_key`; lowercase
+
+letters, digits and single underscores (see :func:`check_name`).
 
 
 #### ordered
@@ -144,6 +159,9 @@ def row_columns(ctx: SeriesContext) -> Mapping[str, Column]
 ```
 
 Columns computed for every sample, in order; refer to them via ``ctx.col``.
+
+Column names follow :func:`check_name` and only need to be unique within
+the rule.
 
 
 #### keep

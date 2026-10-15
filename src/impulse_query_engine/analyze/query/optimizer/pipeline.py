@@ -63,7 +63,7 @@ from .context import (
     run_col,
 )
 from .plan import PushdownPlan
-from .pushdown import RAW_VARIANT, VARIANT_COL, Pushdown, PushdownRule
+from .pushdown import RAW_VARIANT, VARIANT_COL, Pushdown, PushdownRule, check_name
 
 #: Average number of samples per chunk of a series.
 CHUNK_ROWS = 100_000
@@ -143,7 +143,7 @@ class SeriesPipeline:
         for rule, variants in self.rules:
             names = {}
             for name, breaks in rule.runs().items():
-                names[name] = f"{rule.name}_{name}"
+                names[name] = f"{rule.name}__{check_name('run', name)}"
                 self.runs.append(_Run(names[name], breaks, tuple(sorted(variants))))
             self.rule_runs[rule.name] = names
 
@@ -172,18 +172,21 @@ class SeriesPipeline:
         """Series boundaries and each sample's chunk, projected for the shuffle."""
         ts, te, value = self.order
         ts_d, te_d = F.col(ts).cast("double"), F.col(te).cast("double")
+        # The time range spans the finite times; a series without a finite tend is
+        # still cut by its tstart range.
         series = rows.groupBy(*self.key).agg(
-            F.min(ts_d).alias("_pd_first"),
-            F.max(_nan_free(te_d)).alias("_pd_end"),
+            F.min(_nan_free(ts_d)).alias("_pd_first"),
+            F.greatest(F.max(_nan_free(te_d)), F.max(_nan_free(ts_d))).alias("_pd_end"),
             F.count(F.lit(1)).alias("_pd_count"),
         )
         first, end = F.col("_pd_first"), F.col("_pd_end")
         n_chunks = F.ceil(F.col("_pd_count") / F.lit(CHUNK_ROWS))
+        position = F.least(F.floor((ts_d - first) / (end - first) * n_chunks), n_chunks - 1)
+        # Null and NaN tstarts go where the series order puts them: first and last.
         chunk = F.coalesce(
-            F.when(
-                end > first,
-                F.least(F.floor((ts_d - first) / (end - first) * n_chunks), n_chunks - 1),
-            ),
+            F.when(ts_d.isNull(), F.lit(0).cast("long"))
+            .when(F.isnan(ts_d), n_chunks - 1)
+            .when(end > first, position),
             F.lit(0).cast("long"),
         )
         return rows.join(F.broadcast(series), on=self.key).select(
@@ -453,12 +456,12 @@ def _row_branch(
 def _with_rule_columns(df: DataFrame, ctx: SeriesContext, columns: Mapping[str, Column]):
     """Add a rule's columns, defined for the rule's samples only."""
     for name, column in columns.items():
-        df = df.withColumn(ctx.name(name), F.when(ctx.active, column))
+        df = df.withColumn(ctx.name(check_name("column", name)), F.when(ctx.active, column))
     return df
 
 
 def _keep_col(rule: PushdownRule) -> str:
-    return f"_pd_keep_{rule.name}"
+    return f"_pd_keep__{rule.name}"
 
 
 def _keep(df: DataFrame, contexts, extra: Column) -> DataFrame:

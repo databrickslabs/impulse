@@ -797,13 +797,12 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
     def selector_id(self) -> int:
         # series_type / value_type keep distinct-typed selections of the same tag
         # apart, and an aliased selection resolves differently from a direct one on
-        # the same tags; a direct CONTINUOUS selection uses the bare ``str(expr)``
-        # hash for back-compat.
+        # the same tags; direct selections keep their original hashes (a CONTINUOUS
+        # one the bare ``str(expr)``) for back-compat.
+        alias = "alias|" if self._uses_alias else ""
         if self._series_type is SeriesType.CONTINUOUS:
-            if self._uses_alias:
-                return zlib.crc32(f"alias|{self._expr}".encode())
-            return zlib.crc32(str(self._expr).encode())
-        return zlib.crc32(f"{self._series_type}|{self._expr}|{self._value_type}".encode())
+            return zlib.crc32(f"{alias}{self._expr}".encode())
+        return zlib.crc32(f"{alias}{self._series_type}|{self._expr}|{self._value_type}".encode())
 
     def dtype(self) -> T.DataType:
         """

@@ -51,7 +51,11 @@ def channel_rows(spark, series_by_key, time_type=T.LongType()) -> DataFrame:
             T.StructField(VARIANT_COL, T.IntegerType()),
         ]
     )
-    to_time = int if isinstance(time_type, T.IntegralType) else float
+    cast = int if isinstance(time_type, T.IntegralType) else float
+
+    def to_time(t):
+        return None if t is None else cast(t)
+
     rows = [
         (cid, ch, to_time(ts), to_time(te), None if v is None else float(v), vid)
         for (cid, ch, vid), (tstarts, tends, values) in series_by_key.items()
