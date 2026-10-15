@@ -17,6 +17,7 @@ from impulse_query_engine.analyze.query.solvers import (
     SolverBuildContext,
     resolve_solver,
 )
+from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder
 from impulse_query_engine.measurement_db import AbstractMeasurementDB
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.channels.channel_types import ChannelType
@@ -380,7 +381,8 @@ class Report:
                 solver_config=query_engine.solver_config,
                 is_raw_data=query_engine.data_type is DataType.RAW,
                 drop_implausible_data=query_engine.drop_implausible_data,
-                raw_encoder=query_engine.raw_encoder,
+                # None for RLE input, where it isn't consulted; pass the solver default
+                raw_encoder=query_engine.raw_encoder or RawEncoder.RLE,
             )
         )
 

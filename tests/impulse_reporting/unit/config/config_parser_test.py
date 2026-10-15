@@ -668,6 +668,20 @@ def test_impulse_config_custom_solver_gets_its_typed_solver_config(custom_solver
     assert config.query_engine.solver_config.project_id == "p1"  # base settings still apply
 
 
+def test_impulse_config_custom_solver_config_survives_dump_and_reload(custom_solver_registered):
+    config = ImpulseConfig.model_validate(
+        _with_query_engine(
+            {"solver": "ExcludeContainersSolver", "solver_config": {"excluded_container_ids": [3]}}
+        )
+    )
+
+    # The custom settings are part of the dump, and so of the config_hash in measurement_dimension...
+    assert '"excluded_container_ids":[3]' in config.model_dump_json()
+    # ...and a dumped config loads again.
+    reloaded = ImpulseConfig.model_validate(config.model_dump())
+    assert reloaded.query_engine.solver_config == config.query_engine.solver_config
+
+
 _INVALID_EXCLUDE_SETTINGS = r"invalid settings for solver 'ExcludeContainersSolver': "
 
 
@@ -704,6 +718,12 @@ _INVALID_EXCLUDE_SETTINGS = r"invalid settings for solver 'ExcludeContainersSolv
             },
             "solver_config",
             _INVALID_EXCLUDE_SETTINGS + "exclude_container_id: Extra inputs are not permitted",
+        ),
+        # An error on the whole value has no field name to report.
+        (
+            {"solver": "ExcludeContainersSolver", "solver_config": 42},
+            "solver_config",
+            _INVALID_EXCLUDE_SETTINGS + "Input should be a valid dictionary",
         ),
     ],
 )

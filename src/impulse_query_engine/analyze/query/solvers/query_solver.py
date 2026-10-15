@@ -35,7 +35,7 @@ class SolverBuildContext:
     solver_config: SolverConfig | None = None
     is_raw_data: bool = False
     drop_implausible_data: bool = False
-    raw_encoder: RawEncoder | None = None
+    raw_encoder: RawEncoder = RawEncoder.RLE
 
 
 class QuerySolver(ABC):

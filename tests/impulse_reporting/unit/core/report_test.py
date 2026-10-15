@@ -7,6 +7,7 @@ from databricks.sdk import WorkspaceClient
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.solvers import DefaultSolver, SolverConfig, register_solver
+from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.aggregations.aggregation_types import AggregationType
@@ -240,6 +241,19 @@ def test_report_telemetry_keeps_builtin_solver_names(logged_telemetry):
 
     assert type(report.get_solver()) is DefaultSolver
     assert ("solver", "KEY_VALUE_STORE_SOLVER") in logged_telemetry
+
+
+def test_report_passes_a_concrete_raw_encoder_for_rle_data():
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=DUMMY_CONFIG,
+    )
+
+    # query_engine.raw_encoder stays unset for RLE input; the solver still gets the RLE default.
+    assert report.config.query_engine.raw_encoder is None
+    assert report.get_solver().raw_encoder is RawEncoder.RLE
 
 
 def test_set_config():

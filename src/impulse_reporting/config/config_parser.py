@@ -12,6 +12,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializeAsAny,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -449,8 +450,9 @@ class QueryEngine(BaseModel):
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
-    # validate_default: a custom config class may require settings even when solver_config is omitted
-    solver_config: SolverConfig | None = Field(default=None, validate_default=True)
+    # validate_default: a custom config class may require settings even when solver_config is omitted;
+    # SerializeAsAny: dumps (and so config_hash) include the custom config class's settings
+    solver_config: SerializeAsAny[SolverConfig] | None = Field(default=None, validate_default=True)
     measurement_db: Annotated[str, _registered_in(resolve_measurement_db)] = "MeasurementDB"
     measurement_db_config: dict[str, Any] | None = None
     max_channels_per_batch: int = 500
@@ -508,7 +510,8 @@ class QueryEngine(BaseModel):
         except pydantic.ValidationError as exc:
             # Flatten the nested errors; raised as-is, pydantic would collapse their locations.
             details = "; ".join(
-                f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in exc.errors()
+                f"{'.'.join(map(str, err['loc']))}: {err['msg']}" if err["loc"] else err["msg"]
+                for err in exc.errors()
             )
             raise ValueError(f"invalid settings for solver {name!r}: {details}") from None
 
