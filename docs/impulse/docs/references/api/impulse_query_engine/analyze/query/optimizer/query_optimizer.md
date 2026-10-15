@@ -23,6 +23,10 @@ class QueryOptimizer()
 
 Plans which subtrees of a solve's selections are computed natively in Spark.
 
+Nodes are classified bottom-up (:class:`~.traversal.Classifier`), and the
+topmost classified nodes whose pushdown the channel data supports are the
+candidates; a node that is not supported leaves its operands as candidates.
+
 All selections of a solve share the raw data of their physical channels, so
 a subtree is pushed down only when **every** occurrence of its input selector,
 across all selections, sits inside a pushed-down subtree.  Then the raw rows

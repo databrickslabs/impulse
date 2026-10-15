@@ -20,6 +20,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.optimizer import (
     RAW_VARIANT,
     VARIANT_COL,
+    Classifier,
     PushdownContext,
     PushdownPlan,
     QueryOptimizer,
@@ -96,6 +97,8 @@ class TimeSeriesCache(SeriesCache):
         self._container_tag_cols = list(container_tag_cols or [])
         self._container_metric_cols = list(container_metric_cols or [])
         self._plan = plan
+        # Classifies each node once for all lookups of this container.
+        self._classify = Classifier(plan.rules) if plan is not None else None
         has_variants = VARIANT_COL in pdf.columns
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
@@ -225,7 +228,7 @@ class TimeSeriesCache(SeriesCache):
         """
         if self._plan is None:
             return None
-        hit = self._plan.lookup(expression)
+        hit = self._plan.lookup(expression, self._classify)
         if hit is None:
             return None
         pushdown, variant = hit

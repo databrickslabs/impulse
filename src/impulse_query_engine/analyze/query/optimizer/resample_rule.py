@@ -19,7 +19,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 
 from .context import SeriesContext
-from .pushdown import Pushdown, PushdownContext, PushdownRule
+from .pushdown import Operand, Pushdown, PushdownContext, PushdownRule
 
 _RATE = "sample_rate"
 _DEFAULT_RATE = 1.0
@@ -49,17 +49,18 @@ class ResamplePushdownRule(PushdownRule):
 
     name = "resample"
 
-    def match(self, node: TimeSeriesExpression) -> Pushdown | None:
+    def match(self, node: TimeSeriesExpression, operand: Operand) -> Pushdown | None:
         if (
             type(node) is not TimeSeriesOp
             or node.optype != "cls"
             or not isinstance(node.operation, str)
             or node.operation != "resample"
+            or not node.args
         ):
             return None
-        if not node.args or not isinstance(node.args[0], TimeSeriesSelector):
+        selector = operand(node.args[0])
+        if not isinstance(selector, TimeSeriesSelector):
             return None
-        selector = node.args[0]
         if selector.series_type is not SeriesType.CONTINUOUS:
             return None
         rate = _sample_rate(node.args[1:], node.kwargs)

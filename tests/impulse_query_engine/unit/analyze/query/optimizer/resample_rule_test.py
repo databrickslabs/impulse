@@ -10,7 +10,11 @@ import pytest
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
-from impulse_query_engine.analyze.query.optimizer import VARIANT_COL, ResamplePushdownRule
+from impulse_query_engine.analyze.query.optimizer import (
+    VARIANT_COL,
+    Classifier,
+    ResamplePushdownRule,
+)
 from impulse_query_engine.model.series.sample_series import SampleSeries
 from tests.conftest import spark
 from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers import (
@@ -28,7 +32,7 @@ _X = TimeSeriesSelector(TagSelector("channel_name") == "x")
 
 
 def _pushdown(rate):
-    return _RULE.match(_X.resample(rate))
+    return Classifier([_RULE])(_X.resample(rate))
 
 
 def _resample_in_spark(spark, series_by_key, rates, time_type=T.LongType(), chunk_rows=None):
@@ -208,7 +212,7 @@ def test_resample_and_diff_in_one_pass(spark):
         series[(cid, 1, 1)] = series[(cid, 1, 2)] = samples
         expected[(cid, 1, 1)] = _expected(samples, 3)
         expected[(cid, 1, 2)] = SampleSeries(*samples).diff()
-    pushdowns = {1: _pushdown(3), 2: DiffRule().match(_X.diff())}
+    pushdowns = {1: _pushdown(3), 2: Classifier([DiffRule()])(_X.diff())}
     for chunk_size in (2, 7):
         actual = run(spark, series, pushdowns, chunk_size=chunk_size)
         assert actual.keys() == expected.keys()

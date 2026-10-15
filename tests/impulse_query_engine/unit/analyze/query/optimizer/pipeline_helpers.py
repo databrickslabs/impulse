@@ -116,7 +116,7 @@ def random_series(rng, n, nan_tend=False):
     return tstarts, tends, values
 
 
-def _selector_op(node, operation: str) -> TimeSeriesSelector | None:
+def _selector_op(node, operand, operation: str) -> TimeSeriesSelector | None:
     """The continuous selector of ``selector.<operation>()``, or ``None``."""
     if (
         type(node) is not TimeSeriesOp
@@ -124,11 +124,12 @@ def _selector_op(node, operation: str) -> TimeSeriesSelector | None:
         or node.operation != operation
         or len(node.args) != 1
         or node.kwargs
-        or not isinstance(node.args[0], TimeSeriesSelector)
-        or node.args[0].series_type is not SeriesType.CONTINUOUS
     ):
         return None
-    return node.args[0]
+    selector = operand(node.args[0])
+    if not isinstance(selector, TimeSeriesSelector):
+        return None
+    return selector if selector.series_type is SeriesType.CONTINUOUS else None
 
 
 class DiffRule(PushdownRule):
@@ -136,8 +137,8 @@ class DiffRule(PushdownRule):
 
     name = "diff"
 
-    def match(self, node):
-        selector = _selector_op(node, "diff")
+    def match(self, node, operand):
+        selector = _selector_op(node, operand, "diff")
         if selector is None:
             return None
         return Pushdown(rule=self, selector=selector, params=(), consumed=(selector,))
@@ -155,7 +156,7 @@ class OffsetRule(PushdownRule):
     name = "offset"
     ordered = False
 
-    def match(self, node):
+    def match(self, node, operand):
         return None
 
     def emit(self, ctx: SeriesContext) -> Column:

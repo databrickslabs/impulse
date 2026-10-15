@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import abc
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -78,6 +78,10 @@ class Pushdown:
     Expression nodes overload ``==``, so pushdowns compare by identity; use
     :attr:`variant_key` to identify equivalent pushdowns.
 
+    A pushdown reads the samples of its channel, possibly absorbing pushed
+    operands into that pass, or computes on the result of another pushdown, its
+    :attr:`source`.  The pipeline computes the former only.
+
     Parameters
     ----------
     rule : PushdownRule
@@ -88,31 +92,44 @@ class Pushdown:
         Canonical, hashable operation parameters (e.g. ``(("sample_rate", 1e6),)``).
     consumed : tuple of TimeSeriesSelector
         Every selector occurrence inside the subtree (its ``get_selectors()``).
+    source : Pushdown, optional
+        The pushdown whose result this one computes on; ``None`` when it reads
+        the channel's samples.
     """
 
     rule: PushdownRule
     selector: TimeSeriesSelector
     params: tuple[tuple[str, Any], ...]
     consumed: tuple[TimeSeriesSelector, ...]
+    source: Pushdown | None = None
 
     @property
     def variant_key(self) -> tuple:
         """Identity of the derived series, independent of the input channel."""
-        return (self.rule.name, self.params)
+        key = (self.rule.name, self.params)
+        return key if self.source is None else (*key, self.source.variant_key)
 
     def describe(self) -> str:
         """Human-readable ``rule(param=value, ...)`` label."""
         params = ", ".join(f"{k}={v}" for k, v in self.params)
-        return f"{self.rule.name}({params})"
+        label = f"{self.rule.name}({params})"
+        return label if self.source is None else f"{label} on {self.source.describe()}"
+
+
+#: Classification of an operand of the node a rule matches: the selector of a
+#: channel, the :class:`Pushdown` computing the operand, or ``None`` when the
+#: operand is evaluated in pandas or is not an expression.
+Operand = Callable[[Any], "TimeSeriesSelector | Pushdown | None"]
 
 
 class PushdownRule(abc.ABC):
     """Recognizes a subtree and computes it in Spark ahead of the pandas UDF.
 
-    Planning and decoding run in Python: :meth:`match` recognizes the subtree,
-    :meth:`decode` turns one container/channel/variant slice of the derived rows
-    back into the object the subtree evaluates to.  The result must equal
-    evaluating the subtree in pandas on the same channel data.
+    Planning and decoding run in Python: :meth:`match` recognizes a node from
+    its operands' classification, :meth:`decode` turns one
+    container/channel/variant slice of the derived rows back into the object the
+    subtree evaluates to.  The result must equal evaluating the subtree in pandas
+    on the same channel data.
 
     The Spark side is a set of hooks returning columns, evaluated by the shared
     pushdown pipeline (:mod:`.pipeline`) for the samples of the rule's variants,
@@ -136,8 +153,14 @@ class PushdownRule(abc.ABC):
     ordered: ClassVar[bool] = True
 
     @abc.abstractmethod
-    def match(self, node: TimeSeriesExpression) -> Pushdown | None:
+    def match(self, node: TimeSeriesExpression, operand: Operand) -> Pushdown | None:
         """Return the pushdown for *node*, or ``None`` if the rule does not apply.
+
+        Nodes are classified bottom-up: *operand* returns the classification of
+        any operand of *node*.  A pushdown reading the channel's samples sets no
+        ``source``; when it absorbs a pushed operand into that pass, its
+        ``consumed`` includes the operand's and :meth:`supports` covers both.  A
+        pushdown computing on a pushed operand's result sets ``source`` to it.
 
         Purely syntactic: it runs on the driver while planning and again inside
         the UDF to recognize the node, so it must not depend on data or schemas.

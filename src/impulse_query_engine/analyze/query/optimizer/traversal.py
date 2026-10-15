@@ -1,8 +1,9 @@
-"""Generic walk over TSAL expression trees."""
+"""Bottom-up classification of TSAL expression trees into pushdowns."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from typing import Any
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesAliasSelector,
@@ -12,6 +13,9 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 
 from .pushdown import Pushdown, PushdownRule
+
+#: Plan-time check whether a classified node's pushdown is planned.
+Accept = Callable[[TimeSeriesExpression, Pushdown], bool]
 
 
 def child_expressions(node: TimeSeriesExpression) -> Iterator[TimeSeriesExpression]:
@@ -44,34 +48,82 @@ def _expressions_in(values: Iterable) -> Iterator[TimeSeriesExpression]:
             yield from _expressions_in(value.values())
 
 
-def match_node(node: TimeSeriesExpression, rules: Sequence[PushdownRule]) -> Pushdown | None:
-    """Return the first rule's pushdown for *node*, or ``None``.
+class Classifier:
+    """Classifies expression nodes bottom-up into the pushdowns computing them.
 
-    Only plain :class:`TimeSeriesOp` nodes can be pushed down: their ``build``
-    serves precomputed results from the cache, other node types (UDFs,
-    aggregations, events, …) would evaluate on missing raw rows instead.
+    A node is classified after its operands: the first rule whose
+    :meth:`~.pushdown.PushdownRule.match` returns a pushdown for the node, given
+    its operands' classification, computes it.  Only plain :class:`TimeSeriesOp`
+    nodes can be pushed down: their ``build`` serves precomputed results from the
+    cache, other node types (UDFs, aggregations, events, …) would evaluate on
+    missing raw rows instead.
+
+    Classification is syntactic, so the driver and the UDF classify alike.
+    Results are memoized per node object: use one classifier per optimization or
+    per container, and never store it on a plan or a node.
+
+    Parameters
+    ----------
+    rules : Sequence[PushdownRule]
+        Rules in priority order.
     """
-    if type(node) is not TimeSeriesOp:
+
+    def __init__(self, rules: Sequence[PushdownRule]):
+        self.rules = tuple(rules)
+        # Nodes are not hashable; holding each node keeps its id from being reused.
+        self._memo: dict[int, tuple[TimeSeriesOp, Pushdown | None]] = {}
+
+    def __call__(self, node: TimeSeriesExpression) -> Pushdown | None:
+        """The pushdown computing *node*, or ``None``."""
+        if type(node) is not TimeSeriesOp:
+            return None
+        stack: list[tuple[TimeSeriesOp, bool]] = [(node, False)]
+        while stack:
+            current, operands_classified = stack.pop()
+            if id(current) in self._memo:
+                continue
+            if operands_classified:
+                self._memo[id(current)] = (current, self._match(current))
+            else:
+                stack.append((current, True))
+                stack.extend(
+                    (child, False)
+                    for child in child_expressions(current)
+                    if type(child) is TimeSeriesOp
+                )
+        return self._memo[id(node)][1]
+
+    def operand(self, value: Any) -> TimeSeriesSelector | Pushdown | None:
+        """Classification of an operand: its selector for a channel, else its pushdown."""
+        if isinstance(value, TimeSeriesSelector):
+            return value
+        if isinstance(value, TimeSeriesExpression):
+            return self(value)
         return None
-    for rule in rules:
-        pushdown = rule.match(node)
-        if pushdown is not None:
-            return pushdown
-    return None
+
+    def _match(self, node: TimeSeriesOp) -> Pushdown | None:
+        for rule in self.rules:
+            pushdown = rule.match(node, self.operand)
+            if pushdown is not None:
+                return pushdown
+        return None
 
 
 def discover(
-    root: TimeSeriesExpression, rules: Sequence[PushdownRule]
+    root: TimeSeriesExpression, classify: Classifier, accept: Accept | None = None
 ) -> tuple[list[tuple[TimeSeriesExpression, Pushdown]], list[TimeSeriesSelector]]:
-    """Find the maximal subtrees of *root* that a rule can push down.
+    """Find the topmost subtrees of *root* that are pushed down.
 
-    The walk does not descend into a matched subtree and keeps no visited set, so
-    a node referenced twice is counted twice, like ``get_selectors()`` does.
+    A classified node is a candidate when *accept* (by default every pushdown)
+    accepts its pushdown; otherwise the walk continues into its operands, whose
+    pushdowns can still be candidates.  The walk does not descend into a
+    candidate and keeps no visited set, so a node referenced twice is counted
+    twice, like ``get_selectors()`` does.
 
     Returns
     -------
     tuple
-        ``(candidates, leaves)``: the matched ``(node, pushdown)`` pairs and the
+        ``(candidates, leaves)``: the ``(node, pushdown)`` candidates and the
         selectors reached outside of them.
     """
     candidates: list[tuple[TimeSeriesExpression, Pushdown]] = []
@@ -79,8 +131,8 @@ def discover(
     stack: list[TimeSeriesExpression] = [root]
     while stack:
         node = stack.pop()
-        pushdown = match_node(node, rules)
-        if pushdown is not None:
+        pushdown = classify(node)
+        if pushdown is not None and (accept is None or accept(node, pushdown)):
             candidates.append((node, pushdown))
         elif isinstance(node, TimeSeriesSelector):
             leaves.append(node)

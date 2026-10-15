@@ -16,6 +16,7 @@ from impulse_query_engine.analyze.query.channels.calculated_channel import Calcu
 from impulse_query_engine.analyze.query.optimizer import (
     RAW_VARIANT,
     VARIANT_COL,
+    Classifier,
     PushdownPlan,
     QueryOptimizer,
     ResamplePushdownRule,
@@ -327,7 +328,7 @@ class TestTimeSeriesCacheVariants:
 
     @staticmethod
     def _cache(rule, node) -> TimeSeriesCache:
-        pushdown = rule.match(node)
+        pushdown = Classifier([rule])(node)
         plan = PushdownPlan.build([rule], [pushdown], [pushdown.selector.selector_id])
         pdf = pd.DataFrame(
             {
@@ -383,6 +384,22 @@ class TestTimeSeriesCacheVariants:
         result = self._cache(_IntervalsRule(), node).materialized(node)
         assert isinstance(result, Intervals)
         nptest.assert_array_equal(result.tstarts, [0, 10])
+
+    def test_each_node_is_classified_once_per_container(self):
+        matched = []
+
+        class _Recording(ResamplePushdownRule):
+            def match(self, node, operand):
+                matched.append(node)
+                return super().match(node, operand)
+
+        resampled = _rpm().resample(10)
+        cache = self._cache(_Recording(), resampled)
+        matched.clear()
+        integral = resampled.cumtrapz().build(cache)
+        # The root and the served resample, each matched once across both lookups.
+        assert len(matched) == 2 and len({id(node) for node in matched}) == 2
+        nptest.assert_array_equal(integral.tstarts, [0, 10])
 
     def test_optimizer_default_rules(self):
         assert [type(r) for r in QueryOptimizer().rules] == [ResamplePushdownRule]

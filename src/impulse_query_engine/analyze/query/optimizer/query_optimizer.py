@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from functools import partial
 from typing import Any
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
@@ -11,7 +12,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import TimeSer
 from .plan import PushdownPlan
 from .pushdown import Pushdown, PushdownContext, PushdownRule, check_name
 from .resample_rule import ResamplePushdownRule
-from .traversal import discover
+from .traversal import Classifier, discover
 
 
 def default_rules() -> tuple[PushdownRule, ...]:
@@ -21,6 +22,10 @@ def default_rules() -> tuple[PushdownRule, ...]:
 
 class QueryOptimizer:
     """Plans which subtrees of a solve's selections are computed natively in Spark.
+
+    Nodes are classified bottom-up (:class:`~.traversal.Classifier`), and the
+    topmost classified nodes whose pushdown the channel data supports are the
+    candidates; a node that is not supported leaves its operands as candidates.
 
     All selections of a solve share the raw data of their physical channels, so
     a subtree is pushed down only when **every** occurrence of its input selector,
@@ -63,12 +68,14 @@ class QueryOptimizer:
         if not all(isinstance(s, TimeSeriesExpression) for s in selections):
             return PushdownPlan(rules=self.rules)
 
+        classify = Classifier(self.rules)
+        accept = partial(_accepted, context=context)
         total: Counter[int] = Counter()
         candidates: list[tuple[TimeSeriesExpression, Pushdown]] = []
         for selection in selections:
             expected = Counter(s.selector_id for s in selection.get_selectors())
             total.update(expected)
-            found, leaves = discover(selection, self.rules)
+            found, leaves = discover(selection, classify, accept)
             walked = Counter(s.selector_id for s in leaves)
             walked.update(s.selector_id for _, p in found for s in p.consumed)
             # A walk that disagrees with get_selectors() missed or double-counted part
@@ -76,12 +83,8 @@ class QueryOptimizer:
             if walked == expected:
                 candidates.extend(found)
 
-        candidates = [
-            (node, pushdown)
-            for node, pushdown in candidates
-            if pushdown.rule.supports(pushdown, context) and _has_result_type(node, pushdown)
-        ]
-
+        # Candidates read a single selector, so the operands of a dropped candidate
+        # read one whose raw rows are shipped anyway and need not be reconsidered.
         while True:
             consumed = Counter(s.selector_id for _, p in candidates for s in p.consumed)
             fully_pushed = {sid for sid, count in consumed.items() if count == total[sid]}
@@ -95,6 +98,16 @@ class QueryOptimizer:
             candidates = kept
 
         return PushdownPlan.build(self.rules, [p for _, p in candidates], total)
+
+
+def _accepted(node: TimeSeriesExpression, pushdown: Pushdown, context: PushdownContext) -> bool:
+    """Whether the pipeline can compute *pushdown* for *node* on the channel data."""
+    if pushdown.source is not None:
+        # Computing on another pushdown's result needs a pipeline stage per rule.
+        return False
+    if any(s.selector_id != pushdown.selector.selector_id for s in pushdown.consumed):
+        return False
+    return pushdown.rule.supports(pushdown, context) and _has_result_type(node, pushdown)
 
 
 def _has_result_type(node: TimeSeriesExpression, pushdown: Pushdown) -> bool:

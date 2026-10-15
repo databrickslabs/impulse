@@ -40,6 +40,11 @@ Assign variant ids to *pushdowns*, in discovery order.
 - `pushdowns` (`Iterable[Pushdown]`): Accepted pushdowns; each one's selector is pushed down entirely.
 - `selector_ids` (`Iterable[int]`): Ids of all selectors in the solve.
 
+**Raises**:
+
+- `ValueError`: If a pushdown computes on another pushdown's result (``source``),
+which the pipeline cannot compute.
+
 #### is\_empty
 
 ```python
@@ -74,10 +79,14 @@ collide.
 #### lookup
 
 ```python
-def lookup(node: TimeSeriesExpression) -> tuple[Pushdown, int] | None
+def lookup(node: TimeSeriesExpression,
+           classify: Classifier | None = None) -> tuple[Pushdown, int] | None
 ```
 
 Return ``(pushdown, variant)`` when *node* is a pushed-down subtree.
+
+Pass a *classify* shared by the lookups of one evaluation so that every
+node is classified once.
 
 
 #### native\_targets

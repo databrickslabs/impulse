@@ -17,6 +17,7 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.optimizer import (
     VARIANT_COL,
+    Classifier,
     Pushdown,
     SeriesPipeline,
     apply_pushdowns,
@@ -156,7 +157,7 @@ def test_diff_matches_sample_series(spark):
         samples = random_series(rng, n)
         series[(cid, 1, 1)] = samples
         expected[(cid, 1, 1)] = SampleSeries(*samples).diff()
-    pushdowns = {1: DiffRule().match(_X.diff())}
+    pushdowns = {1: Classifier([DiffRule()])(_X.diff())}
     for chunk_size in (1, 3, None):
         actual = run(spark, series, pushdowns, chunk_size=chunk_size)
         for key, exp in expected.items():
@@ -175,7 +176,7 @@ def _offset(value: float) -> Pushdown:
 def test_per_sample_rules_share_the_row_branch_with_raw_rows(spark):
     samples = ([0, 1, 5], [1, 2, 6], [1.0, 2.0, 4.0])
     series = {(1, 1, 0): samples, (1, 1, 1): samples, (1, 1, 2): samples, (2, 1, 3): samples}
-    pushdowns = {1: _offset(10.0), 2: _offset(0.5), 3: DiffRule().match(_X.diff())}
+    pushdowns = {1: _offset(10.0), 2: _offset(0.5), 3: Classifier([DiffRule()])(_X.diff())}
     actual = run(spark, series, pushdowns, chunk_size=2)
     nptest.assert_array_equal(actual[(1, 1, 0)].values, [1.0, 2.0, 4.0])
     nptest.assert_array_equal(actual[(1, 1, 1)].values, [11.0, 12.0, 14.0])
@@ -196,7 +197,7 @@ def test_per_sample_rules_skip_the_series_scan(spark):
 def test_raw_rows_only_when_asked(spark):
     samples = ([0, 1], [1, 2], [1.0, 2.0])
     series = {(1, 1, 0): samples, (1, 1, 1): samples}
-    pushdowns = {1: DiffRule().match(_X.diff())}
+    pushdowns = {1: Classifier([DiffRule()])(_X.diff())}
     assert set(run(spark, series, pushdowns)) == {(1, 1, 0), (1, 1, 1)}
     assert set(run(spark, series, pushdowns, include_raw=False)) == {(1, 1, 1)}
 
@@ -226,7 +227,7 @@ def test_one_shuffle_of_the_samples(spark):
     rng = np.random.default_rng(3)
     series = {(cid, 1, 1): random_series(rng, 30) for cid in range(3)}
     df = channel_rows(spark, series)
-    plan = plan_for({1: DiffRule().match(_X.diff())})
+    plan = plan_for({1: Classifier([DiffRule()])(_X.diff())})
     result = apply_pushdowns(df, plan, CONFIG, include_raw=False)
     result.collect()
     final = result._jdf.queryExecution().executedPlan().toString().split("== Initial Plan ==")[0]
@@ -271,7 +272,7 @@ def test_series_without_a_finite_tend_is_still_chunked(spark):
     df = channel_rows(spark, {(1, 1, 1): samples}, time_type=T.DoubleType())
     rule = DiffRule()
     with chunk_rows(2):
-        chunks = SeriesPipeline([(rule, {1: rule.match(_X.diff())})], CONFIG)._chunked(df)
+        chunks = SeriesPipeline([(rule, {1: Classifier([rule])(_X.diff())})], CONFIG)._chunked(df)
         assert chunks.select("_pd_chunk").distinct().count() == 3
 
 

@@ -12,7 +12,7 @@ from pyspark.sql import Column
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
 
 from .pushdown import RAW_VARIANT, Pushdown, PushdownRule
-from .traversal import match_node
+from .traversal import Classifier
 
 
 @dataclass(frozen=True, eq=False)
@@ -58,11 +58,19 @@ class PushdownPlan:
             Accepted pushdowns; each one's selector is pushed down entirely.
         selector_ids : Iterable[int]
             Ids of all selectors in the solve.
+
+        Raises
+        ------
+        ValueError
+            If a pushdown computes on another pushdown's result (``source``),
+            which the pipeline cannot compute.
         """
         variant_ids: dict[tuple, int] = {}
         pushdowns_by_variant: dict[int, Pushdown] = {}
         variants_by_selector: dict[int, list[int]] = {}
         for pushdown in pushdowns:
+            if pushdown.source is not None:
+                raise ValueError(f"pushdown {pushdown.describe()} has a source")
             key = pushdown.variant_key
             if key not in variant_ids:
                 variant_ids[key] = len(variant_ids) + 1
@@ -106,9 +114,17 @@ class PushdownPlan:
             group[1][variant] = pushdown
         return list(groups.values())
 
-    def lookup(self, node: TimeSeriesExpression) -> tuple[Pushdown, int] | None:
-        """Return ``(pushdown, variant)`` when *node* is a pushed-down subtree."""
-        pushdown = match_node(node, self.rules)
+    def lookup(
+        self, node: TimeSeriesExpression, classify: Classifier | None = None
+    ) -> tuple[Pushdown, int] | None:
+        """Return ``(pushdown, variant)`` when *node* is a pushed-down subtree.
+
+        Pass a *classify* shared by the lookups of one evaluation so that every
+        node is classified once.
+        """
+        if classify is None:
+            classify = Classifier(self.rules)
+        pushdown = classify(node)
         if pushdown is None:
             return None
         variant = self.variant_ids.get(pushdown.variant_key)
@@ -143,10 +159,11 @@ class PushdownPlan:
         if not selections:
             return None
         targets: dict[int, dict[int, list[tuple[int, bool]]]] = {}
+        classify = Classifier(self.rules)
         for selection in selections:
             if not isinstance(selection, CalculatedChannel):
                 return None
-            hit = self.lookup(selection.expr)
+            hit = self.lookup(selection.expr, classify)
             if hit is None or not hit[0].rule.emits_result_rows(hit[0]):
                 return None
             pushdown, variant = hit
