@@ -696,6 +696,15 @@ _INVALID_EXCLUDE_SETTINGS = r"invalid settings for solver 'ExcludeContainersSolv
             "solver_config",
             _INVALID_EXCLUDE_SETTINGS + "excluded_container_ids: Input should be a valid list",
         ),
+        # The custom config class inherits SolverConfig's extra="forbid": a typo isn't dropped.
+        (
+            {
+                "solver": "ExcludeContainersSolver",
+                "solver_config": {"excluded_container_ids": [3], "exclude_container_id": [4]},
+            },
+            "solver_config",
+            _INVALID_EXCLUDE_SETTINGS + "exclude_container_id: Extra inputs are not permitted",
+        ),
     ],
 )
 def test_impulse_config_solver_rejected_at_parse_time(
@@ -706,6 +715,27 @@ def test_impulse_config_solver_rejected_at_parse_time(
 
     [reported] = exc_info.value.errors()  # one error, on the key that is wrong
     assert reported["loc"] == ("query_engine", key)
+
+
+@pytest.mark.parametrize(
+    ("config", "loc"),
+    [
+        # Custom settings without selecting the custom solver are checked against SolverConfig.
+        (
+            _with_query_engine({"solver_config": {"excluded_container_ids": [3]}}),
+            ("query_engine", "solver_config", "excluded_container_ids"),
+        ),
+        # "solver" outside query_engine.
+        ({**impulse_config_JSON, "solver": "ExcludeContainersSolver"}, ("solver",)),
+    ],
+)
+def test_impulse_config_rejects_misplaced_solver_settings(custom_solver_registered, config, loc):
+    # Silently dropping these would run DefaultSolver without the custom settings.
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted") as exc_info:
+        ImpulseConfig.model_validate(config)
+
+    [reported] = exc_info.value.errors()
+    assert reported["loc"] == loc
 
 
 def test_query_engine_revalidates_base_solver_config_for_custom_solver(custom_solver_registered):

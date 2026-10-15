@@ -22,7 +22,14 @@ from .solver_config import RawEncoder, SolverConfig
 
 @dataclass(frozen=True, slots=True)
 class SolverBuildContext:
-    """Everything a report passes to a solver when it builds one (see ``QuerySolver.from_config``)."""
+    """Everything a report passes to a solver when it builds one (see ``QuerySolver.from_config``).
+
+    The fields copy the ``query_engine`` settings a solver needs rather than passing the report's
+    ``QueryEngine`` config, because that model lives in ``impulse_reporting`` and the query engine
+    must not depend on the reporting layer (``config_parser`` imports this package, so the reverse
+    import would also be circular). When a solver needs another ``query_engine`` setting, add a
+    field here and set it in ``Report.create_solver``.
+    """
 
     spark: SparkSession
     solver_config: SolverConfig | None = None

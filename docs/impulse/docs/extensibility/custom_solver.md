@@ -61,9 +61,10 @@ class ExcludeContainersSolver(DefaultSolver):
         )
 ```
 
-- **Override only the stages you want to change** and call `super()` for the rest. Subclassing
-  `QuerySolver` directly means implementing all five stages (`filter_container_tags`,
-  `filter_container_metrics`, `filter_channel_tags`, `filter_channel_metrics`, `solve`).
+- **Override only the stages you want to change** and call `super()` for the rest. Subclass
+  `DefaultSolver`. Subclassing `QuerySolver` directly is possible but means implementing all
+  stages, including the alias stages (`filter_aliased_channel_metrics`,
+  `resolve_channel_selections`), and overriding `from_config` if you need RAW data.
 - **Put your settings on a `SolverConfig` subclass.** It keeps the per-table `column_name_mapping`,
   `filters` and `project_id`, and `self.config` is an instance of your class.
 - **`register_solver(name, config_cls=SolverConfig, *, aliases=())`** registers the class under the
@@ -97,10 +98,10 @@ The config is checked when it is loaded, so these fail as a validation error rat
 
 - an unregistered `solver` name (the message lists the registered names);
 - a missing required setting of your config class, or a setting with the wrong type, including when
-  `solver_config` is left out entirely.
-
-`SolverConfig` ignores unknown keys, so a misspelled setting is silently dropped. Add
-`model_config = ConfigDict(extra="forbid")` (from `pydantic`) to your config class to reject them.
+  `solver_config` is left out entirely;
+- an unknown key in `solver_config`: a misspelled setting, or your settings without `"solver"`
+  selecting your solver. `SolverConfig` forbids unknown keys and your config class inherits that, so
+  neither is silently dropped.
 
 ## Rules
 

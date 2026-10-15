@@ -831,6 +831,10 @@ class ImpulseConfig(BaseModel):
      >>> config = ImpulseConfig.model_validate(config_data)
     """
 
+    # reject misplaced or misspelled top-level keys, e.g. "solver" outside "query_engine",
+    # which would otherwise be dropped and the default solver silently used
+    model_config = ConfigDict(extra="forbid")
+
     source: Source
     unity_sink: UnitySink | None = None
     container_filters: ContainerFilters | None = None

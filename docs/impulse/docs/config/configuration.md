@@ -148,8 +148,10 @@ Two independent filter families:
 If `query_engine` is omitted, the default is `DefaultSolver` with
 `data_type = "RLE"`.
 
-Unknown keys under `query_engine` are rejected when the config is loaded: a misspelled key such as
-`"measurment_db"` fails with `Extra inputs are not permitted` instead of being silently ignored.
+Unknown keys at the top level of the config, under `query_engine` and directly under
+`query_engine.solver_config` are rejected when the config is loaded: a misspelled key such as
+`"measurment_db"`, or `"solver"` placed outside `query_engine`, fails with `Extra inputs are not
+permitted` instead of being silently ignored.
 
 For a source schema that needs reshaping beyond column renames, select your own read seam — see
 [Custom measurement DB](../extensibility/custom_measurement_db.md).
