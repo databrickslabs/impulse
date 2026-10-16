@@ -48,6 +48,18 @@ const config: Config = {
         },
       };
     },
+    // Second docs instance for the Impulse App (apps/adhoc-reporting), served under /app.
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'app',
+        path: 'app',
+        routeBasePath: 'app',
+        sidebarPath: './sidebarsApp.ts',
+        editUrl:
+          'https://github.com/databrickslabs/impulse/tree/main/docs/impulse/',
+      },
+    ],
     'docusaurus-lunr-search',
   ],
 
@@ -85,7 +97,14 @@ const config: Config = {
           type: 'docSidebar',
           sidebarId: 'tutorialSidebar',
           position: 'left',
-          label: 'Docs',
+          label: 'Impulse Analytics Framework',
+        },
+        {
+          type: 'docSidebar',
+          sidebarId: 'appSidebar',
+          docsPluginId: 'app',
+          position: 'left',
+          label: 'Impulse App',
         },
         {
           type: 'search',
