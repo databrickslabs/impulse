@@ -8,7 +8,7 @@ This Software includes software developed at Databricks (https://www.databricks.
 
 Dependencies are grouped below by license. Each table row lists a third-party package bundled or used at build time, along with its license and upstream source. Dev-only dependencies (linters, test runners, build tooling) are marked `dev`; runtime dependencies are marked `runtime`.
 
-This NOTICE covers the full transitive Python graph (`uv.lock` via `pip-licenses`) plus the **direct** docs-site dependencies declared in `docs/impulse/package.json`.
+This NOTICE covers the full transitive Python graph (`uv.lock` via `pip-licenses`) plus the **direct** docs-site dependencies declared in `docs/impulse/package.json`. The optional Impulse App in `apps/adhoc-reporting` has its own section, [Impulse App](#impulse-app).
 
 ---
 
@@ -183,6 +183,111 @@ Full license text: [https://docs.python.org/3/license.html](https://docs.python.
 | --- | --- | --- | --- | --- | --- |
 | distlib | 0.4.0 | Python | dev | Vinay Sajip | [https://github.com/pypa/distlib](https://github.com/pypa/distlib) |
 | matplotlib | 3.10.0 | Python | runtime | John D. Hunter, Michael Droettboom | [https://matplotlib.org](https://matplotlib.org) |
+| typing_extensions | 4.15.0 | Python | runtime | "Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee" <levkivskyi@gmail.com> | [https://github.com/python/typing_extensions](https://github.com/python/typing_extensions) |
+
+---
+
+## Impulse App
+
+The optional Impulse App in `apps/adhoc-reporting` has its own dependencies, grouped below by license in the same way. This section covers its full transitive Python graph (`apps/adhoc-reporting/uv.lock` via `pip-licenses`) plus the **direct** frontend dependencies declared in `apps/adhoc-reporting/frontend/package.json`.
+
+### Apache License 2.0
+
+Full license text: [https://www.apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0).
+
+| Package | Version | Ecosystem | Type | Copyright | Source |
+| --- | --- | --- | --- | --- | --- |
+| cryptography | 48.0.0 | Python | runtime | The Python Cryptographic Authority and individual contributors <cryptography-dev@python.org> | [https://github.com/pyca/cryptography](https://github.com/pyca/cryptography) |
+| databricks-sdk | 0.115.0 | Python | runtime | _see upstream_ | [https://databricks-sdk-py.readthedocs.io](https://databricks-sdk-py.readthedocs.io) |
+| google-auth | 2.53.0 | Python | runtime | Google Cloud Platform | [https://github.com/googleapis/google-auth-library-python](https://github.com/googleapis/google-auth-library-python) |
+| packaging | 26.3 | Python | dev | Donald Stufft <donald@stufft.io> | [https://github.com/pypa/packaging](https://github.com/pypa/packaging) |
+| requests | 2.34.2 | Python | runtime | Kenneth Reitz <me@kennethreitz.org> | [https://github.com/psf/requests](https://github.com/psf/requests) |
+| typescript | 5.9.3 | npm | dev | Microsoft Corp. | [https://github.com/microsoft/TypeScript](https://github.com/microsoft/TypeScript) |
+
+### BSD 2-Clause License
+
+Full license text: [https://opensource.org/licenses/BSD-2-Clause](https://opensource.org/licenses/BSD-2-Clause).
+
+| Package | Version | Ecosystem | Type | Copyright | Source |
+| --- | --- | --- | --- | --- | --- |
+| pyasn1 | 0.6.3 | Python | runtime | Ilya Etingof <etingof@gmail.com> | [https://github.com/pyasn1/pyasn1](https://github.com/pyasn1/pyasn1) |
+| Pygments | 2.21.0 | Python | dev | Georg Brandl <georg@python.org> | [https://pygments.org](https://pygments.org) |
+
+### BSD 3-Clause License
+
+Full license text: [https://opensource.org/licenses/BSD-3-Clause](https://opensource.org/licenses/BSD-3-Clause).
+
+| Package | Version | Ecosystem | Type | Copyright | Source |
+| --- | --- | --- | --- | --- | --- |
+| click | 8.4.1 | Python | runtime | _see upstream_ | [https://github.com/pallets/click/](https://github.com/pallets/click/) |
+| httpcore | 1.0.9 | Python | dev | Tom Christie <tom@tomchristie.com> | [https://www.encode.io/httpcore/](https://www.encode.io/httpcore/) |
+| idna | 3.17 | Python | runtime | Kim Davies <kim+pypi@gumleaf.org> | [https://github.com/kjd/idna](https://github.com/kjd/idna) |
+| protobuf | 6.33.6 | Python | runtime | protobuf@googlegroups.com | [https://developers.google.com/protocol-buffers/](https://developers.google.com/protocol-buffers/) |
+| pycparser | 3.0 | Python | runtime | Eli Bendersky <eliben@gmail.com> | [https://github.com/eliben/pycparser](https://github.com/eliben/pycparser) |
+| starlette | 1.2.1 | Python | runtime | Tom Christie <tom@tomchristie.com> | [https://github.com/Kludex/starlette](https://github.com/Kludex/starlette) |
+| uvicorn | 0.48.0 | Python | runtime | Tom Christie <tom@tomchristie.com> | [https://uvicorn.dev/](https://uvicorn.dev/) |
+
+### BSD License
+
+Full license text: [https://opensource.org/licenses/BSD-3-Clause](https://opensource.org/licenses/BSD-3-Clause).
+
+| Package | Version | Ecosystem | Type | Copyright | Source |
+| --- | --- | --- | --- | --- | --- |
+| colorama | 0.4.6 | Python | runtime | Jonathan Hartley <tartley@tartley.com> | [https://github.com/tartley/colorama](https://github.com/tartley/colorama) |
+| httpx | 0.28.1 | Python | dev | Tom Christie <tom@tomchristie.com> | [https://github.com/encode/httpx](https://github.com/encode/httpx) |
+| pyasn1_modules | 0.4.2 | Python | runtime | Ilya Etingof | [https://github.com/pyasn1/pyasn1-modules](https://github.com/pyasn1/pyasn1-modules) |
+
+### ISC License
+
+Full license text: [https://opensource.org/licenses/ISC](https://opensource.org/licenses/ISC).
+
+| Package | Version | Ecosystem | Type | Copyright | Source |
+| --- | --- | --- | --- | --- | --- |
+| lucide-react | 1.48.0 | npm | runtime | Eric Fennis | [https://github.com/lucide-icons/lucide](https://github.com/lucide-icons/lucide) |
+
+### MIT License
+
+Full license text: [https://opensource.org/licenses/MIT](https://opensource.org/licenses/MIT).
+
+| Package | Version | Ecosystem | Type | Copyright | Source |
+| --- | --- | --- | --- | --- | --- |
+| annotated-doc | 0.0.4 | Python | runtime | Sebastián Ramírez <tiangolo@gmail.com> | [https://github.com/fastapi/annotated-doc](https://github.com/fastapi/annotated-doc) |
+| annotated-types | 0.7.0 | Python | runtime | Adrian Garcia Badaracco <1755071+adriangb@users.noreply.github.com>, Samuel Colvin <s@muelcolvin.com>, Zac Hatfield-Dodds <zac@zhd.dev> | [https://github.com/annotated-types/annotated-types](https://github.com/annotated-types/annotated-types) |
+| anyio | 4.13.0 | Python | runtime | Alex Grönholm <alex.gronholm@nextday.fi> | [https://anyio.readthedocs.io/en/stable/versionhistory.html](https://anyio.readthedocs.io/en/stable/versionhistory.html) |
+| cffi | 2.0.0 | Python | runtime | Armin Rigo, Maciej Fijalkowski | [https://cffi.readthedocs.io/en/latest/whatsnew.html](https://cffi.readthedocs.io/en/latest/whatsnew.html) |
+| charset-normalizer | 3.4.7 | Python | runtime | "Ahmed R. TAHRI" <tahri.ahmed@proton.me> | [https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md](https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md) |
+| fastapi | 0.136.3 | Python | runtime | Sebastián Ramírez <tiangolo@gmail.com> | [https://github.com/fastapi/fastapi](https://github.com/fastapi/fastapi) |
+| h11 | 0.16.0 | Python | runtime | Nathaniel J. Smith | [https://github.com/python-hyper/h11](https://github.com/python-hyper/h11) |
+| iniconfig | 2.3.0 | Python | dev | Ronny Pfannschmidt <opensource@ronnypfannschmidt.de>, Holger Krekel <holger.krekel@gmail.com> | [https://github.com/pytest-dev/iniconfig](https://github.com/pytest-dev/iniconfig) |
+| pluggy | 1.6.0 | Python | dev | Holger Krekel <holger@merlinux.eu> | [https://github.com/pytest-dev/pluggy](https://github.com/pytest-dev/pluggy) |
+| pydantic | 2.13.4 | Python | runtime | Samuel Colvin <s@muelcolvin.com>, Eric Jolibois <em.jolibois@gmail.com>, Hasan Ramezani <hasan.r67@gmail.com>, Adrian Garcia Badaracco <1755071+adriangb@users.noreply.github.com>, Terrence Dorsey <terry@pydantic.dev>, David Montague <david@pydantic.dev>, Serge Matveenko <lig@countzero.co>, Marcelo Trylesinski <marcelotryle@gmail.com>, Sydney Runkle <sydneymarierunkle@gmail.com>, David Hewitt <mail@davidhewitt.dev>, Alex Hall <alex.mojaki@gmail.com>, Victorien Plot <contact@vctrn.dev> | [https://github.com/pydantic/pydantic](https://github.com/pydantic/pydantic) |
+| pydantic_core | 2.46.4 | Python | runtime | Samuel Colvin <s@muelcolvin.com>, Adrian Garcia Badaracco <1755071+adriangb@users.noreply.github.com>, David Montague <david@pydantic.dev>, David Hewitt <mail@davidhewitt.dev>, Sydney Runkle <sydneymarierunkle@gmail.com>, Victorien Plot <contact@vctrn.dev> | [https://github.com/pydantic](https://github.com/pydantic) |
+| pytest | 9.1.1 | Python | dev | Brianna Laugher, Bruno Oliveira, Floris Bruynooghe, Freya Bruhin, Holger Krekel, Others (See AUTHORS), Ronny Pfannschmidt | [https://docs.pytest.org/en/latest/](https://docs.pytest.org/en/latest/) |
+| PyYAML | 6.0.3 | Python | runtime | Kirill Simonov | [https://pyyaml.org/](https://pyyaml.org/) |
+| typing-inspection | 0.4.2 | Python | runtime | Victorien Plot <contact@vctrn.dev> | [https://github.com/pydantic/typing-inspection](https://github.com/pydantic/typing-inspection) |
+| urllib3 | 2.7.0 | Python | runtime | Andrey Petrov <andrey.petrov@shazow.net> | [https://github.com/urllib3/urllib3/blob/main/CHANGES.rst](https://github.com/urllib3/urllib3/blob/main/CHANGES.rst) |
+| @types/react | 19.3.0 | npm | dev | _see upstream_ | [https://github.com/DefinitelyTyped/DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped) |
+| @types/react-dom | 19.3.0 | npm | dev | _see upstream_ | [https://github.com/DefinitelyTyped/DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped) |
+| @vitejs/plugin-react | 6.1.1 | npm | dev | Evan You | [https://github.com/vitejs/vite-plugin-react](https://github.com/vitejs/vite-plugin-react) |
+| plotly.js-cartesian-dist-min | 3.7.0 | npm | runtime | Plotly, Inc. | [https://github.com/plotly/plotly.js](https://github.com/plotly/plotly.js) |
+| react | 19.3.0 | npm | runtime | _see upstream_ | [https://github.com/react/react](https://github.com/react/react) |
+| react-dom | 19.3.0 | npm | runtime | _see upstream_ | [https://github.com/react/react](https://github.com/react/react) |
+| vite | 8.3.1 | npm | dev | Evan You | [https://github.com/vitejs/vite](https://github.com/vitejs/vite) |
+
+### Mozilla Public License 2.0
+
+Full license text: [https://www.mozilla.org/en-US/MPL/2.0/](https://www.mozilla.org/en-US/MPL/2.0/).
+
+| Package | Version | Ecosystem | Type | Copyright | Source |
+| --- | --- | --- | --- | --- | --- |
+| certifi | 2026.5.20 | Python | runtime | Kenneth Reitz | [https://github.com/certifi/python-certifi](https://github.com/certifi/python-certifi) |
+
+### Python Software Foundation License
+
+Full license text: [https://docs.python.org/3/license.html](https://docs.python.org/3/license.html).
+
+| Package | Version | Ecosystem | Type | Copyright | Source |
+| --- | --- | --- | --- | --- | --- |
 | typing_extensions | 4.15.0 | Python | runtime | "Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee" <levkivskyi@gmail.com> | [https://github.com/python/typing_extensions](https://github.com/python/typing_extensions) |
 
 ---

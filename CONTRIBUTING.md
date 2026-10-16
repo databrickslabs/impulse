@@ -48,6 +48,12 @@ Notes specific to Impulse:
   `gold` schemas. You don't need a Databricks workspace to run the unit tests.
 - Spark warehouse output is written to `spark-warehouse/` (gitignored).
 
+## Apps
+
+The apps in [`apps/`](apps/) are separate projects with their own dependencies, tests, Makefile
+and CI workflow; the root `make` targets don't include them. For developing the Impulse App see
+[`apps/adhoc-reporting/README.md`](apps/adhoc-reporting/README.md).
+
 ## Code style
 
 We use **black** for formatting and **ruff** for linting. Both are configured in

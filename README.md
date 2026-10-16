@@ -96,6 +96,12 @@ databricks workspace import-dir skills /Workspace/.assistant/skills
 
 Genie picks them up on next use — verify with *"List the Impulse skills you can use."* For Claude Code and other tools (including how to refresh after edits), see [`skills/README.md`](skills/README.md).
 
+## Apps
+
+The [`apps/`](apps/) folder contains optional Databricks Apps built on Impulse. They are separate projects, not part of the `databricks-impulse` package, and are installed on their own.
+
+- [`apps/adhoc-reporting`](apps/adhoc-reporting/) — the **Impulse App**: build reports step by step or by describing them to an assistant, run them on serverless compute and chart the results. See the [Impulse App documentation](https://databrickslabs.github.io/impulse/app/) for requirements, installation and architecture.
+
 ## Requirements
 
 Python 3.12, PySpark 4.0, Delta Lake 4.0. The full dependency list is in [pyproject.toml](pyproject.toml).

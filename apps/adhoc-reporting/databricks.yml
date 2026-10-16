@@ -1,0 +1,54 @@
+bundle:
+  name: impulse-adhoc-reporting
+
+sync:
+  include:
+    - frontend/dist/**
+  exclude:
+    - tests/**
+    - scripts/**
+    - frontend/src/**
+    - frontend/package.json
+    - frontend/package-lock.json
+    - frontend/tsconfig.json
+    - frontend/vite.config.ts
+    - frontend/index.html
+    - Makefile
+    - .env.example
+    - uv.lock
+
+variables:
+  app_name:
+    default: impulse-adhoc-reporting
+  warehouse_id:
+    description: SQL warehouse the app runs user queries on
+  end_user_group:
+    default: users
+
+resources:
+  apps:
+    impulse_app:
+      name: ${var.app_name}
+      description: Impulse report builder
+      source_code_path: .
+      user_api_scopes:
+        - sql
+        - workspace.workspace
+        - model-serving
+        - catalog.catalogs:read
+        - catalog.schemas:read
+        - catalog.tables:read
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+      permissions:
+        - level: CAN_USE
+          group_name: ${var.end_user_group}
+
+targets:
+  dev:
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
