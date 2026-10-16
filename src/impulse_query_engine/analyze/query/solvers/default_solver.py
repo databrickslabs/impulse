@@ -622,10 +622,6 @@ class DefaultSolver(QuerySolver):
         columns, the result is restricted to the candidate containers, and
         ``selector_ids`` is computed from the matching selectors.
 
-        In both modes a selector resolves to at most one channel per container:
-        when several channels of a container match, the lowest ``channel_id``
-        is kept.
-
         Parameters
         ----------
         spark : SparkSession
@@ -662,7 +658,10 @@ class DefaultSolver(QuerySolver):
                 on=[container_id_col, channel_id_col],
                 how="inner",
             )
-            return self._one_channel_per_selector(metrics)
+            metrics = metrics.withColumn("selector_ids", F.array(F.col("selector_id"))).drop(
+                "selector_id"
+            )
+            return metrics.select(container_id_col, channel_id_col, "selector_ids")
 
         # Wide mode: selectors apply directly to channel_metrics columns.
         channel_metrics_df = channel_metrics_df.where(self._build_expr(selectors))
@@ -671,28 +670,10 @@ class DefaultSolver(QuerySolver):
             on=[container_id_col],
             how="inner",
         )
-        result = result.withColumn("selector_id", self._build_selector_id_expr(selectors))
-        return self._one_channel_per_selector(result)
-
-    def _one_channel_per_selector(self, matches: DataFrame) -> DataFrame:
-        """Keep the lowest matching ``channel_id`` per container and direct selector.
-
-        *matches* carries one ``selector_id`` per ``(container_id, channel_id)``
-        row (the first selector matching the channel).  Returns
-        ``(container_id, channel_id, selector_ids)`` with one row per container
-        and selector.
-        """
-        container_id_col = self.config.container_id_col
-        channel_id_col = self.config.channel_id_col
-        return (
-            matches.groupBy(container_id_col, "selector_id")
-            .agg(F.min(channel_id_col).alias(channel_id_col))
-            .select(
-                container_id_col,
-                channel_id_col,
-                F.array(F.col("selector_id")).alias("selector_ids"),
-            )
+        result = result.withColumn(
+            "selector_ids", F.array(self._build_selector_id_expr(selectors))
         )
+        return result.select(container_id_col, channel_id_col, "selector_ids")
 
     def filter_aliased_channel_metrics(
         self, spark, db: MeasurementDB, container_df, selectors
@@ -909,20 +890,7 @@ class DefaultSolver(QuerySolver):
         ]
         if has_unit_cols:
             aliased_solve_cols.extend([source_unit_col, target_unit_col])
-        # An aliased selector matching several aliases of a container resolves to
-        # one channel, like a direct selector: best alias priority, then lowest
-        # channel_id.
-        per_selector = Window.partitionBy(
-            self.config.container_id_col, F.col("selector_ids")[0]
-        ).orderBy(
-            F.col(self.config.alias_priority_col).asc_nulls_last(),
-            F.col(self.config.channel_id_col).asc(),
-        )
-        aliased_for_union = (
-            aliased_channel_metrics_df.withColumn("_rank", F.row_number().over(per_selector))
-            .where(F.col("_rank") == 1)
-            .select(*aliased_solve_cols)
-        )
+        aliased_for_union = aliased_channel_metrics_df.select(*aliased_solve_cols)
 
         merged = channel_metrics_df.unionByName(
             aliased_for_union, allowMissingColumns=has_unit_cols

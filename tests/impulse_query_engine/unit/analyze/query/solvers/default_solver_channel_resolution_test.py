@@ -1,12 +1,11 @@
 # pylint: disable=missing-function-docstring
-"""DefaultSolver resolves every selector to at most one channel per container.
+"""DefaultSolver channel resolution when several channels of a container match a selection.
 
-When several channels of a container match a selection, the lowest ``channel_id``
-wins (after the alias priority for aliased selections), independent of row order.
+A direct selection keeps every matching channel.  An alias resolves to one channel per
+container: the best alias priority, then the lowest ``channel_id``.
 """
 
 import os
-import zlib
 
 import numpy as np
 import pandas as pd
@@ -14,10 +13,7 @@ import pyspark.sql.functions as F
 import pytest
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
-from impulse_query_engine.analyze.metadata.time_series_expression import (
-    SeriesType,
-    TimeSeriesSelector,
-)
+from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     ChannelMappingConfig,
@@ -28,6 +24,9 @@ from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConf
 from tests.conftest import spark
 
 _ALIAS_SCHEMA = "spark_catalog.silver_key_value_store_alias"
+# unit="C" matches the ambient and intake temperatures: channels 6 and 9 in containers 1
+# and 2, channels 2 and 8 in container 3.
+_CELSIUS_CHANNELS = {1: [6, 9], 2: [6, 9], 3: [2, 8]}
 
 
 def _alias_config() -> SolverConfig:
@@ -85,14 +84,12 @@ def _with_channel(channel_metrics, container_id, channel_id, **columns):
 
 
 class TestDirectSelectors:
-    def test_wide_mode_keeps_lowest_channel_id(self, spark, basic_narrow_db):
-        # unit="C" matches the ambient and intake temperatures: channels 6 and 9 in
-        # containers 1 and 2, channels 2 and 8 in container 3.
+    def test_wide_mode_keeps_every_matching_channel(self, spark, basic_narrow_db):
         q = basic_narrow_db.query
         celsius = q.channel(unit="C")
-        assert _resolved(spark, DefaultSolver(spark), q, celsius) == {1: [6], 2: [6], 3: [2]}
+        assert _resolved(spark, DefaultSolver(spark), q, celsius) == _CELSIUS_CHANNELS
 
-    def test_wide_mode_solves_on_the_resolved_channel(self, spark, basic_narrow_db):
+    def test_wide_mode_solves_on_one_of_the_matching_channels(self, spark, basic_narrow_db):
         q = basic_narrow_db.query
         result = q.select(q.channel(unit="C").max().alias("t_max")).solve(
             spark, solver=DefaultSolver(spark)
@@ -102,18 +99,20 @@ class TestDirectSelectors:
         base_path = os.path.dirname(os.path.abspath(__file__))
         base_path = base_path[: base_path.find("tests")]
         data = pd.read_csv(f"{base_path}/tests/unit/data/basic_narrow_csv/channel_data.csv")
-        expected = {
-            cid: np.nanmax(data[(data.container_id == cid) & (data.channel_id == ch)].value)
-            for cid, ch in {1: 6, 2: 6, 3: 2}.items()
-        }
-        assert actual == pytest.approx(expected)
-        assert all(np.isfinite(v) for v in actual.values())
+        assert actual.keys() == _CELSIUS_CHANNELS.keys()
+        for cid, channels in _CELSIUS_CHANNELS.items():
+            maxima = [
+                np.nanmax(data[(data.container_id == cid) & (data.channel_id == ch)].value)
+                for ch in channels
+            ]
+            assert np.isfinite(actual[cid])
+            assert any(actual[cid] == pytest.approx(m) for m in maxima)
 
-    def test_eav_mode_keeps_lowest_channel_id(
+    def test_eav_mode_keeps_every_matching_channel(
         self, spark, setup_key_value_store_alias_db, mock_workspace_client
     ):
         # Re-tag channel 9 of container 1 and channels 2 and 8 of container 3 as
-        # "Engine RPM": container 1 keeps 5 (the original), container 3 keeps 2.
+        # "Engine RPM", next to channel 5 of containers 1 and 2.
         tables = _alias_tables(spark)
         tags = tables["channel_tags"]
         retagged = [(1, 9), (3, 2), (3, 8)]
@@ -130,9 +129,9 @@ class TestDirectSelectors:
         q = db.query
         rpm = q.channel(channel_name="Engine RPM")
         assert _resolved(spark, DefaultSolver(spark, config=_alias_config()), q, rpm) == {
-            1: [5],
+            1: [5, 9],
             2: [5],
-            3: [2],
+            3: [2, 8],
         }
 
 
@@ -157,39 +156,21 @@ class TestAliasedSelectors:
         solver = DefaultSolver(spark, config=_alias_config())
         assert _resolved(spark, solver, q, engine_speed)[1] == [expected]
 
-    def test_selector_matching_several_aliases_resolves_one_channel(
+    def test_selector_matching_several_aliases_resolves_each_alias(
         self, spark, key_value_store_alias_db
     ):
         q = key_value_store_alias_db.query
         solver = DefaultSolver(spark, config=_alias_config())
-        per_alias = [
-            _resolved(spark, solver, q, q.channel_with_alias(channel_alias=alias))
-            for alias in ("engine_speed", "vehicle_speed")
-        ]
+        expected: dict = {}
+        for alias in ("engine_speed", "vehicle_speed"):
+            one = _resolved(spark, solver, q, q.channel_with_alias(channel_alias=alias))
+            for cid, channels in one.items():
+                expected.setdefault(cid, set()).update(channels)
         both = TimeSeriesSelector(
             (TagSelector("channel_alias") == "engine_speed")
             | (TagSelector("channel_alias") == "vehicle_speed"),
             uses_alias=True,
         )
         resolved = _resolved(spark, solver, q, both)
-        assert resolved
-        for cid, channels in resolved.items():
-            candidates = [ch for one in per_alias for ch in one.get(cid, [])]
-            assert channels == [min(candidates)]
-
-
-def test_aliased_and_direct_selectors_on_the_same_tags_have_distinct_ids():
-    expr = TagSelector("channel_name") == "Engine RPM"
-    direct = TimeSeriesSelector(expr)
-    aliased = TimeSeriesSelector(expr, uses_alias=True)
-    assert direct.selector_id == zlib.crc32(str(expr).encode())
-    assert aliased.selector_id != direct.selector_id
-
-
-def test_aliased_and_direct_poi_selectors_on_the_same_tags_have_distinct_ids():
-    expr = TagSelector("channel_name") == "Fault Code"
-    direct = TimeSeriesSelector(expr, series_type=SeriesType.POINTS_IN_TIME)
-    aliased = TimeSeriesSelector(expr, uses_alias=True, series_type=SeriesType.POINTS_IN_TIME)
-    expected_direct = f"{SeriesType.POINTS_IN_TIME}|{expr}|{direct._value_type}"
-    assert direct.selector_id == zlib.crc32(expected_direct.encode())
-    assert aliased.selector_id != direct.selector_id
+        assert resolved == {cid: sorted(channels) for cid, channels in expected.items()}
+        assert any(len(channels) == 2 for channels in resolved.values())

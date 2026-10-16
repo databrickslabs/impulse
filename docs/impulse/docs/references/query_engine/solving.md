@@ -50,7 +50,7 @@ sample data is read in this stage. It covers the first five stages of the `Query
    their pre-filtered containers here.
 2. **Channels.** Every selector of every expression, e.g. `channel(channel_name="Engine RPM")`, is
    matched against the channel attributes on `channel_tags` (optional, EAV) or `channel_metrics`.
-   A selector resolves to at most one channel per container, the one with the lowest `channel_id`
+   A selector should match at most one channel per container
    (see [Channel selection](tsal/defining_expressions.md#channel-selection)).
 3. **Aliases.** Alongside the direct selectors, selectors written with `channel_with_alias(...)`
    are resolved through `channel_mapping` (optional), by alias priority.

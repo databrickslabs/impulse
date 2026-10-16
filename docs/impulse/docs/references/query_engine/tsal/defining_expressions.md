@@ -32,11 +32,9 @@ table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolve
 :::
 
 :::note When a selection matches several channels
-A selection resolves to at most one channel per container. If several channels of a container
-match its tags (e.g. the same `channel_name` under two `data_key`s), the one with the lowest
-`channel_id` is used; add tags such as `data_key` to select a specific channel. Earlier versions
-picked an arbitrary match, so recompute incremental reports in full if their selections were
-ambiguous.
+A selection should identify at most one channel per container. If several channels of a container
+match its tags (e.g. the same `channel_name` under two `data_key`s), one of them is used, and which
+one is unspecified; add tags such as `data_key` to select a specific channel.
 :::
 
 ### Points-in-Time (POI) channels

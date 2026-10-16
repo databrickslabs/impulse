@@ -172,10 +172,6 @@ frame; the selectors are applied directly to ``channel_metrics``
 columns, the result is restricted to the candidate containers, and
 ``selector_ids`` is computed from the matching selectors.
 
-In both modes a selector resolves to at most one channel per container:
-when several channels of a container match, the lowest ``channel_id``
-is kept.
-
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
