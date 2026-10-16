@@ -15,7 +15,8 @@ tables are **fully optional** add-ons, used only when configured — see the
 The rest of this page documents the full shape. Landing your data in it during
 ingest is the simplest path (see the [Ingestion guide](ingestion.md)); if you
 can't reshape, a [`SolverConfig`](ingestion.md#adapting-to-existing-data-layouts)
-can remap column names, or you can implement a custom solver.
+can remap column names, or a [custom MeasurementDB](../extensibility/custom_measurement_db.md)
+can reshape your tables when they are read.
 
 :::
 

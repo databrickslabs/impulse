@@ -19,9 +19,10 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
-from .query_solver import QuerySolver
+from .query_solver import QuerySolver, SolverBuildContext
 from .series_cache import SeriesCache
 from .solver_config import RawEncoder, SolverConfig
+from .solver_registry import register_solver
 from .utils.interval_encoder import IntervalEncoder
 from .utils.rle_encoder import RleEncoder
 from .utils.window_bounds import with_window_bounds
@@ -210,6 +211,7 @@ class TimeSeriesCache(SeriesCache):
         return {c: row[c] for c in cols if c in self.mdf.columns}
 
 
+@register_solver("DefaultSolver", SolverConfig, aliases=("DeltaSolver", "KeyValueStoreSolver"))
 class DefaultSolver(QuerySolver):
     """
     The default query-engine solver.  Adapts to the shape of the silver layer.
@@ -275,6 +277,17 @@ class DefaultSolver(QuerySolver):
         # encoding, bridging intervals instead of splitting them. Reject it.
         self.config.reject_implausible_channels_filter_in_raw(is_raw=self.is_raw_data)
         self.channel_encoder: RleEncoder | IntervalEncoder = self._build_channel_encoder()
+
+    @classmethod
+    def from_config(cls, ctx: SolverBuildContext) -> DefaultSolver:
+        """Build the solver with the Spark session and RAW-data flags from the report config."""
+        return cls(
+            ctx.spark,
+            config=ctx.solver_config,
+            is_raw_data=ctx.is_raw_data,
+            drop_implausible_data=ctx.drop_implausible_data,
+            raw_encoder=ctx.raw_encoder,
+        )
 
     def _build_channel_encoder(self) -> RleEncoder | IntervalEncoder:
         """Construct the raw -> interval encoder selected by ``raw_encoder``.

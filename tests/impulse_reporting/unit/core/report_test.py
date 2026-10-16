@@ -4,9 +4,10 @@ from unittest.mock import create_autospec
 import pytest
 from databricks.sdk import WorkspaceClient
 
-import impulse_query_engine.measurement_db_registry as registry
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
+from impulse_query_engine.analyze.query.solvers import DefaultSolver, SolverConfig, register_solver
+from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.aggregations.aggregation_types import AggregationType
@@ -173,14 +174,13 @@ def test_report_init():
     assert report.aggregation_dfs == {}
 
 
-def test_report_init_fails_loudly_for_custom_db_skipping_super_init(monkeypatch):
+def test_report_init_fails_loudly_for_custom_db_skipping_super_init(isolated_registries):
     """A custom DB that skips ``super().__init__`` fails when the Report reads ``db.ws``."""
 
     class SkipsSuperInitDB(MeasurementDB):
         def __init__(self, config, ws):
             self.config = config  # forgets super().__init__(config, ws)
 
-    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
     register_measurement_db("SkipsSuperInitDB", MeasurementDBConfig)(SkipsSuperInitDB)
 
     with pytest.raises(TypeError, match=r"SkipsSuperInitDB\.__init__ must call super\(\)"):
@@ -190,6 +190,70 @@ def test_report_init_fails_loudly_for_custom_db_skipping_super_init(monkeypatch)
             workspace_client=create_autospec(WorkspaceClient),
             config={**DUMMY_CONFIG, "query_engine": {"measurement_db": "SkipsSuperInitDB"}},
         )
+
+
+@pytest.fixture
+def logged_telemetry(monkeypatch):
+    """Records the (key, value) pairs the Report sends to telemetry."""
+    logged = []
+    monkeypatch.setattr(
+        "impulse_reporting.core.report.log_telemetry",
+        lambda _ws, key, value: logged.append((key, value)),
+    )
+    return logged
+
+
+def test_report_builds_registered_custom_solver(isolated_registries, logged_telemetry):
+    class ExcludeContainersConfig(SolverConfig):
+        excluded_container_ids: list[int]
+
+    class ExcludeContainersSolver(DefaultSolver): ...
+
+    register_solver("ExcludeContainersSolver", ExcludeContainersConfig)(ExcludeContainersSolver)
+
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config={
+            **DUMMY_CONFIG,
+            "query_engine": {
+                "solver": "ExcludeContainersSolver",
+                "solver_config": {"excluded_container_ids": [3]},
+            },
+        },
+    )
+
+    solver = report.get_solver()
+    assert type(solver) is ExcludeContainersSolver
+    assert solver.config.excluded_container_ids == [3]
+    # Custom solver names aren't sent; built-in names stay as they were (next test).
+    assert ("solver", "custom") in logged_telemetry
+
+
+def test_report_telemetry_keeps_builtin_solver_names(logged_telemetry):
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=DUMMY_KEY_VALUE_STORE_CONFIG,
+    )
+
+    assert type(report.get_solver()) is DefaultSolver
+    assert ("solver", "KEY_VALUE_STORE_SOLVER") in logged_telemetry
+
+
+def test_report_passes_a_concrete_raw_encoder_for_rle_data():
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=DUMMY_CONFIG,
+    )
+
+    # query_engine.raw_encoder stays unset for RLE input; the solver still gets the RLE default.
+    assert report.config.query_engine.raw_encoder is None
+    assert report.get_solver().raw_encoder is RawEncoder.RLE
 
 
 def test_set_config():
