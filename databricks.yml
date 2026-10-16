@@ -18,7 +18,7 @@ variables:
     default: maxim_catalog
   source_schema:
     description: Schema under `catalog` with the silver test data (read-only).
-    default: impulse_v4_demo
+    default: default
 
 targets:
   # Workspace host and auth come from the environment.

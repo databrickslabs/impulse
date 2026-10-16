@@ -56,11 +56,6 @@ dev = [
     "black==26.3.1"
 ]
 
-# End-to-end suite (tests/e2e); runs on Databricks, which provides pyspark/delta.
-e2e = [
-    "databricks-labs-pytester==0.7.4",
-]
-
 # Setuptools options
 [tool.setuptools.dynamic]
 version = {file = ["VERSION"]}
@@ -74,9 +69,6 @@ exclude = ["src/*/demos"]
 pythonpath = [".", "src/impulse_reporting"]
 testpaths = ["tests"]
 addopts = "--junitxml=test-results.xml --cov=src --cov-report=html --cov-report=xml:coverage.xml --cov-report=term-missing"
-markers = [
-    "e2e: end-to-end tests that run on Databricks.",
-]
 
 # Default dependency groups
 [tool.uv]

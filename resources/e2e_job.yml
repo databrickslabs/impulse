@@ -6,17 +6,62 @@ resources:
       max_concurrent_runs: 1
 
       tasks:
-        - task_key: run_e2e
-          spark_python_task:
-            python_file: ../tests/e2e/run_in_job.py
-            parameters:
-              - "--catalog"
-              - ${var.catalog}
-              - "--source-schema"
-              - ${var.source_schema}
-              - "--repo-root"
-              - ${workspace.file_path}
+        - task_key: setup
           environment_key: e2e_env
+          disable_auto_optimization: true
+          spark_python_task:
+            python_file: ../tests/e2e/setup_schema.py
+            parameters: ["--catalog", "${var.catalog}", "--schema", "e2e_{{job.run_id}}"]
+
+        - task_key: run_report
+          depends_on: [{task_key: setup}]
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          spark_python_task:
+            python_file: ../tests/e2e/run_report.py
+            parameters: &report_params
+              ["--catalog", "${var.catalog}", "--schema", "e2e_{{job.run_id}}",
+               "--source-schema", "${var.source_schema}"]
+
+        # Second run of the same report: gold tables must be updated in place.
+        - task_key: run_report_rerun
+          depends_on: [{task_key: run_report}]
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          spark_python_task:
+            python_file: ../tests/e2e/run_report.py
+            parameters: *report_params
+
+        - task_key: validate
+          depends_on: [{task_key: run_report_rerun}]
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          spark_python_task:
+            python_file: ../tests/e2e/validate.py
+            parameters:
+              ["--catalog", "${var.catalog}", "--schema", "e2e_{{job.run_id}}",
+               "--expected-dir", "${workspace.file_path}/tests/e2e/expected",
+               "--actual-dir", "${workspace.root_path}/actual"]
+
+        - task_key: teardown
+          depends_on: &all_steps
+            [{task_key: setup}, {task_key: run_report}, {task_key: run_report_rerun}, {task_key: validate}]
+          run_if: ALL_DONE
+          disable_auto_optimization: true
+          environment_key: e2e_env
+          spark_python_task:
+            python_file: ../tests/e2e/teardown.py
+            parameters: ["--catalog", "${var.catalog}", "--schema", "e2e_{{job.run_id}}"]
+
+        # Fails the run if any step failed; without it the succeeding teardown
+        # would mark the run "succeeded with failures".
+        - task_key: fail_on_error
+          depends_on: *all_steps
+          run_if: AT_LEAST_ONE_FAILED
+          disable_auto_optimization: true
+          environment_key: e2e_env
+          spark_python_task:
+            python_file: ../tests/e2e/fail_on_error.py
 
       environments:
         - environment_key: e2e_env
@@ -25,4 +70,3 @@ resources:
             environment_version: "5"
             dependencies:
               - ../dist/*.whl
-              - databricks-labs-pytester==0.7.4

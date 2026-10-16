@@ -13,13 +13,6 @@ from pyspark.sql import SparkSession
 import impulse_query_engine.schema as S
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 
-# tests/e2e runs only on Databricks; skip it where its plugin is not installed.
-collect_ignore_glob = []
-try:
-    import databricks.labs.pytester  # noqa: F401
-except ImportError:
-    collect_ignore_glob.append("e2e/*")
-
 
 @pytest.fixture(scope="session")
 def spark(tmp_path_factory, worker_id) -> SparkSession:
