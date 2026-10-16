@@ -10,6 +10,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import TimeSer
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
 from impulse_query_engine.analyze.query.optimizer import (
     PushdownContext,
+    PushdownPlan,
     QueryOptimizer,
     ResamplePushdownRule,
 )
@@ -45,6 +46,7 @@ def test_channel_variants(spark, selectors):
         "pushed": ([pushed.selector_id], list(pushed_variant)),
         "raw_and_pushed": ([raw.selector_id, pushed.selector_id], [0]),
         "pushed_and_null": ([pushed.selector_id, None], list(pushed_variant)),
+        "pushed_twice": ([pushed.selector_id, pushed.selector_id], list(pushed_variant)),
         "two_pushed": (
             [pushed.selector_id, pushed_2.selector_id],
             list(pushed_variant + pushed_2_variant),
@@ -61,6 +63,15 @@ def test_channel_variants(spark, selectors):
         ).collect()
     }
     assert actual == {name: expected for name, (_, expected) in cases.items()}
+
+
+def test_channel_selector_ids(spark):
+    df = spark.createDataFrame(
+        [(0, [7, None, 7, 3]), (1, []), (2, None)], schema="i int, selector_ids array<int>"
+    )
+    result = df.select("i", PushdownPlan.channel_selector_ids("selector_ids").alias("ids"))
+    assert result.schema["ids"].dataType.elementType == T.LongType()
+    assert {r["i"]: r["ids"] for r in result.collect()} == {0: [7, 3], 1: [], 2: None}
 
 
 class TestNativeTargets:

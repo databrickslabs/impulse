@@ -123,6 +123,19 @@ A channel ships only its raw data (``[0]``) unless every one of its
 selectors is pushed down; then it ships the derived variants instead.
 
 
+#### channel\_selector\_ids
+
+```python
+def channel_selector_ids(selector_ids: Column | str) -> Column
+```
+
+A matched channel's distinct, non-null ``selector_ids``, as ``long``.
+
+Variant tagging (:meth:`channel_variants`) and the native calculated-channel
+rows both read a channel's selectors through this, so they agree on which
+selectors it carries.
+
+
 #### describe
 
 ```python

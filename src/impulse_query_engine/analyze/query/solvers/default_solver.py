@@ -1768,16 +1768,10 @@ class DefaultSolver(QuerySolver):
             ]
         )
         by_selector = F.try_element_at(by_variant, F.col(VARIANT_COL))
-        selector_ids = F.array_distinct(
-            F.filter(
-                F.transform("selector_ids", lambda sid: sid.cast("long")),
-                lambda sid: sid.isNotNull(),
-            )
-        )
         no_targets = F.array().cast(target_type)
         channel_targets = F.flatten(
             F.transform(
-                selector_ids,
+                PushdownPlan.channel_selector_ids("selector_ids"),
                 lambda sid: F.coalesce(F.try_element_at(by_selector, sid), no_targets),
             )
         )

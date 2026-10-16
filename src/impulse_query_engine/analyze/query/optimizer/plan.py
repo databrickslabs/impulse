@@ -179,9 +179,7 @@ class PushdownPlan:
         A channel ships only its raw data (``[0]``) unless every one of its
         selectors is pushed down; then it ships the derived variants instead.
         """
-        ids = F.filter(
-            F.transform(selector_ids, lambda sid: sid.cast("long")), lambda sid: sid.isNotNull()
-        )
+        ids = PushdownPlan.channel_selector_ids(selector_ids)
         pushed = sorted(self.variants_by_selector)
         needs_raw = F.exists(ids, lambda sid: ~sid.isin(pushed)) | (F.size(ids) == 0)
         mapping = F.create_map(
@@ -204,6 +202,21 @@ class PushdownPlan:
         )
         return F.when(F.coalesce(needs_raw, F.lit(True)), F.array(F.lit(RAW_VARIANT))).otherwise(
             derived
+        )
+
+    @staticmethod
+    def channel_selector_ids(selector_ids: Column | str) -> Column:
+        """A matched channel's distinct, non-null ``selector_ids``, as ``long``.
+
+        Variant tagging (:meth:`channel_variants`) and the native calculated-channel
+        rows both read a channel's selectors through this, so they agree on which
+        selectors it carries.
+        """
+        return F.array_distinct(
+            F.filter(
+                F.transform(selector_ids, lambda sid: sid.cast("long")),
+                lambda sid: sid.isNotNull(),
+            )
         )
 
     def describe(self) -> str:
