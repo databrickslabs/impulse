@@ -7,6 +7,7 @@ from collections import Counter
 import numpy as np
 import numpy.testing as nptest
 import pandas as pd
+import pyspark.sql.functions as F
 import pytest
 from pyspark.sql import SparkSession
 
@@ -297,6 +298,35 @@ class TestIdenticalResults:
         _assert_same(on, off)
         rpm = on["rpm"].iloc[0]
         assert rpm.tstarts[-1] == rpm.tends[-1]  # the series ends on a point
+
+    @pytest.mark.parametrize("channel_id_type", ["int", "string"])
+    def test_channel_id_types(
+        self,
+        spark: SparkSession,
+        setup_key_value_store_db,
+        mock_workspace_client,
+        udf_rows,
+        channel_id_type,
+    ):
+        tables = {
+            name: spark.read.table(f"spark_catalog.silver_key_value_store.{name}")
+            for name in ("container_tags", "container_metrics", "channel_metrics", "channels")
+        }
+        for name in ("channel_metrics", "channels"):
+            tables[name] = tables[name].withColumn(
+                "channel_id", F.col("channel_id").cast(channel_id_type)
+            )
+        db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=mock_workspace_client)
+        off, on = _solve_both(
+            spark,
+            db,
+            lambda q: [q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm")],
+            config=_kvs_config(),
+        )
+        _assert_same(on, off)
+        assert all(np.isfinite(s.values).all() and len(s) > 1 for s in on["rpm"])
+        _, rows_on = udf_rows
+        assert {variant for _, variant in rows_on} == {1}
 
 
 class TestCalculatedChannels:
