@@ -1,8 +1,12 @@
-"""e2e step: run a report from the silver tables into the test schema."""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # e2e: run report
+# MAGIC Runs a report on the silver tables and writes the gold tables to the test schema.
 
-import argparse
+# COMMAND ----------
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.runtime import dbutils
 from pyspark.sql import SparkSession
 
 from impulse_reporting.aggregations.histogram import HistogramDuration
@@ -10,13 +14,12 @@ from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--catalog", required=True)
-parser.add_argument("--schema", required=True)
-parser.add_argument("--source-schema", required=True)
-args = parser.parse_args()
+catalog = dbutils.widgets.get("catalog")
+schema = dbutils.widgets.get("schema")
+source = f"{catalog}.{dbutils.widgets.get('source_schema')}"
 
-source = f"{args.catalog}.{args.source_schema}"
+# COMMAND ----------
+
 config = {
     "source": {
         "container_metrics_table": f"{source}.container_metrics",
@@ -25,7 +28,7 @@ config = {
         "channel_tags_table": f"{source}.channel_tags",
         "channels_uri": f"{source}.channels",
     },
-    "unity_sink": {"catalog": args.catalog, "schema": args.schema, "table_prefix": "eval"},
+    "unity_sink": {"catalog": catalog, "schema": schema, "table_prefix": "eval"},
     "query_engine": {"solver": "DefaultSolver", "data_type": "RLE"},
     "measurement_dimensions": ["container_id", "vehicle_key", "start_ts", "stop_ts"],
 }
@@ -54,5 +57,7 @@ page.add_aggregation(
     )
 )
 report.add_page(page)
+
+# COMMAND ----------
 
 report.run()

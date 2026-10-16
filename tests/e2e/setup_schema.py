@@ -1,12 +1,16 @@
-"""e2e step: create the schema the report writes to."""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # e2e: setup
+# MAGIC Creates the schema the report writes to.
 
-import argparse
+# COMMAND ----------
 
+from databricks.sdk.runtime import dbutils
 from pyspark.sql import SparkSession
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--catalog", required=True)
-parser.add_argument("--schema", required=True)
-args = parser.parse_args()
+catalog = dbutils.widgets.get("catalog")
+schema = dbutils.widgets.get("schema")
 
-SparkSession.builder.getOrCreate().sql(f"CREATE SCHEMA `{args.catalog}`.`{args.schema}`")
+# COMMAND ----------
+
+SparkSession.builder.getOrCreate().sql(f"CREATE SCHEMA `{catalog}`.`{schema}`")

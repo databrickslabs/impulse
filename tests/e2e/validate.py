@@ -1,34 +1,36 @@
-"""e2e step: compare the report's gold tables with the expected rows.
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # e2e: validate
+# MAGIC Compares the report's gold tables with the expected rows in `tests/e2e/expected`.
+# MAGIC On a mismatch the actual rows are uploaded as CSV to `actual_dir`, so the expected
+# MAGIC files can be refreshed from them.
 
-On a mismatch the actual rows are uploaded as CSV to --actual-dir, so the
-expected files can be refreshed from them.
-"""
+# COMMAND ----------
 
-import argparse
 import io
 import os
 
 import pandas as pd
 import pyspark.sql.functions as F
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.runtime import dbutils
 from databricks.sdk.service.workspace import ImportFormat
 from pyspark.sql import SparkSession
 from pyspark.testing import assertDataFrameEqual
 
+catalog = dbutils.widgets.get("catalog")
+schema = dbutils.widgets.get("schema")
+expected_dir = dbutils.widgets.get("expected_dir")
+# The workspace API takes paths without the /Workspace mount prefix.
+actual_dir = dbutils.widgets.get("actual_dir").removeprefix("/Workspace")
+
 # Gold tables to compare, without the report's table prefix.
 TABLES = ["histogram_fact", "event_instance_fact"]
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--catalog", required=True)
-parser.add_argument("--schema", required=True)
-parser.add_argument("--expected-dir", required=True)
-parser.add_argument("--actual-dir", required=True)
-args = parser.parse_args()
-
 spark = SparkSession.builder.getOrCreate()
 ws = WorkspaceClient()
-# The workspace API takes paths without the /Workspace mount prefix.
-actual_dir = args.actual_dir.removeprefix("/Workspace")
+
+# COMMAND ----------
 
 
 def as_strings(df):
@@ -50,12 +52,14 @@ def save_actual(name, df):
     return path
 
 
+# COMMAND ----------
+
 failures = []
 for name in TABLES:
-    actual = spark.read.table(f"`{args.catalog}`.`{args.schema}`.eval_{name}")
+    actual = spark.read.table(f"`{catalog}`.`{schema}`.eval_{name}")
     # Skip bookkeeping columns such as _created_at, which differ per run.
     actual = actual.select([c for c in actual.columns if not c.startswith("_")])
-    expected_path = os.path.join(args.expected_dir, f"{name}.csv")
+    expected_path = os.path.join(expected_dir, f"{name}.csv")
 
     if not os.path.exists(expected_path):
         failures.append(
