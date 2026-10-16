@@ -43,6 +43,43 @@ class QuerySolver(ABC):
                 df = df.withColumnRenamed(physical, internal)
         return df
 
+    def scoped_container_metrics(self, spark, query, pre_filtered_containers_df=None) -> DataFrame:
+        """Read ``container_metrics`` scoped to the solver config.
+
+        Source is *pre_filtered_containers_df* when provided (the incremental
+        container subset), otherwise the full ``container_metrics`` table.
+        Applies the per-table ``column_name_mapping``, the top-level
+        ``project_id`` filter, and the per-table ``container_metrics.filters``.
+        Query-level ``MetricExpression`` filters are **not** applied here —
+        callers add those on top when needed.
+
+        Parameters
+        ----------
+        spark : pyspark.sql.SparkSession
+            Active Spark session used to read the table.
+        query : QueryBuilder
+            Query object (database + config).
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental subset to read instead of the full table.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            The scoped, column-mapped ``container_metrics`` frame.
+        """
+        if pre_filtered_containers_df is not None:
+            metrics = pre_filtered_containers_df
+        else:
+            metrics = query.db.container_metrics(spark)
+        metrics = self._apply_column_mapping(
+            metrics, self.config.container_metrics.column_name_mapping
+        )
+        if self.config.project_id is not None:
+            metrics = metrics.where(F.col(self.config.project_id_col) == self.config.project_id)
+        for col_name, value in self.config.container_metrics.filters.items():
+            metrics = metrics.where(F.col(col_name) == value)
+        return metrics
+
     def _build_expr(self, filters):
         """
         Build a combined selector expression from a list of filter expressions.
@@ -373,6 +410,32 @@ class QuerySolver(ABC):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support aliased channel resolution"
         )
+
+    def attach_container_metadata(
+        self, query, channels_df, pre_filtered_containers_df=None
+    ) -> DataFrame:
+        """Attach requested container-level tags/metrics onto the channel-match frame.
+
+        No-op by default; solvers that inject container metadata (e.g.
+        ``DefaultSolver``) override this to left-join the columns.  When
+        *pre_filtered_containers_df* is given, the metadata read is scoped to
+        those containers.
+
+        Parameters
+        ----------
+        query : QueryBuilder
+            Query object (selections + db info).
+        channels_df : pyspark.sql.DataFrame
+            Channel-match frame from the filter pipeline.
+        pre_filtered_containers_df : pyspark.sql.DataFrame, optional
+            Incremental container subset to scope the metadata read to.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            *channels_df*, unchanged by default.
+        """
+        return channels_df
 
     def filter_candidates(self, query, channel_df) -> DataFrame:
         """

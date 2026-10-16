@@ -11,6 +11,23 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesOp,
     TimeSeriesSelector,
 )
+from impulse_query_engine.analyze.query.aggregations.histogram import (
+    HistogramCustomWeights,
+    HistogramDuration,
+)
+from impulse_query_engine.analyze.query.aggregations.histogram2d import (
+    Histogram2DCustomWeights,
+    Histogram2DDuration,
+)
+from impulse_query_engine.analyze.query.aggregations.point_value_aggregator import (
+    PointValueAggregator,
+)
+from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+from impulse_query_engine.analyze.query.events.sequence_of_events_expression import (
+    SequenceOfEventsExpression,
+)
+from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
 
 
 def test_where():
@@ -256,3 +273,196 @@ class TestGetSelectors:
         result = op.get_selectors()
         assert len(result) == 2
         assert all(s is sel for s in result)
+
+
+def _noop(*args, **kwargs):
+    """Stand-in UDF body; the declaration tests never invoke it."""
+    return 0.0
+
+
+class TestContainerMetadataDeclaration:
+    """UDFs declaring container tags/metrics and their propagation."""
+
+    def test_defaults_are_empty(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        assert sel.required_container_tags() == set()
+        assert sel.required_container_metrics() == set()
+
+    def test_apply_declares_container_metadata(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        udf_expr = sel.apply(
+            _noop,
+            container_tags=["vehicle_type"],
+            container_metrics=["nominal_power"],
+        )
+        assert udf_expr.required_container_tags() == {"vehicle_type"}
+        assert udf_expr.required_container_metrics() == {"nominal_power"}
+
+    def test_udf_decorator_declares_container_metadata(self):
+        @TimeSeriesExpression.udf(container_tags=["t"], container_metrics=["m"])
+        def scaled(ts, container_tags, container_metrics):
+            return 0.0
+
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        expr = scaled(sel)
+        assert expr.required_container_tags() == {"t"}
+        assert expr.required_container_metrics() == {"m"}
+
+    def test_bare_udf_still_works(self):
+        prepped = TimeSeriesExpression.udf(lambda ts, scalar: ts * scalar)
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        expr = prepped(sel, 1.5)
+        assert expr.required_container_tags() == set()
+        assert expr.required_container_metrics() == set()
+
+    def test_requirements_union_through_nesting(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        u1 = sel.apply(_noop, container_metrics=["m1"])
+        u2 = sel.apply(_noop, container_tags=["t1"])
+        combo = u1 + u2  # TimeSeriesOp with both UDFs as args
+        assert combo.required_container_metrics() == {"m1"}
+        assert combo.required_container_tags() == {"t1"}
+
+    def test_collect_container_meta_ordered_dedup(self):
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        u1 = sel.apply(_noop, container_metrics=["b", "a"])
+        u2 = sel.apply(_noop, container_metrics=["a", "c"])
+        # Sorted within each expression, deduped preserving discovery order.
+        assert TimeSeriesExpression.collect_container_metrics([u1, u2]) == ["a", "b", "c"]
+        assert TimeSeriesExpression.collect_container_metrics([sel]) == []
+
+    def test_empty_cache_defaults(self):
+        cache = EmptyTimeSeriesCache()
+        assert cache.container_tags == {}
+        assert cache.container_metrics == {}
+
+    def test_build_injects_dicts_against_empty_cache(self):
+        captured = {}
+
+        def grab(ts, container_tags, container_metrics):
+            captured["tags"] = container_tags
+            captured["metrics"] = container_metrics
+            return 0.0
+
+        sel = TimeSeriesSelector(TagSelector("name") == "x")
+        expr = sel.apply(grab, container_tags=["a"], container_metrics=["b"])
+        # Builds against the empty cache without KeyError; values default to None.
+        assert expr.build(EmptyTimeSeriesCache()) == 0.0
+        assert captured["tags"] == {"a": None}
+        assert captured["metrics"] == {"b": None}
+
+
+class TestContainerMetadataCompositeExpressions:
+    """Composite expressions propagate container needs from wrapped children.
+
+    They carry no container metadata of their own; ``required_container_*`` unions
+    the children exactly like ``required_tags`` does (a metadata-declaring
+    ``TimeSeriesUDF`` wrapped inside them propagates up).
+    """
+
+    def _sel(self, name="x"):
+        return TimeSeriesSelector(TagSelector("name") == name)
+
+    def test_histogram_propagates_wrapped_udf(self):
+        wrapped = self._sel().apply(_noop, container_metrics=["m"])
+        h = HistogramDuration(wrapped, [0.0, 1.0])
+        assert h.required_container_metrics() == {"m"}
+        assert h.required_container_tags() == set()
+
+    def test_plain_histogram_has_no_requirements(self):
+        h = HistogramDuration(self._sel(), [0.0, 1.0])
+        assert h.required_container_metrics() == set()
+        assert h.required_container_tags() == set()
+
+    def test_custom_weights_unions_children(self):
+        h = HistogramCustomWeights(
+            self._sel("a").apply(_noop, container_metrics=["m1"]),
+            weights=self._sel("b").apply(_noop, container_tags=["t1"]),
+            bins=[0.0, 1.0],
+        )
+        assert h.required_container_metrics() == {"m1"}
+        assert h.required_container_tags() == {"t1"}
+
+    def test_sequence_of_events_propagates(self):
+        expr = SequenceOfEventsExpression([self._sel().apply(_noop, container_tags=["child"])])
+        assert expr.required_container_tags() == {"child"}
+        assert expr.required_container_metrics() == set()
+
+    def test_calculated_channel_propagates(self):
+        cc = CalculatedChannel(
+            self._sel().apply(_noop, container_metrics=["m"]), {"channel_name": "x"}
+        )
+        assert cc.required_container_metrics() == {"m"}
+        assert cc.required_container_tags() == set()
+
+    def test_collect_across_composites(self):
+        selections = [
+            HistogramDuration(self._sel().apply(_noop, container_metrics=["b"]), [0.0, 1.0]),
+            CalculatedChannel(
+                self._sel().apply(_noop, container_metrics=["a"]), {"channel_name": "z"}
+            ),
+        ]
+        # Deduplicated union across the selections' wrapped UDFs.
+        assert set(TimeSeriesExpression.collect_container_metrics(selections)) == {"a", "b"}
+
+    def test_histogram2d_unions_children(self):
+        h = Histogram2DDuration(
+            self._sel("x").apply(_noop, container_metrics=["mx"]),
+            self._sel("y").apply(_noop, container_tags=["ty"]),
+            [0.0, 1.0],
+            [0.0, 1.0],
+        )
+        assert h.required_container_metrics() == {"mx"}
+        assert h.required_container_tags() == {"ty"}
+
+    def test_histogram2d_custom_weights_unions_children(self):
+        h = Histogram2DCustomWeights(
+            self._sel("x").apply(_noop, container_metrics=["mx"]),
+            self._sel("y").apply(_noop, container_metrics=["my"]),
+            self._sel("w").apply(_noop, container_tags=["tw"]),
+            [0.0, 1.0],
+            [0.0, 1.0],
+        )
+        assert h.required_container_metrics() == {"mx", "my"}
+        assert h.required_container_tags() == {"tw"}
+
+    def test_point_value_aggregator_unions_inputs_and_event(self):
+        agg = PointValueAggregator(
+            input_expressions=[self._sel("a").apply(_noop, container_metrics=["m"])],
+            event_expression=self._sel("e").apply(_noop, container_tags=["t"]),
+        )
+        assert agg.required_container_metrics() == {"m"}
+        assert agg.required_container_tags() == {"t"}
+
+    def test_stats_aggregator_unions_inputs_and_event(self):
+        agg = StatsAggregator(
+            input_expressions=[self._sel("a").apply(_noop, container_metrics=["m"])],
+            statistics=["mean"],
+            event_expression=self._sel("e").apply(_noop, container_tags=["t"]),
+        )
+        assert agg.required_container_metrics() == {"m"}
+        assert agg.required_container_tags() == {"t"}
+
+    def test_stats_aggregator_without_event(self):
+        # event_expression=None must not raise (the `is not None` guard).
+        agg = StatsAggregator(
+            input_expressions=[self._sel("a").apply(_noop, container_metrics=["m"])],
+            statistics=["mean"],
+        )
+        assert agg.required_container_metrics() == {"m"}
+        assert agg.required_container_tags() == set()
+
+    def test_alias_selector_unions_aliases(self):
+        alias = TimeSeriesAliasSelector(
+            self._sel("a").apply(_noop, container_metrics=["m"]),
+            self._sel("b").apply(_noop, container_tags=["t"]),
+        )
+        assert alias.required_container_metrics() == {"m"}
+        assert alias.required_container_tags() == {"t"}
+
+    def test_op_propagates_through_kwargs(self):
+        # TimeSeriesOp walks both args and kwargs; a metadata UDF passed as a
+        # keyword argument must still propagate.
+        prepped = TimeSeriesExpression.udf(_noop)
+        expr = prepped(self._sel(), other=self._sel().apply(_noop, container_metrics=["kw"]))
+        assert expr.required_container_metrics() == {"kw"}

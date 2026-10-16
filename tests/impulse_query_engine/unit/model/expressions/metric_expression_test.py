@@ -4,7 +4,52 @@
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricOp, MetricSelector
 
+
+def test_metric_expression_is_not_serializable():
+    """Metric expressions have no ``as_dict``/``from_dict``.
+
+    This is *why* a ``MetricSelector`` can never be smuggled into a
+    ``TimeSeriesSelector._expr`` via ``from_dict`` deserialization (and thus never
+    reach the pandas ``resolve`` path): there is no serialized form to resolve back
+    to a metric class. Tag expressions, which legitimately populate ``_expr``, are
+    serializable; metric expressions are deliberately not.
+    """
+    sel = MetricSelector("poi_defect_values")
+    op = sel.contains_any(["A", "B"])
+    for expr in (sel, op):
+        assert not hasattr(expr, "as_dict")
+        assert not hasattr(expr, "from_dict")
+
+
 # --- Comparison operator tests ---
+# --- Array-membership operator tests (structure only; evaluation in md/expressions) ---
+
+
+def test_contains_builds_metric_op():
+    expr = MetricSelector("poi_defect_values").contains("B1024-43")
+    assert isinstance(expr, MetricOp)
+    assert expr.required_metrics() == {"poi_defect_values"}
+
+
+def test_contains_any_builds_metric_op():
+    expr = MetricSelector("poi_defect_values").contains_any(["B1024-43", "U0046-13"])
+    assert isinstance(expr, MetricOp)
+    assert expr.required_metrics() == {"poi_defect_values"}
+
+
+def test_contains_all_builds_metric_op():
+    expr = MetricSelector("poi_defect_values").contains_all(["B1024-43", "U0046-13"])
+    assert isinstance(expr, MetricOp)
+    assert expr.required_metrics() == {"poi_defect_values"}
+
+
+def test_array_ops_compose_with_scalar_metrics():
+    """An array op ANDs/ORs with ordinary comparisons, unioning required metrics."""
+    expr = (MetricSelector("poi_defect_values").contains_any(["A", "B"])) & (
+        MetricSelector("duration_ms") > 30
+    )
+    assert isinstance(expr, MetricOp)
+    assert expr.required_metrics() == {"poi_defect_values", "duration_ms"}
 
 
 def test_eq():

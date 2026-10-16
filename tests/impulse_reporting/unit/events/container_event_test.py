@@ -1,5 +1,7 @@
 """Unit tests for ContainerEvent."""
 
+import hashlib
+
 import pyspark.sql.functions as f
 
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
@@ -141,6 +143,18 @@ def test_definition_hash_ignores_description():
     assert ev1.determine_definition_hash() == ev2.determine_definition_hash()
 
 
+def _sha256_long(text: str) -> int:
+    return int.from_bytes(hashlib.sha256(text.encode()).digest()[:8], "big", signed=True)
+
+
+def test_definition_hash_is_name_only():
+    """The channel time settings only shape TimeWindowEvent windows; a ContainerEvent writes
+    the raw boundaries, so its hash stays the name alone and never forces a recompute."""
+    event = ContainerEvent(name="ev")
+    assert event.determine_definition_hash() == _sha256_long("ev")
+    assert event.as_dict()["definition_hash"] == _sha256_long("ev")
+
+
 # ---------------------------------------------------------------------------
 # determine_events (integration-ish, needs Spark)
 # ---------------------------------------------------------------------------
@@ -163,9 +177,9 @@ def test_determine_events(spark, basic_narrow_db):
     assert "end_ts" in df.columns
     assert df.count() > 0
 
-    # Compare event_instance_id with crc32(container_id)
+    # Compare event_instance_id with xxhash64(container_id)
 
-    df_with_test = df.withColumn("test_values", f.crc32(f.col("container_id").cast("string")))
+    df_with_test = df.withColumn("test_values", f.xxhash64(f.col("container_id").cast("string")))
     for row in df_with_test.collect():
         assert row.event_instance_id == row.test_values, (
             f"container_id={row.container_id}: "

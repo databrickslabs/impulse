@@ -611,6 +611,7 @@ class TestCustomChannelColumnMapping:
             "te": "tend",
             "val": "value",
             "conv": "conversion_factor",
+            "value_string": "value_string",
         }
 
     def test_mapping_entries_stored_correctly(self, spark):

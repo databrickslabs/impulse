@@ -9,7 +9,7 @@ ContainerEvent — an event spanning the full measurement container.
 ## ContainerEvent
 
 ```python
-class ContainerEvent(Event)
+class ContainerEvent(ContainerBoundaryEvent)
 ```
 
 Event that treats the full measurement container as a single event instance.
@@ -32,18 +32,6 @@ Initialise a ContainerEvent.
 - `name` (`str`): Name of the event.
 - `desc` (`str`): Human-readable description.
 - `attributes` (`dict`): Key-value metadata for the event.
-
-#### get\_id
-
-```python
-def get_id() -> int
-```
-
-Return a unique identifier derived from the event name.
-
-**Returns**:
-
-`int`: Positive 32-bit integer identifier.
 
 #### get\_expression
 
@@ -86,30 +74,6 @@ so the name of the event is hashed.
 
 `int`: Hash value representing the computation definition.
 
-#### as\_dict
-
-```python
-def as_dict() -> dict
-```
-
-Return a dictionary representation of the event.
-
-**Returns**:
-
-`dict`: 
-
-#### as\_spark\_row
-
-```python
-def as_spark_row() -> Row
-```
-
-Return a Spark ``Row`` representation.
-
-**Returns**:
-
-`Row`: 
-
 #### determine\_events
 
 ```python
@@ -141,22 +105,4 @@ produces one event instance per container.
 **Returns**:
 
 `DataFrame`: Spark DataFrame matching ``EVENT_INSTANCE_FACT_SCHEMA``.
-
-#### determine\_metadata\_df
-
-```python
-def determine_metadata_df(cls, spark: SparkSession,
-                          events: list[ContainerEvent]) -> DataFrame
-```
-
-Create a Spark DataFrame containing event metadata.
-
-**Arguments**:
-
-- `spark` (`SparkSession`): Active Spark session.
-- `events` (`list of ContainerEvent`): List of ContainerEvent objects.
-
-**Returns**:
-
-`DataFrame`: Spark DataFrame matching ``EVENT_DIMENSION_SCHEMA``.
 

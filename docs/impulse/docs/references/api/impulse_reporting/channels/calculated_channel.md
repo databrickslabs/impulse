@@ -18,10 +18,15 @@ is driven by :class:`Report` to compute the channel across containers, persist
 the narrow result to a gold fact table, and update it incrementally.
 
 Structurally parallels :class:`BasicEvent` (holds an aliased expression,
-name-derived id, SHA-256 definition hash) but — like ``ContainerEvent`` — it
-drives its own solve via ``QueryBuilder.solve_calculated_channels`` rather than
-riding the centralized wide ``solved_df``.  Accordingly :meth:`get_expression`
-returns ``None`` so it is excluded from the batch solve.
+name-derived id, SHA-256 definition hash). Like the other entity types, its
+narrow solve is batched from :class:`Report` (see
+``Report._solve_calculated_channels_batched``): the channels are packed into
+batches of at most ``max_channels_per_batch`` distinct input channels (a channel
+whose own inputs exceed the cap gets a batch of its own); each batch is solved
+via ``QueryBuilder.solve_calculated_channels``
+and persisted as a temp table, then the batches are unioned into a narrow
+``solved_df``. :meth:`determine_calculated_channels` shapes that already-solved
+df, mirroring ``determine_aggregations`` / ``determine_events``.
 
 **Arguments**:
 
@@ -78,13 +83,10 @@ Return the deterministic entity id (also the fact/dimension ``channel_id``).
 #### get\_expression
 
 ```python
-def get_expression() -> TimeSeriesExpression | None
+def get_expression() -> TimeSeriesExpression
 ```
 
-Return ``None`` — calculated channels drive their own narrow solve.
-
-Returning ``None`` keeps this channel out of the centralized wide batch
-solve (``collect_solvable_expressions``), mirroring ``ContainerEvent``.
+Return the wrapped query-engine ``CalculatedChannel`` expression.
 
 
 #### get\_expression\_str
@@ -143,30 +145,30 @@ def determine_calculated_channels(
         spark: SparkSession,
         channels: list[CalculatedChannel],
         *,
-        query: QueryBuilder = None,
-        solver: QuerySolver = None,
-        pre_filtered_containers_df: DataFrame = None) -> DataFrame | None
+        solved_df: DataFrame = None) -> DataFrame | None
 ```
 
-Solve the given channels and shape the result into fact rows.
+Shape the already-solved narrow rows into this type's fact rows.
 
-Drives ``QueryBuilder.solve_calculated_channels`` (the narrow, many-rows-
-per-container endpoint) with the report's ``query`` + ``solver``, then
-projects to :data:`CALCULATED_CHANNEL_FACT_SCHEMA`.  Because each channel's
-``channel_id`` was fixed to its entity id at construction, no id-join is
-needed.
+Mirrors ``determine_aggregations`` / ``determine_events``: the batched
+narrow solve happens in the ``Report`` (see
+``Report._solve_calculated_channels_batched``), and this only *shapes* the
+resulting ``solved_df``: it selects the rows for these channels (by
+``channel_id``) and projects to :data:`CALCULATED_CHANNEL_FACT_SCHEMA`.
+Each channel's ``channel_id`` was fixed to its entity id at construction,
+so the filter needs no join.
 
 **Arguments**:
 
-- `spark` (`SparkSession`): Spark session, forwarded to ``QueryBuilder.solve_calculated_channels``.
-- `channels` (`list of CalculatedChannel`): Channels to solve; identity keys may differ across channels.
-- `query` (`QueryBuilder`): Query builder used to select and solve the channels.
-- `solver` (`QuerySolver`): Solver implementing ``solve_calculated_channels`` (a ``DefaultSolver``).
-- `pre_filtered_containers_df` (`DataFrame`): Incremental container subset; ``None`` processes all containers.
+- `spark` (`SparkSession`): Active Spark session (unused; kept for dispatcher symmetry).
+- `channels` (`list of CalculatedChannel`): The channels whose rows to select from ``solved_df``.
+- `solved_df` (`DataFrame`): Narrow batched solve output (``container_id, channel_id, tstart, tend,
+value, identity``). ``None`` (no channels solved) returns ``None``.
 
 **Returns**:
 
-`DataFrame or None`: Narrow fact DataFrame, or ``None`` when there are no channels.
+`DataFrame or None`: Narrow fact DataFrame, or ``None`` when there are no channels or no
+solved rows.
 
 #### determine\_metadata\_df
 
@@ -180,4 +182,51 @@ Create the dimension DataFrame for the given channels.
 ``identity`` is a self-describing ``MapType(string, string)`` column,
 which ``createDataFrame`` builds directly from the plain dict returned by
 
+
+#### determine\_channel\_metrics
+
+```python
+def determine_channel_metrics(
+        cls,
+        spark: SparkSession,
+        channels: list[CalculatedChannel],
+        fact_df: DataFrame | None,
+        *,
+        attribute_columns: list[str] | None = None,
+        kpis: list[str] | None = None) -> DataFrame | None
+```
+
+Derive a silver-shaped ``channel_metrics`` DataFrame from the fact rows.
+
+The calculated-channel fact table already matches the silver ``channels``
+table; this builds its companion ``channel_metrics`` so the pair can serve
+as an Impulse silver source.  Metrics are aggregated **directly from the
+narrow fact rows** (``container_id, channel_id, tstart, tend, value``),
+grouped by ``(container_id, channel_id)``.
+
+The output schema is **dynamic**: fixed columns ``container_id,
+channel_id, value_type`` plus one column per configured KPI (see ``kpis``),
+one per identity key (the union across all ``channels``), and one per
+configured attribute key.  Identity/attribute values are pulled from
+each channel's in-memory ``identity`` / ``attributes`` dicts (null where a
+channel omits a key).  On an identity/attribute key collision, identity wins
+and the attribute is skipped.
+
+**Arguments**:
+
+- `spark` (`SparkSession`): Session used to build the per-channel metadata frame.
+- `channels` (`list of CalculatedChannel`): The channels whose fact rows are in ``fact_df``; supply identity and
+attributes.
+- `fact_df` (`DataFrame or None`): Narrow fact DataFrame (output of :meth:`determine_calculated_channels`).
+``None`` returns ``None``.
+- `attribute_columns` (`list of str`): Attribute keys to surface as columns.  Default/empty → no attribute
+columns.  A key no channel defines yields an all-null column.
+- `kpis` (`list of str`): KPI names to compute (see ``calculated_channel_kpis.KPI_BUILDERS``); the
+output carries one column per name, in order.  ``None`` → the default
+KPIs (``duration, min, max, mean``).
+
+**Returns**:
+
+`DataFrame or None`: The dynamic-schema metrics DataFrame, or ``None`` when ``fact_df`` is
+``None``.
 

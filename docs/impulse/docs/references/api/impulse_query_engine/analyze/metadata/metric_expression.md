@@ -33,22 +33,6 @@ Return a Spark SQL column expression for the selected metric.
 
 `pyspark.sql.Column`: Spark SQL column corresponding to the metric key.
 
-#### build\_pandas
-
-```python
-def build_pandas(df) -> pd.Series
-```
-
-Return a pandas Series for the selected metric from the DataFrame.
-
-**Arguments**:
-
-- `df` (`pandas.DataFrame`): DataFrame containing metric data.
-
-**Returns**:
-
-`pandas.Series`: Series corresponding to the metric key.
-
 #### \_\_repr\_\_
 
 ```python
@@ -116,22 +100,6 @@ Build a Spark SQL expression for the metric selection.
 **Returns**:
 
 `pyspark.sql.Column`: Spark SQL column representing the metric operation.
-
-#### build\_pandas
-
-```python
-def build_pandas(df) -> pd.Series
-```
-
-Build a pandas Series for the metric operation from the given DataFrame.
-
-**Arguments**:
-
-- `df` (`pandas.DataFrame`): DataFrame containing metric data.
-
-**Returns**:
-
-`pandas.Series`: Series representing the metric operation.
 
 #### \_\_repr\_\_
 

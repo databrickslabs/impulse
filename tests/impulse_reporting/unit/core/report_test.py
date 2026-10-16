@@ -4,8 +4,11 @@ from unittest.mock import create_autospec
 import pytest
 from databricks.sdk import WorkspaceClient
 
+import impulse_query_engine.measurement_db_registry as registry
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.aggregations.histogram import HistogramDuration
 from impulse_reporting.aggregations.histogram2d import Histogram2DDuration
@@ -13,7 +16,9 @@ from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.event_types import EventType
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.persist.report_storage import SinkConfig
 
 DUMMY_CONFIG = {
@@ -166,6 +171,25 @@ def test_report_init():
     assert report.name == "test_report"
     assert report.pages == []
     assert report.aggregation_dfs == {}
+
+
+def test_report_init_fails_loudly_for_custom_db_skipping_super_init(monkeypatch):
+    """A custom DB that skips ``super().__init__`` fails when the Report reads ``db.ws``."""
+
+    class SkipsSuperInitDB(MeasurementDB):
+        def __init__(self, config, ws):
+            self.config = config  # forgets super().__init__(config, ws)
+
+    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+    register_measurement_db("SkipsSuperInitDB", MeasurementDBConfig)(SkipsSuperInitDB)
+
+    with pytest.raises(TypeError, match=r"SkipsSuperInitDB\.__init__ must call super\(\)"):
+        Report(
+            name="test_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config={**DUMMY_CONFIG, "query_engine": {"measurement_db": "SkipsSuperInitDB"}},
+        )
 
 
 def test_set_config():
@@ -351,6 +375,120 @@ def test_create_solver_delta_with_solver_config():
     assert solver.config.value_col == "value"
 
 
+class TestAddEvent:
+    """Tests for add_event method."""
+
+    def test_duplicate_event_name_raises_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="rpm_event", expr=ts_expr > 0))
+
+        with pytest.raises(ValueError, match="'rpm_event' has already been added"):
+            report.add_event(BasicEvent(name="rpm_event", expr=ts_expr > 100))
+
+        assert len(report.get_events()) == 1
+
+    def test_duplicate_event_name_of_other_type_raises_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="window", expr=ts_expr > 0))
+
+        with pytest.raises(ValueError, match="'window' has already been added"):
+            report.add_event(TimeWindowEvent(name="window", window_length=60_000))
+
+    def test_same_event_added_twice_raises_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        event = BasicEvent(name="rpm_event", expr=ts_expr > 0)
+        report.add_event(event)
+
+        with pytest.raises(ValueError, match="'rpm_event' has already been added"):
+            report.add_event(event)
+
+    def test_duplicate_event_name_ignoring_case_raises_error(self):
+        # Spark resolves the solved event columns case-insensitively.
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="RPM_high", expr=ts_expr > 0))
+
+        with pytest.raises(
+            ValueError, match="Cannot add event 'rpm_high': an event named 'RPM_high'"
+        ):
+            report.add_event(BasicEvent(name="rpm_high", expr=ts_expr > 0))
+
+    def test_names_distinct_in_spark_are_allowed(self):
+        # Spark resolves these as two distinct columns, so both names are accepted.
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="Drehzahl_groß", expr=ts_expr > 0))
+        report.add_event(BasicEvent(name="Drehzahl_gross", expr=ts_expr > 0))
+
+        assert len(report.get_events()) == 2
+
+    def test_second_container_event_keeps_container_event_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        report.add_event(ContainerEvent(name="measurement"))
+
+        with pytest.raises(ValueError, match="Only one ContainerEvent is allowed per report"):
+            report.add_event(ContainerEvent(name="measurement"))
+
+    def test_distinct_event_names_are_all_registered(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        events = [
+            BasicEvent(name="rpm_event", expr=ts_expr > 0),
+            ContainerEvent(name="measurement"),
+            TimeWindowEvent(name="window", window_length=60_000),
+        ]
+        for event in events:
+            report.add_event(event)
+
+        assert report.get_events() == events
+        assert report.get_events_dict() == {event.get_name(): event for event in events}
+
+
 class TestValidateAggregationEvents:
     """Tests for _validate_aggregation_events method."""
 
@@ -382,7 +520,7 @@ class TestValidateAggregationEvents:
 
         assert "test_event" in str(exc_info.value)
         assert "test_stats" in str(exc_info.value)
-        assert "not added to the report" in str(exc_info.value)
+        assert "uses event 'test_event' which was not added to the report" in str(exc_info.value)
 
     def test_histogram_event_not_registered_raises_error(self):
         report: Report = Report(
@@ -567,3 +705,194 @@ class TestValidateAggregationEvents:
         report.add_page(page)
 
         report._validate_aggregation_events()
+
+    def test_same_name_different_definition_event_raises_error(self):
+        # The event fact would tile 60 s windows while the solve tiles 10 s windows.
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        report.add_event(TimeWindowEvent(name="w", window_length=60_000))
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        stats = StatsAggregator(
+            name="window_stats",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["mean"],
+            event=TimeWindowEvent(name="w", window_length=10_000),
+        )
+
+        page = Page(page_number=1)
+        page.add_aggregation(stats)
+        report.add_page(page)
+
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_aggregation_events()
+
+        error_msg = str(exc_info.value)
+        assert "window_stats" in error_msg
+        assert "'w' that is a different object" in error_msg
+
+    def test_same_name_identical_copy_event_raises_error(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="rpm_event", expr=ts_expr > 0))
+
+        hist = HistogramDuration(
+            name="test_histogram",
+            base_expr=ts_expr,
+            bins=[0.0, 100.0],
+            event=BasicEvent(name="rpm_event", expr=ts_expr > 0),
+        )
+
+        page = Page(page_number=1)
+        page.add_aggregation(hist)
+        report.add_page(page)
+
+        with pytest.raises(ValueError, match="'rpm_event' that is a different object"):
+            report._validate_aggregation_events()
+
+    def test_name_differing_only_by_case_counts_as_copy(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="RPM_high", expr=ts_expr > 0))
+
+        stats = StatsAggregator(
+            name="rpm_stats",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["mean"],
+            event=BasicEvent(name="rpm_high", expr=ts_expr > 0),
+        )
+
+        page = Page(page_number=1)
+        page.add_aggregation(stats)
+        report.add_page(page)
+
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_aggregation_events()
+
+        error_msg = str(exc_info.value)
+        assert (
+            "'rpm_high' that is a different object from the registered event 'RPM_high'"
+            in error_msg
+        )
+        assert "report.get_events_dict()['RPM_high']" in error_msg
+
+    def test_unregistered_and_copied_events_are_listed_together(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        report.add_event(BasicEvent(name="registered_event", expr=ts_expr > 0))
+
+        copied = StatsAggregator(
+            name="copied_stats",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["min"],
+            event=BasicEvent(name="registered_event", expr=ts_expr > 0),
+        )
+        unregistered = StatsAggregator(
+            name="unregistered_stats",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["max"],
+            event=BasicEvent(name="other_event", expr=ts_expr > 0),
+        )
+
+        page = Page(page_number=1)
+        page.add_aggregation(copied)
+        page.add_aggregation(unregistered)
+        report.add_page(page)
+
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_aggregation_events()
+
+        error_msg = str(exc_info.value)
+        assert "'copied_stats' uses an event named 'registered_event'" in error_msg
+        assert (
+            "'unregistered_stats' uses event 'other_event' which was not added to the report"
+            in error_msg
+        )
+
+
+class TestValidateFullRecalculationScope:
+    """Tests for _validate_full_recalculation_scope method."""
+
+    @staticmethod
+    def _report_with_scope(scope: dict) -> Report:
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=dict(DUMMY_CONFIG, full_recalculation=scope),
+        )
+        ts_expr = TimeSeriesSelector(TagSelector("name") == "test_signal")
+        event = BasicEvent(name="my_event", expr=ts_expr > 0)
+        report.add_event(event)
+
+        stats = StatsAggregator(
+            name="my_agg",
+            input_expressions=[ts_expr],
+            channel_names=["test_signal"],
+            statistics=["min", "max"],
+            event=event,
+        )
+        page = Page(page_number=1)
+        page.add_aggregation(stats)
+        report.add_page(page)
+        return report
+
+    def test_no_full_recalculation_config_passes(self):
+        report: Report = Report(
+            name="my_report",
+            spark=None,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=DUMMY_CONFIG,
+        )
+        # No full_recalculation configured → nothing to validate.
+        report._validate_full_recalculation_scope()
+
+    def test_all_known_names_pass(self):
+        report = self._report_with_scope({"aggregations": ["my_agg"], "events": ["my_event"]})
+        report._validate_full_recalculation_scope()
+
+    def test_unknown_aggregation_name_raises(self):
+        report = self._report_with_scope({"aggregations": ["nope_agg"]})
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_full_recalculation_scope()
+        assert "nope_agg" in str(exc_info.value)
+        # Error lists the valid registered names.
+        assert "my_agg" in str(exc_info.value)
+
+    def test_unknown_event_name_raises(self):
+        report = self._report_with_scope({"events": ["nope_event"]})
+        with pytest.raises(ValueError) as exc_info:
+            report._validate_full_recalculation_scope()
+        assert "nope_event" in str(exc_info.value)
+        assert "my_event" in str(exc_info.value)
+
+    def test_empty_scope_lists_pass(self):
+        report = self._report_with_scope({})
+        report._validate_full_recalculation_scope()

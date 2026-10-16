@@ -119,6 +119,12 @@ class HistogramDuration(Aggregation):
         """
         return self.selection.required_tags()
 
+    def required_container_tags(self) -> set[str]:
+        return self.selection.required_container_tags()
+
+    def required_container_metrics(self) -> set[str]:
+        return self.selection.required_container_metrics()
+
     def get_selector_expr(self):
         """
         Return the selector expression for the aggregation.
@@ -260,6 +266,16 @@ class HistogramCustomWeights(Aggregation):
             Set of required tags for the aggregation.
         """
         return self.selection.required_tags().union(self.weights.required_tags())
+
+    def required_container_tags(self) -> set[str]:
+        return self.selection.required_container_tags().union(
+            self.weights.required_container_tags()
+        )
+
+    def required_container_metrics(self) -> set[str]:
+        return self.selection.required_container_metrics().union(
+            self.weights.required_container_metrics()
+        )
 
     def get_selector_expr(self):
         """

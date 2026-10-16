@@ -5,8 +5,7 @@ description: >
   star schema. Use when the user wants to "build an Impulse report", compute histograms/statistics
   across all recordings and write them to Delta tables for a dashboard or scheduled job, or run
   incrementally so only new/changed data is reprocessed. Covers the Report/Page lifecycle
-  (`add_event`, `add_page`, `determine_report`, `persist_results`), incremental processing, and
-  sinkless mode.
+  (`add_event`, `add_page`, `run`), incremental processing, and sinkless mode.
 ---
 
 # Impulse — reporting pipeline
@@ -46,8 +45,11 @@ Exactly one of `config` / `config_path` must be provided.
 
 Useful methods: `get_db()` → the `MeasurementDB` for signal selection; `get_solver()` → the configured
 solver; `get_sink_config()` → the resolved sink; `add_event(event)`; `add_page(page)`;
-`add_calculated_channel(channel)` (see `impulse-channels`); `determine_report(is_incremental=None)`;
-`persist_results()`.
+`add_calculated_channel(channel)` (see `impulse-channels`);
+`run(is_incremental=None, persist_results=True, cleanup_temp_tables=None)` — the single entry point
+that computes and writes the report (`cleanup_temp_tables=True`/`False` overrides the
+`unity_sink.cleanup_temp_tables` config flag for dropping `__impulse_temp_*` tables after a
+successful write).
 
 ## The lifecycle
 
@@ -81,32 +83,39 @@ report.add_calculated_channel(CalculatedChannel(
     identity={"channel_name": "speed_kmh", "data_key": "CALC"},
 ))
 
-# 5. Compute everything (in parallel across containers)
-report.determine_report()
-
-# 6. Write the gold star schema
-report.persist_results()
+# 5. Compute everything (in parallel across containers) and write the gold star schema
+report.run()
 ```
 
-`determine_report()` validates that **every event referenced by an aggregation has been registered
-with `add_event()`** before computing — otherwise it raises. Register events even when an aggregation
-is the only thing that uses them.
+`run()` validates that **every event referenced by an aggregation has been registered with
+`add_event()`** before computing — otherwise it raises. Register events even when an aggregation is
+the only thing that uses them. The aggregation must reference the registered object itself (a
+re-created event with the same name raises too), and `add_event()` rejects duplicate event names,
+ignoring case.
 
-After `determine_report()`, computed results are also available on the report object without a write —
-`report.aggregation_dfs[...]` (used by `impulse-ml`) — which is what makes sinkless mode useful.
+With `run(persist_results=False)` (or no sink), computed results stay on the report object —
+`report.aggregation_dfs[...]` (used by `impulse-ml`) — which is what makes sinkless mode useful. They
+are lazy DataFrames: after a persisting run, read the gold tables instead (incremental results re-detect
+against the updated gold, and a capped run keeps only its last batch).
+
+`determine_report()` + `persist_results()` are deprecated (they warn) — use `run()`. The
+`persist_results=` flag of `run()` is unrelated to the deprecated method of the same name.
 
 ## Sinkless mode (compute without writing)
 
-Omit `unity_sink` from the config. `determine_report()` still computes events, aggregations, and
-dimensions and exposes them on the report; `persist_results()` becomes a no-op. Good for notebooks,
-tests, and feeding ML (see `impulse-ml`). Reading a DataFrame straight out of the query engine without
-any report at all is `impulse-analyze`.
+Omit `unity_sink` from the config. `run()` still computes events, aggregations, and dimensions and
+exposes them on the report, but writes nothing. To compute without writing even when a sink is
+configured, call `run(persist_results=False)`. Good for notebooks, tests, and feeding ML (see
+`impulse-ml`). Reading a DataFrame straight out of the query engine without any report at all is
+`impulse-analyze`.
 
 ## Incremental processing
 
 Reuses prior results for unchanged definitions and reprocesses only containers that are new or updated
 in silver. Turn it on via `incremental.enabled` in config (see `impulse-config`) or pass
-`is_incremental=True` to `determine_report()`.
+`is_incremental=True` to `run()`. With `query_engine.max_containers_per_batch` set, `run()` commits at
+most that many upserted containers per iteration and loops until all are processed (if a batch makes
+no forward progress it logs a warning and stops early).
 
 **Mode resolution** (in order):
 
@@ -120,6 +129,12 @@ definitions reprocess only new/updated containers (persisted via Delta `MERGE` o
 changed or brand-new definitions reprocess all matching containers (replaced atomically via
 `replaceWhere` on `visual_id`/`event_id`/`channel_id`). A single run can mix both per entity.
 
+**Forcing a full recalculation.** To recompute specific *unchanged* entities over all containers — e.g.
+to backfill after a persistence fix or corrected upstream data — list their names under
+`full_recalculation` in config (see `impulse-config`). Those aggregations/events/calculated channels are
+treated as changed for that run regardless of their hash; everything else stays incremental. A no-op in
+full mode, and a name matching no registered entity fails fast.
+
 **What counts as a definition change** — only the hashed attributes; renames, descriptions, and units
 are cosmetic and do not trigger reprocessing:
 
@@ -129,7 +144,7 @@ are cosmetic and do not trigger reprocessing:
 | `ContainerEvent`    | `name`                                             |
 | `Histogram`         | `base_expr`, `bins`, `event`                       |
 | `Histogram2D`       | `x_expr`, `y_expr`, `x_bins`, `y_bins`, `event`    |
-| `StatsAggregator`   | `input_expressions`, `statistics`, `event`         |
+| `StatsAggregator`   | `input_expressions`, `statistics`, `event`, `channel_names`, custom stats (incl. cross-channel `channel_name`) |
 | `CalculatedChannel` | `expr` string + `identity`                         |
 
 **Container-update detection** unions two sets: new containers (silver rows absent from gold) and

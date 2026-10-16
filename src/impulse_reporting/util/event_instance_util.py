@@ -21,17 +21,19 @@ def generate_event_instance_id_column(
     """
     Generate an event_instance_id column.
 
-    For ``ContainerEvent`` the sentinel value ``-1`` is returned because a
-    container event produces exactly one instance per container.
-    For all other event types a CRC32 hash of
-    ``container_id::event_name::start_ts::end_ts`` is used.
+    The id is an xxHash64 of ``container_id::event_name::start_ts::end_ts``.
+    For ``ContainerEvent`` only ``container_id`` is hashed, since a container
+    event produces exactly one instance per container. The result is a signed
+    64-bit long (may be negative), wide enough to keep this merge/join key
+    collision-free at scale.
 
     Parameters
     ----------
     event_type : type[Event] or None, optional
-        The event class.  When the class is ``ContainerEvent``, ``container_id``
-          column is used for CRC32 hash. For any other value (including ``None``
-        for backward-compatibility) the CRC32 hash column is returned.
+        The event class.  When the class is ``ContainerEvent``, the
+        ``container_id`` column is hashed. For any other value (including
+        ``None`` for backward-compatibility) the timestamp-based hash column is
+        returned.
     container_id_col : str, optional
         Name of the container ID column, defaults to "container_id".
     event_name_col : str, optional
@@ -49,9 +51,9 @@ def generate_event_instance_id_column(
     from impulse_reporting.events.container_event import ContainerEvent
 
     if event_type is ContainerEvent:
-        return f.crc32(f.col(container_id_col).cast("string"))
+        return f.xxhash64(f.col(container_id_col).cast("string"))
 
-    return f.crc32(
+    return f.xxhash64(
         f.concat_ws(
             "::",
             f.col(container_id_col),

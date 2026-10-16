@@ -86,6 +86,23 @@ class SinkConfig(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_output_uri_channel_metrics_table(self, element: ChannelType) -> str:
+        """
+        Get the output URI for the (optional) channel-metrics table.
+
+        Parameters
+        ----------
+        element : ChannelType
+            The channel type to get the URI for.
+
+        Returns
+        -------
+        str
+            The output URI for the channel-metrics table.
+        """
+        pass
+
 
 @dataclass()
 class UnitySinkConfig(SinkConfig):
@@ -183,6 +200,27 @@ class UnitySinkConfig(SinkConfig):
             )
         else:
             uri = f"{self.catalog_name}.{self.schema_name}." "channel_mapping_resolution_dimension"
+        return uri
+
+    def get_output_uri_channel_metrics_table(self, element: ChannelType) -> str:
+        """
+        Get the output URI for the channel-metrics table in Unity Catalog format.
+
+        Parameters
+        ----------
+        element : ChannelType
+            The channel type to get the URI for.
+
+        Returns
+        -------
+        str
+            The Unity Catalog URI for the channel-metrics table.
+        """
+        table_name = element.get_metrics_table_name()
+        if self.table_prefix:
+            uri = f"{self.catalog_name}.{self.schema_name}.{self.table_prefix}_{table_name}"
+        else:
+            uri = f"{self.catalog_name}.{self.schema_name}.{table_name}"
         return uri
 
 

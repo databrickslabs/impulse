@@ -33,7 +33,7 @@ class TestStatisticsAggregatorIntegration:
         rows = result.collect()
         for row in rows:
             stats_data = row["engine_rpm_stats"]
-            event_timestamps, numeric_values, string_values = stats_data
+            event_timestamps, numeric_values, string_values, cross_channel_values = stats_data
 
             # Should have one event (entire series)
             assert len(event_timestamps) == 1
@@ -81,11 +81,11 @@ class TestStatisticsAggregatorIntegration:
         rows = result.collect()
         for row in rows:
             stats_data = row["multi_channel_stats"]
-            event_timestamps, numeric_values, string_values = stats_data
+            event_timestamps, numeric_values, string_values, cross_channel_values = stats_data
 
-            # event_timestamps is appended inside the per-expression loop,
-            # so N=2 expressions with one synthetic event each give 2 entries.
-            assert len(event_timestamps) == 2
+            # event_timestamps is canonical (one entry per interval), so the single
+            # synthetic interval spanning both channels gives 1 entry.
+            assert len(event_timestamps) == 1
 
             # Should have two expressions (eng_rpm and veh_speed)
             assert len(numeric_values) == 2
@@ -127,7 +127,7 @@ class TestStatisticsAggregatorIntegration:
         rows = result.collect()
         for row in rows:
             stats_data = row["high_speed_rpm_stats"]
-            event_timestamps, numeric_values, string_values = stats_data
+            event_timestamps, numeric_values, string_values, cross_channel_values = stats_data
 
             # May have zero or more events depending on data
             # (some containers may never exceed 50 km/h)
@@ -163,7 +163,7 @@ class TestStatisticsAggregatorIntegration:
         rows = result.collect()
         for row in rows:
             stats_data = row["rpm_mean_only"]
-            event_timestamps, numeric_values, string_values = stats_data
+            event_timestamps, numeric_values, string_values, cross_channel_values = stats_data
 
             stats = numeric_values[0][0]
             # Should only have mean
@@ -202,7 +202,7 @@ class TestStatisticsAggregatorIntegration:
         rows = result.collect()
         for row in rows:
             stats_data = row["temp_during_driving"]
-            event_timestamps, numeric_values, string_values = stats_data
+            event_timestamps, numeric_values, string_values, cross_channel_values = stats_data
 
             # Should have one expression
             assert len(numeric_values) == 1
@@ -225,11 +225,13 @@ class TestStatisticsAggregatorIntegration:
         schema = result.schema
         stats_field = schema["rpm_stats"]
 
-        # Should be a struct with event_timestamps, numeric_values, string_values
+        # Should be a struct with event_timestamps, numeric_values, string_values,
+        # and cross_channel_values
         struct_fields = {f.name for f in stats_field.dataType.fields}
         assert "event_timestamps" in struct_fields
         assert "numeric_values" in struct_fields
         assert "string_values" in struct_fields
+        assert "cross_channel_values" in struct_fields
 
     def test_compare_statistics_with_native_methods(self, spark, basic_narrow_db):
         """Compare StatisticsAggregator results with native SampleSeries methods."""
@@ -258,7 +260,7 @@ class TestStatisticsAggregatorIntegration:
         rows = result.collect()
         for row in rows:
             stats_data = row["agg_stats"]
-            event_timestamps, numeric_values, string_values = stats_data
+            event_timestamps, numeric_values, string_values, cross_channel_values = stats_data
 
             agg_stats = numeric_values[0][0]
 

@@ -1,9 +1,9 @@
-from databricks.sdk import WorkspaceClient
+import warnings
+
 from pyspark.sql import DataFrame
 
-from impulse_query_engine import __version__
-from impulse_query_engine.telemetry import verify_workspace_client
-from .analyze.query.query_builder import QueryBuilder
+from .measurement_db_abstract import AbstractMeasurementDB
+from .measurement_db_registry import register_measurement_db
 
 
 class MeasurementDBConfig:
@@ -14,6 +14,7 @@ class MeasurementDBConfig:
         channel_tags_table=None,
         channel_metrics_table=None,
         channels_uri=None,
+        poi_channels_uri=None,
         channel_mapping_table=None,
         unit_conversion_table=None,
         table_locations: str = "external_locations",
@@ -23,10 +24,17 @@ class MeasurementDBConfig:
         self.channel_tags_table = channel_tags_table
         self.channel_metrics_table = channel_metrics_table
         self.channels_uri = channels_uri
+        # Optional Points-in-Time (POI) channel-data table. ``None`` means no POI
+        # channels are configured, so POI-unaware deployments are unchanged.
+        self.poi_channels_uri = poi_channels_uri
         self.channel_mapping_table = channel_mapping_table
         self.unit_conversion_table = unit_conversion_table
         self.table_locations = table_locations
         self.debug_tables = None
+        # URI -> pinned Delta version, populated once per run by
+        # ``MeasurementDB.pin_versions``. Empty means "read latest" (unchanged
+        # behavior). Never populated in debug mode.
+        self.pinned_versions: dict[str, int] = {}
 
     @staticmethod
     def for_unity_catalog(
@@ -34,6 +42,7 @@ class MeasurementDBConfig:
         core_schema_name: str = "core",
         channel_mapping_table: str | None = None,
         unit_conversion_table: str | None = None,
+        poi_channels_uri: str | None = None,
     ):
         return MeasurementDBConfig(
             container_tags_table=f"{catalog_name}.{core_schema_name}.container_tags",
@@ -41,6 +50,7 @@ class MeasurementDBConfig:
             channel_tags_table=f"{catalog_name}.{core_schema_name}.channel_tags",
             channel_metrics_table=f"{catalog_name}.{core_schema_name}.channel_metrics",
             channels_uri=f"{catalog_name}.{core_schema_name}.channels",
+            poi_channels_uri=poi_channels_uri,
             channel_mapping_table=channel_mapping_table,
             unit_conversion_table=unit_conversion_table,
             table_locations="unity_catalog",
@@ -58,6 +68,7 @@ class MeasurementDBConfig:
                 "channel_metrics" if "channel_metrics" in debug_tables else None
             ),
             channels_uri="channels" if "channels" in debug_tables else None,
+            poi_channels_uri="poi_channels" if "poi_channels" in debug_tables else None,
             channel_mapping_table=(
                 "channel_mapping" if "channel_mapping" in debug_tables else None
             ),
@@ -69,24 +80,96 @@ class MeasurementDBConfig:
         cfg.debug_tables = debug_tables
         return cfg
 
+    def configured_table_uris(self) -> list[str]:
+        """Return the URIs of every configured (non-``None``) silver table."""
+        return [
+            uri
+            for uri in (
+                self.container_tags_table,
+                self.container_metrics_table,
+                self.channel_tags_table,
+                self.channel_metrics_table,
+                self.channels_uri,
+                self.poi_channels_uri,
+                self.channel_mapping_table,
+                self.unit_conversion_table,
+            )
+            if uri is not None
+        ]
 
-class MeasurementDB:
-    def __init__(self, config: MeasurementDBConfig, ws: WorkspaceClient):
-        self.config = config
-        self.ws = verify_workspace_client(ws, "databricks-impulse", __version__)
 
-    @property
-    def query(self):
-        return QueryBuilder(db=self)
+@register_measurement_db("MeasurementDB", MeasurementDBConfig)
+class MeasurementDB(AbstractMeasurementDB):
+    def _current_delta_version(self, spark, uri: str) -> int | None:
+        """Latest committed Delta version of ``uri``, or ``None`` if unpinnable.
+
+        Read-only and never raises. Views are detected via catalog metadata
+        (before any Delta command runs, so serverless logs no
+        ``[DELTA_MISSING_DELTA_TABLE]`` ERROR) and non-Delta / unresolvable
+        tables via the caught exception; both warn and return ``None`` so
+        :meth:`pin_versions` skips them and they keep reading the latest version.
+        """
+        from delta.tables import DeltaTable
+
+        try:
+            if self.config.table_locations == "unity_catalog":
+                if spark.catalog.getTable(uri).tableType == "VIEW":
+                    warnings.warn(
+                        f"'{uri}' is a view, not a Delta table; reading the latest "
+                        f"version (a view has no Delta history to pin a snapshot to).",
+                        stacklevel=2,
+                    )
+                    return None
+                dt = DeltaTable.forName(spark, uri)
+            else:  # path mode
+                dt = DeltaTable.forPath(spark, uri)
+            return int(dt.history(1).select("version").first()[0])
+        except Exception as exc:  # noqa: BLE001 - graceful degradation per table
+            warnings.warn(f"Could not pin Delta version for '{uri}': {exc}", stacklevel=2)
+            return None
+
+    def pin_versions(self, spark) -> None:
+        """Pin every configured silver table to its current Delta version.
+
+        Resolves each table's latest version once so that all lazily-evaluated
+        reads in a run observe the same snapshot regardless of when they
+        materialize (issue #87). Debug mode is exempt. Anything that cannot be
+        time-traveled is skipped, warns, and continues to read the latest
+        version: views (no Delta history) and non-Delta / unresolvable tables.
+        See :meth:`_current_delta_version`.
+
+        **Opt-in for direct query-engine use.** This is *not* called
+        automatically when you query a ``MeasurementDB`` directly — reads
+        return the latest version unless you call this first. Call it when you
+        want a fan-out of lazy reads to see a stable snapshot even if the silver
+        tables change mid-analysis. The reporting layer (``Report``) calls it
+        for you at the start of every run, so snapshot consistency there is
+        automatic.
+
+        The pin is stored on the config and **persists until cleared** — a
+        long-lived ``MeasurementDB`` will keep reading the pinned snapshot (and
+        never see newer data) until you re-pin (call again) or unpin
+        (``db.config.pinned_versions = {}``).
+        """
+        if self.config.table_locations == "debug":
+            return
+        pinned: dict[str, int] = {}
+        for uri in self.config.configured_table_uris():
+            version = self._current_delta_version(spark, uri)
+            if version is not None:
+                pinned[uri] = version
+        self.config.pinned_versions = pinned
 
     def _read_table(self, spark, table_name):
-        # if not DeltaTable.isDeltaTable(spark, table_name):
-        #    raise Exception(f"Table not found: `{table_name}`")
-        if self.config.table_locations == "unity_catalog":
-            return spark.read.table(table_name)
-        elif self.config.table_locations == "debug":
+        if self.config.table_locations == "debug":
             return self.config.debug_tables[table_name]
-        return spark.read.format("delta").load(table_name)
+        reader = spark.read
+        version = self.config.pinned_versions.get(table_name)
+        if version is not None:
+            reader = reader.option("versionAsOf", version)
+        if self.config.table_locations == "unity_catalog":
+            return reader.table(table_name)
+        return reader.format("delta").load(table_name)
 
     def container_tags(self, spark) -> DataFrame:
         return self._read_table(spark, self.config.container_tags_table)
@@ -102,6 +185,20 @@ class MeasurementDB:
 
     def channels(self, spark) -> DataFrame:
         return self._read_table(spark, self.config.channels_uri)
+
+    def has_poi_channels(self) -> bool:
+        """Whether a Points-in-Time (POI) channel-data table is configured."""
+        return getattr(self.config, "poi_channels_uri", None) is not None
+
+    def poi_channels(self, spark) -> DataFrame:
+        """Read the Points-in-Time (POI) channel-data table.
+
+        Parallel to :meth:`channels`. Raises if no ``poi_channels_uri`` is
+        configured — callers should gate on :meth:`has_poi_channels` first.
+        """
+        if not self.has_poi_channels():
+            raise ValueError("poi_channels_uri is not configured")
+        return self._read_table(spark, self.config.poi_channels_uri)
 
     def channel_mapping(self, spark) -> DataFrame:
         if self.config.channel_mapping_table is None:

@@ -82,6 +82,9 @@ configured) regardless of whether ``container_tags_table`` is set.
 - `container_metrics_table` (`str`): Full Unity Catalog path to the container metrics table.
 - `channel_metrics_table` (`str`): Full Unity Catalog path to the channel metrics table.
 - `channels_uri` (`str`): Full Unity Catalog path to the channels data table.
+- `poi_channels_uri` (`str`): Full Unity Catalog path to the Points-in-Time (POI) channel data table.
+Required only when the report selects POI channels via ``poi_channel()``;
+omit it for sample-only data models.
 - `channel_mapping_table` (`str`): Full Unity Catalog path to the channel mapping table. Required when using
 ``channel_with_alias()`` for logical alias resolution.
 - `unit_conversion_table` (`str`): Full Unity Catalog path to the unit conversion table. When set together
@@ -102,6 +105,10 @@ Configuration for data sink location in Unity Catalog.
 - `catalog` (`str`): Target catalog name for output tables.
 - `schema` (`str`): Target schema name for output tables.
 - `table_prefix` (`str`): Prefix to use for generated output table names.
+- `cleanup_temp_tables` (`bool`): When ``True``, the intermediate ``__impulse_temp_*`` tables written to this
+sink during batch solving are dropped after ``Report.run()`` persists
+successfully. Defaults to ``False`` (temp tables are retained for inspection
+and only cleared at the start of the next report run).
 
 ## Comparator
 
@@ -201,6 +208,9 @@ scoping.  Key sub-fields:
 
 When omitted, all default column names are used and no
 project/toolbox filtering is applied.
+- `measurement_db` (`str, default="MeasurementDB"`): Registered name of the MeasurementDB implementation to use.
+- `measurement_db_config` (`dict`): Keyword arguments for that implementation's config class,
+merged with the ``source`` tables.
 
 #### validate\_drop\_implausible\_data\_requires\_raw
 
@@ -212,6 +222,32 @@ def validate_drop_implausible_data_requires_raw()
 
 The filter is applied inside the RAW -> interval conversion path by the
 selected ``raw_encoder`` (``RleEncoder`` / ``IntervalEncoder``).
+
+
+#### reject\_channels\_filter\_on\_is\_plausible\_in\_raw
+
+```python
+def reject_channels_filter_on_is_plausible_in_raw()
+```
+
+Reject an is_plausible channels filter in RAW mode (delegates to SolverConfig).
+
+The shared invariant lives on ``SolverConfig`` so direct query-engine use
+(``DefaultSolver``) enforces the same rule; here we surface it at config-parse time.
+
+
+#### warn\_channels\_filters\_bridge\_in\_raw
+
+```python
+def warn_channels_filters_bridge_in_raw()
+```
+
+Warn (not reject) on any non-plausibility channels filter in RAW mode.
+
+Such filters run before raw encoding and bridge intervals across dropped
+samples. That is fine for whole-channel scoping but corrupts per-sample cleaning,
+and the two cannot be told apart statically, so we warn. ``is_plausible`` is
+hard-rejected above as the one unambiguously per-sample case.
 
 
 #### default\_raw\_encoder\_for\_raw\_data
@@ -234,8 +270,74 @@ Configuration for incremental processing behavior.
 **Arguments**:
 
 - `enabled` (`bool, default=False`): Whether incremental processing is enabled.
-- `silver_last_modified_column` (`str, default="timestamp"`): Column name in the silver layer used for freshness comparison.
+- `silver_last_modified_column` (`str, default="timestamp"`): Column name in the silver layer used for freshness comparison. This is
+the name after ``column_name_mapping`` is applied (the physical name
+unless you remap that column).
 - `gold_last_modified_column` (`str, default="last_modified"`): Column name in the gold layer used for freshness comparison.
+
+## CalculatedChannels
+
+```python
+class CalculatedChannels(BaseModel)
+```
+
+Configuration for calculated-channel outputs.
+
+**Arguments**:
+
+- `emit_channel_metrics` (`bool, default=False`): When True, also emit a ``calculated_channel_metrics`` gold table (silver
+``channel_metrics`` shape) alongside the calculated-channel fact table, so
+the fact + metrics pair can serve as an Impulse silver source.
+- `attribute_columns` (`list of str, default=[]`): Calculated-channel attribute keys to surface as columns on the metrics
+table (e.g. ``["unit"]``). Empty (the default) → no attribute columns.
+Identity keys are always surfaced dynamically and win over an
+attribute key of the same name.
+- `kpis` (`list of str, default=["duration", "min", "max", "mean"]`): KPIs computed on the metrics table, one column per name. Each must be a
+registered KPI (see ``calculated_channel_kpis.KPI_BUILDERS``); an unknown
+name is rejected at validation. Duplicates are removed (order preserved).
+
+## FullRecalculation
+
+```python
+class FullRecalculation(BaseModel)
+```
+
+Scoped full-recalculation request, by entity name.
+
+Lists aggregations / events / calculated channels — identified by their
+human-readable ``name`` — that should be fully recalculated on the next run,
+regardless of whether their definition hash changed.
+
+Only meaningful in incremental mode: listed entities recompute over **all**
+containers and fully replace their gold rows (the same treatment a
+definition-hash change already receives), while every other entity stays
+incremental. In full mode this is a no-op, since everything recomputes over all
+containers anyway.
+
+Names that do not match any registered entity are rejected at the start of
+``Report.run`` (fail fast on typos / stale names).
+
+**Arguments**:
+
+- `aggregations` (`list of str, default=[]`): Names of aggregations to fully recalculate.
+- `events` (`list of str, default=[]`): Names of events to fully recalculate.
+- `calculated_channels` (`list of str, default=[]`): Names of calculated channels to fully recalculate.
+
+#### build\_measurement\_db\_config
+
+```python
+def build_measurement_db_config(
+    source_dict: dict[str, Any], query_engine: QueryEngine
+) -> tuple[type[AbstractMeasurementDB], MeasurementDBConfig]
+```
+
+Resolve the selected MeasurementDB implementation and build its config class from
+
+``measurement_db_config`` merged with the ``source`` tables in *source_dict*.
+
+Raises ``KeyError`` for an unregistered ``measurement_db`` and ``TypeError`` for a missing,
+unknown or duplicated config key.
+
 
 ## ImpulseConfig
 
@@ -257,6 +359,13 @@ Attributes
      Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
  incremental : IncrementalConfig, optional
      Optional incremental processing configuration. Defaults to IncrementalConfig().
+ calculated_channels : CalculatedChannels, optional
+     Optional calculated-channel output configuration (e.g. opting in to the
+     ``calculated_channel_metrics`` table). Defaults to CalculatedChannels().
+ full_recalculation : FullRecalculation, optional
+     Optional scoped full-recalculation request naming aggregations / events /
+     calculated channels to fully recompute on the next incremental run
+     regardless of definition-hash changes. Defaults to None (no override).
  measurement_dimensions : list of str, optional
      Column names to surface from ``container_metrics`` into the
      gold-layer ``measurement_dimension`` table. Names are matched

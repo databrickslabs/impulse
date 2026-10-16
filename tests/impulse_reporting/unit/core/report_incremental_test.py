@@ -1,11 +1,13 @@
 """
-Unit tests for Report.determine_report() and Report.persist_results()
-with is_incremental=True and is_incremental=False.
+Unit tests for Report._determine_report() and Report._persist_results()
+with is_incremental=True and is_incremental=False, plus the deprecated public
+determine_report() / persist_results() wrappers.
 
 Tests use mocking to isolate the Report class logic from downstream
 Spark processing (event/aggregation determination, persistence).
 """
 
+import warnings
 from unittest.mock import MagicMock, create_autospec, patch
 
 import pyspark.sql.functions as F
@@ -85,10 +87,10 @@ def _build_report(spark, config_dict=None):
 
 
 # ============================================================================
-# Tests: determine_report with is_incremental=False
+# Tests: _determine_report with is_incremental=False
 # ============================================================================
 class TestDetermineReportFullMode:
-    """Tests for determine_report with is_incremental=False (full processing)."""
+    """Tests for _determine_report with is_incremental=False (full processing)."""
 
     @pytest.fixture(autouse=True)
     def mock_gold_exists(self):
@@ -109,7 +111,7 @@ class TestDetermineReportFullMode:
                 return_value=None,
             ),
         ):
-            report.determine_report(is_incremental=False)
+            report._determine_report(is_incremental=False)
 
             mock_detect.assert_not_called()
 
@@ -126,12 +128,12 @@ class TestDetermineReportFullMode:
             ),
             patch("impulse_reporting.core.report.DefinitionHashComparator") as mock_hash_cls,
         ):
-            report.determine_report(is_incremental=False)
+            report._determine_report(is_incremental=False)
 
             mock_hash_cls.assert_called()
 
     def test_full_mode_sets_is_incremental_false(self, spark):
-        """After determine_report(is_incremental=False), _is_incremental is False."""
+        """After _determine_report(is_incremental=False), _is_incremental is False."""
         report = _build_report(spark)
 
         with (
@@ -142,7 +144,7 @@ class TestDetermineReportFullMode:
                 return_value=None,
             ),
         ):
-            report.determine_report(is_incremental=False)
+            report._determine_report(is_incremental=False)
 
         assert report._is_incremental is False
         assert report._changed_event_ids == {}
@@ -161,16 +163,16 @@ class TestDetermineReportFullMode:
                 return_value=None,
             ),
         ):
-            report.determine_report(is_incremental=None)
+            report._determine_report(is_incremental=None)
 
             mock_detect.assert_not_called()
 
 
 # ============================================================================
-# Tests: determine_report with is_incremental=True
+# Tests: _determine_report with is_incremental=True
 # ============================================================================
 class TestDetermineReportIncrementalMode:
-    """Tests for determine_report with is_incremental=True."""
+    """Tests for _determine_report with is_incremental=True."""
 
     @pytest.fixture(autouse=True)
     def mock_gold_exists(self):
@@ -195,12 +197,12 @@ class TestDetermineReportIncrementalMode:
             ),
             patch("impulse_reporting.core.report.DefinitionHashComparator"),
         ):
-            report.determine_report(is_incremental=True)
+            report._determine_report(is_incremental=True)
 
             mock_detect.assert_called_once()
 
     def test_incremental_sets_is_incremental_true(self, spark):
-        """After determine_report(is_incremental=True), _is_incremental is True."""
+        """After _determine_report(is_incremental=True), _is_incremental is True."""
         report = _build_report(spark, INCREMENTAL_CONFIG)
 
         with (
@@ -217,7 +219,7 @@ class TestDetermineReportIncrementalMode:
             ),
             patch("impulse_reporting.core.report.DefinitionHashComparator"),
         ):
-            report.determine_report(is_incremental=True)
+            report._determine_report(is_incremental=True)
             assert report._is_incremental is True
 
     def test_incremental_with_hash_optimization_creates_comparator(self, spark):
@@ -235,7 +237,7 @@ class TestDetermineReportIncrementalMode:
             ),
             patch("impulse_reporting.core.report.DefinitionHashComparator") as mock_hash_cls,
         ):
-            report.determine_report(is_incremental=True)
+            report._determine_report(is_incremental=True)
 
             mock_hash_cls.assert_called_once_with(spark)
 
@@ -257,12 +259,12 @@ class TestDetermineReportIncrementalMode:
             ),
             patch("impulse_reporting.core.report.DefinitionHashComparator"),
         ):
-            report.determine_report(is_incremental=None)
+            report._determine_report(is_incremental=None)
 
             mock_detect.assert_called_once()
 
     def test_persist_full_calls_persist_full_method(self, spark):
-        """persist_results() calls _persist_full() when _is_incremental=False."""
+        """_persist_results() calls _persist_full() when _is_incremental=False."""
         report = _build_report(spark)
         report._is_incremental = False
 
@@ -270,34 +272,34 @@ class TestDetermineReportIncrementalMode:
             patch.object(report, "_persist_full") as mock_full,
             patch.object(report, "_persist_incremental") as mock_incr,
         ):
-            report.persist_results()
+            report._persist_results()
 
             mock_full.assert_called_once()
             mock_incr.assert_not_called()
 
     def test_persist_full_default_mode(self, spark):
-        """persist_results() without tracked state defaults to _persist_full()."""
+        """_persist_results() without tracked state defaults to _persist_full()."""
         report = _build_report(spark)
         # report._is_incremental= None
         with (
             patch.object(report, "_persist_full") as mock_full,
             patch.object(report, "_persist_incremental") as mock_incr,
         ):
-            # report.determine_report()
-            report.persist_results()
+            # report._determine_report()
+            report._persist_results()
 
             mock_full.assert_called_once()
             mock_incr.assert_not_called()
 
 
 # ============================================================================
-# Tests: persist_results with is_incremental=True
+# Tests: _persist_results with is_incremental=True
 # ============================================================================
 class TestPersistResultsIncrementalMode:
-    """Tests for persist_results when _is_incremental is True."""
+    """Tests for _persist_results when _is_incremental is True."""
 
     def test_persist_incremental_calls_persist_incremental_method(self, spark):
-        """persist_results() calls _persist_incremental() when _is_incremental=True."""
+        """_persist_results() calls _persist_incremental() when _is_incremental=True."""
         report = _build_report(spark)
         report._is_incremental = True
         report._changed_aggregation_ids = {"HISTOGRAM": [1]}
@@ -308,7 +310,7 @@ class TestPersistResultsIncrementalMode:
             patch.object(report, "_persist_full") as mock_full,
             patch.object(report, "_persist_incremental") as mock_incr,
         ):
-            report.persist_results()
+            report._persist_results()
 
             mock_incr.assert_called_once_with(
                 {"HISTOGRAM": [1]}, {"BASIC_EVENT": [2]}, {"CALCULATED_CHANNEL": [3]}
@@ -316,10 +318,10 @@ class TestPersistResultsIncrementalMode:
             mock_full.assert_not_called()
 
     def test_persist_uses_tracked_state_from_determine_report(self, spark):
-        """persist_results() uses _is_incremental and changed IDs from determine_report()."""
+        """_persist_results() uses _is_incremental and changed IDs from _determine_report()."""
         report = _build_report(spark)
 
-        # Simulate state set by determine_report
+        # Simulate state set by _determine_report
         report._is_incremental = True
         report._changed_aggregation_ids = {"HISTOGRAM": [100]}
         report._changed_event_ids = {"BASIC_EVENT": [200]}
@@ -330,7 +332,7 @@ class TestPersistResultsIncrementalMode:
             patch.object(report, "_persist_incremental") as mock_incr,
         ):
             # Call with defaults - should use tracked state
-            report.persist_results()
+            report._persist_results()
 
             mock_incr.assert_called_once_with(
                 {"HISTOGRAM": [100]}, {"BASIC_EVENT": [200]}, {"CALCULATED_CHANNEL": [300]}
@@ -339,10 +341,10 @@ class TestPersistResultsIncrementalMode:
 
 
 # ============================================================================
-# Tests: determine_report uses _resolve_is_incremental
+# Tests: _determine_report uses _resolve_is_incremental
 # ============================================================================
 class TestDetermineReportProcessingMode:
-    """Tests for determine_report respecting config and gold layer."""
+    """Tests for _determine_report respecting config and gold layer."""
 
     def test_determine_report_config_enabled_no_gold(self, spark):
         """Config enabled=True but no gold → _is_incremental=False."""
@@ -357,7 +359,7 @@ class TestDetermineReportProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report()
+            report._determine_report()
 
             assert report._is_incremental is False
 
@@ -374,7 +376,7 @@ class TestDetermineReportProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report(is_incremental=True)
+            report._determine_report(is_incremental=True)
 
             assert report._is_incremental is False
 
@@ -392,7 +394,7 @@ class TestDetermineReportProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report(is_incremental=False)
+            report._determine_report(is_incremental=False)
 
             assert report._is_incremental is True
 
@@ -409,7 +411,7 @@ class TestDetermineReportProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report(is_incremental=True)
+            report._determine_report(is_incremental=True)
 
             assert report._is_incremental is False
 
@@ -427,7 +429,7 @@ class TestDetermineReportProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report(is_incremental=True)
+            report._determine_report(is_incremental=True)
 
             assert report._is_incremental is True
 
@@ -444,7 +446,7 @@ class TestDetermineReportProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report(is_incremental=False)
+            report._determine_report(is_incremental=False)
 
             assert report._is_incremental is False
 
@@ -461,7 +463,7 @@ class TestDetermineReportProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report()
+            report._determine_report()
 
             assert report._is_incremental is False
 
@@ -479,19 +481,19 @@ class TestDetermineReportProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report()
+            report._determine_report()
 
             assert report._is_incremental is True
 
 
 # ============================================================================
-# Tests: persist_results with config-driven processing mode
+# Tests: _persist_results with config-driven processing mode
 # ============================================================================
 class TestPersistResultsProcessingMode:
-    """Tests for persist_results respecting config set by determine_report."""
+    """Tests for _persist_results respecting config set by _determine_report."""
 
     def test_persist_full_when_config_disabled(self, spark):
-        """persist_results calls _persist_full when config enabled=False."""
+        """_persist_results calls _persist_full when config enabled=False."""
         report = _build_report(spark, config_dict=INCREMENTAL_DISABLED_CONFIG)
 
         with (
@@ -503,19 +505,19 @@ class TestPersistResultsProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report()
+            report._determine_report()
 
         with (
             patch.object(report, "_persist_full") as mock_full,
             patch.object(report, "_persist_incremental") as mock_incr,
         ):
-            report.persist_results()
+            report._persist_results()
 
             mock_full.assert_called_once()
             mock_incr.assert_not_called()
 
     def test_persist_incremental_when_config_enabled(self, spark):
-        """persist_results calls _persist_incremental when config enabled=True and gold exists."""
+        """_persist_results calls _persist_incremental when config enabled=True and gold exists."""
         report = _build_report(spark, config_dict=INCREMENTAL_CONFIG)
 
         with (
@@ -528,19 +530,19 @@ class TestPersistResultsProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report()
+            report._determine_report()
 
         with (
             patch.object(report, "_persist_full") as mock_full,
             patch.object(report, "_persist_incremental") as mock_incr,
         ):
-            report.persist_results()
+            report._persist_results()
 
             mock_incr.assert_called_once()
             mock_full.assert_not_called()
 
     def test_persist_full_when_no_gold_layer(self, spark):
-        """persist_results calls _persist_full when no gold layer exists."""
+        """_persist_results calls _persist_full when no gold layer exists."""
         report = _build_report(spark, config_dict=INCREMENTAL_CONFIG)
 
         with (
@@ -552,19 +554,19 @@ class TestPersistResultsProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report()
+            report._determine_report()
 
         with (
             patch.object(report, "_persist_full") as mock_full,
             patch.object(report, "_persist_incremental") as mock_incr,
         ):
-            report.persist_results()
+            report._persist_results()
 
             mock_full.assert_called_once()
             mock_incr.assert_not_called()
 
     def test_persist_full_when_no_config(self, spark):
-        """persist_results calls _persist_full when no incremental config."""
+        """_persist_results calls _persist_full when no incremental config."""
         report = _build_report(spark, config_dict=DUMMY_CONFIG)
 
         with (
@@ -576,13 +578,13 @@ class TestPersistResultsProcessingMode:
                 return_value=None,
             ),
         ):
-            report.determine_report()
+            report._determine_report()
 
         with (
             patch.object(report, "_persist_full") as mock_full,
             patch.object(report, "_persist_incremental") as mock_incr,
         ):
-            report.persist_results()
+            report._persist_results()
 
             mock_full.assert_called_once()
             mock_incr.assert_not_called()
@@ -943,7 +945,7 @@ class TestPersistFullDictHandling:
 # Tests: duplicate calculated-channel identity rejection
 # ============================================================================
 class TestDuplicateCalculatedChannelIdentities:
-    """determine_report must reject two calculated channels sharing an identity."""
+    """_determine_report must reject two calculated channels sharing an identity."""
 
     @staticmethod
     def _channel(name, identity):
@@ -973,7 +975,7 @@ class TestDuplicateCalculatedChannelIdentities:
             ),
             pytest.raises(ValueError, match="unique identities"),
         ):
-            report.determine_report(is_incremental=False)
+            report._determine_report(is_incremental=False)
 
     def test_distinct_identities_do_not_raise(self, spark):
         report = _build_report(spark)
@@ -983,3 +985,95 @@ class TestDuplicateCalculatedChannelIdentities:
         ]
         # Should not raise (validation passes); call the guard directly.
         report._validate_unique_calculated_channels()
+
+
+# ============================================================================
+# Tests: deprecated determine_report() / persist_results() wrappers
+# ============================================================================
+class TestDeprecatedEntryPoints:
+    """The public two-step API warns, names run() as the replacement, and delegates."""
+
+    @staticmethod
+    def _run_deprecation(record):
+        """The run()-pointing deprecation warnings among everything pytest recorded."""
+        return [w for w in record if "Report.run()" in str(w.message)]
+
+    def test_determine_report_warns_and_delegates(self, spark):
+        report = _build_report(spark)
+
+        with (
+            patch.object(report, "_determine_report") as mock_determine,
+            pytest.warns(
+                FutureWarning, match=r"Report\.determine_report\(\) is deprecated"
+            ) as record,
+        ):
+            report.determine_report(is_incremental=True)
+
+        mock_determine.assert_called_once_with(True)
+        deprecations = self._run_deprecation(record)
+        assert len(deprecations) == 1
+        # Attributed to the caller, not the telemetry_logger wrapper.
+        assert deprecations[0].filename == __file__
+
+    def test_persist_results_warns_and_delegates(self, spark):
+        report = _build_report(spark)
+
+        with (
+            patch.object(report, "_persist_results") as mock_persist,
+            pytest.warns(
+                FutureWarning, match=r"Report\.persist_results\(\) is deprecated"
+            ) as record,
+        ):
+            report.persist_results(cleanup_temp_tables=True)
+
+        mock_persist.assert_called_once_with(True)
+        deprecations = self._run_deprecation(record)
+        assert len(deprecations) == 1
+        assert deprecations[0].filename == __file__
+
+    def test_run_does_not_warn(self, spark):
+        report = _build_report(spark)
+        # Normally set by _determine_report; preset since it is mocked here.
+        report._more_batches_pending = False
+
+        with (
+            patch.object(report, "_determine_report") as mock_determine,
+            patch.object(report, "_persist_results") as mock_persist,
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("error", FutureWarning)
+            report.run(is_incremental=False, cleanup_temp_tables=False)
+
+        mock_determine.assert_called_once_with(False)
+        mock_persist.assert_called_once_with(False)
+
+
+# ============================================================================
+# Tests: run() telemetry
+# ============================================================================
+class TestRunTelemetry:
+    """run() logs its own tag plus the per-step tags carried by the private methods."""
+
+    def test_run_logs_run_and_step_tags(self, spark):
+        report = _build_report(spark)
+
+        with (
+            patch.object(report, "_gold_layer_exists", return_value=True),
+            patch.object(report, "_group_events_by_type", return_value={}),
+            patch.object(report, "_group_aggregations_by_type", return_value={}),
+            patch(
+                "impulse_reporting.core.report.ContainerDimension.get_dimension",
+                return_value=None,
+            ),
+            patch.object(report, "_persist_full") as mock_full,
+            patch("impulse_query_engine.telemetry.log_telemetry") as mock_log,
+        ):
+            report.run(is_incremental=False)
+
+        mock_full.assert_called_once()
+        tags = [(c.args[1], c.args[2]) for c in mock_log.call_args_list]
+        assert tags == [
+            ("report", "run"),
+            ("report", "determine_report"),
+            ("report", "persist_results"),
+        ]

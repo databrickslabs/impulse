@@ -171,9 +171,9 @@ class Event(ABC):
         solved_df : DataFrame, optional
             Pre-solved wide DataFrame from centralized batch solve.
         query : QueryBuilder, optional
-            Query builder for constructing event queries (ContainerEvent path).
+            Query builder for constructing event queries (container-boundary event path).
         solver : QuerySolver, optional
-            Query solver for executing queries (ContainerEvent path).
+            Query solver for executing queries (container-boundary event path).
         pre_filtered_containers_df : DataFrame, optional
             Pre-filtered containers for incremental processing.
 

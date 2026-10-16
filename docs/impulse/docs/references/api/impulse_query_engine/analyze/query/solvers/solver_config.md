@@ -126,6 +126,21 @@ so that solver code can always reference the same constants.
 override for the channel mapping (alias) table.
 - `channels` (`TableConfig`): Column mappings and filters for the channel data table.
 - `unit_conversion` (`TableConfig`): Column mappings and filters for the unit conversion table.
+- `channel_time_unit` (`{"s", "ms", "us", "ns"} or None`): Time unit of the timestamps in the ``channels`` table (``tstart`` / ``tend``, or
+``timestamp`` for RAW data).  Only used to compute ``TimeWindowEvent`` windows in
+that unit (see ``solvers.utils.window_bounds.with_window_bounds``); required when
+``container_metrics`` ``start_ts`` / ``stop_ts`` are ``TIMESTAMP`` columns.  Nothing
+else is converted: channel timestamps, and the ``start_ts`` / ``stop_ts`` seen by
+UDFs, ``ContainerEvent`` and ``measurement_dimension``, keep their original values.
+- `channel_time_origin` (`{"epoch", "container_start"}`): Origin of the channel timestamps: absolute epoch (default), or relative to the
+container's ``start_ts``.  Like :attr:`channel_time_unit`, only used for the
+``TimeWindowEvent`` windows.
+- `container_time_unit` (`{"s", "ms", "us", "ns"} or None`): Unit of **numeric** ``container_metrics`` ``start_ts`` / ``stop_ts``, when it differs
+from :attr:`channel_time_unit` (e.g. boundaries in epoch ms, channels in µs).  Only
+used to convert them into :attr:`channel_time_unit` for the ``TimeWindowEvent``
+windows; requires :attr:`channel_time_unit`.  Unset means the numeric boundaries are
+already in the channels' unit.  Not allowed for ``TIMESTAMP`` boundaries, which carry
+their own unit.
 
 #### from\_json
 
@@ -215,6 +230,30 @@ def start_ts_col() -> str
 Internal column name for the measurement-start epoch timestamp on container_metrics.
 
 
+#### window\_start\_col
+
+```python
+def window_start_col() -> str
+```
+
+Internal column name for the container start in the channel time frame.
+
+Added by ``solvers.utils.window_bounds.with_window_bounds``; prefixed so it cannot
+clash with a customer column.
+
+
+#### window\_stop\_col
+
+```python
+def window_stop_col() -> str
+```
+
+Internal column name for the container stop in the channel time frame.
+
+Added by ``solvers.utils.window_bounds.with_window_bounds``; prefixed so it cannot
+clash with a customer column.
+
+
 #### stop\_ts\_col
 
 ```python
@@ -231,6 +270,33 @@ def value_col() -> str
 ```
 
 Internal column name for the signal value on the channels table.
+
+
+#### poi\_timestamp\_col
+
+```python
+def poi_timestamp_col() -> str
+```
+
+Internal column name for the point timestamp on the poi_channels table.
+
+
+#### poi\_value\_double\_col
+
+```python
+def poi_value_double_col() -> str
+```
+
+Internal column name for the numeric value on the poi_channels table.
+
+
+#### poi\_value\_string\_col
+
+```python
+def poi_value_string_col() -> str
+```
+
+Internal column name for the string value on the poi_channels table.
 
 
 #### tag\_key\_col
@@ -428,5 +494,27 @@ def col_map() -> dict[str, str]
 ```
 
 Short-key → internal-column-name mapping for UDFs and caches.
+
+
+#### reject\_implausible\_channels\_filter\_in\_raw
+
+```python
+def reject_implausible_channels_filter_in_raw(is_raw: bool) -> None
+```
+
+Raise if an is_plausible channels filter is set in RAW mode.
+
+Such a filter runs before raw encoding and bridges intervals across dropped
+samples instead of splitting them; use drop_implausible_data instead. No-op
+when not raw.
+
+
+#### validate\_container\_time\_unit\_requires\_channel\_time\_unit
+
+```python
+def validate_container_time_unit_requires_channel_time_unit()
+```
+
+``container_time_unit`` converts into ``channel_time_unit``, so it needs one.
 
 

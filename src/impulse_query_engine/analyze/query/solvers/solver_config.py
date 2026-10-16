@@ -16,8 +16,9 @@ properties on :class:`SolverConfig`.
 
 import json
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class RawEncoder(StrEnum):
@@ -133,9 +134,30 @@ class SolverConfig(BaseModel):
         Column mappings and filters for the channel data table.
     unit_conversion : TableConfig
         Column mappings and filters for the unit conversion table.
+    channel_time_unit : {"s", "ms", "us", "ns"} or None
+        Time unit of the timestamps in the ``channels`` table (``tstart`` / ``tend``, or
+        ``timestamp`` for RAW data).  Only used to compute ``TimeWindowEvent`` windows in
+        that unit (see ``solvers.utils.window_bounds.with_window_bounds``); required when
+        ``container_metrics`` ``start_ts`` / ``stop_ts`` are ``TIMESTAMP`` columns.  Nothing
+        else is converted: channel timestamps, and the ``start_ts`` / ``stop_ts`` seen by
+        UDFs, ``ContainerEvent`` and ``measurement_dimension``, keep their original values.
+    channel_time_origin : {"epoch", "container_start"}
+        Origin of the channel timestamps: absolute epoch (default), or relative to the
+        container's ``start_ts``.  Like :attr:`channel_time_unit`, only used for the
+        ``TimeWindowEvent`` windows.
+    container_time_unit : {"s", "ms", "us", "ns"} or None
+        Unit of **numeric** ``container_metrics`` ``start_ts`` / ``stop_ts``, when it differs
+        from :attr:`channel_time_unit` (e.g. boundaries in epoch ms, channels in µs).  Only
+        used to convert them into :attr:`channel_time_unit` for the ``TimeWindowEvent``
+        windows; requires :attr:`channel_time_unit`.  Unset means the numeric boundaries are
+        already in the channels' unit.  Not allowed for ``TIMESTAMP`` boundaries, which carry
+        their own unit.
     """
 
     project_id: str | None = None
+    channel_time_unit: Literal["s", "ms", "us", "ns"] | None = None
+    channel_time_origin: Literal["epoch", "container_start"] = "epoch"
+    container_time_unit: Literal["s", "ms", "us", "ns"] | None = None
 
     container_tags: TableConfig = TableConfig()
     container_metrics: TableConfig = TableConfig()
@@ -143,6 +165,7 @@ class SolverConfig(BaseModel):
     channel_metrics: TableConfig = TableConfig()
     channel_mapping: ChannelMappingConfig = ChannelMappingConfig()
     channels: TableConfig = TableConfig()
+    poi_channels: TableConfig = TableConfig()
     unit_conversion: TableConfig = TableConfig()
 
     # ------------------------------------------------------------------
@@ -222,6 +245,24 @@ class SolverConfig(BaseModel):
         return "start_ts"
 
     @property
+    def window_start_col(self) -> str:
+        """Internal column name for the container start in the channel time frame.
+
+        Added by ``solvers.utils.window_bounds.with_window_bounds``; prefixed so it cannot
+        clash with a customer column.
+        """
+        return "__window_start"
+
+    @property
+    def window_stop_col(self) -> str:
+        """Internal column name for the container stop in the channel time frame.
+
+        Added by ``solvers.utils.window_bounds.with_window_bounds``; prefixed so it cannot
+        clash with a customer column.
+        """
+        return "__window_stop"
+
+    @property
     def stop_ts_col(self) -> str:
         """Internal column name for the measurement-stop epoch timestamp on container_metrics."""
         return "stop_ts"
@@ -230,6 +271,21 @@ class SolverConfig(BaseModel):
     def value_col(self) -> str:
         """Internal column name for the signal value on the channels table."""
         return "value"
+
+    @property
+    def poi_timestamp_col(self) -> str:
+        """Internal column name for the point timestamp on the poi_channels table."""
+        return "timestamp"
+
+    @property
+    def poi_value_double_col(self) -> str:
+        """Internal column name for the numeric value on the poi_channels table."""
+        return "value_double"
+
+    @property
+    def poi_value_string_col(self) -> str:
+        """Internal column name for the string value on the poi_channels table."""
+        return "value_string"
 
     @property
     def tag_key_col(self) -> str:
@@ -379,4 +435,36 @@ class SolverConfig(BaseModel):
             "te": self.tend_col,
             "val": self.value_col,
             "conv": self.conversion_factor_col,
+            # String POI slices read their value from this column. Series-type
+            # dispatch is driven by the selector (passed to load_blob), so no
+            # per-row series_type / dtype marker column is needed in the frame.
+            "value_string": self.poi_value_string_col,
         }
+
+    def reject_implausible_channels_filter_in_raw(self, is_raw: bool) -> None:
+        """Raise if an is_plausible channels filter is set in RAW mode.
+
+        Such a filter runs before raw encoding and bridges intervals across dropped
+        samples instead of splitting them; use drop_implausible_data instead. No-op
+        when not raw.
+        """
+        if not is_raw:
+            return
+        if self.is_plausible_col in self.channels.filters:
+            raise ValueError(
+                f"A channels.filters entry on '{self.is_plausible_col}' in RAW mode is "
+                "applied before raw encoding, which bridges intervals across dropped "
+                "samples. Use drop_implausible_data=True instead -- it drops "
+                "implausible points inside the encoder with correct interval boundaries."
+            )
+
+    @model_validator(mode="after")
+    def validate_container_time_unit_requires_channel_time_unit(self):
+        """``container_time_unit`` converts into ``channel_time_unit``, so it needs one."""
+        if self.container_time_unit is not None and self.channel_time_unit is None:
+            raise ValueError(
+                "container_time_unit requires channel_time_unit: numeric container boundaries "
+                "are converted from container_time_unit into the unit of the channel "
+                "timestamps."
+            )
+        return self

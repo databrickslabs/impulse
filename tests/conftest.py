@@ -1,3 +1,4 @@
+import fcntl
 import os
 from unittest.mock import create_autospec
 
@@ -25,17 +26,45 @@ except ImportError:
 
 
 @pytest.fixture(scope="session")
-def spark() -> SparkSession:
-    spark = configure_spark_with_delta_pip(
+def spark(tmp_path_factory, worker_id) -> SparkSession:
+    # Isolate the warehouse + Derby metastore per pytest-xdist worker. Each worker is a
+    # separate process with its own SparkSession/JVM, and a Derby-backed metastore cannot
+    # be shared across processes. ``getbasetemp()`` is already per-worker under xdist, and
+    # ``worker_id`` is "master" in serial runs, so this is a safe no-op without ``-n``.
+    base = tmp_path_factory.getbasetemp()
+    warehouse_dir = base / "spark-warehouse"
+    metastore_dir = base / "metastore_db"
+    builder = configure_spark_with_delta_pip(
         SparkSession.builder.master("local")
+        .appName(f"impulse-tests-{worker_id}")
+        .config("spark.sql.warehouse.dir", str(warehouse_dir))
+        .config(
+            "spark.hadoop.javax.jdo.option.ConnectionURL",
+            f"jdbc:derby:;databaseName={metastore_dir};create=true",
+        )
         .config(
             "spark.sql.catalog.spark_catalog",
             "org.apache.spark.sql.delta.catalog.DeltaCatalog",
         )
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.databricks.delta.retentionDurationCheck.enabled ", "false")
-        .config("spark.shuffle.partitions", 1)
-    ).getOrCreate()
+        .config("spark.databricks.delta.retentionDurationCheck.enabled", "false")
+        # Local tuning for tiny test data: avoid 200-way shuffles and skip the Spark UI
+        # so per-worker sessions start fast and stay lean.
+        .config("spark.sql.shuffle.partitions", 1)
+        .config("spark.default.parallelism", 1)
+        .config("spark.ui.enabled", "false")
+    )
+    # configure_spark_with_delta_pip resolves the Delta jars via ivy at JVM launch. Under
+    # xdist, workers sharing the default ~/.ivy2 race on a cold cache and some fail with
+    # JAVA_GATEWAY_EXITED / unresolved dependency. Serialize session startup across workers
+    # with a cross-run file lock (base.parent is shared by all workers of a run): the first
+    # worker populates the shared cache, the rest reuse it. Cheap once the cache is warm.
+    with open(base.parent / "impulse-spark-startup.lock", "w") as lock_fh:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX)
+        try:
+            spark = builder.getOrCreate()
+        finally:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver")
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver_narrow_db")
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver_key_value_store")
@@ -58,6 +87,7 @@ def basic_narrow_db(spark, mock_workspace_client) -> MeasurementDB:
     tables["container_metrics"] = spark.read.table("spark_catalog.silver.container_metrics")
     tables["channel_metrics"] = spark.read.table("spark_catalog.silver.channel_metrics")
     tables["channels"] = spark.read.table("spark_catalog.silver.channels")
+    tables["poi_channels"] = spark.read.table("spark_catalog.silver.poi_channels")
 
     cfg = MeasurementDBConfig.for_debug(tables)
     return MeasurementDB(cfg, ws=mock_workspace_client)
@@ -107,6 +137,20 @@ def setup_narrow_db(spark):
         ),
         schema=S.CHANNELS_SCHEMA,
     )
+    poi_channels = spark.createDataFrame(
+        pd.read_csv(
+            f"{base_path}/tests/unit/data/unit_test_csv/1_poi_channels.csv",
+            dtype={
+                "container_id": np.int64,
+                "channel_id": np.int32,
+                "timestamp": np.longlong,
+                "value_double": np.float64,
+                "value_string": "object",
+                "dtype": "object",
+            },
+        ),
+        schema=S.POI_CHANNELS_SCHEMA,
+    )
 
     container_tags.write.format("delta").mode("overwrite").saveAsTable(
         "spark_catalog.silver_narrow_db.container_tags"
@@ -122,6 +166,9 @@ def setup_narrow_db(spark):
     )
     channels.write.format("delta").mode("overwrite").saveAsTable(
         "spark_catalog.silver_narrow_db.channels"
+    )
+    poi_channels.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver_narrow_db.poi_channels"
     )
 
 
@@ -142,11 +189,20 @@ def setup_basic_db(spark):
     container_metric_path = f"{base_path}/tests/unit/data/basic_narrow_csv/container_metrics.csv"
     channel_metric_path = f"{base_path}/tests/unit/data/basic_narrow_csv/channel_metrics.csv"
     channels_path = f"{base_path}/tests/unit/data/basic_narrow_csv/channel_data.csv"
+    poi_channels_path = f"{base_path}/tests/unit/data/basic_narrow_csv/poi_channels.csv"
 
     options = {"header": "True", "delimiter": ",", "inferSchema": "True"}
     container_metrics = spark.read.options(**options).csv(container_metric_path)
     channel_metrics = spark.read.options(**options).csv(channel_metric_path)
     channels = spark.read.options(**options).csv(channels_path)
+    # POI channel data: explicit schema so empty value columns keep their nullable
+    # typed shape (value_double double / value_string string) rather than being
+    # inferred as all-null strings.
+    poi_channels = (
+        spark.read.schema(S.POI_CHANNELS_SCHEMA)
+        .options(header="True", delimiter=",")
+        .csv(poi_channels_path)
+    )
 
     container_metrics.write.format("delta").mode("overwrite").saveAsTable(
         "spark_catalog.silver.container_metrics"
@@ -161,6 +217,9 @@ def setup_basic_db(spark):
         "spark_catalog.silver.channel_metrics"
     )
     channels.write.format("delta").mode("overwrite").saveAsTable("spark_catalog.silver.channels")
+    poi_channels.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver.poi_channels"
+    )
 
 
 @pytest.fixture(scope="session")
@@ -247,6 +306,7 @@ def narrow_db(spark, setup_narrow_db, mock_workspace_client) -> MeasurementDB:
         "spark_catalog.silver_narrow_db.channel_metrics"
     )
     debug_tables["channels"] = spark.read.table("spark_catalog.silver_narrow_db.channels")
+    debug_tables["poi_channels"] = spark.read.table("spark_catalog.silver_narrow_db.poi_channels")
 
     cfg = MeasurementDBConfig.for_debug(debug_tables)
     return MeasurementDB(cfg, ws=mock_workspace_client)

@@ -129,8 +129,7 @@ page.add_aggregation(HistogramDuration(
 ))
 report.add_page(page)
 
-report.determine_report()   # compute
-report.persist_results()    # write the gold star schema
+report.run()   # compute and write the gold star schema
 ```
 
 ## Where to go next

@@ -1,9 +1,31 @@
 """Integration tests for StatsAggregator with end-to-end usage."""
 
+import math
+
+import numpy as np
 import pytest
 
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
+    CrossChannelStatistic,
+    PerChannelStatistic,
+)
 from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+
+
+def _value_spread(series, t_start, t_end):
+    """Cross-channel statistic: max - min over the values of all series."""
+    values = [v for s in series for v in s.values if not np.isnan(v)]
+    if not values:
+        return [float("nan")]
+    return [float(max(values) - min(values))]
+
+
+def _rms(series, t_start, t_end):
+    """Per-channel statistic: root mean square of the series values."""
+    if len(series) == 0:
+        return [float("nan")]
+    return [float(np.sqrt(np.nanmean(series.values**2)))]
 
 
 def test_stats_case_check_numeric_values(spark, basic_narrow_db):
@@ -212,3 +234,67 @@ def test_stats_aggregator_with_median(spark, basic_narrow_db):
                 assert (
                     event_stats["min"] <= event_stats["median"] <= event_stats["max"]
                 ), "median should be between min and max"
+
+
+def test_stats_aggregator_with_custom_statistics(spark, basic_narrow_db):
+    """End-to-end solve with cross-channel and per-channel custom statistics."""
+    query = basic_narrow_db.query
+
+    eng_rpm = query.channel(channel_name="Engine RPM")
+    veh_spd = query.channel(channel_name="Vehicle Speed Sensor")
+    air_temp = query.channel(channel_name="Intake Air Temperature")
+    air_temp_event = air_temp >= 0
+
+    stats_aggregator = StatsAggregator(
+        input_expressions=[eng_rpm, veh_spd],
+        statistics=["min", "max"],
+        event_expression=air_temp_event,
+        cross_channel_custom_statistics=[
+            CrossChannelStatistic(
+                func=_value_spread,
+                aggregation_labels=["spread"],
+                inputs=["engine_rpm", "vehicle_speed"],
+            ),
+        ],
+        per_channel_custom_statistics=[PerChannelStatistic(func=_rms, aggregation_labels=["rms"])],
+        input_names=["engine_rpm", "vehicle_speed"],
+    )
+
+    metric_container_id = query.metric("container_id")
+    df = (
+        query.where(metric_container_id == 1)
+        .select(stats_aggregator.alias("custom_stats"))
+        .solve(spark, solver=DefaultSolver(spark))
+    )
+
+    rows = df.select("custom_stats").collect()
+    assert len(rows) == 1
+
+    my_stats = rows[0]["custom_stats"]
+    numeric_values = my_stats["numeric_values"]
+    cross_channel_values = my_stats["cross_channel_values"]
+
+    # one cross-channel map per interval, aligned with the per-channel interval count
+    assert len(numeric_values) == 2
+    assert len(cross_channel_values) > 0
+    assert len(cross_channel_values) == len(numeric_values[0])
+
+    for interval_index, interval_map in enumerate(cross_channel_values):
+        spread = interval_map["spread"]
+        assert not math.isnan(spread)
+        # spread across both channels dominates each channel's own value range
+        for channel_values in numeric_values:
+            event_stats = channel_values[interval_index]
+            assert spread >= event_stats["max"] - event_stats["min"] - 1e-9
+
+    # per-channel custom statistic lands next to the built-ins, per channel
+    rms_values = []
+    for channel_values in numeric_values:
+        for event_stats in channel_values:
+            assert "rms" in event_stats
+            if not math.isnan(event_stats["rms"]):
+                rms_values.append(event_stats["rms"])
+                # rms of non-negative samples lies within [min, max]
+                assert event_stats["min"] - 1e-9 <= event_stats["rms"] <= event_stats["max"] + 1e-9
+    assert rms_values, "expected at least one non-NaN rms value"
+    assert all(v > 0 for v in rms_values)

@@ -7,6 +7,7 @@ loaders:
       - impulse_reporting.events.basic_event
       - impulse_reporting.events.container_event
       - impulse_reporting.events.sequence_of_events
+      - impulse_reporting.events.time_window_event
       - impulse_reporting.aggregations.histogram
       - impulse_reporting.aggregations.histogram2d
       - impulse_reporting.aggregations.stats_aggregator
@@ -19,6 +20,7 @@ loaders:
       - impulse_query_engine.analyze.metadata.tag_expression
       - impulse_query_engine.analyze.metadata.metric_expression
       - impulse_query_engine.analyze.query.aggregations.statistic_type
+      - impulse_query_engine.analyze.query.aggregations.custom_statistic
       - impulse_query_engine.analyze.query.solvers.default_solver
       - impulse_query_engine.analyze.query.solvers.solver_config
       - impulse_query_engine.analyze.query.solvers.query_solver

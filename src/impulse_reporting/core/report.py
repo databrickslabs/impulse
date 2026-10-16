@@ -1,8 +1,11 @@
 import json
+import logging
+import warnings
 import zlib
 from typing import Any
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 from pyspark.sql.types import StructType
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
@@ -11,13 +14,14 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db import AbstractMeasurementDB
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.channels.channel_types import ChannelType
 from impulse_reporting.config.config_parser import (
     ImpulseConfig,
     Solvers,
     DataType,
+    build_measurement_db_config,
 )
 from impulse_reporting.core.page import Page
 from impulse_reporting.core.report_utils import (
@@ -25,20 +29,27 @@ from impulse_reporting.core.report_utils import (
     cleanup_temp_tables,
     collect_solvable_expressions,
     dispatch_aggregations,
+    dispatch_calculated_channel_metrics,
     dispatch_calculated_channels,
     dispatch_events,
+    full_recalc_names,
     group_selectables_by_type,
     merge_changed_unchanged,
+    persist_channel_metrics,
     persist_dimensions_full,
     persist_dimensions_incremental,
     persist_facts_full,
     persist_facts_incremental,
+    solve_calculated_channels_batched,
     solve_expressions_batched,
     split_by_hash_change,
+    validate_full_recalculation_scope,
 )
+from impulse_reporting.events.container_boundary_event import ContainerBoundaryEvent
 from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.event import Event
 from impulse_reporting.events.event_types import EventType
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.incremental.container_detector import ContainerUpsertDetector
 from impulse_reporting.incremental.definition_hash_comparator import (
     DefinitionHashComparator,
@@ -57,6 +68,19 @@ from impulse_reporting.persist.report_storage import (
 )
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 from impulse_query_engine.telemetry import log_telemetry, telemetry_logger
+
+logger = logging.getLogger(__name__)
+
+_DETERMINE_REPORT_DEPRECATION_MSG = (
+    "Report.determine_report() is deprecated; use Report.run() instead "
+    "(run(persist_results=False) computes without writing). "
+    "determine_report() will be removed in a future release."
+)
+_PERSIST_RESULTS_DEPRECATION_MSG = (
+    "Report.persist_results() is deprecated; use Report.run() instead, which determines and "
+    "persists in one call and drains capped incremental batches. "
+    "persist_results() will be removed in a future release."
+)
 
 
 class Report:
@@ -106,6 +130,7 @@ class Report:
         self.aggregation_metadata_dfs = {}
         self.calculated_channel_dfs = {}
         self.calculated_channel_metadata_dfs = {}
+        self.calculated_channel_metrics_dfs = {}
         self.container_dimension_df = None
         self.channel_mapping_resolution_dimension_df = None
         self._is_incremental = None
@@ -145,13 +170,13 @@ class Report:
         """
         return zlib.crc32(self.name.encode()) & 0x7FFFFFFF  # Ensures positive 32-bit int
 
-    def get_db(self) -> MeasurementDB:
+    def get_db(self) -> AbstractMeasurementDB:
         """
         Get the measurement database associated with this report.
 
         Returns
         -------
-        MeasurementDB
+        AbstractMeasurementDB
             The measurement database instance.
         """
         return self.db
@@ -203,10 +228,12 @@ class Report:
         return ImpulseConfig.model_validate(config_info)
 
     @staticmethod
-    def create_measurement_db(config: ImpulseConfig, ws: WorkspaceClient) -> MeasurementDB:
+    def create_measurement_db(config: ImpulseConfig, ws: WorkspaceClient) -> AbstractMeasurementDB:
         """
-        Create a measurement database based on the provided configuration.
+        Create the measurement database selected by ``query_engine.measurement_db``.
 
+        Builds the registered config class from the ``source`` tables plus
+        ``query_engine.measurement_db_config``, then the registered DB class.
         Maps the optional ``container_tags`` field from the Source config
         to the ``container_tags_table`` parameter expected by
         ``MeasurementDBConfig``.
@@ -220,18 +247,18 @@ class Report:
 
         Returns
         -------
-        MeasurementDB
+        AbstractMeasurementDB
             The measurement database instance.
         """
         source_dict = dict(config.source)
         # Map config field name to MeasurementDBConfig parameter name
         if "container_tags" in source_dict:
             source_dict["container_tags_table"] = source_dict.pop("container_tags")
-        measurement_db_config = MeasurementDBConfig(**source_dict, table_locations="unity_catalog")
-        return MeasurementDB(config=measurement_db_config, ws=ws)
+        db_cls, db_config = build_measurement_db_config(source_dict, config.query_engine)
+        return db_cls(db_config, ws)
 
     @staticmethod
-    def create_query_builder(db: MeasurementDB, config: ImpulseConfig) -> QueryBuilder:
+    def create_query_builder(db: AbstractMeasurementDB, config: ImpulseConfig) -> QueryBuilder:
         """
         Create a query builder based on the provided configuration and set container filters.
 
@@ -242,7 +269,7 @@ class Report:
 
         Parameters
         ----------
-        db : MeasurementDB
+        db : AbstractMeasurementDB
             The measurement database instance.
         config : ImpulseConfig
             The Impulse configuration.
@@ -393,7 +420,10 @@ class Report:
         Raises
         ------
         ValueError
-            If the event is a ContainerEvent and a ContainerEvent already exists in the report.
+            If the event is a ContainerEvent and a ContainerEvent already exists in the report,
+            or if an event with the same name, ignoring case, has already been added (event
+            names identify events in the fact and dimension tables and name the event's
+            column in the solved data, which Spark resolves case-insensitively).
         """
         if isinstance(event, ContainerEvent) and any(
             isinstance(e, ContainerEvent) for e in self.events
@@ -402,8 +432,27 @@ class Report:
                 "Only one ContainerEvent is allowed per report. "
                 "A ContainerEvent has already been added to this report."
             )
+        # Names are compared like Spark's case-insensitive column resolution.
+        existing = next(
+            (e for e in self.events if e.get_name().lower() == event.get_name().lower()), None
+        )
+        if existing is not None:
+            raise ValueError(
+                f"Cannot add event '{event.get_name()}': an event named "
+                f"'{existing.get_name()}' has already been added to this report. "
+                "Event names must be unique within a report, ignoring case."
+            )
         self.events.append(event)
         event.set_report_id(self.report_id)
+        if isinstance(event, TimeWindowEvent):
+            # The windows are computed in the channel time frame, so it is part of the
+            # event's (and its scoped aggregations') definition.
+            solver_config = self.solver.config
+            event.set_channel_time(
+                solver_config.channel_time_unit,
+                solver_config.channel_time_origin,
+                solver_config.container_time_unit,
+            )
 
     def get_events(self) -> list[Event]:
         """
@@ -514,45 +563,100 @@ class Report:
 
     def _validate_aggregation_events(self) -> None:
         """
-        Validate that all events used in aggregations are added to the report.
+        Validate that every aggregation's event is an event object added to the report.
+
+        The event must be the registered object itself, not another object with the same
+        name: the event fact is derived from the registered event, while the solve scopes the
+        aggregation to its own event, so a differing copy would produce mismatched rows.
 
         Raises
         ------
         ValueError
-            If an aggregation uses an event that was not added to the report via add_event().
+            If an aggregation uses an event that was not added to the report via add_event(),
+            or a different object with the name (ignoring case) of a registered event.
         """
-        registered_events = set(self.events)
-        registered_event_names = {event.get_name() for event in self.events}
+        # Keyed like add_event's uniqueness check, so there is one event per key.
+        registered_events = {event.get_name().lower(): event for event in self.events}
 
-        missing_events = []
+        unregistered_events = []
 
         for page in self.pages:
             for aggregation in page.aggregations:
                 event = aggregation.get_event()
-                if event is not None and event not in registered_events:
-                    event_name = event.get_name()
-                    if event_name not in registered_event_names:
-                        missing_events.append(
-                            f"Aggregation '{aggregation.get_name()}' uses event "
-                            f"'{event_name}' which was not added to the report."
-                        )
+                if event is None:
+                    continue
+                registered = registered_events.get(event.get_name().lower())
+                if registered is event:
+                    continue
+                if registered is not None:
+                    unregistered_events.append(
+                        f"Aggregation '{aggregation.get_name()}' uses an event named "
+                        f"'{event.get_name()}' that is a different object from the registered "
+                        f"event '{registered.get_name()}'. Pass the registered event (e.g. "
+                        f"report.get_events_dict()[{registered.get_name()!r}])."
+                    )
+                else:
+                    unregistered_events.append(
+                        f"Aggregation '{aggregation.get_name()}' uses event "
+                        f"'{event.get_name()}' which was not added to the report."
+                    )
 
-        if missing_events:
+        if unregistered_events:
             error_message = (
-                "The following events are used in aggregations but were not added "
-                "to the report via add_event():\n"
-                + "\n".join(f"  - {msg}" for msg in missing_events)
+                "The following aggregations reference events that are not registered with "
+                "this report:\n" + "\n".join(f"  - {msg}" for msg in unregistered_events)
             )
             raise ValueError(error_message)
 
+    def _validate_full_recalculation_scope(self) -> None:
+        """Reject full-recalculation names that match no registered entity.
+
+        Thin wrapper delegating to :func:`report_utils.validate_full_recalculation_scope`;
+        supplies the report's registered entity names. Fails fast (mirroring
+        :meth:`_validate_aggregation_events`) so typos or stale names surface
+        immediately rather than silently recomputing nothing.
+
+        Raises
+        ------
+        ValueError
+            If any configured name does not match a registered entity of its kind.
+        """
+        validate_full_recalculation_scope(
+            self.config,
+            {
+                "events": self.get_events(),
+                "aggregations": [agg for page in self.pages for agg in page.aggregations],
+                "calculated_channels": self.get_calculated_channels(),
+            },
+        )
+
+    def persist_results(self, cleanup_temp_tables: bool | None = None):
+        """Deprecated: use :meth:`run`, which determines and persists in one call.
+
+        Persists the results of a prior :meth:`determine_report` call. Unlike :meth:`run`,
+        it does not drain capped incremental batches.
+
+        Parameters
+        ----------
+        cleanup_temp_tables : bool | None, optional
+            Same as the :meth:`run` argument.
+        """
+        warnings.warn(_PERSIST_RESULTS_DEPRECATION_MSG, FutureWarning, stacklevel=2)
+        self._persist_results(cleanup_temp_tables)
+
     @telemetry_logger("report", "persist_results")
-    def persist_results(self):
+    def _persist_results(self, cleanup_temp_tables: bool | None = None):
         """
         Persist report results using appropriate strategy based on definition changes.
 
-        Uses tracked state from determine_report() to decide persistence strategy:
+        Uses tracked state from :meth:`_determine_report` to decide persistence strategy:
         - Changed definitions: replaceWhere (atomic delete + insert)
         - Unchanged definitions: MERGE (upsert)
+
+        Parameters
+        ----------
+        cleanup_temp_tables : bool | None, optional
+            Temp-table cleanup override, see :meth:`run`.
 
         Returns
         -------
@@ -561,7 +665,7 @@ class Report:
         if not self._has_sink:
             return
 
-        # Use tracked state from determine_report
+        # Use tracked state from _determine_report
         changed_aggregation_ids = getattr(self, "_changed_aggregation_ids", {})
         changed_event_ids = getattr(self, "_changed_event_ids", {})
         changed_channel_ids = getattr(self, "_changed_channel_ids", {})
@@ -572,6 +676,20 @@ class Report:
             )
         else:
             self._persist_full()
+
+        # Only drop the current run's temp tables once persistence has succeeded.
+        if self._resolve_cleanup_temp_tables(cleanup_temp_tables):
+            self._cleanup_temp_tables()
+
+    def _resolve_cleanup_temp_tables(self, cleanup: bool | None) -> bool:
+        """Resolve whether to drop temp tables: explicit arg wins, else config flag.
+
+        ``self.config.unity_sink`` is guaranteed non-None when called, since
+        ``_persist_results`` returns early unless a sink is configured.
+        """
+        if cleanup is not None:
+            return cleanup
+        return bool(self.config.unity_sink.cleanup_temp_tables)
 
     def _persist_full(self):
         """
@@ -598,6 +716,16 @@ class Report:
         persist_facts_full(self.calculated_channel_dfs, ChannelType, storage_factory)
         persist_dimensions_full(self.calculated_channel_metadata_dfs, ChannelType, storage_factory)
 
+        # optional calculated channel metrics table (dynamic schema — stored
+        # directly without the fixed-schema projecting writer)
+        persist_channel_metrics(
+            self.calculated_channel_metrics_dfs,
+            ChannelType,
+            self.sink,
+            ReportEntityTransformer(),
+            incremental=False,
+        )
+
         # persist measurement dimensions
         if self.container_dimension_df:
             writer = storage_factory.create_container_dimension_writer()
@@ -610,7 +738,6 @@ class Report:
             uri = writer.get_output_uri()
             writer.write(self.channel_mapping_resolution_dimension_df, uri=uri)
 
-    @telemetry_logger("report", "determine_report")
     def _persist_incremental(
         self,
         changed_aggregation_ids: dict[str, list[int]],
@@ -706,6 +833,17 @@ class Report:
             self.sink,
             _transform,
             merge_keys=["channel_id"],
+        )
+
+        # Optional calculated channel metrics table (dynamic schema — merged
+        # directly, scoping the delete-by-source to updated containers).
+        persist_channel_metrics(
+            self.calculated_channel_metrics_dfs,
+            ChannelType,
+            self.sink,
+            transformer,
+            incremental=True,
+            updated_container_ids=updated_container_ids,
         )
 
         # Persist the measurement dimension LAST (as ``_persist_full`` does). It
@@ -834,22 +972,67 @@ class Report:
             expressions=expressions,
             query=self.query,
             solver=self.solver,
-            batch_size=self.config.query_engine.batch_size,
+            max_channels_per_batch=self.config.query_engine.max_channels_per_batch,
             has_sink=self._has_sink,
             catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
             schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
             pre_filtered_containers_df=pre_filtered_containers_df,
+            max_containers_per_batch=self.config.query_engine.max_containers_per_batch,
         )
 
-    @telemetry_logger("report", "determine_report")
-    def determine_report(self, is_incremental: bool = None):
+    def _solve_calculated_channels_batched(
+        self,
+        qe_channels: list,
+        pre_filtered_containers_df: DataFrame = None,
+    ) -> DataFrame | None:
+        """Solve calculated channels in configurable batches; return the unioned rows.
+
+        Narrow counterpart to :meth:`_solve_expressions_batched`; delegates to
+        :func:`solve_calculated_channels_batched` in ``report_utils``.
         """
-        Determine and process events, aggregations, and container dimensions for the report.
-        Results are accessible in the report's attributes.
+        return solve_calculated_channels_batched(
+            spark=self.spark,
+            qe_channels=qe_channels,
+            query=self.query,
+            solver=self.solver,
+            max_channels_per_batch=self.config.query_engine.max_channels_per_batch,
+            has_sink=self._has_sink,
+            catalog=getattr(self.config, "unity_sink", None) and self.config.unity_sink.catalog,
+            schema=getattr(self.config, "unity_sink", None) and self.config.unity_sink.schema,
+            pre_filtered_containers_df=pre_filtered_containers_df,
+            max_containers_per_batch=self.config.query_engine.max_containers_per_batch,
+        )
+
+    @telemetry_logger("report", "run")
+    def run(
+        self,
+        is_incremental: bool = None,
+        persist_results: bool = True,
+        cleanup_temp_tables: bool | None = None,
+    ):
+        """Determine and persist a report, draining all container batches.
+
+        The entry point for executing a report. Computes events, aggregations, calculated
+        channels, and container dimensions, then writes them to the gold layer. Without a
+        configured sink nothing is written.
+
+        ``run(persist_results=False)`` is the compute-only path: results are left on the
+        report's attributes (e.g. ``aggregation_dfs``, ``event_dfs``) for inspection. These
+        are lazy DataFrames, so after a persisting run read the gold tables instead: an
+        incremental run's attributes re-detect containers against the updated gold, a capped
+        run's hold only the last batch, and ``cleanup_temp_tables`` drops the temp tables
+        they read from.
 
         Supports incremental processing with definition-hash-based optimization:
         - Changed definitions trigger full reprocessing (all containers)
         - Unchanged definitions use incremental processing (only new/updated containers)
+
+        With ``max_containers_per_batch`` set on an incremental run, ``run()`` loops: each
+        iteration commits at most that many upserted containers, and the loop continues
+        until a run observes at most that many remaining (the last batch clears the rest).
+        After the first iteration all definition hashes are current, so later iterations
+        recompute only unchanged entities over the next batch of new containers. Without a
+        cap (or in full mode) it is a single determine+persist pass.
 
         Parameters
         ----------
@@ -859,6 +1042,76 @@ class Report:
             - True: Request incremental processing (if gold layer exists)
             - False: Force full processing
             - None: Use config value (default: full processing)
+        persist_results : bool, optional
+            When True (default), persist after determining and drain the batches. When
+            False, determine once without persisting (no iteration — nothing commits, so
+            the batch cannot advance).
+        cleanup_temp_tables : bool | None, optional
+            Whether to drop the batch-solving ``__impulse_temp_*`` tables from the
+            sink schema after persistence completes successfully.
+            - True/False: use this value, overriding the config flag.
+            - None (default): fall back to ``config.unity_sink.cleanup_temp_tables``
+              (which itself defaults to False).
+
+        Notes
+        -----
+        If a batch is detected again unchanged after being persisted (no forward
+        progress, e.g. a misconfigured ``gold_last_modified_column`` or containers
+        excluded by ``container_filters`` that never yield a gold row), the loop would
+        otherwise spin forever. ``run()`` detects the repeated batch, logs a warning
+        naming the stuck containers, and stops (partial completion) rather than hanging.
+        """
+        previous_batch_ids = None
+        while True:
+            self._determine_report(is_incremental)
+            if not persist_results:
+                return
+            self._persist_results(cleanup_temp_tables)
+            # Stop once a run processed the remainder (uncapped upserted <= cap); also
+            # covers no cap / full mode, where the flag stays False.
+            if not self._more_batches_pending:
+                return
+            # Forward-progress guard: each iteration commits a deterministic batch (the
+            # lowest ``cap`` container ids). If the just-persisted batch is detected again
+            # unchanged, the persist removed nothing from detection, so the drain has
+            # stalled and the loop would never terminate. Stop instead of hanging.
+            current_batch_ids = frozenset(self._processed_container_ids or [])
+            if current_batch_ids == previous_batch_ids:
+                logger.warning(
+                    "Incremental run stopped early: %d containers were detected again after "
+                    "being persisted, so the run made no forward progress. First ids: %s. "
+                    "Likely causes: a misconfigured gold_last_modified_column or containers that "
+                    "produce no measurement_dimension row. Remaining containers were not processed.",
+                    len(current_batch_ids),
+                    sorted(current_batch_ids)[:10],
+                )
+                return
+            previous_batch_ids = current_batch_ids
+
+    def determine_report(self, is_incremental: bool = None):
+        """Deprecated: use :meth:`run`, or ``run(persist_results=False)`` to compute only.
+
+        Computes the report without persisting; results are accessible in the report's
+        attributes.
+
+        Parameters
+        ----------
+        is_incremental : bool, optional
+            Same as the :meth:`run` argument.
+        """
+        warnings.warn(_DETERMINE_REPORT_DEPRECATION_MSG, FutureWarning, stacklevel=2)
+        self._determine_report(is_incremental)
+
+    @telemetry_logger("report", "determine_report")
+    def _determine_report(self, is_incremental: bool = None):
+        """
+        Determine and process events, aggregations, and container dimensions for the report.
+        Results are accessible in the report's attributes; :meth:`run` documents the modes.
+
+        Parameters
+        ----------
+        is_incremental : bool, optional
+            Processing-mode hint, see :meth:`run`.
 
         Returns
         -------
@@ -866,6 +1119,14 @@ class Report:
         """
         # Validate that every aggregation references a registered event
         self._validate_aggregation_events()
+
+        # Validate that any scoped full-recalculation names match registered entities
+        self._validate_full_recalculation_scope()
+
+        # Pin one consistent Delta snapshot of every configured silver input for
+        # the whole run so mid-run table changes cannot leak across lazy stages
+        # (issue #87).
+        self.db.pin_versions(self.spark)
 
         # TODO: port unit-consistency sanity check from MDA Framework
         # (`mda_reporting/util/unit_sanity_check.py`). When a
@@ -881,21 +1142,59 @@ class Report:
         self._is_incremental = self._resolve_is_incremental(is_incremental)
 
         # Detect containers to process (incremental mode only): new + updated.
+        # ``_more_batches_pending`` tells run()'s batch loop whether more than one batch
+        # of upserted containers remains; reset each call so it never carries stale state.
         pre_filtered_containers_df = None
+        self._more_batches_pending = False
+        # Ids of the capped batch this run processes; used by run()'s loop to detect a
+        # stalled drain (the same batch recurring => no forward progress). Only populated
+        # on capped incremental runs, the only runs where run() iterates.
+        self._processed_container_ids = None
+        # Whether this run has containers to process (gates whether fact tables are
+        # written). Set from the collected batch under a cap, else probed with isEmpty();
+        # defaults False (full mode without a cap / sinkless).
+        self._has_processed_containers = False
         if self._is_incremental:
             pre_filtered_containers_df = self._detect_upserted_containers()
+            # Cap containers per run: committed containers get a fresh
+            # measurement_dimension timestamp and drop out of the next run's detection,
+            # so successive runs advance through the population.
+            max_containers = self.config.query_engine.max_containers_per_batch
+            if max_containers is not None and pre_filtered_containers_df is not None:
+                (
+                    pre_filtered_containers_df,
+                    self._processed_container_ids,
+                    self._more_batches_pending,
+                ) = self._cap_upserted_batch(pre_filtered_containers_df, max_containers)
+                self._has_processed_containers = bool(self._processed_container_ids)
+            elif pre_filtered_containers_df is not None:
+                self._has_processed_containers = not pre_filtered_containers_df.isEmpty()
+        elif self.config.query_engine.max_containers_per_batch is not None:
+            # Full mode with a cap: solve the full scoped population in one pass, chunked by
+            # the cap for memory. Supplying the frame here lets the batched solve chunk it;
+            # there is no cross-run deferral (``_more_batches_pending`` stays False).
+            pre_filtered_containers_df = self._filtered_container_metrics()
+            self._has_processed_containers = not pre_filtered_containers_df.isEmpty()
 
-        # Two signals for persistence:
-        # - has_processed_containers (new + updated): gates whether a fact table is
-        #   written (new containers must be inserted). Only a bool is needed, so
-        #   probe emptiness with isEmpty() rather than collecting the whole id list.
-        # - updated container ids: scopes the delete-by-source, since only
-        #   containers that already have gold rows can have stale rows to prune.
-        self._has_processed_containers = (
-            pre_filtered_containers_df is not None and not pre_filtered_containers_df.isEmpty()
-        )
+        # Updated container ids scope the delete-by-source; derived from the (capped)
+        # upserted set (see _updated_containers_within), so a capped run never prunes
+        # containers it did not reprocess.
         self._updated_container_ids = self._collect_container_ids(
-            self._detect_updated_containers() if self._is_incremental else None
+            self._updated_containers_within(pre_filtered_containers_df)
+            if self._is_incremental
+            else None
+        )
+
+        # Container scope for CHANGED entities. Incremental: without a cap, None (all
+        # containers); under a cap, all historical (gold) containers plus the capped new
+        # ones (``_changed_scope``), so a definition change is re-applied to existing
+        # containers while new containers beyond the cap are deferred. Full mode: the same
+        # full frame as the unchanged solve (``_changed_scope`` is an incremental-cap
+        # concept and must not run here).
+        changed_pre_filtered_containers_df = (
+            self._changed_scope(pre_filtered_containers_df)
+            if self._is_incremental
+            else pre_filtered_containers_df
         )
 
         hash_comparator = DefinitionHashComparator(self.spark)
@@ -907,7 +1206,13 @@ class Report:
         # Split changed/unchanged definitions
         changed_events_by_type, unchanged_events_by_type, self._changed_event_ids = (
             split_by_hash_change(
-                events_by_type, EventType, self.sink, self.spark, hash_comparator, kind="event"
+                events_by_type,
+                EventType,
+                self.sink,
+                self.spark,
+                hash_comparator,
+                kind="event",
+                force_recalc_names=full_recalc_names(self.config, "events"),
             )
         )
         changed_aggs_by_type, unchanged_aggs_by_type, self._changed_aggregation_ids = (
@@ -918,20 +1223,23 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="aggregation",
+                force_recalc_names=full_recalc_names(self.config, "aggregations"),
             )
         )
 
-        # Collect all solvable expressions (exclude ContainerEvent)
+        # Collect all solvable expressions. Container-boundary events (ContainerEvent,
+        # TimeWindowEvent) resolve from container_metrics, not the channel solve.
         all_changed_expressions = collect_solvable_expressions(
-            changed_events_by_type, EventType, exclude_cls=ContainerEvent
+            changed_events_by_type, EventType, exclude_cls=ContainerBoundaryEvent
         ) + collect_solvable_expressions(changed_aggs_by_type, AggregationType)
         all_unchanged_expressions = collect_solvable_expressions(
-            unchanged_events_by_type, EventType, exclude_cls=ContainerEvent
+            unchanged_events_by_type, EventType, exclude_cls=ContainerBoundaryEvent
         ) + collect_solvable_expressions(unchanged_aggs_by_type, AggregationType)
 
         # Centralized solve
         changed_solved_df = self._solve_expressions_batched(
-            all_changed_expressions, pre_filtered_containers_df=None
+            all_changed_expressions,
+            pre_filtered_containers_df=changed_pre_filtered_containers_df,
         )
         unchanged_solved_df = self._solve_expressions_batched(
             all_unchanged_expressions, pre_filtered_containers_df=pre_filtered_containers_df
@@ -945,8 +1253,8 @@ class Report:
             changed_solved_df,
             self.query,
             self.solver,
-            None,
-            ContainerEvent,
+            changed_pre_filtered_containers_df,
+            ContainerBoundaryEvent,
         )
         unchanged_event_dfs = dispatch_events(
             self.spark,
@@ -956,7 +1264,7 @@ class Report:
             self.query,
             self.solver,
             pre_filtered_containers_df,
-            ContainerEvent,
+            ContainerBoundaryEvent,
         )
 
         # Merge event results into {type: {"changed": df, "unchanged": df}} and
@@ -984,9 +1292,11 @@ class Report:
             aggs_by_type, AggregationType, self.spark
         )
 
-        # Calculated channels: own narrow solve (not the wide solved_df).
-        # Changed definitions recompute over all containers; unchanged ones over
-        # the incrementally-detected subset.
+        # Calculated channels: own narrow batched solve driven here (mirrors the
+        # wide expression solve above), producing a narrow ``solved_df`` that each
+        # channel type then shapes. Changed definitions recompute over the changed
+        # scope (all containers, or gold+capped under a cap); unchanged ones over the
+        # incrementally-detected subset.
         self._validate_unique_calculated_channels()
         channels_by_type = group_selectables_by_type(self.calculated_channels, ChannelType)
         changed_channels_by_type, unchanged_channels_by_type, self._changed_channel_ids = (
@@ -997,23 +1307,34 @@ class Report:
                 self.spark,
                 hash_comparator,
                 kind="channel",
+                force_recalc_names=full_recalc_names(self.config, "calculated_channels"),
             )
+        )
+        # Collect the query-engine channel expressions across types for the batched
+        # solve (mirrors collect_solvable_expressions for aggregations/events).
+        changed_channel_exprs = [
+            c.expression for cs in changed_channels_by_type.values() for c in cs
+        ]
+        unchanged_channel_exprs = [
+            c.expression for cs in unchanged_channels_by_type.values() for c in cs
+        ]
+        changed_channel_solved_df = self._solve_calculated_channels_batched(
+            changed_channel_exprs, pre_filtered_containers_df=changed_pre_filtered_containers_df
+        )
+        unchanged_channel_solved_df = self._solve_calculated_channels_batched(
+            unchanged_channel_exprs, pre_filtered_containers_df=pre_filtered_containers_df
         )
         changed_channel_dfs = dispatch_calculated_channels(
             self.spark,
             changed_channels_by_type,
             ChannelType,
-            self.query,
-            self.solver,
-            None,
+            changed_channel_solved_df,
         )
         unchanged_channel_dfs = dispatch_calculated_channels(
             self.spark,
             unchanged_channels_by_type,
             ChannelType,
-            self.query,
-            self.solver,
-            pre_filtered_containers_df,
+            unchanged_channel_solved_df,
         )
         self.calculated_channel_dfs = merge_changed_unchanged(
             changed_channel_dfs, unchanged_channel_dfs
@@ -1021,6 +1342,37 @@ class Report:
         self.calculated_channel_metadata_dfs = build_metadata_dfs(
             channels_by_type, ChannelType, self.spark
         )
+
+        # Optionally derive a silver-shaped channel_metrics table from the fact
+        # rows so the fact + metrics pair can serve as an Impulse silver source.
+        # Identity/attribute columns are derived dynamically; the full per-type
+        # channel list is passed to both buckets so changed/unchanged share a
+        # schema (extra channels are ignored by the fact-driven left join).
+        self.calculated_channel_metrics_dfs = {}
+        if self.config.calculated_channels.emit_channel_metrics:
+            cc = self.config.calculated_channels
+            # Pass the full per-type channel list to both buckets so changed and
+            # unchanged metrics share one schema (extra channels are dropped by the
+            # fact-driven left join in determine_channel_metrics).
+            changed_metrics = dispatch_calculated_channel_metrics(
+                self.spark,
+                channels_by_type,
+                changed_channel_dfs,
+                ChannelType,
+                attribute_columns=cc.attribute_columns,
+                kpis=cc.kpis,
+            )
+            unchanged_metrics = dispatch_calculated_channel_metrics(
+                self.spark,
+                channels_by_type,
+                unchanged_channel_dfs,
+                ChannelType,
+                attribute_columns=cc.attribute_columns,
+                kpis=cc.kpis,
+            )
+            self.calculated_channel_metrics_dfs = merge_changed_unchanged(
+                changed_metrics, unchanged_metrics
+            )
 
         # Determine container dimension
         self.container_dimension_df = ContainerDimension.get_dimension(
@@ -1032,9 +1384,9 @@ class Report:
         )
 
         # Determine channel mapping resolution dimension.
-        # Mirror the fact split: aliases from changed definitions resolve
-        # over all containers, aliases only in unchanged definitions stay
-        # scoped to the incrementally-detected containers.
+        # Mirror the fact split: aliases from changed definitions resolve over the
+        # changed scope (all containers, or gold+capped under a cap), aliases only in
+        # unchanged definitions stay scoped to the incrementally-detected containers.
         changed_aliased_selectors = TimeSeriesExpression.collect_selectors(
             all_changed_expressions,
             uses_alias=True,
@@ -1051,6 +1403,7 @@ class Report:
                 changed_aliased_selectors=changed_aliased_selectors,
                 unchanged_aliased_selectors=unchanged_aliased_selectors,
                 pre_filtered_containers_df=pre_filtered_containers_df,
+                changed_pre_filtered_containers_df=changed_pre_filtered_containers_df,
             )
         )
 
@@ -1076,9 +1429,18 @@ class Report:
         bool
             True for incremental processing, False for full processing.
         """
-        # Rule 1: No gold layer → always FULL (nothing to compare against)
+        # Rule 1: No gold layer → FULL, EXCEPT the bootstrap of a capped incremental
+        # config. With a cap, the first run must process at most N containers and defer
+        # the rest, so it runs incrementally over all containers as "new" (see
+        # ``_detect_upserted_containers``) rather than computing the whole population.
+        # A non-capped incremental config still bootstraps in full mode (nothing to batch).
         if not self._gold_layer_exists():
-            return False
+            return bool(
+                hasattr(self, "config")
+                and getattr(self.config, "incremental", None) is not None
+                and self.config.incremental.enabled
+                and self.config.query_engine.max_containers_per_batch is not None
+            )
 
         if not hasattr(self, "config") and is_incremental is not None:
             return is_incremental
@@ -1117,6 +1479,43 @@ class Report:
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
         return self.spark.catalog.tableExists(measurement_dim_table)
 
+    def _cap_upserted_batch(
+        self, upserted_df: DataFrame, max_containers: int
+    ) -> tuple[DataFrame, list, bool]:
+        """Take at most ``max_containers`` upserted containers.
+
+        ``upserted_df`` is already produced from the solver's report-eligible container
+        pipeline. Ordering by ``container_id`` and collecting one id past the cap answers
+        both which containers this batch commits and whether more eligible containers remain.
+
+        Returns
+        -------
+        tuple[DataFrame, list, bool]
+            ``(capped_containers_df, batch_ids, more_pending)``.
+        """
+        container_id_col = self.solver.config.container_id_col
+        batch_ids = [
+            row[container_id_col]
+            for row in upserted_df.select(container_id_col)
+            .distinct()
+            .orderBy(container_id_col)
+            .limit(max_containers + 1)
+            .collect()
+        ]
+        more_pending = len(batch_ids) > max_containers
+        batch_ids = batch_ids[:max_containers]
+        capped_df = upserted_df.where(F.col(container_id_col).isin(batch_ids))
+        return capped_df, batch_ids, more_pending
+
+    def _filtered_container_metrics(
+        self, pre_filtered_containers_df: DataFrame = None
+    ) -> DataFrame:
+        """Resolve container metrics through the public solver container pipeline."""
+        container_tags_df = self.solver.filter_container_tags(self.spark, self.query)
+        return self.solver.filter_container_metrics(
+            self.spark, self.query, container_tags_df, pre_filtered_containers_df
+        )
+
     def _detect_upserted_containers(self) -> DataFrame | None:
         """
         Detect new and updated containers for incremental processing.
@@ -1126,19 +1525,28 @@ class Report:
         used for freshness comparison.  Falls back to ``"last_modified"``
         when no incremental config is present.
 
-        Returns None if gold layer doesn't exist (triggers full processing)
-        or if no sink is configured (sinkless mode).
+        When the gold layer does not exist yet, every silver container is "new",
+        so all of them are returned (the capped-incremental bootstrap; this method
+        is only reached in incremental mode). Returns None only in sinkless mode
+        (no sink configured).
 
         Returns
         -------
         DataFrame | None
-            DataFrame containing containers to process, or None if gold table
-            doesn't exist (indicating full processing is needed).
+            Containers to process (new + updated, or all silver containers on the
+            bootstrap first run), or None in sinkless mode.
         """
         args = self._container_detection_args()
         if args is None:
             return None
         detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
+        # Bootstrap of a capped incremental config (this method is only reached with
+        # ``_is_incremental`` True, and Rule 1 only makes that True on no gold when a cap
+        # is set): gold doesn't exist yet, so every silver container is "new". Return them
+        # all so the cap can slice the first batch; the detector would otherwise signal
+        # full processing by returning None on a missing gold table.
+        if not self._gold_layer_exists():
+            return silver_containers
         return detector.detect_upserted_containers(
             silver_containers,
             measurement_dim_table,
@@ -1146,29 +1554,46 @@ class Report:
             gold_last_modified_col=gold_col,
         )
 
-    def _detect_updated_containers(self) -> DataFrame | None:
-        """Detect only UPDATED containers (present in gold, newer silver timestamp).
+    def _updated_containers_within(self, containers_df: DataFrame | None) -> DataFrame | None:
+        """Updated containers within the run's (capped) upserted set, for delete scoping.
 
-        Excludes new containers — see
-        ``ContainerUpsertDetector.detect_updated_containers``. Used to scope the
-        incremental delete-by-source. Returns None in sinkless mode or when the
-        gold table doesn't exist.
-
-        Returns
-        -------
-        DataFrame | None
-            Updated containers, or None.
+        Delegates to ``ContainerUpsertDetector.updated_within``. Returns None in
+        sinkless mode or when ``containers_df`` is None.
         """
+        if containers_df is None:
+            return None
         args = self._container_detection_args()
         if args is None:
             return None
-        detector, silver_containers, measurement_dim_table, silver_col, gold_col = args
-        return detector.detect_updated_containers(
-            silver_containers,
-            measurement_dim_table,
-            silver_last_modified_col=silver_col,
-            gold_last_modified_col=gold_col,
-        )
+        _detector, _silver_containers, measurement_dim_table, _silver_col, _gold_col = args
+        return _detector.updated_within(containers_df, measurement_dim_table)
+
+    def _changed_scope(self, capped_upserted_df: DataFrame | None) -> DataFrame | None:
+        """Container scope for CHANGED entities under a cap.
+
+        All historical (gold) containers plus the capped upserted set, so a definition
+        change is re-applied to existing containers while new containers beyond the cap
+        are deferred (they have no gold rows, so the global changed-entity delete cannot
+        orphan them). Returns None (all containers, today's behavior) when no cap is set
+        or the run is not incremental.
+        """
+        if self.config.query_engine.max_containers_per_batch is None or capped_upserted_df is None:
+            return None
+        args = self._container_detection_args()
+        if args is None:
+            return None
+        _detector, silver_containers, measurement_dim_table, _silver_col, _gold_col = args
+        # Bootstrap: no gold table yet, so there are no historical containers to fold in —
+        # the changed scope is exactly the capped new set. (Also avoids reading a table
+        # that does not exist.)
+        if not self._gold_layer_exists():
+            return capped_upserted_df
+        gold_ids = self.spark.read.table(measurement_dim_table).select("container_id")
+        allowed = gold_ids.unionByName(capped_upserted_df.select("container_id")).distinct()
+        # Full container_metrics rows for the allowed ids, not just the ids: downstream uses this
+        # frame as the container_metrics source, so it needs all columns. ``allowed`` has only
+        # ``container_id``.
+        return silver_containers.join(allowed, on="container_id", how="inner")
 
     def _container_detection_args(self):
         """Shared inputs for container detection, or None in sinkless mode.
@@ -1183,7 +1608,11 @@ class Report:
         if not self._has_sink:
             return None
         detector = ContainerUpsertDetector(self.spark)
-        silver_containers = self.db.container_metrics(self.spark)
+        # Read container_metrics through the solver's public container pipeline, so
+        # detection joins on the internal ``container_id`` and sees the same report-eligible
+        # container universe as the solve. Reading the raw table here would break configs
+        # that remap the physical container-id column (#99).
+        silver_containers = self._filtered_container_metrics()
         measurement_dim_table = self.sink.config.get_output_uri_measurement_dimensions_table()
 
         silver_col = "last_modified"

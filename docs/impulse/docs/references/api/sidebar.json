@@ -17,6 +17,7 @@
               "items": [
                 {
                   "items": [
+                    "references/api/impulse_query_engine/analyze/query/aggregations/custom_statistic",
                     "references/api/impulse_query_engine/analyze/query/aggregations/statistic_type"
                   ],
                   "label": "impulse_query_engine.analyze.query.aggregations",
@@ -105,7 +106,8 @@
           "items": [
             "references/api/impulse_reporting/events/basic_event",
             "references/api/impulse_reporting/events/container_event",
-            "references/api/impulse_reporting/events/sequence_of_events"
+            "references/api/impulse_reporting/events/sequence_of_events",
+            "references/api/impulse_reporting/events/time_window_event"
           ],
           "label": "impulse_reporting.events",
           "type": "category"
