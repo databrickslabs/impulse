@@ -308,8 +308,18 @@ class TestNativeCalculatedChannels:
 @pytest.mark.parametrize("channel_id_type", ["short", "string"])
 @pytest.mark.parametrize("enable_pushdown", [False, True])
 def test_channel_id_must_be_integer_or_long(
-    spark, setup_key_value_store_db, mock_workspace_client, channel_id_type, enable_pushdown
+    spark,
+    setup_key_value_store_db,
+    mock_workspace_client,
+    monkeypatch,
+    channel_id_type,
+    enable_pushdown,
 ):
+    def _prelude(*args, **kwargs):
+        raise AssertionError("the channel data was prepared before the channel_id check")
+
+    # The check reads only the schema, before the prelude runs its first Spark job.
+    monkeypatch.setattr(DefaultSolver, "_prepare_channels_join", _prelude)
     tables = {
         name: spark.read.table(f"{_KVS_SCHEMA}.{name}")
         for name in ("container_tags", "container_metrics", "channel_metrics", "channels")

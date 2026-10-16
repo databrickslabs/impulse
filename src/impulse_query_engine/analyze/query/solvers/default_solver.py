@@ -1637,11 +1637,11 @@ class DefaultSolver(QuerySolver):
         :meth:`PushdownPlan.native_targets`), the rows are produced in Spark from
         the derived rows and no pandas UDF runs.
         """
+        self._validate_calculated_channel_id_type(query)
         col_map = self.config.col_map
         q, joined_df, container_count, plan, targets = self._prepare_channels_join(
             query, channels_df, native_selections=selections
         )
-        self._validate_calculated_channel_id_type(q)
 
         if targets is not None:
             logger.info("Calculated channels solved natively in Spark, without the pandas UDF")
@@ -1691,13 +1691,17 @@ class DefaultSolver(QuerySolver):
             )
         return rows.withColumn("identity", identity_expr)
 
-    def _validate_calculated_channel_id_type(self, channels_q: DataFrame) -> None:
-        """Raise unless the channel-data ``channel_id`` can hold calculated-channel ids.
+    def _validate_calculated_channel_id_type(self, query) -> None:
+        """Raise unless the ``channels`` table's ``channel_id`` can hold calculated-channel ids.
 
         :attr:`CalculatedChannel.channel_id` is a 31-bit integer, which only fits
-        ``IntegerType`` and ``LongType`` columns.
+        ``IntegerType`` and ``LongType`` columns.  Only the table schema is read, so
+        the check runs no Spark job.
         """
-        dtype = channels_q.schema[self.config.channel_id_col].dataType
+        channels = self._apply_column_mapping(
+            query.db.channels(self.spark), self.config.channels.column_name_mapping
+        )
+        dtype = channels.schema[self.config.channel_id_col].dataType
         if not isinstance(dtype, T.IntegerType | T.LongType):
             raise ValueError(
                 "Calculated channels need an integer or long channel_id column, got "
