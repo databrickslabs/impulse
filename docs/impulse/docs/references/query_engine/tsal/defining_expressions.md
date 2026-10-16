@@ -31,6 +31,12 @@ Each tag passed to `channel(...)` must be resolvable by the solver — either as
 table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolver-adapts).
 :::
 
+:::note When a selection matches several channels
+A selection should identify at most one channel per container. If several channels of a container
+match its tags (e.g. the same `channel_name` under two `data_key`s), one of them is used, and which
+one is unspecified; add tags such as `data_key` to select a specific channel.
+:::
+
 ### Points-in-Time (POI) channels
 
 Not every channel can be interpreted as a continuous signal within its `[tstart, tend)` intervals.
@@ -94,6 +100,9 @@ the solver resolves each logical name by joining `channel_mapping` to `channel_m
 channel-identifying columns (by default `channel_name` and `data_key`). See
 [Query Solvers](../query_solvers.md) for details.
 :::
+
+If several mapping entries of an alias resolve in a container, the one with the lowest `priority`
+wins; without priorities, or on ties, the lowest `channel_id` is used.
 
 When the `channel_mapping` table carries `source_unit` and `target_unit` columns and the report config sets
 `source.unit_conversion_table`, values returned from `channel_with_alias()` are automatically converted from source
@@ -176,6 +185,10 @@ type) at execution time.
 ```python
 distance_km = veh_spd.resample(1e6).cumtrapz() / 3600 / 1e6
 ```
+
+When downsampling large channels, `.resample(...)` on a physical channel can be computed in Spark
+before the data reaches the pandas evaluation — see
+[Spark pushdown](../query_solvers.md#spark-pushdown-opt-in).
 
 ### Filtering
 

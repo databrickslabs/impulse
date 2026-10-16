@@ -48,6 +48,11 @@ silver layer.
 ``RawEncoder.RLE`` (default) run-length encodes equal-valued runs;
 ``RawEncoder.INTERVAL`` only derives ``tend`` and drops exact
 duplicates.  Only consulted when ``is_raw_data`` is ``True``.
+- `enable_pushdown` (`bool`): Whether to compute supported expression subtrees (e.g.
+``channel.resample(rate)``) natively in Spark before the pandas UDF, so
+fewer rows are shipped to it (see :class:`QueryOptimizer`).  A channel
+is only pushed down when every use of it in the solve is.  Default
+``False``.
 
 #### filter\_container\_tags
 
