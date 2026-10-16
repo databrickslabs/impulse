@@ -32,8 +32,7 @@ class Registry[I, C]:
 
         Re-registering a name replaces the previous entry.
         """
-        if self.config_base is not None and not _is_subclass(config_cls, self.config_base):
-            raise TypeError(f"{config_cls!r} must subclass {self.config_base.__name__}")
+        self._check_config_cls(config_cls)
 
         def decorator[T: type](impl_cls: T) -> T:
             if not _is_subclass(impl_cls, self.base):
@@ -54,6 +53,16 @@ class Registry[I, C]:
                 f"Unknown {self.kind} {name!r}; registered: {sorted(self._entries)}. "
                 "Import the package that registers it before parsing the report config."
             ) from None
+
+    def _check_config_cls(self, config_cls: type) -> None:
+        """Raise ``TypeError`` unless *config_cls* subclasses ``config_base``.
+
+        A registry without a ``config_base`` (the measurement-DB registry) accepts any config class.
+        """
+        if self.config_base is None:
+            return
+        if not _is_subclass(config_cls, self.config_base):
+            raise TypeError(f"{config_cls!r} must subclass {self.config_base.__name__}")
 
 
 def _is_subclass(obj: object, base: type) -> bool:
