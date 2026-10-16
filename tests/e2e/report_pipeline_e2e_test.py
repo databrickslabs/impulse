@@ -1,23 +1,6 @@
 # pylint: disable=missing-function-docstring
-"""End-to-end report pipeline against a real Databricks workspace.
+"""End-to-end report pipeline on Databricks: silver tables -> report -> gold tables."""
 
-Runs inside a serverless job (see ``databricks.yml``). Exercises the whole
-library path on real Unity Catalog + serverless Spark that the local-Spark unit
-suite can only mock:
-
-1. Load the Seat Leon reporting demo CSVs into silver Delta tables in an
-   **ephemeral** UC schema (auto-dropped after the test).
-2. Build a ``Report`` with a ``UnitySink`` pointing at that schema, defining a
-   ``BasicEvent`` (RPM > 2000) and a ``HistogramDuration`` over ``Engine RPM``
-   — the same shape as ``demos/getting_started.ipynb``.
-3. ``determine_report()`` → ``persist_results()`` **twice**, so the second write
-   goes through the incremental Delta ``MERGE`` path on real serverless compute.
-4. Assert the gold histogram-fact table holds real, non-zero values (not just
-   row counts), mirroring
-   ``tests/impulse_reporting/integration/string_container_id_report_test.py``.
-"""
-
-import pandas as pd
 import pyspark.sql.functions as F
 import pytest
 
@@ -26,41 +9,18 @@ from impulse_reporting.core.page import Page
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
 
-# Silver tables loaded from demos/data/reporting. `channels` is RAW point data
-# (container_id, channel_id, timestamp, value); metadata is narrow/EAV.
-_SILVER_TABLES = (
-    "container_metrics",
-    "container_tags",
-    "channel_metrics",
-    "channel_tags",
-    "channels",
-)
-
-
-def _load_silver(spark, schema_full_name: str, csv_dir: str) -> None:
-    """Load the demo CSVs into ``<schema>.<table>`` Delta tables."""
-    for table in _SILVER_TABLES:
-        pdf = pd.read_csv(f"{csv_dir}/{table}.csv")
-        (
-            spark.createDataFrame(pdf)
-            .write.format("delta")
-            .mode("overwrite")
-            .saveAsTable(f"{schema_full_name}.{table}")
-        )
-
 
 @pytest.mark.e2e
-def test_report_pipeline_end_to_end(spark, ws, e2e_schema, reporting_demo_dir):
-    schema = e2e_schema.full_name  # impulse_tests.<random>
-    _load_silver(spark, schema, reporting_demo_dir)
+def test_report_pipeline_end_to_end(spark, ws, e2e_schema, source_schema):
+    schema = e2e_schema.full_name
 
     config = {
         "source": {
-            "container_metrics_table": f"{schema}.container_metrics",
-            "container_tags_table": f"{schema}.container_tags",
-            "channel_metrics_table": f"{schema}.channel_metrics",
-            "channel_tags_table": f"{schema}.channel_tags",
-            "channels_uri": f"{schema}.channels",
+            "container_metrics_table": f"{source_schema}.container_metrics",
+            "container_tags_table": f"{source_schema}.container_tags",
+            "channel_metrics_table": f"{source_schema}.channel_metrics",
+            "channel_tags_table": f"{source_schema}.channel_tags",
+            "channels_uri": f"{source_schema}.channels",
         },
         "unity_sink": {
             "catalog": e2e_schema.catalog_name,
@@ -91,13 +51,16 @@ def test_report_pipeline_end_to_end(spark, ws, e2e_schema, reporting_demo_dir):
     )
     report.add_page(page)
 
-    report.determine_report()
-    report.persist_results()
-    # Second persist merges into the existing gold tables (incremental Delta MERGE).
-    report.persist_results()
+    histogram_fact_table = f"{schema}.eval_histogram_fact"
 
-    histogram_fact = spark.read.table(f"{schema}.eval_histogram_fact")
+    report.run()
+    rows_after_first_run = spark.read.table(histogram_fact_table).count()
 
-    assert histogram_fact.count() > 0, "histogram fact table is empty"
+    # A second run must update the gold tables in place, not append.
+    report.run()
+    histogram_fact = spark.read.table(histogram_fact_table)
+
+    assert rows_after_first_run > 0, "histogram fact table is empty"
+    assert histogram_fact.count() == rows_after_first_run, "second run duplicated histogram rows"
     total_hist_value = histogram_fact.agg(F.sum("hist_value")).first()[0]
     assert total_hist_value is not None and total_hist_value > 0, total_hist_value

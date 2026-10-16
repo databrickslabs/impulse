@@ -45,10 +45,7 @@ coverage:
 	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=html
 	open htmlcov/index.html
 
-# Run the on-Databricks end-to-end suite as a serverless job. Requires the
-# Databricks CLI and workspace auth in the environment (DATABRICKS_HOST +
-# oauth-m2m, or a configured profile). Deploys the bundle (which builds the
-# wheel) then runs the job; a pytest failure inside the job fails `bundle run`.
+# Run the end-to-end suite on Databricks. Needs the Databricks CLI and workspace auth.
 test-e2e:
 	databricks bundle deploy -t e2e
 	databricks bundle run e2e_tests -t e2e

@@ -287,6 +287,9 @@ dev = [
     { name = "ruff" },
     { name = "setuptools" },
 ]
+e2e = [
+    { name = "databricks-labs-pytester" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -315,6 +318,52 @@ dev = [
     { name = "pytest-xdist", specifier = "==3.6.1" },
     { name = "ruff", specifier = "==0.9.10" },
     { name = "setuptools", specifier = "==75.8.2" },
+]
+e2e = [{ name = "databricks-labs-pytester", specifier = "==0.7.4" }]
+
+[[package]]
+name = "databricks-labs-blueprint"
+version = "0.12.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "databricks-sdk" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0a/92/c3a15d7d1de5b684408189de899628df9b920a123c7e02a396953de85e2c/databricks_labs_blueprint-0.12.0.tar.gz", hash = "sha256:247c3394c2172c35993041a3c4de4418581b1881a6d8fcbe026ceb287a27c3db", size = 85036, upload-time = "2025-12-30T17:27:36.589Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/fa/68da7f40a645efdefed57b606b034ae992f62e3bc691762318f69003ae63/databricks_labs_blueprint-0.12.0-py3-none-any.whl", hash = "sha256:62d17f9a4c6fd42fb814ddc544926d247edc82463863d837a77be7aa26fe5d20", size = 70275, upload-time = "2025-12-30T17:27:35.02Z" },
+]
+
+[package.optional-dependencies]
+yaml = [
+    { name = "pyyaml" },
+]
+
+[[package]]
+name = "databricks-labs-lsql"
+version = "0.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "databricks-labs-blueprint", extra = ["yaml"] },
+    { name = "databricks-sdk" },
+    { name = "sqlglot" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/80/61/b2e2fad8d3680b5db7ce90dea2fec84f5504747f6a648467e083c1aa3c91/databricks_labs_lsql-0.16.0.tar.gz", hash = "sha256:b6680471b198bd5c01fe2bc690a5bf4d0c7504519019fd45241435464dcb47a3", size = 52867, upload-time = "2025-02-27T18:25:36.357Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/08/fc6eaa5d1b7c7cae0029170edd1916f97c430589f5c0f9c3cdec98c2c6f5/databricks_labs_lsql-0.16.0-py3-none-any.whl", hash = "sha256:d3004edd7ac2089156ee24db4bb2f4fce7f49bf45e2a96287d1243ac4e4a9cc0", size = 48054, upload-time = "2025-02-27T18:25:34.159Z" },
+]
+
+[[package]]
+name = "databricks-labs-pytester"
+version = "0.7.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "databricks-labs-lsql" },
+    { name = "databricks-sdk" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/80/61/3ef2b750f0a728798d101f4cdafb339b40b8b7a769381dfba7bcdfd16a5b/databricks_labs_pytester-0.7.4.tar.gz", hash = "sha256:bdb03c6e59b54f0dfdfbd8132d8d7c43166269519ac232eba09f6a10821c1940", size = 59533, upload-time = "2025-10-17T08:04:47.64Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/78/99d9c808e962d26a42344c13419957e45a70437cf8d81815d20aa6f62beb/databricks_labs_pytester-0.7.4-py3-none-any.whl", hash = "sha256:052dc86f74bae1c9ba0eb4703c9d31ead091ede7f894bfc1bd1db6db3f8ed6c0", size = 50751, upload-time = "2025-10-17T08:04:45.996Z" },
 ]
 
 [[package]]
@@ -1112,6 +1161,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "sqlglot"
+version = "30.22.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/94/e0/db58fbf2527426758dc1e862ce538736978e100e4e78fc9657e9661826ee/sqlglot-30.22.0.tar.gz", hash = "sha256:ec4b83ca8236ea8867f574a382dc15ce35b071c977fecfcc66482d9a3f500661", size = 6088770, upload-time = "2026-10-09T16:09:01.04Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/4c/b8474b02b572d9c7a2903e364335d566d52b6128b834b92a7cdfe5597823/sqlglot-30.22.0-py3-none-any.whl", hash = "sha256:90aa461490fcd95d14ec3842a97506ae20f6d3e9313307ad31be793d479cca65", size = 777816, upload-time = "2026-10-09T16:08:59.07Z" },
 ]
 
 [[package]]
