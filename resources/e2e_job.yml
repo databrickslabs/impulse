@@ -11,63 +11,58 @@ resources:
           disable_auto_optimization: true
           notebook_task:
             notebook_path: ../tests/e2e/setup_schema.py
-            base_parameters:
-              catalog: ${var.catalog}
-              schema: e2e_{{job.run_id}}
-
-        - task_key: run_report
-          depends_on: [{task_key: setup}]
-          environment_key: e2e_env
-          disable_auto_optimization: true
-          notebook_task:
-            notebook_path: ../tests/e2e/run_report.py
-            base_parameters: &report_params
+            base_parameters: &params
               catalog: ${var.catalog}
               schema: e2e_{{job.run_id}}
               source_schema: ${var.source_schema}
-
-        # Second run of the same report: gold tables must be updated in place.
-        - task_key: run_report_rerun
-          depends_on: [{task_key: run_report}]
-          environment_key: e2e_env
-          disable_auto_optimization: true
-          notebook_task:
-            notebook_path: ../tests/e2e/run_report.py
-            base_parameters: *report_params
-
-        - task_key: validate
-          depends_on: [{task_key: run_report_rerun}]
-          environment_key: e2e_env
-          disable_auto_optimization: true
-          notebook_task:
-            notebook_path: ../tests/e2e/validate.py
-            base_parameters:
-              catalog: ${var.catalog}
-              schema: e2e_{{job.run_id}}
+              # Each test writes its tables with this prefix and reads expected/<prefix>/.
+              prefix: "{{task.name}}"
               expected_dir: ${workspace.file_path}/tests/e2e/expected
               actual_dir: ${workspace.root_path}/actual
 
-        - task_key: teardown
-          depends_on: &all_steps
-            [{task_key: setup}, {task_key: run_report}, {task_key: run_report_rerun}, {task_key: validate}]
-          run_if: ALL_DONE
+        # The tests run in parallel.
+        - task_key: rpm_histogram
           environment_key: e2e_env
           disable_auto_optimization: true
-          notebook_task:
-            notebook_path: ../tests/e2e/teardown.py
-            base_parameters:
-              catalog: ${var.catalog}
-              schema: e2e_{{job.run_id}}
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_rpm_histogram.py, base_parameters: *params}
 
-        # Fails the run if any step failed; without it the succeeding teardown
-        # would mark the run "succeeded with failures".
-        - task_key: fail_on_error
-          depends_on: *all_steps
-          run_if: AT_LEAST_ONE_FAILED
+        - task_key: incremental
           environment_key: e2e_env
           disable_auto_optimization: true
-          notebook_task:
-            notebook_path: ../tests/e2e/fail_on_error.py
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_incremental.py, base_parameters: *params}
+
+        - task_key: pipeline
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_pipeline.py, base_parameters: *params}
+
+        - task_key: container_filter
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_container_filter.py, base_parameters: *params}
+
+        # Runs only when all tests passed.
+        - task_key: teardown
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on:
+            - {task_key: rpm_histogram}
+            - {task_key: incremental}
+            - {task_key: pipeline}
+            - {task_key: container_filter}
+          notebook_task: {notebook_path: ../tests/e2e/teardown.py, base_parameters: *params}
+
+        # Fails the run when setup or a test failed.
+        - task_key: fail_on_error
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}, {task_key: rpm_histogram}, {task_key: incremental}, {task_key: pipeline}, {task_key: container_filter}]
+          run_if: AT_LEAST_ONE_FAILED
+          notebook_task: {notebook_path: ../tests/e2e/fail_on_error.py}
 
       environments:
         - environment_key: e2e_env

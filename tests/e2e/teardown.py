@@ -1,18 +1,14 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # e2e: teardown
-# MAGIC Drops the test schema. Runs even when an earlier step failed.
+# MAGIC Drops the test schema. Runs only when all tests passed; otherwise the schema is kept for
+# MAGIC debugging and removed by a later setup.
 
 # COMMAND ----------
 
-from databricks.sdk.runtime import dbutils
-from pyspark.sql import SparkSession
+from e2e_utils import params, spark
 
-catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-
-# COMMAND ----------
-
-if not schema.startswith("e2e_"):
-    raise ValueError(f"Refusing to drop non-e2e schema {schema!r}")
-SparkSession.builder.getOrCreate().sql(f"DROP SCHEMA IF EXISTS `{catalog}`.`{schema}` CASCADE")
+p = params()
+if not p.schema.startswith("e2e_"):
+    raise ValueError(f"Refusing to drop non-e2e schema {p.schema!r}")
+spark.sql(f"DROP SCHEMA IF EXISTS {p.catalog}.{p.schema} CASCADE")
