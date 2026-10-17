@@ -86,3 +86,6 @@ yarn-error.log*
 .claude/
 .isaac/
 CLAUDE.md
+
+# Local design docs
+/docs/design/
