@@ -68,7 +68,7 @@ def channel(report, name):
     return report.get_db().query.channel(channel_name=name, brand="Seat", model="Leon")
 
 
-def add_rpm_histogram(report):
+def add_rpm_histogram(report, bin_width=500):
     """Baseline report: an RPM > 2000 event and the RPM duration histogram within it."""
     eng_rpm = channel(report, "Engine RPM")
     high_rpm = BasicEvent(name="high_rpm", expr=eng_rpm > 2000, desc="Engine RPM above 2000")
@@ -78,7 +78,7 @@ def add_rpm_histogram(report):
         HistogramDuration(
             name="rpm_distribution",
             base_expr=eng_rpm,
-            bins=[float(x) for x in range(0, 5001, 500)],
+            bins=[float(x) for x in range(0, 5001, bin_width)],
             event=high_rpm,
             channel_name="Engine RPM",
             bins_unit="rpm",
@@ -89,8 +89,44 @@ def add_rpm_histogram(report):
     return high_rpm
 
 
-def gold(p, table):
-    df = spark.read.table(f"{p.catalog}.{p.schema}.{p.prefix}_{table}")
+def copy_silver(p):
+    """Empty copies of the silver tables, named `<prefix>_src_*`, with a `last_modified`
+    column on container_metrics. Returns the source prefix for `config(p, source=...)`."""
+    source = f"{p.catalog}.{p.schema}.{p.prefix}_src_"
+    for table in SILVER_TABLES:
+        extra = ", current_timestamp() AS last_modified" if table == "container_metrics" else ""
+        spark.sql(
+            f"CREATE TABLE {source}{table} AS SELECT *{extra} FROM {p.source}{table} WHERE false"
+        )
+    return source
+
+
+def load_silver(p, source, where):
+    """Copy the source rows matching `where` into the silver copy."""
+    for table in SILVER_TABLES:
+        extra = ", current_timestamp()" if table == "container_metrics" else ""
+        spark.sql(
+            f"INSERT INTO {source}{table} SELECT *{extra} FROM {p.source}{table} WHERE {where}"
+        )
+
+
+def versions(p, tables):
+    """Latest Delta version of each of this test's gold tables."""
+    return {
+        t: spark.sql(f"DESCRIBE HISTORY {p.catalog}.{p.schema}.{p.prefix}_{t} LIMIT 1")
+        .first()
+        .version
+        for t in tables
+    }
+
+
+def event_ids(p):
+    rows = gold(p, "event_dimension").select("event_name", "event_id").collect()
+    return {r.event_name: r.event_id for r in rows}
+
+
+def gold(p, table, prefix=None):
+    df = spark.read.table(f"{p.catalog}.{p.schema}.{prefix or p.prefix}_{table}")
     # Skip bookkeeping columns such as _created_at, which differ per run.
     return df.select([c for c in df.columns if not c.startswith("_")])
 

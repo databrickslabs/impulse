@@ -45,6 +45,18 @@ resources:
           depends_on: [{task_key: setup}]
           notebook_task: {notebook_path: ../tests/e2e/e2e_container_filter.py, base_parameters: *params}
 
+        - task_key: incremental_updates
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_incremental_updates.py, base_parameters: *params}
+
+        - task_key: events
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_events.py, base_parameters: *params}
+
         # Runs only when all tests passed.
         - task_key: teardown
           environment_key: e2e_env
@@ -54,13 +66,15 @@ resources:
             - {task_key: incremental}
             - {task_key: pipeline}
             - {task_key: container_filter}
+            - {task_key: incremental_updates}
+            - {task_key: events}
           notebook_task: {notebook_path: ../tests/e2e/teardown.py, base_parameters: *params}
 
         # Fails the run when setup or a test failed.
         - task_key: fail_on_error
           environment_key: e2e_env
           disable_auto_optimization: true
-          depends_on: [{task_key: setup}, {task_key: rpm_histogram}, {task_key: incremental}, {task_key: pipeline}, {task_key: container_filter}]
+          depends_on: [{task_key: setup}, {task_key: rpm_histogram}, {task_key: incremental}, {task_key: pipeline}, {task_key: container_filter}, {task_key: incremental_updates}, {task_key: events}]
           run_if: AT_LEAST_ONE_FAILED
           notebook_task: {notebook_path: ../tests/e2e/fail_on_error.py}
 

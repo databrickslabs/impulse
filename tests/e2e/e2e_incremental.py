@@ -8,22 +8,19 @@
 # COMMAND ----------
 
 from e2e_utils import (
-    SILVER_TABLES,
     add_rpm_histogram,
     check,
     config,
+    copy_silver,
     expected,
     gold,
+    load_silver,
     new_report,
     params,
-    spark,
 )
 
 p = params()
-silver = f"{p.catalog}.{p.schema}.{p.prefix}_src_"
-for table in SILVER_TABLES:
-    spark.sql(f"CREATE TABLE {silver}{table} AS SELECT * FROM {p.source}{table} WHERE false")
-
+silver = copy_silver(p)
 report = new_report(
     config(
         p,
@@ -37,10 +34,7 @@ add_rpm_histogram(report)
 # COMMAND ----------
 
 for containers in ["container_id <= 40", "container_id > 40"]:
-    for table in SILVER_TABLES:
-        spark.sql(
-            f"INSERT INTO {silver}{table} SELECT * FROM {p.source}{table} WHERE {containers}"
-        )
+    load_silver(p, silver, containers)
     report.run()
 
 # COMMAND ----------
