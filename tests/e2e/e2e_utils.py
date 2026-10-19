@@ -158,8 +158,10 @@ def check(p, name, actual, expected_rows=None):
     try:
         if expected_rows is None:
             expected_rows = expected(p, name, actual.schema)
-        assertDataFrameEqual(actual, expected_rows, rtol=1e-9, maxErrors=10)
-    except (AssertionError, FileNotFoundError):
+        # Absolute tolerance only: a relative one would allow seconds of drift on epoch timestamps.
+        assertDataFrameEqual(actual, expected_rows, rtol=0, atol=1e-6, maxErrors=10)
+    except Exception:
+        # Also on a missing or outdated expected file (e.g. a new column).
         print(f"{name}: actual rows saved to {save_actual(p, name, actual)}")
         raise
     print(f"{name}: OK ({actual.count()} rows)")

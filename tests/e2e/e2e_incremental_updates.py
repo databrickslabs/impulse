@@ -23,6 +23,7 @@ from e2e_utils import (
     spark,
     versions,
 )
+from pyspark.testing import assertDataFrameEqual
 
 p = params()
 silver = copy_silver(p)
@@ -44,6 +45,7 @@ assert versions(p, tables) == before, "a run without changes rewrote fact tables
 # COMMAND ----------
 
 # 2. Container 5 is re-ingested with only the first half of its samples.
+before = versions(p, tables)
 mid = spark.sql(
     f"SELECT (start_ts + stop_ts) / 2 FROM {silver}container_metrics WHERE container_id = 5"
 ).first()[0]
@@ -53,6 +55,14 @@ spark.sql(
     "WHERE container_id = 5"
 )
 report.run()
+
+# The other containers' rows must not be rewritten (same rows incl. _created_at).
+for table, version in before.items():
+    name = f"{p.catalog}.{p.schema}.{p.prefix}_{table}"
+    assertDataFrameEqual(
+        spark.sql(f"SELECT * FROM {name} WHERE container_id != 5"),
+        spark.sql(f"SELECT * FROM {name} VERSION AS OF {version} WHERE container_id != 5"),
+    )
 
 # COMMAND ----------
 

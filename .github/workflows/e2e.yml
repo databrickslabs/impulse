@@ -2,10 +2,6 @@ name: e2e
 
 # End-to-end tests on Databricks serverless (see databricks.yml). Nightly and on demand.
 on:
-  # TEMPORARY — remove before merging to main.
-  push:
-    branches:
-      - feature/e2e_tests_on_databricks
   schedule:
     # 04:00 UTC daily.
     - cron: "0 4 * * *"
@@ -14,25 +10,15 @@ on:
 permissions:
   contents: read
 
+# All runs deploy to the same bundle and job, so they queue instead of cancelling each
+# other (cancelling would stop only the CLI, not the job run).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
-  # Fork runs get no secrets; skip them (same as acceptance.yml).
-  not-a-fork:
-    runs-on:
-      group: databrickslabs-protected-runner-group
-      labels: linux-ubuntu-latest
-    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
-    steps:
-      - run: echo "Not a fork, proceeding"
-
   e2e:
     name: E2E on Databricks (serverless)
-    needs: not-a-fork
-    # TEMPORARY — remove before merging to main. Failing runs show as green.
-    continue-on-error: true
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -70,3 +56,10 @@ jobs:
 
       - name: Run e2e job
         run: databricks bundle run e2e_tests -t e2e
+
+      # A cancelled workflow leaves the job run going; stop it too.
+      - name: Cancel e2e job run
+        if: cancelled()
+        run: |
+          job_id=$(databricks bundle summary -t e2e -o json | jq -r '.resources.jobs.e2e_tests.id')
+          databricks jobs cancel-all-runs --job-id "$job_id"
