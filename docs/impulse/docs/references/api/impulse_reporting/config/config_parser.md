@@ -46,11 +46,13 @@ Validate if a string is a valid Unity Catalog entity name.
 ## Solvers
 
 ```python
-class Solvers(Enum)
+class Solvers(StrEnum)
 ```
 
-Enumeration of available solver types for the query engine.
+Names of the built-in solvers.
 
+``query_engine.solver`` takes any registered solver name (see
+``register_solver``); these are the names Impulse registers itself.
 ``DEFAULT_SOLVER`` is the single, unified solver. ``DELTA_SOLVER`` and
 ``KEY_VALUE_STORE_SOLVER`` are **deprecated aliases** kept so that existing
 report configs continue to deserialize; both now resolve to the same
@@ -186,7 +188,11 @@ Configuration for the query engine solver.
 
 **Arguments**:
 
-- `solver` (`Solvers, default=Solvers.DEFAULT_SOLVER`): The solver type to use for query execution.
+- `solver` (`str, default="DefaultSolver"`): Registered name of the solver to use for query execution. Impulse
+registers ``"DefaultSolver"`` (``"DeltaSolver"`` and
+``"KeyValueStoreSolver"`` are deprecated aliases); a custom solver
+registered with ``register_solver`` is selected by its name. An
+unregistered name fails when the config is loaded.
 - `raw_encoder` (`RawEncoder, optional, default=None`): Encoder used to convert RAW point data into intervals.  ``RLE``
 collapses consecutive equal-valued samples into runs; ``INTERVAL``
 only derives ``tend`` and drops exact duplicates.  Only takes effect
@@ -207,7 +213,9 @@ scoping.  Key sub-fields:
   ``column_name_mapping`` and ``filters`` dicts.
 
 When omitted, all default column names are used and no
-project/toolbox filtering is applied.
+project/toolbox filtering is applied.  It is validated with the
+config class the selected solver registered, so a custom solver can
+add its own settings to a ``SolverConfig`` subclass.
 - `measurement_db` (`str, default="MeasurementDB"`): Registered name of the MeasurementDB implementation to use.
 - `measurement_db_config` (`dict`): Keyword arguments for that implementation's config class,
 merged with the ``source`` tables.
