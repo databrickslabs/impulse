@@ -395,6 +395,12 @@ class QueryEngine(BaseModel):
     measurement_db_config : dict, optional
         Keyword arguments for that implementation's config class,
         merged with the ``source`` tables.
+    enable_pushdown : bool, default=False
+        Compute supported expression subtrees (currently
+        ``channel.resample(rate)`` on a physical channel) natively in Spark
+        before the pandas UDF, so fewer rows are shipped to it.  A channel is
+        only pushed down when every use of it in a solve batch is.  Meant for
+        downsampling.
 
     Notes
     -----
@@ -423,6 +429,7 @@ class QueryEngine(BaseModel):
     measurement_db_config: dict[str, Any] | None = None
     max_channels_per_batch: int = 500
     max_containers_per_batch: int | None = None
+    enable_pushdown: bool = False
 
     @model_validator(mode="before")
     @classmethod

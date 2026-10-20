@@ -211,6 +211,11 @@ project/toolbox filtering is applied.
 - `measurement_db` (`str, default="MeasurementDB"`): Registered name of the MeasurementDB implementation to use.
 - `measurement_db_config` (`dict`): Keyword arguments for that implementation's config class,
 merged with the ``source`` tables.
+- `enable_pushdown` (`bool, default=False`): Compute supported expression subtrees (currently
+``channel.resample(rate)`` on a physical channel) natively in Spark
+before the pandas UDF, so fewer rows are shipped to it.  A channel is
+only pushed down when every use of it in a solve batch is.  Meant for
+downsampling.
 
 #### validate\_drop\_implausible\_data\_requires\_raw
 
