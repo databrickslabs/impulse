@@ -120,6 +120,36 @@ def versions(p, tables):
     }
 
 
+def assert_unchanged(p, before, where):
+    """The rows matching `where` (incl. _created_at) equal those at the versions in `before`."""
+    for table, version in before.items():
+        name = f"{p.catalog}.{p.schema}.{p.prefix}_{table}"
+        assertDataFrameEqual(
+            spark.sql(f"SELECT * FROM {name} WHERE {where}"),
+            spark.sql(f"SELECT * FROM {name} VERSION AS OF {version} WHERE {where}"),
+        )
+
+
+def assert_histogram_covers_events(histogram, events):
+    """Per container, the RPM histogram adds up to the duration of its event's instances,
+    and the bins up to the event threshold (2000 rpm) are empty."""
+    assert (
+        histogram.where("upper_bound <= 2000 AND hist_value != 0").count() == 0
+    ), "histogram values below the event threshold"
+    keys = ["container_id", "event_id"]
+    totals = histogram.groupBy(keys).agg(F.sum("hist_value").alias("hist"))
+    durations = (
+        events.join(histogram.select("event_id").distinct(), "event_id", "semi")
+        .groupBy(keys)
+        .agg(F.sum(F.col("end_ts") - F.col("start_ts")).alias("dur"))
+    )
+    # Containers without events still have (empty) histogram rows.
+    diff = totals.join(durations, keys, "full").where(
+        F.abs(F.coalesce("hist", F.lit(0.0)) - F.coalesce("dur", F.lit(0.0))) > 1e-5
+    )
+    assert diff.count() == 0, f"histogram doesn't match event durations: {diff.take(5)}"
+
+
 def event_ids(p):
     rows = gold(p, "event_dimension").select("event_name", "event_id").collect()
     return {r.event_name: r.event_id for r in rows}

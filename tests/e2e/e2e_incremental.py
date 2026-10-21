@@ -2,13 +2,17 @@
 # MAGIC %md
 # MAGIC # e2e: incremental
 # MAGIC Loads the source containers into a copy of the silver tables in two steps and runs the
-# MAGIC baseline report incrementally after each, in batches of 15 containers. The result must
-# MAGIC equal the full run in `expected/rpm_histogram`.
+# MAGIC baseline report incrementally after each, in batches of 15 containers. The second load
+# MAGIC must leave the first load's rows untouched and commit one batch at a time. The result
+# MAGIC must equal the full run in `expected/rpm_histogram`.
 
 # COMMAND ----------
 
+import math
+
 from e2e_utils import (
     add_rpm_histogram,
+    assert_unchanged,
     check,
     config,
     copy_silver,
@@ -17,28 +21,51 @@ from e2e_utils import (
     load_silver,
     new_report,
     params,
+    spark,
+    versions,
 )
 
 p = params()
 silver = copy_silver(p)
+cap = 15
 report = new_report(
     config(
         p,
         source=silver,
         incremental={"enabled": True},
-        query_engine={"max_containers_per_batch": 15},
+        query_engine={"max_containers_per_batch": cap},
     )
 )
 add_rpm_histogram(report)
+tables = ["histogram_fact", "event_instance_fact"]
 
 # COMMAND ----------
 
-for containers in ["container_id <= 40", "container_id > 40"]:
-    load_silver(p, silver, containers)
-    report.run()
+load_silver(p, silver, "container_id <= 40")
+report.run()
 
 # COMMAND ----------
 
-for table in ["histogram_fact", "event_instance_fact"]:
+before = versions(p, tables)
+load_silver(p, silver, "container_id > 40")
+report.run()
+
+# Only the new containers were processed.
+assert_unchanged(p, before, "container_id <= 40")
+
+# One MERGE per batch of at most `cap` containers (10 histogram bins each).
+new = spark.read.table(f"{silver}container_metrics").where("container_id > 40").count()
+histogram = f"{p.catalog}.{p.schema}.{p.prefix}_histogram_fact"
+# Other commits (e.g. OPTIMIZE by predictive optimization) don't count.
+commits = spark.sql(f"DESCRIBE HISTORY {histogram}").where(
+    f"version > {before['histogram_fact']} AND operation = 'MERGE'"
+)
+assert commits.count() == math.ceil(new / cap), f"{commits.count()} batches for {new} containers"
+inserted = commits.selectExpr("int(operationMetrics['numTargetRowsInserted']) AS n")
+assert inserted.where(f"n > {cap * 10}").count() == 0, "a batch exceeds the cap"
+
+# COMMAND ----------
+
+for table in tables:
     actual = gold(p, table)
     check(p, table, actual, expected(p, table, actual.schema, test="rpm_histogram"))

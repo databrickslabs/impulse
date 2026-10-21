@@ -9,12 +9,12 @@ The job is defined in `resources/e2e_job.yml`. Each task is a notebook in this f
 | Task | Notebook | Checks |
 |---|---|---|
 | `setup` | `setup_schema` | Creates the schema, drops this job's schemas older than one day, checks the source data against `expected/containers.csv` |
-| `rpm_histogram` | `e2e_rpm_histogram` | Baseline report (event `Engine RPM > 2000`, duration histogram of `Engine RPM`): a compute-only run writes nothing and gives the expected histogram; two persisted runs update the gold tables in place |
-| `incremental` | `e2e_incremental` | Baseline report on a silver copy that receives the containers in two loads, run incrementally in batches of 15; must equal `rpm_histogram` |
-| `incremental_updates` | `e2e_incremental_updates` | A rerun without changes rewrites no fact table; a re-ingested container (half its samples) is recomputed without stale rows while the other containers' rows stay untouched; changed histogram bins recompute only the histogram; the result equals a full run |
+| `rpm_histogram` | `e2e_rpm_histogram` | Baseline report (event `Engine RPM > 2000`, duration histogram of `Engine RPM`): a compute-only run writes nothing and gives the expected histogram and events; two persisted runs update the gold tables in place (same Delta table, new version); the histogram adds up to the event durations |
+| `incremental` | `e2e_incremental` | Baseline report on a silver copy that receives the containers in two loads, run incrementally in batches of 15; the second load leaves the first load's rows untouched and commits one MERGE per batch; must equal `rpm_histogram` |
+| `incremental_updates` | `e2e_incremental_updates` | A rerun without changes rewrites no fact table; a re-ingested container (half its samples) is recomputed like a full run while the other containers' rows stay untouched; changed histogram bins recompute only the histogram, which still adds up to the event durations; the result equals a full run |
 | `pipeline` | `e2e_pipeline` | Container event, per-container statistics, an RPM x speed heatmap and a calculated channel; the calculated channel's samples must give the same statistics as the StatsAggregator |
 | `container_filter` | `e2e_container_filter` | Baseline report on (`experiment_1` or `experiment_2`) and longer than 30 minutes; must equal those containers' `rpm_histogram` rows, with the containers selected independently in SQL |
-| `events` | `e2e_events` | Points-in-time, sequence and 5-minute window events with point values and window statistics; point events have zero length, windows tile each container |
+| `events` | `e2e_events` | Points-in-time, sequence and 5-minute window events with point values and window statistics; point events have zero length; windows tile each container without gaps or overlaps; each slow_down has one value per channel, with speed at most 100 |
 | `teardown` | `teardown` | Drops the schema; runs only if all tests passed |
 | `fail_on_error` | `fail_on_error` | Fails the job run if `setup` or a test failed |
 
@@ -36,7 +36,7 @@ The reports read the silver tables in `<catalog>.<source_schema>` (bundle variab
 
 ## Expected results
 
-`expected/<test>/<table>.csv` holds the expected gold rows of a test (without `_` bookkeeping columns). `incremental` and `container_filter` reuse `expected/rpm_histogram/`; `incremental_updates` compares with a full reference run instead of expected files.
+`expected/<test>/<table>.csv` holds the expected gold rows of a test (without `_` bookkeeping columns). `incremental` and `container_filter` reuse `expected/rpm_histogram/`; `incremental_updates` compares with full reference runs instead of expected files.
 
 To refresh them after an intended change, run the job. On a mismatch, the test uploads its actual rows as CSV to `<bundle root>/actual/<test>/` and logs the path. Review them, then copy them into `expected/`.
 

@@ -101,7 +101,10 @@ from_fact = (
     .groupBy(F.col("container_id").cast("long").alias("container_id"))
     .agg(
         F.min(value).alias("min"),
-        (F.sum(value * F.col("dur")) / F.sum("dur")).alias("mean"),
+        # NaN samples count neither towards the sum nor the duration.
+        (F.sum(value * F.col("dur")) / F.sum(F.when(value.isNotNull(), F.col("dur")))).alias(
+            "mean"
+        ),
         F.max(value).alias("max"),
     )
 )
