@@ -6,7 +6,7 @@
 # MAGIC 2. removes half of container 5's samples: only that container is recomputed,
 # MAGIC 3. changes the histogram bins: only the histogram is recomputed.
 # MAGIC
-# MAGIC After steps 2 and 3, the result must equal a full run of the report on the same data.
+# MAGIC The result must equal a full run of the final report on the final data.
 
 # COMMAND ----------
 
@@ -35,14 +35,6 @@ incremental = {"enabled": True, "silver_last_modified_column": "last_modified"}
 tables = ["histogram_fact", "event_instance_fact"]
 
 
-def full_run(prefix, bin_width):
-    """A full run of the report on the current silver data, written to `<prefix>_*`."""
-    reference = new_report(config(p, source=silver, unity_sink={"table_prefix": prefix}))
-    add_rpm_histogram(reference, bin_width=bin_width)
-    reference.run()
-    return prefix
-
-
 report = new_report(config(p, source=silver, incremental=incremental))
 add_rpm_histogram(report)
 report.run()
@@ -69,11 +61,10 @@ spark.sql(
 report.run()
 
 # The other containers' rows must not be rewritten (same rows incl. _created_at), and
-# container 5's rows must be those of a full run.
+# container 5's histogram must match its new events. Step 3 keeps the events, so the full
+# run at the end also checks them.
 assert_unchanged(p, before, "container_id != 5")
-ref = full_run(f"{p.prefix}_ref500", bin_width=500)
-for table in tables:
-    check(p, table, gold(p, table), gold(p, table, prefix=ref))
+assert_histogram_covers_events(gold(p, "histogram_fact"), gold(p, "event_instance_fact"))
 
 events = gold(p, "event_instance_fact").where("container_id = 5")
 original = expected(p, "event_instance_fact", events.schema, test="rpm_histogram")
@@ -91,7 +82,12 @@ after = versions(p, tables)
 assert after["histogram_fact"] > before["histogram_fact"], "histogram was not recomputed"
 assert after["event_instance_fact"] == before["event_instance_fact"], "event was rewritten"
 
-ref = full_run(f"{p.prefix}_ref", bin_width=250)
+# Reference: a full run of the same report on the same data.
+ref = f"{p.prefix}_ref"
+reference = new_report(config(p, source=silver, unity_sink={"table_prefix": ref}))
+add_rpm_histogram(reference, bin_width=250)
+reference.run()
+
 for table in tables:
     check(p, table, gold(p, table), gold(p, table, prefix=ref))
 

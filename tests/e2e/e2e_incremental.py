@@ -60,7 +60,8 @@ histogram = f"{p.catalog}.{p.schema}.{p.prefix}_histogram_fact"
 commits = spark.sql(f"DESCRIBE HISTORY {histogram}").where(
     f"version > {before['histogram_fact']} AND operation = 'MERGE'"
 )
-assert commits.count() == math.ceil(new / cap), f"{commits.count()} batches for {new} containers"
+batches = commits.count()
+assert batches == math.ceil(new / cap), f"{batches} batches for {new} containers"
 inserted = commits.selectExpr("int(operationMetrics['numTargetRowsInserted']) AS n")
 assert inserted.where(f"n > {cap * 10}").count() == 0, "a batch exceeds the cap"
 

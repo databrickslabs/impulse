@@ -59,7 +59,8 @@ def config(p, source=None, **extra):
 
 def new_report(cfg):
     report = Report(name="e2e_report", spark=spark, workspace_client=ws, config=cfg)
-    # Tests run in parallel in one schema: don't drop the other runs' temp tables.
+    # Tests run in parallel in one schema: don't drop the other runs' temp tables. Every run
+    # drops them at its start, whatever `unity_sink.cleanup_temp_tables` says.
     report._cleanup_temp_tables = lambda: None
     return report
 
