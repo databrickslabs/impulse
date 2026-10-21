@@ -19,9 +19,14 @@ variables:
   source_schema:
     description: Schema under `catalog` with the silver test data (read-only).
     default: default
+  suffix:
+    description: Suffix of the bundle root and job name, so each PR deploys its own copy.
+    default: ""
 
 targets:
   # Workspace host and auth come from the environment.
   e2e:
     default: true
     mode: development
+    workspace:
+      root_path: ~/.bundle/${bundle.name}/${bundle.target}${var.suffix}

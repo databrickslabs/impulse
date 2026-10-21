@@ -25,7 +25,9 @@ Shared code (report config, baseline report, comparison) is in `e2e_utils.py`. W
 make test-e2e
 ```
 
-This deploys the bundle (`databricks.yml`) and runs the job. It needs the Databricks CLI and workspace authentication. CI runs it nightly via `.github/workflows/e2e.yml`.
+This deploys the bundle (`databricks.yml`) and runs the job. It needs the Databricks CLI and workspace authentication.
+
+CI runs it via `.github/workflows/e2e.yml` on every push to a PR into main, nightly and on demand. Each PR deploys its own copy of the bundle and job (bundle variable `suffix`, e.g. `-pr-123`), which is removed when the PR is closed. Fork PRs are skipped; mirror them with `make fork-sync PR=<n>`.
 
 ## Input data
 

@@ -1,7 +1,12 @@
 name: e2e
 
-# End-to-end tests on Databricks serverless (see databricks.yml). Nightly and on demand.
+# End-to-end tests on Databricks serverless (see databricks.yml). On PRs into main, nightly
+# and on demand.
 on:
+  pull_request:
+    branches: [main]
+    # `closed` removes the PR's bundle.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   schedule:
     # 04:00 UTC daily.
     - cron: "0 4 * * *"
@@ -10,15 +15,24 @@ on:
 permissions:
   contents: read
 
-# All runs deploy to the same bundle and job, so they queue instead of cancelling each
-# other (cancelling would stop only the CLI, not the job run).
+# Each PR deploys its own copy of the bundle and job (the suffix names its bundle root), so
+# PRs run in parallel. A new push replaces the PR's running check; nightly and manual runs
+# share the default bundle and queue.
 concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'default' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  BUNDLE_VAR_suffix: ${{ github.event.pull_request.number && format('-pr-{0}', github.event.pull_request.number) || '' }}
 
 jobs:
   e2e:
     name: E2E on Databricks (serverless)
+    # Fork PRs get no secrets; mirror them with `make fork-sync PR=<n>` (see acceptance.yml).
+    if: >-
+      github.event.action != 'closed'
+      && !github.event.pull_request.draft
+      && !github.event.pull_request.head.repo.fork
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -63,3 +77,25 @@ jobs:
         run: |
           job_id=$(databricks bundle summary -t e2e -o json | jq -r '.resources.jobs.e2e_tests.id')
           databricks jobs cancel-all-runs --job-id "$job_id"
+
+  # The PR's bundle is kept while the PR is open, so failed runs can be inspected.
+  destroy:
+    name: Remove the PR's e2e bundle
+    if: github.event.action == 'closed' && !github.event.pull_request.head.repo.fork
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    environment: e2e
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      DATABRICKS_AUTH_TYPE: oauth-m2m
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@8821c27b1fe57472264eeb6e50c1f31d69552f28 # v1.10.0
+
+      - name: Destroy bundle
+        run: databricks bundle destroy -t e2e --auto-approve

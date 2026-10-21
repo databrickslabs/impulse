@@ -1,7 +1,7 @@
 resources:
   jobs:
     e2e_tests:
-      name: "impulse e2e tests"
+      name: "impulse e2e tests${var.suffix}"
       timeout_seconds: 3600
       max_concurrent_runs: 1
 
