@@ -161,6 +161,34 @@ derated = derate(power)
 - Values are constant per container. The declaration **propagates** when the UDF is wrapped in an
   aggregation, event, or calculated channel — the wrapper does not redeclare anything.
 
+**Rules for correct UDF results** (when an input is a `SampleSeries`):
+
+- **Handle empty inputs.** Every UDF runs once at planning time, with every series input empty (and
+  every declared container tag/metric `None`), so the engine can infer the result type. Indexing
+  (`values[0]`, `tstarts[-1]`), `np.max(values)` or `SampleSeries.from_timestamps(...)` fail on empty
+  input; guard with `if len(series) == 0: return SampleSeries.empty()`. Built-in reducers return NaN.
+- **Return the same type on every path.** The type returned on the planning call fixes the output
+  column type; a return type that depends on the data (a `SampleSeries` on one branch, a float on
+  another) produces values that do not fit that column.
+- **Respect gaps.** A series may contain gaps; two samples are contiguous only if
+  `tstarts[i+1] == tends[i]` exactly. Compute neighbour-based logic (differences, gradients,
+  cumulative sums) per segment using `series.continuous_interval_indices` (inclusive `(start, end)`
+  index pairs), as `diff()`, `cumtrapz()` and `resample()` do.
+- **Synchronize before combining raw arrays of several series.** Channels have different timestamps,
+  so element-wise numpy on `a.values` and `b.values` pairs unrelated samples (or raises on a shape
+  mismatch). Operators (`a + b`, `a > b`) synchronize automatically; inside a UDF call
+  `a.synchronized(b)` or `a.synchronized_all([b, c])`, which return the series (self first) on shared
+  intervals covering only their overlap, so the result may be shorter or empty.
+
+```python
+import numpy as np
+
+@TimeSeriesExpression.udf
+def magnitude(x, y):
+    xs, ys = x.synchronized(y)
+    return SampleSeries(xs.tstarts, xs.tends, np.hypot(xs.values, ys.values))
+```
+
 ## What an expression evaluates to (the core data model)
 
 Every expression resolves — per container — to one of four in-memory types. Knowing the type tells you

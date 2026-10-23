@@ -310,6 +310,41 @@ still return a valid object of the declared type. For example, an empty `SampleS
 UDF should return a valid, empty `SampleSeries`.
 :::
 
+#### Rules for correct results
+
+When a UDF receives one or more `SampleSeries`, follow these rules:
+
+- **Handle empty inputs.** On the planning call above, every series argument is empty. Indexing
+  (`series.values[0]`, `series.tstarts[-1]`), `np.max(series.values)` or
+  `SampleSeries.from_timestamps(...)` raise on empty input. Guard with
+  `if len(series) == 0: return SampleSeries.empty()`; the built-in reducers (`sum()`, `min()`,
+  `max()`, `mean()`) return NaN for an empty series.
+- **Return the same type on every path.** The type returned on the planning call determines the
+  Spark column type of the result. A UDF whose return type depends on the data (for example, a
+  `SampleSeries` on one branch and a float on another) produces values that do not fit that column.
+- **Respect gaps.** A series may contain gaps. Two consecutive samples are contiguous only if
+  `tstarts[i + 1] == tends[i]` holds exactly. Compute neighbour-based logic (differences, gradients,
+  cumulative sums) per contiguous segment using `series.continuous_interval_indices`, a list of
+  inclusive `(start, end)` index pairs. The built-in `diff()`, `cumtrapz()` and `resample()` work this
+  way.
+- **Synchronize before combining the raw arrays of several series.** Different channels have
+  different timestamps, so element-wise numpy operations on `a.values` and `b.values` pair unrelated
+  samples (or raise on a shape mismatch). TSAL operators (`a + b`, `a > b`) synchronize
+  automatically. Inside a UDF, call `a.synchronized(b)` or `a.synchronized_all([b, c])`: they return
+  the series (the calling series first) on shared intervals covering only their overlap, so the
+  result may be shorter than the inputs, or empty.
+
+```python
+import numpy as np
+
+@TimeSeriesExpression.udf
+def magnitude(x, y):
+    xs, ys = x.synchronized(y)
+    return SampleSeries(xs.tstarts, xs.tends, np.hypot(xs.values, ys.values))
+
+speed = magnitude(vel_x, vel_y)
+```
+
 ---
 
 ## Virtual signals
