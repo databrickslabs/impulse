@@ -173,8 +173,9 @@ derated = derate(power)
 
 - **Handle empty inputs.** Every UDF runs once at planning time, with every series input empty (and
   every declared container tag/metric `None`), so the engine can infer the result type. Indexing
-  (`values[0]`, `tstarts[-1]`), `np.max(values)` or `SampleSeries.from_timestamps(...)` fail on empty
-  input; guard with `if len(series) == 0: return SampleSeries.empty()`. Built-in reducers return NaN.
+  (`series.values[0]`, `series.tstarts[-1]`) fails on empty input. Guard with `if len(series) == 0:`
+  and return an empty result of the UDF's return type: `SampleSeries.empty()` for a series, `np.nan`
+  for a number. The built-in reducers (`sum()`, `min()`, `max()`, `mean()`) already return NaN.
 - **Return the same type on every path.** The type returned on the planning call fixes the output
   column type; a return type that depends on the data (a `SampleSeries` on one branch, a float on
   another) produces values that do not fit that column.

@@ -315,10 +315,10 @@ UDF should return a valid, empty `SampleSeries`.
 When a UDF receives one or more `SampleSeries`, follow these rules:
 
 - **Handle empty inputs.** On the planning call above, every series argument is empty. Indexing
-  (`series.values[0]`, `series.tstarts[-1]`), `np.max(series.values)` or
-  `SampleSeries.from_timestamps(...)` raise on empty input. Guard with
-  `if len(series) == 0: return SampleSeries.empty()`; the built-in reducers (`sum()`, `min()`,
-  `max()`, `mean()`) return NaN for an empty series.
+  (`series.values[0]`, `series.tstarts[-1]`) raises on empty input. Guard with
+  `if len(series) == 0:` and return an empty result of the UDF's return type: `SampleSeries.empty()`
+  for a series, `np.nan` for a number. The built-in reducers (`sum()`, `min()`, `max()`, `mean()`)
+  already return NaN for an empty series.
 - **Return the same type on every path.** The type returned on the planning call determines the
   Spark column type of the result. A UDF whose return type depends on the data (for example, a
   `SampleSeries` on one branch and a float on another) produces values that do not fit that column.
