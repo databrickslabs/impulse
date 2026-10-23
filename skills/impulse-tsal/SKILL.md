@@ -131,11 +131,11 @@ three `SampleSeries` (min, max, average).
 
 **Prefer native functionality.** Before writing a UDF, check whether the request can be expressed
 with native building blocks: the operators and signal methods above, the `Intervals` methods below,
-the event types (`impulse-events`) and the aggregation classes (`impulse-aggregations`). Write a UDF
-only for the part native functionality cannot express, and keep everything else native. Native
-operations already handle empty inputs, gaps and unaligned channels (see the rules below). Future
-Impulse versions may also optimize the execution of native functionality, while logic inside a UDF
-stays opaque to the engine.
+the event types (`impulse-events`), the aggregation classes (`impulse-aggregations`) and calculated
+channels (`impulse-channels`). Write a UDF only for the part native functionality cannot express,
+and keep everything else native. Native operations already handle empty inputs, gaps and unaligned
+channels (see the rules below). Future Impulse versions may also optimize the execution of native
+functionality, while logic inside a UDF stays opaque to the engine.
 
 ```python
 from impulse_query_engine.model.series import SampleSeries
