@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.claude/
+*.egg-info/
+.DS_Store
+CLAUDE.md
+.databricks/
+.vscode/
+frontend/dist/
+*.tsbuildinfo
+.isaac/
+.env
