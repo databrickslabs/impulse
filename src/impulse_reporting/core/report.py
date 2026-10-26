@@ -12,8 +12,12 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
-from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
-from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.analyze.query.solvers import (
+    QuerySolver,
+    SolverBuildContext,
+    resolve_solver,
+)
+from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder
 from impulse_query_engine.measurement_db import AbstractMeasurementDB
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.channels.channel_types import ChannelType
@@ -81,6 +85,18 @@ _PERSIST_RESULTS_DEPRECATION_MSG = (
     "persists in one call and drains capped incremental batches. "
     "persist_results() will be removed in a future release."
 )
+
+
+def _solver_telemetry_name(solver: str) -> str:
+    """Telemetry value for the selected solver.
+
+    Built-in solvers keep their member name (``DEFAULT_SOLVER``, ...) so existing telemetry is
+    unchanged; custom solvers are reported as ``"custom"`` so customer class names aren't sent.
+    """
+    try:
+        return Solvers(solver).name
+    except ValueError:
+        return "custom"
 
 
 class Report:
@@ -152,7 +168,7 @@ class Report:
         )
 
         self.solver = Report.create_solver(self.spark, self.config)
-        log_telemetry(self.ws, "solver", self.config.query_engine.solver.name)
+        log_telemetry(self.ws, "solver", _solver_telemetry_name(self.config.query_engine.solver))
         log_telemetry(self.ws, "data_type", self.config.query_engine.data_type.value)
 
     @property
@@ -333,7 +349,12 @@ class Report:
     @staticmethod
     def create_solver(spark: SparkSession, config: ImpulseConfig) -> QuerySolver:
         """
-        Create a query solver based on the provided configuration.
+        Create the query solver selected by ``query_engine.solver``.
+
+        Resolves the registered solver name (``"DeltaSolver"`` and
+        ``"KeyValueStoreSolver"`` are deprecated aliases of ``"DefaultSolver"``)
+        and builds it with its ``from_config`` hook.
+
         Parameters
         ----------
         spark : SparkSession
@@ -344,31 +365,26 @@ class Report:
         Returns
         -------
         QuerySolver
-            An instance of the appropriate query solver based on the configuration.
+            An instance of the registered solver.
 
         Raises
         ------
-        ValueError
-            If the solver type is unknown.
+        KeyError
+            If the solver name is not registered (normally already reported when the
+            config is parsed).
         """
-        # DELTA_SOLVER and KEY_VALUE_STORE_SOLVER are deprecated aliases retained
-        # for backward compatibility with existing report configs; all three
-        # resolve to the unified DefaultSolver.
-        match config.query_engine.solver:
-            case Solvers.DEFAULT_SOLVER | Solvers.DELTA_SOLVER | Solvers.KEY_VALUE_STORE_SOLVER:
-                return DefaultSolver(
-                    spark,
-                    config=config.query_engine.solver_config,
-                    is_raw_data=config.query_engine.data_type is DataType.RAW,
-                    drop_implausible_data=config.query_engine.drop_implausible_data,
-                    raw_encoder=config.query_engine.raw_encoder,
-                )
-            case _:
-                raise ValueError(
-                    f"Unknown query engine solver: {config.query_engine.solver}. "
-                    f"Supported: {Solvers.DEFAULT_SOLVER} (DELTA_SOLVER and "
-                    f"KEY_VALUE_STORE_SOLVER are deprecated aliases)."
-                )
+        query_engine = config.query_engine
+        registration = resolve_solver(query_engine.solver)
+        return registration.impl_cls.from_config(
+            SolverBuildContext(
+                spark=spark,
+                solver_config=query_engine.solver_config,
+                is_raw_data=query_engine.data_type is DataType.RAW,
+                drop_implausible_data=query_engine.drop_implausible_data,
+                # None for RLE input, where it isn't consulted; pass the solver default
+                raw_encoder=query_engine.raw_encoder or RawEncoder.RLE,
+            )
+        )
 
     def get_sink_config(self) -> SinkConfig:
         """

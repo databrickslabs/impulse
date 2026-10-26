@@ -1,12 +1,11 @@
 # pylint: disable=missing-function-docstring
-"""Tests for the ``AbstractMeasurementDB`` contract and the name registry."""
+"""Tests for the ``AbstractMeasurementDB`` contract and the MeasurementDB registry wiring."""
 
 from unittest.mock import create_autospec
 
 import pytest
 from databricks.sdk import WorkspaceClient
 
-import impulse_query_engine.measurement_db_registry as registry
 from impulse_query_engine import __version__
 from impulse_query_engine.measurement_db import (
     AbstractMeasurementDB,
@@ -17,11 +16,6 @@ from impulse_query_engine.measurement_db_registry import (
     register_measurement_db,
     resolve_measurement_db,
 )
-
-
-@pytest.fixture(autouse=True)
-def isolated_registry(monkeypatch):
-    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
 
 
 def test_measurement_db_implements_the_contract():
@@ -78,21 +72,14 @@ def test_register_rejects_non_subclass():
         register_measurement_db("Bad", MeasurementDBConfig)(object)
 
 
-def test_register_returns_class_and_last_registration_wins():
-    class First(MeasurementDB): ...
+def test_builtin_measurement_db_is_registered():
+    registration = resolve_measurement_db("MeasurementDB")
 
-    class Second(MeasurementDB): ...
-
-    assert register_measurement_db("Custom", MeasurementDBConfig)(First) is First
-    register_measurement_db("Custom", MeasurementDBConfig)(Second)
-    assert resolve_measurement_db("Custom").db_cls is Second
+    assert registration.impl_cls is MeasurementDB
+    assert registration.config_cls is MeasurementDBConfig
 
 
-def test_unknown_name_lists_registered_names():
-    # The error names the unknown DB, lists the registered names, and tells the caller how to
-    # fix it (import the registering package before parsing) -- all three are user-facing guidance.
-    with pytest.raises(
-        KeyError,
-        match=r"'Missing'.*\['MeasurementDB'\].*Import the package that registers it",
-    ):
+def test_unknown_name_error_names_the_measurement_db_kind():
+    # The registry mechanics are covered in registry_test.py; this pins the user-facing kind.
+    with pytest.raises(KeyError, match=r"Unknown measurement DB 'Missing'"):
         resolve_measurement_db("Missing")

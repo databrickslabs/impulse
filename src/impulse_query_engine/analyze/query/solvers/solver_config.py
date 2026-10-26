@@ -18,7 +18,7 @@ import json
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class RawEncoder(StrEnum):
@@ -153,6 +153,10 @@ class SolverConfig(BaseModel):
         already in the channels' unit.  Not allowed for ``TIMESTAMP`` boundaries, which carry
         their own unit.
     """
+
+    # reject misspelled settings instead of silently dropping them; inherited by the config
+    # classes of custom solvers (a dropped custom setting would silently change results)
+    model_config = ConfigDict(extra="forbid")
 
     project_id: str | None = None
     channel_time_unit: Literal["s", "ms", "us", "ns"] | None = None

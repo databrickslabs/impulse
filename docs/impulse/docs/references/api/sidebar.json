@@ -34,7 +34,8 @@
                   "items": [
                     "references/api/impulse_query_engine/analyze/query/solvers/default_solver",
                     "references/api/impulse_query_engine/analyze/query/solvers/query_solver",
-                    "references/api/impulse_query_engine/analyze/query/solvers/solver_config"
+                    "references/api/impulse_query_engine/analyze/query/solvers/solver_config",
+                    "references/api/impulse_query_engine/analyze/query/solvers/solver_registry"
                   ],
                   "label": "impulse_query_engine.analyze.query.solvers",
                   "type": "category"
