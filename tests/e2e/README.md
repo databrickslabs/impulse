@@ -15,6 +15,7 @@ The job is defined in `resources/e2e_job.yml`. Each task is a notebook in this f
 | `pipeline` | `e2e_pipeline` | Container event, per-container statistics, an RPM x speed heatmap and a calculated channel; the calculated channel's samples must give the same statistics as the StatsAggregator |
 | `container_filter` | `e2e_container_filter` | Baseline report on (`experiment_1` or `experiment_2`) and longer than 30 minutes; must equal those containers' `rpm_histogram` rows, with the containers selected independently in SQL |
 | `events` | `e2e_events` | Points-in-time, sequence and 5-minute window events with point values and window statistics; point events have zero length; windows tile each container without gaps or overlaps; each slow_down has one value per channel, with speed at most 100 |
+| `pushdown` | `e2e_pushdown` | A report of `resample` expressions (calculated channels, an event condition, a histogram next to a raw-channel event, a `diff` above a resample, and a channel also used raw) runs without Spark pushdown, with it, and with it on small chunks; the pushdown runs log a pushdown plan and solve the calculated channels without the pandas UDF, and their gold tables equal the run without pushdown; the calculated channels lie on the 1 s grid |
 | `teardown` | `teardown` | Drops the schema; runs only if all tests passed, otherwise it ends as upstream failed, which fails the job run |
 
 Shared code (report config, baseline report, comparison) is in `e2e_utils.py`. When a test fails, its schema is kept for debugging.
@@ -37,7 +38,7 @@ The reports read the silver tables in `<source_catalog>.<source_schema>` (bundle
 
 ## Expected results
 
-`expected/<test>/<table>.csv` holds the expected gold rows of a test (without `_` bookkeeping columns). `incremental` and `container_filter` reuse `expected/rpm_histogram/`; `incremental_updates` compares with full reference runs instead of expected files.
+`expected/<test>/<table>.csv` holds the expected gold rows of a test (without `_` bookkeeping columns). `incremental` and `container_filter` reuse `expected/rpm_histogram/`; `incremental_updates` compares with full reference runs instead of expected files. `pushdown` also compares with a reference run without pushdown, and has no expected file for `calculated_channel_fact` (too many rows).
 
 To refresh them after an intended change, run the job. On a mismatch, the test uploads its actual rows as CSV to `<bundle root>/actual/<test>/` and logs the path. Review them, then copy them into `expected/`.
 
