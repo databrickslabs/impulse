@@ -110,8 +110,8 @@ PUSHED_SCANS = [
 ]
 #: Channels also used raw add one read.
 MIXED_SCANS = sorted([*PUSHED_SCANS, "container_id,channel_id,tstart,tend,value"])
-#: The one shuffle of the pushed samples: by series and chunk.
-SAMPLE_SHUFFLE = f"hashpartitioning(container_id, channel_id, {VARIANT_COL}, _pd_chunk"
+#: The one shuffle of the pushed samples: by channel and chunk, once per sample.
+SAMPLE_SHUFFLE = "hashpartitioning(container_id, channel_id, _pd_chunk"
 
 
 @pytest.fixture

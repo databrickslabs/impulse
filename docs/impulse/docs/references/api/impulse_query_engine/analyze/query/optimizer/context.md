@@ -83,8 +83,9 @@ class SeriesContext()
 Columns a rule's hooks build on, for the current sample of one of its series.
 
 Every series is one channel's samples of one variant, ordered by
-``(tstart, tend, value)``.  Rules running in series order (``ordered``) see
-neighbours, runs and series facts; per-sample rules see only the sample.
+``(tstart, tend, value)``; all variants of a channel have the same samples.
+Rules running in series order (``ordered``) see neighbours, runs and series
+facts; per-sample rules see only the sample.
 
 **Arguments**:
 
@@ -232,8 +233,9 @@ def in_chunk() -> WindowSpec
 
 Window over the sample's chunk in series order, for local neighbour access.
 
-Chunks are consecutive slices of a series; use :attr:`prev`, :attr:`next`
-and runs for anything that must see across chunk boundaries.
+Chunks are consecutive slices of a channel, the same for all its series;
+use :attr:`prev`, :attr:`next` and runs for anything that must see across
+chunk boundaries.
 
 
 #### block

@@ -17,6 +17,7 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.optimizer import (
     VARIANT_COL,
+    VARIANTS_COL,
     Classifier,
     Pushdown,
     SeriesPipeline,
@@ -186,8 +187,8 @@ def test_per_sample_rules_share_the_row_branch_with_raw_rows(spark):
 
 
 def test_per_sample_rules_skip_the_series_scan(spark):
-    df = channel_rows(spark, {(1, 1, 1): ([0, 1], [1, 2], [1.0, 2.0])})
-    result = apply_pushdowns(df, plan_for({1: _offset(1.0)}), CONFIG, include_raw=False)
+    df, variants = channel_rows(spark, {(1, 1, 1): ([0, 1], [1, 2], [1.0, 2.0])})
+    result = apply_pushdowns(df, variants, plan_for({1: _offset(1.0)}), CONFIG, include_raw=False)
     plan = result._jdf.queryExecution().optimizedPlan().toString()
     assert "_pd_chunk" not in plan
     assert "Window" not in plan
@@ -209,39 +210,109 @@ def test_ordered_services_are_refused_to_per_sample_rules(spark):
         def emit(self, ctx):
             return F.array(ctx.element(value=ctx.prev.value))
 
-    df = channel_rows(spark, {(1, 1, 1): ([0], [1], [1.0])})
+    df, variants = channel_rows(spark, {(1, 1, 1): ([0], [1], [1.0])})
     pushdown = Pushdown(rule=_Neighbourly(), selector=_X, params=(), consumed=(_X,))
     with pytest.raises(TypeError, match="needs an ordered rule"):
-        apply_pushdowns(df, plan_for({1: pushdown}), CONFIG)
+        apply_pushdowns(df, variants, plan_for({1: pushdown}), CONFIG)
 
 
 def test_block_end_is_only_available_to_kept_samples(spark):
     rule = ProbeRule("early_block_end", lambda ctx: ctx.value)
     rule.row_columns = lambda ctx: {"end": ctx.block_end}
-    df = channel_rows(spark, {(1, 1, 1): ([0], [1], [1.0])})
+    df, variants = channel_rows(spark, {(1, 1, 1): ([0], [1], [1.0])})
     with pytest.raises(TypeError, match="kept samples"):
-        apply_pushdowns(df, plan_for({1: rule.pushdown(_X)}), CONFIG)
+        apply_pushdowns(df, variants, plan_for({1: rule.pushdown(_X)}), CONFIG)
 
 
 def test_one_shuffle_of_the_samples(spark):
     rng = np.random.default_rng(3)
     series = {(cid, 1, 1): random_series(rng, 30) for cid in range(3)}
-    df = channel_rows(spark, series)
+    df, variants = channel_rows(spark, series)
     plan = plan_for({1: Classifier([DiffRule()])(_X.diff())})
-    result = apply_pushdowns(df, plan, CONFIG, include_raw=False)
+    result = apply_pushdowns(df, variants, plan, CONFIG, include_raw=False)
     result.collect()
-    final = result._jdf.queryExecution().executedPlan().toString().split("== Initial Plan ==")[0]
-    # Shuffles (not broadcasts), each listed once even when reused.
-    exchanges = [
-        re.sub(r"#\d+L?", "", e) for e in re.findall(r"(?<=- )Exchange (\w+\([^)]*\))", final)
-    ]
-    key = f"container_id, channel_id, {VARIANT_COL}"
+    final = _final_plan(result)
+    exchanges = _shuffles(final)
+    key = "container_id, channel_id"
     samples = [e for e in exchanges if "_pd_chunk" in e]
     assert len(samples) == 1 and samples[0].startswith(f"hashpartitioning({key}, _pd_chunk")
-    # The others are the per-series boundaries and chunk summaries.
+    # The others are the per-channel boundaries and chunk summaries.
     assert all(e.startswith(f"hashpartitioning({key}") for e in exchanges)
     # One full read, shared by the chunk pass and its summaries, and the boundaries.
-    assert len(re.findall(r"Scan ExistingRDD", final)) == 2
+    assert len(_channel_data_scans(final)) == 2
+
+
+def test_chunks_scale_with_the_variants_of_a_channel(spark):
+    # Both variants of channel (1, 1) fan out per chunk, so it gets twice as many chunks
+    # to keep the rows per chunk; each of its samples enters the chunk shuffle once.
+    samples = (list(range(12)), list(range(1, 13)), [1.0] * 12)
+    df, variants = channel_rows(
+        spark, {(1, 1, 1): samples, (1, 1, 2): samples, (2, 1, 1): samples}
+    )
+    diff, probe = DiffRule(), ProbeRule("probe_value", lambda ctx: ctx.value)
+    rules = [(diff, {1: Classifier([diff])(_X.diff())}), (probe, {2: probe.pushdown(_X)})]
+    with chunk_rows(4):
+        chunks = SeriesPipeline(rules, CONFIG)._chunked(df, variants)
+        per_channel = chunks.groupBy("container_id", "channel_id").agg(
+            F.countDistinct("_pd_chunk").alias("chunks"), F.count(F.lit(1)).alias("samples")
+        )
+        counts = {(r[0], r[1]): (r["chunks"], r["samples"]) for r in per_channel.collect()}
+    assert counts == {(1, 1): (6, 12), (2, 1): (3, 12)}
+
+
+def test_samples_are_shuffled_once_per_channel(spark):
+    samples = random_series(np.random.default_rng(11), 40)
+    # Channel (1, 1) ships two ordered variants, channel (2, 1) its raw rows.
+    series = {(1, 1, 1): samples, (1, 1, 2): samples, (2, 1, 0): samples}
+    df, variants = channel_rows(spark, series)
+    probe = ProbeRule("probe_value", lambda ctx: ctx.value)
+    plan = plan_for({1: Classifier([DiffRule()])(_X.diff()), 2: probe.pushdown(_X)})
+    result = apply_pushdowns(df, variants, plan, CONFIG)
+    result.collect()
+    final = _final_plan(result)
+    # The variants fan out after the chunk shuffle, which no further shuffle follows.
+    assert all(VARIANT_COL not in e for e in _shuffles(final))
+    lines = final.splitlines()
+    shuffle = next(
+        i for i, line in enumerate(lines) if re.search(r"- Exchange \w+\(.*_pd_chunk", line)
+    )
+    assert not any("Generate" in line for line in _subtree(lines, shuffle))
+    # One broadcast of the variants for the boundaries, the fan-out and the raw rows.
+    assert len([s for s in _scans(final) if VARIANTS_COL in s]) == 1
+
+
+def _final_plan(df) -> str:
+    """The final physical plan of *df*, which must have been collected."""
+    return df._jdf.queryExecution().executedPlan().toString().split("== Initial Plan ==")[0]
+
+
+def _shuffles(final: str) -> list[str]:
+    """Partitionings of the shuffles (not broadcasts), each listed once even when reused."""
+    return [re.sub(r"#\d+L?", "", e) for e in re.findall(r"(?<=- )Exchange (\w+\([^)]*\))", final)]
+
+
+def _scans(final: str) -> list[str]:
+    """Output columns of each in-memory scan in the plan."""
+    return re.findall(r"Scan ExistingRDD\[([^\]]*)\]", final)
+
+
+def _channel_data_scans(final: str) -> list[str]:
+    """Scans of the channel data, not of the variants of each channel."""
+    return [s for s in _scans(final) if VARIANTS_COL not in s]
+
+
+def _subtree(lines: list[str], i: int) -> list[str]:
+    """The plan lines below the node on line *i*."""
+
+    def depth(line: str) -> int:
+        return len(line) - len(line.lstrip(" :+-"))
+
+    below = []
+    for line in lines[i + 1 :]:
+        if depth(line) <= depth(lines[i]):
+            break
+        below.append(line)
+    return below
 
 
 def _values_by_tend(df) -> dict:
@@ -253,11 +324,15 @@ def test_null_and_nan_tstarts_keep_their_place_in_the_series(spark, chunk_size):
     # Spark orders a null tstart first and a NaN tstart last; their chunks must too.
     nan = float("nan")
     samples = ([None, 0.0, 1.0, 2.0, 3.0, 4.0, nan], [0.5, 1, 2, 3, 4, 5, 5.5], [1.0] * 7)
-    df = channel_rows(spark, {(1, 1, 1): samples, (1, 1, 2): samples}, time_type=T.DoubleType())
+    df, variants = channel_rows(
+        spark, {(1, 1, 1): samples, (1, 1, 2): samples}, time_type=T.DoubleType()
+    )
     prev = ProbeRule("prev_start", lambda ctx: ctx.prev.tstart).pushdown(_X)
     nxt = ProbeRule("next_start", lambda ctx: ctx.next.tstart).pushdown(_X)
     with chunk_rows(chunk_size):
-        result = apply_pushdowns(df, plan_for({1: prev, 2: nxt}), CONFIG, include_raw=False)
+        result = apply_pushdowns(
+            df, variants, plan_for({1: prev, 2: nxt}), CONFIG, include_raw=False
+        )
         by_variant = {v: _values_by_tend(result.where(F.col(VARIANT_COL) == v)) for v in (1, 2)}
     expected_prev = {0.5: None, 1.0: None, 2.0: 0.0, 3.0: 1.0, 4.0: 2.0, 5.0: 3.0, 5.5: 4.0}
     expected_next = {0.5: 0.0, 1.0: 1.0, 2.0: 2.0, 3.0: 3.0, 4.0: 4.0, 5.0: nan, 5.5: None}
@@ -269,10 +344,11 @@ def test_null_and_nan_tstarts_keep_their_place_in_the_series(spark, chunk_size):
 def test_series_without_a_finite_tend_is_still_chunked(spark):
     nan = float("nan")
     samples = ([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], [nan] * 6, [1.0] * 6)
-    df = channel_rows(spark, {(1, 1, 1): samples}, time_type=T.DoubleType())
+    df, variants = channel_rows(spark, {(1, 1, 1): samples}, time_type=T.DoubleType())
     rule = DiffRule()
     with chunk_rows(2):
-        chunks = SeriesPipeline([(rule, {1: Classifier([rule])(_X.diff())})], CONFIG)._chunked(df)
+        pipeline = SeriesPipeline([(rule, {1: Classifier([rule])(_X.diff())})], CONFIG)
+        chunks = pipeline._chunked(df, variants)
         assert chunks.select("_pd_chunk").distinct().count() == 3
 
 
@@ -292,6 +368,6 @@ def test_invalid_rule_column_and_run_names_are_rejected(spark, hook):
         rule.row_columns = lambda ctx: {"Bad__name": ctx.value}
     else:
         rule._runs = {"Bad__name": _value_change}
-    df = channel_rows(spark, {(1, 1, 1): ([0], [1], [1.0])})
+    df, variants = channel_rows(spark, {(1, 1, 1): ([0], [1], [1.0])})
     with pytest.raises(ValueError, match="name 'Bad__name'"):
-        apply_pushdowns(df, plan_for({1: rule.pushdown(_X)}), CONFIG)
+        apply_pushdowns(df, variants, plan_for({1: rule.pushdown(_X)}), CONFIG)

@@ -16,6 +16,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.analyze.query.optimizer import (
     VARIANT_COL,
+    VARIANTS_COL,
     Pushdown,
     PushdownPlan,
     PushdownRule,
@@ -31,7 +32,7 @@ CONFIG = SolverConfig()
 
 @contextlib.contextmanager
 def chunk_rows(n: int | None):
-    """Run the pipeline with *n* samples per chunk (the default when ``None``)."""
+    """Run the pipeline with *n* rows per chunk (the default when ``None``)."""
     if n is None:
         yield
         return
@@ -39,8 +40,17 @@ def chunk_rows(n: int | None):
         yield
 
 
-def channel_rows(spark, series_by_key, time_type=T.LongType()) -> DataFrame:
-    """Tagged channel data for ``{(cid, ch, variant): (tstarts, tends, values)}``."""
+def channel_rows(spark, series_by_key, time_type=T.LongType()) -> tuple[DataFrame, DataFrame]:
+    """Channel data and the variants of each channel, as ``apply_pushdowns`` takes them.
+
+    *series_by_key* maps ``(cid, ch, variant)`` to ``(tstarts, tends, values)``; all
+    variants of a channel have the same samples, as in a solve.
+    """
+    by_channel: dict[tuple, tuple] = {}
+    for (cid, ch, vid), samples in series_by_key.items():
+        known, vids = by_channel.setdefault((cid, ch), (samples, []))
+        assert known is samples or known == samples, f"variants of {(cid, ch)} differ"
+        vids.append(vid)
     schema = T.StructType(
         [
             T.StructField("container_id", T.LongType()),
@@ -48,7 +58,6 @@ def channel_rows(spark, series_by_key, time_type=T.LongType()) -> DataFrame:
             T.StructField("tstart", time_type),
             T.StructField("tend", time_type),
             T.StructField("value", T.DoubleType()),
-            T.StructField(VARIANT_COL, T.IntegerType()),
         ]
     )
     cast = int if isinstance(time_type, T.IntegralType) else float
@@ -57,11 +66,20 @@ def channel_rows(spark, series_by_key, time_type=T.LongType()) -> DataFrame:
         return None if t is None else cast(t)
 
     rows = [
-        (cid, ch, to_time(ts), to_time(te), None if v is None else float(v), vid)
-        for (cid, ch, vid), (tstarts, tends, values) in series_by_key.items()
+        (cid, ch, to_time(ts), to_time(te), None if v is None else float(v))
+        for (cid, ch), ((tstarts, tends, values), _) in by_channel.items()
         for ts, te, v in zip(tstarts, tends, values, strict=True)
     ]
-    return spark.createDataFrame(rows, schema=schema)
+    variants = T.StructType(
+        [
+            T.StructField("container_id", T.LongType()),
+            T.StructField("channel_id", T.LongType()),
+            T.StructField(VARIANTS_COL, T.ArrayType(T.IntegerType())),
+        ]
+    )
+    return spark.createDataFrame(rows, schema=schema), spark.createDataFrame(
+        [(cid, ch, sorted(vids)) for (cid, ch), (_, vids) in by_channel.items()], variants
+    )
 
 
 def plan_for(pushdowns: dict[int, Pushdown]) -> PushdownPlan:
@@ -83,10 +101,15 @@ def run(
     include_raw: bool = True,
 ) -> dict[tuple, SampleSeries]:
     """Run *pushdowns* on the series; ``{(cid, ch, variant): SampleSeries}`` like the cache."""
-    df = channel_rows(spark, series_by_key, time_type)
+    df, variants = channel_rows(spark, series_by_key, time_type)
     with chunk_rows(chunk_size):
-        result = apply_pushdowns(df, plan_for(pushdowns), CONFIG, include_raw=include_raw)
-        assert result.schema == df.schema
+        result = apply_pushdowns(
+            df, variants, plan_for(pushdowns), CONFIG, include_raw=include_raw
+        )
+        expected = [*df.schema.fields, T.StructField(VARIANT_COL, T.IntegerType())]
+        assert [(f.name, f.dataType) for f in result.schema] == [
+            (f.name, f.dataType) for f in expected
+        ]
         pdf = result.toPandas()
     out = {}
     for key, group in pdf.groupby(["container_id", "channel_id", VARIANT_COL]):

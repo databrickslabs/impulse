@@ -20,6 +20,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.analyze.query.optimizer import (
     RAW_VARIANT,
     VARIANT_COL,
+    VARIANTS_COL,
     Classifier,
     PushdownContext,
     PushdownPlan,
@@ -1316,8 +1317,8 @@ class DefaultSolver(QuerySolver):
     ) -> DataFrame:
         """Replace raw channel data with the derived rows of *plan* where possible.
 
-        Each matched channel is tagged with the variants it ships
-        (:meth:`PushdownPlan.channel_variants`): its raw data (variant ``0``)
+        Each matched channel ships the variants of
+        :meth:`PushdownPlan.channel_variants`: its raw data (variant ``0``)
         while any of its selectors still needs it, otherwise the derived
         variants of its selectors, computed by their rules (see
         :func:`~impulse_query_engine.analyze.query.optimizer.apply_pushdowns`).
@@ -1326,10 +1327,9 @@ class DefaultSolver(QuerySolver):
         """
         key = [self.config.container_id_col, self.config.channel_id_col]
         variants = channels_df.select(
-            *key, F.explode(plan.channel_variants(F.col("selector_ids"))).alias(VARIANT_COL)
+            *key, plan.channel_variants(F.col("selector_ids")).alias(VARIANTS_COL)
         )
-        rows = channels_q.join(F.broadcast(variants), on=key)
-        return apply_pushdowns(rows, plan, self.config, include_raw=include_raw)
+        return apply_pushdowns(channels_q, variants, plan, self.config, include_raw=include_raw)
 
     @staticmethod
     def _query_contains_poi_selections(selections: Iterable[Any]) -> bool:

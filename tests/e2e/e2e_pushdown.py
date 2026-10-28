@@ -5,8 +5,9 @@
 # MAGIC pushdown on small chunks (so channels span many chunks). The pushdown runs must log a
 # MAGIC pushdown plan and solve the calculated channels without the pandas UDF, and their gold
 # MAGIC tables must equal those of the run without pushdown. Covers calculated channels computed
-# MAGIC in Spark, pushed subtrees inside events and aggregations, a nested op above a pushdown,
-# MAGIC and a channel also used raw, which is not pushed down.
+# MAGIC in Spark (one channel at two rates, so its samples fan out into two variants), pushed
+# MAGIC subtrees inside events and aggregations, a nested op above a pushdown, and a channel also
+# MAGIC used raw, which is not pushed down.
 
 # COMMAND ----------
 
@@ -28,9 +29,12 @@ from impulse_reporting.events.container_event import ContainerEvent
 
 p = params()
 RATE = 1.0  # The source timestamps are epoch seconds; an integral rate gives an exact grid.
+SLOW_RATE = 5 * RATE  # A second rate on speed: two pushed-down variants of one channel.
 SOLVER_LOGGER = "impulse_query_engine.analyze.query.solvers.default_solver"
 PLAN_LOG = "Spark pushdown plan"
 NATIVE_LOG = "Calculated channels solved natively in Spark"
+#: Rate of each calculated channel, by channel id (filled by build()).
+CALCULATED_RATES = {}
 
 
 def build(prefix, pushdown):
@@ -47,10 +51,16 @@ def build(prefix, pushdown):
     )
 
     # Only resamples, so the calculated channels are computed in Spark without the UDF.
-    for name, expr in [("speed_1s", speed.resample(RATE)), ("coolant_1s", coolant.resample(RATE))]:
-        report.add_calculated_channel(
-            CalculatedChannel(name=name, expr=expr, identity={"channel_name": name})
+    for name, source, rate in [
+        ("speed_1s", speed, RATE),
+        ("coolant_1s", coolant, RATE),
+        ("speed_5s", speed, SLOW_RATE),
+    ]:
+        calculated = CalculatedChannel(
+            name=name, expr=source.resample(rate), identity={"channel_name": name}
         )
+        report.add_calculated_channel(calculated)
+        CALCULATED_RATES[calculated.get_id()] = rate
 
     high_rpm = BasicEvent(name="high_rpm", expr=rpm > 2000)
     fast = BasicEvent(name="fast", expr=speed.resample(RATE) > 100)
@@ -140,6 +150,7 @@ for prefix in [p.prefix, chunked]:
     plans = [m for m in logs[prefix] if m.startswith(PLAN_LOG)]
     assert plans, f"{prefix}: no pushdown plan"
     assert all(f"resample(sample_rate={RATE})" in m for m in plans), plans
+    assert any(f"resample(sample_rate={SLOW_RATE})" in m for m in plans), plans
     assert any(NATIVE_LOG in m for m in logs[prefix]), f"{prefix}: calculated channels in UDF"
     print(f"{prefix}: {plans}")
 
@@ -172,17 +183,21 @@ for prefix in [p.prefix, chunked]:
 
 # COMMAND ----------
 
-# The calculated channels lie on the 1 s grid: every sample lasts exactly the rate, except the
-# last one of each continuous block (whose end isn't the next sample's start).
+# The calculated channels lie on their grids (1 s or 5 s): every sample lasts exactly the rate,
+# except the last one of each continuous block (whose end isn't the next sample's start).
 series = Window.partitionBy("container_id", "channel_id").orderBy("tstart")
+rate = F.create_map(
+    *[x for cid, r in CALCULATED_RATES.items() for x in (F.lit(cid).cast("long"), F.lit(r))]
+)[F.col("channel_id").cast("long")]
 samples = gold(p, "calculated_channel_fact").withColumn("next", F.lead("tstart").over(series))
+duration = F.col("tend") - F.col("tstart")
 off_grid = samples.where(
-    (F.col("tend") - F.col("tstart") != RATE)
-    & ((F.col("tend") - F.col("tstart") > RATE) | (F.col("next") == F.col("tend")))
+    (duration != rate) & ((duration > rate) | (F.col("next") == F.col("tend")))
 )
 assert off_grid.count() == 0, f"samples off the grid: {off_grid.take(5)}"
 n_series = samples.select("container_id", "channel_id").distinct().count()
-assert n_series == 2 * gold(p, "measurement_dimension").count(), "missing series"
+n_containers = gold(p, "measurement_dimension").count()
+assert n_series == len(CALCULATED_RATES) * n_containers, "missing series"
 
 ids = event_ids(p)
 fast = gold(p, "event_instance_fact").where(F.col("event_id") == ids["fast"])

@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 
 #: Column tagging each channel-data row with the series variant it belongs to.
 VARIANT_COL = "__impulse_variant"
+#: Column listing the variant ids a matched channel ships, one row per channel.
+VARIANTS_COL = "__impulse_variants"
 #: Variant id of the unmodified (raw) channel data.
 RAW_VARIANT = 0
 

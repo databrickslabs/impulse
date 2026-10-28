@@ -177,8 +177,8 @@ def _top_level_items(text):
 
 
 def _optimized_plan(spark) -> str:
-    df = channel_rows(spark, {(1, 1, 1): ([0, 1], [1, 2], [1.0, 2.0])})
-    result = apply_pushdowns(df, plan_for({1: _pushdown(1)}), CONFIG, include_raw=False)
+    df, variants = channel_rows(spark, {(1, 1, 1): ([0, 1], [1, 2], [1.0, 2.0])})
+    result = apply_pushdowns(df, variants, plan_for({1: _pushdown(1)}), CONFIG, include_raw=False)
     return result._jdf.queryExecution().optimizedPlan().toString()
 
 
@@ -187,19 +187,23 @@ def test_windows_over_samples_are_chunked(spark):
     # partitioned by the series alone; only the chunk summaries are.
     plan = _optimized_plan(spark)
     specs = re.findall(r"windowspecdefinition\((.*?), specifiedwindowframe", plan)
-    series_key = ["container_id", "channel_id", VARIANT_COL]
+    channel_key = ["container_id", "channel_id"]
     seen = set()
     for spec in specs:
         items = _top_level_items(re.sub(r"#\d+L?", "", spec))
         partition = [item for item in items if not item.endswith(("NULLS FIRST", "NULLS LAST"))]
         order = [item.split(" ")[0] for item in items[len(partition) :]]
         seen.add((tuple(partition), tuple(order)))
-        if partition == series_key:
+        if partition == channel_key:
             assert order == ["_pd_chunk"]
         else:
-            assert partition == [*series_key, "_pd_chunk"]
-    assert any(order == ("tstart", "tend", "value") for _, order in seen)
-    assert any(partition == tuple(series_key) for partition, _ in seen)
+            # Per chunk of a channel; after the fan-out, per chunk of a series.
+            assert partition in (
+                [*channel_key, "_pd_chunk"],
+                [*channel_key, VARIANT_COL, "_pd_chunk"],
+            )
+    assert (tuple([*channel_key, "_pd_chunk"]), ("tstart", "tend", "value")) in seen
+    assert any(partition == tuple(channel_key) for partition, _ in seen)
     # Photon runs window aggregates over structs row-based.
     assert not re.search(r"(max|min)\(struct\(", plan)
 

@@ -11,6 +11,11 @@ Building blocks of Spark pushdown rules.
 Column tagging each channel-data row with the series variant it belongs to.
 
 
+#### VARIANTS\_COL
+
+Column listing the variant ids a matched channel ships, one row per channel.
+
+
 #### RAW\_VARIANT
 
 Variant id of the unmodified (raw) channel data.

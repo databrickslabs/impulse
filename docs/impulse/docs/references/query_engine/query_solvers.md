@@ -210,15 +210,21 @@ produce overlaps).
 
 All pushed-down subtrees of a solve share one pass over the channel data:
 
-- Spark cuts each pushed channel into chunks, equal time slices of about 100 000 samples on
-  average, and processes the chunks in parallel. A task holds one chunk at a time, not a whole
-  channel or container; with strongly varying sampling density a chunk can hold more samples.
+- Spark cuts each pushed channel into chunks, equal time slices, and processes the chunks in
+  parallel. A chunk holds about 100 000 samples on average, divided by the number of pushed-down
+  expressions that read the channel (e.g. about 50 000 for `spd.resample(1e6)` next to
+  `spd.resample(5e6)`), as each of them computes on every sample of the chunk. A task holds one
+  chunk at a time, not a whole channel or container; with strongly varying sampling density a
+  chunk can hold more samples.
 - Within a chunk the samples are ordered by `tstart`, then `tend`, then value; samples with equal
   times are ordered by value. For `resample`, each sample is assigned the grid bucket it falls
   into, and only the last sample of each bucket emits rows: the grid points up to the next
   sample's bucket.
 - What crosses a chunk boundary (neighbouring samples, gaps, the start and end of a continuous
   block) comes from one summary row per chunk.
+- Each sample is shuffled once, however many pushed-down expressions read its channel: chunks,
+  neighbours and continuous blocks are computed once per channel, and only the expressions' own
+  computations run per expression.
 
 The channel data is read **twice**, however many expressions are pushed down: once in full, and
 once with only `container_id`, `channel_id`, `tstart` and `tend` (the channel boundaries that

@@ -4,6 +4,7 @@ from .plan import PushdownPlan
 from .pushdown import (
     RAW_VARIANT,
     VARIANT_COL,
+    VARIANTS_COL,
     Operand,
     Pushdown,
     PushdownContext,
@@ -17,6 +18,7 @@ __all__ = [
     "ELEMENT_TYPE",
     "RAW_VARIANT",
     "VARIANT_COL",
+    "VARIANTS_COL",
     "Classifier",
     "Operand",
     "Pushdown",

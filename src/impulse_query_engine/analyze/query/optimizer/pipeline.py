@@ -1,31 +1,34 @@
 """Spark execution of a pushdown plan: one shared pass for all rules.
 
-:func:`apply_pushdowns` turns the tagged channel data of a solve into the rows
-the solver ships: raw rows where still needed, plus every rule's derived rows.
-Rules contribute columns only (see :class:`~.pushdown.PushdownRule`), so the
-number of reads of the channel data does not grow with the number of rules:
+:func:`apply_pushdowns` turns the channel data of a solve into the rows the
+solver ships: raw rows where still needed, plus every rule's derived rows, each
+tagged with its variant.  Rules contribute columns only (see
+:class:`~.pushdown.PushdownRule`), so the number of reads of the channel data
+does not grow with the number of rules:
 
 * **Ordered rules** (:class:`SeriesPipeline`) read the channel data once in full
-  and once narrowly (series boundaries, aggregated before their shuffle).  The
-  samples are shuffled once, by series and chunk, and processed per chunk in
-  parallel.
+  and once narrowly (channel boundaries, aggregated before their shuffle).  Each
+  sample is shuffled once, by channel and chunk, however many variants its
+  channel ships, and processed per chunk in parallel.
 * **Raw rows and per-sample rules** share one more read, only when present.
 
-The ordered pass, per series (one channel's samples of one variant, ordered by
-``(tstart, tend, value)``):
+The ordered pass, per channel (its samples ordered by ``(tstart, tend, value)``):
 
-1. Series boundaries give each sample its chunk: equal time slices holding about
-   :data:`CHUNK_ROWS` samples on average.
+1. Channel boundaries give each sample its chunk: equal time slices holding
+   about :data:`CHUNK_ROWS` / k samples on average for a channel with k variants.
 2. A window per chunk derives each sample's neighbours and run breaks.
 3. One summary row per chunk, scanned in chunk order, carries what crosses chunk
-   boundaries: neighbours at chunk edges, run numbers and starts, the series'
+   boundaries: neighbours at chunk edges, run numbers and starts, the channel's
    sample count and last sample, and block ends.
-4. Rules add per-sample columns (``row_columns``) and select samples (``keep``).
-5. Kept samples get their block end; rules add ``kept_columns``.
-6. Rules ``emit`` the derived rows.
+4. The samples fan out into one row per variant: a series, one channel's samples
+   of one variant.  Stages 1 to 3 are the same for every variant of a channel,
+   so they run once; a chunk again holds about :data:`CHUNK_ROWS` rows.
+5. Rules add per-sample columns (``row_columns``) and select samples (``keep``).
+6. Kept samples get their block end; rules add ``kept_columns``.
+7. Rules ``emit`` the derived rows.
 
 Windows never span more than a chunk of samples (or the chunk summaries of a
-series), so the memory per task is bounded by the chunk size.
+channel), so the memory per task is bounded by the chunk size.
 
 Keeping one full read for the chunk pass and its summaries relies on both
 seeing the same projected rows: a fixed projection before the shuffle, a chunk
@@ -40,6 +43,7 @@ from dataclasses import dataclass
 from functools import reduce
 
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
 from pyspark.sql import Column, DataFrame, Window
 
 from .context import (
@@ -63,24 +67,35 @@ from .context import (
     run_col,
 )
 from .plan import PushdownPlan
-from .pushdown import RAW_VARIANT, VARIANT_COL, Pushdown, PushdownRule, check_name
+from .pushdown import (
+    RAW_VARIANT,
+    VARIANT_COL,
+    VARIANTS_COL,
+    Pushdown,
+    PushdownRule,
+    check_name,
+)
 
-#: Average number of samples per chunk of a series.
+#: Average number of rows per chunk of a channel, counting a sample once per variant.
 CHUNK_ROWS = 100_000
 
 _ELEMENT = "_pd_element"
 
 
 def apply_pushdowns(
-    rows: DataFrame, plan: PushdownPlan, config, include_raw: bool = True
+    rows: DataFrame, variants: DataFrame, plan: PushdownPlan, config, include_raw: bool = True
 ) -> DataFrame:
     """The rows a solve ships: raw rows (when *include_raw*) and all derived rows.
 
     Parameters
     ----------
     rows : pyspark.sql.DataFrame
-        Channel data ``(container_id, channel_id, tstart, tend, value)`` tagged
-        with :data:`VARIANT_COL`, one copy per variant a channel ships.
+        Channel data ``(container_id, channel_id, tstart, tend, value)``, one row
+        per sample.
+    variants : pyspark.sql.DataFrame
+        ``(container_id, channel_id, VARIANTS_COL)``: the variant ids each matched
+        channel ships, one row per channel (see :meth:`PushdownPlan.channel_variants`).
+        Channels without a row are dropped.  Both branches broadcast this one frame.
     plan : PushdownPlan
         The solve's pushdown plan.
     config : SolverConfig
@@ -91,21 +106,22 @@ def apply_pushdowns(
     Returns
     -------
     pyspark.sql.DataFrame
-        Rows with the columns and types of *rows*.
+        Rows with the columns and types of *rows* plus :data:`VARIANT_COL`.
     """
     groups = plan.variants_by_rule()
     ordered = [(rule, variants) for rule, variants in groups if rule.ordered]
     per_sample = [(rule, variants) for rule, variants in groups if not rule.ordered]
-    variant = F.col(VARIANT_COL)
+    key = [config.container_id_col, config.channel_id_col]
+    schema = _output_schema(rows)
     parts = []
     row_variants = ([RAW_VARIANT] if include_raw else []) + _variant_ids(per_sample)
     if row_variants:
-        parts.append(_row_branch(rows.where(variant.isin(row_variants)), per_sample, config))
+        tagged = _fan_out(rows, variants, key, row_variants).select(*rows.columns, VARIANT_COL)
+        parts.append(_row_branch(tagged, per_sample, config, schema))
     if ordered:
-        pipeline = SeriesPipeline(ordered, config)
-        parts.append(pipeline.run(rows.where(variant.isin(_variant_ids(ordered)))))
+        parts.append(SeriesPipeline(ordered, config).run(rows, variants))
     if not parts:
-        return rows.limit(0)
+        return rows.withColumn(VARIANT_COL, F.lit(None).cast(T.IntegerType())).limit(0)
     return reduce(lambda a, b: a.unionByName(b), parts)
 
 
@@ -113,17 +129,50 @@ def _variant_ids(groups: Sequence[tuple[PushdownRule, Mapping[int, Pushdown]]]) 
     return sorted(vid for _, variants in groups for vid in variants)
 
 
+def _shipped(ids: Sequence[int]) -> Column:
+    """The variant ids among *ids* that a channel ships, from its :data:`VARIANTS_COL`."""
+    return F.filter(F.col(VARIANTS_COL), lambda vid: vid.isin(sorted(ids)))
+
+
+def _fan_out(df: DataFrame, variants: DataFrame, key: Sequence[str], ids: Sequence[int]):
+    """*df* with one row per variant among *ids* its channel ships, in :data:`VARIANT_COL`.
+
+    Channels shipping none of *ids* are dropped.  Unlike ``explode``, ``explode_outer``
+    adds no inferred filter to the broadcast side of the join, so all joins with
+    *variants* share one broadcast.
+    """
+    return (
+        df.join(F.broadcast(variants), on=key)
+        .withColumn(VARIANT_COL, F.explode_outer(_shipped(ids)))
+        .where(F.col(VARIANT_COL).isNotNull())
+        .drop(VARIANTS_COL)
+    )
+
+
+def _output_schema(rows: DataFrame) -> T.StructType:
+    """The columns and types of the shipped rows: those of *rows* plus the variant."""
+    return T.StructType([*rows.schema.fields, T.StructField(VARIANT_COL, T.IntegerType())])
+
+
 @dataclass(frozen=True)
 class _Run:
-    """A run definition of the pipeline, active for *variants* (all when ``None``)."""
+    """A run definition of the pipeline."""
 
     name: str
     breaks: RunBreak
-    variants: tuple[int, ...] | None
 
 
 class SeriesPipeline:
     """The ordered pass shared by all rules that need their series in order.
+
+    Chunking and everything that crosses chunk edges runs once per channel; its
+    samples fan out into one series per variant only for the rules' hooks.  The
+    shuffle therefore carries each sample once, while a task after it processes
+    about k rows per shuffled sample of a channel with k variants (chunks are k
+    times smaller to keep the rows per chunk at :data:`CHUNK_ROWS`).
+
+    Rule runs are computed for every channel of the pass; a rule only reads its
+    own runs, on its own series.
 
     Parameters
     ----------
@@ -136,26 +185,35 @@ class SeriesPipeline:
     def __init__(self, rules: Sequence[tuple[PushdownRule, Mapping[int, Pushdown]]], config):
         self.rules = list(rules)
         self.config = config
-        self.key = [config.container_id_col, config.channel_id_col, VARIANT_COL]
+        self.channel_key = [config.container_id_col, config.channel_id_col]
+        self.key = [*self.channel_key, VARIANT_COL]
         self.order = [config.tstart_col, config.tend_col, config.value_col]
-        self.runs = [_Run(BLOCK, block_break, None)]
+        self.variant_ids = _variant_ids(self.rules)
+        self.runs = [_Run(BLOCK, block_break)]
         self.rule_runs: dict[str, dict[str, str]] = {}
-        for rule, variants in self.rules:
+        for rule, _ in self.rules:
             names = {}
             for name, breaks in rule.runs().items():
                 names[name] = f"{rule.name}__{check_name('run', name)}"
-                self.runs.append(_Run(names[name], breaks, tuple(sorted(variants))))
+                self.runs.append(_Run(names[name], breaks))
             self.rule_runs[rule.name] = names
 
     def _context(self, rule: PushdownRule, variants: Mapping[int, Pushdown]) -> SeriesContext:
         return SeriesContext(rule, variants, self.key, self.order, True, self.rule_runs[rule.name])
 
-    def run(self, rows: DataFrame) -> DataFrame:
-        """Replace the samples of the rules' variants with their derived rows."""
-        df = self._chunked(rows)
+    def run(self, rows: DataFrame, variants: DataFrame) -> DataFrame:
+        """Replace the samples of the rules' variants with their derived rows.
+
+        *rows* holds the channel data, one row per sample; *variants* the variant
+        ids of each channel (see :func:`apply_pushdowns`).  Only channels shipping a
+        variant of the rules are processed.
+        """
+        df = self._chunked(rows, variants)
         df = self._chunk_scan(df)
-        df = df.join(F.broadcast(self._chunk_summaries(df)), on=[*self.key, CHUNK])
+        df = df.join(F.broadcast(self._chunk_summaries(df)), on=[*self.channel_key, CHUNK])
         df = self._resolve_neighbours_and_runs(df)
+        # The rules' columns read the variant (SeriesContext.active, .param).
+        df = _fan_out(df, variants, self.channel_key, self.variant_ids)
         contexts = [(rule, self._context(rule, variants)) for rule, variants in self.rules]
         for rule, ctx in contexts:
             df = _with_rule_columns(df, ctx, rule.row_columns(ctx))
@@ -164,23 +222,35 @@ class SeriesPipeline:
         kept = [(rule, ctx.kept_stage()) for rule, ctx in contexts]
         for rule, ctx in kept:
             df = _with_rule_columns(df, ctx, rule.kept_columns(ctx))
-        return _emit(df, kept, rows, self.order, raw=None)
+        return _emit(df, kept, _output_schema(rows), self.order, raw=None)
 
     # --- stages ----------------------------------------------------------------------
 
-    def _chunked(self, rows: DataFrame) -> DataFrame:
-        """Series boundaries and each sample's chunk, projected for the shuffle."""
+    def _chunked(self, rows: DataFrame, variants: DataFrame) -> DataFrame:
+        """Channel boundaries and each sample's chunk, projected for the shuffle.
+
+        A channel with k variants gets k times as many chunks: its samples fan out
+        per chunk before the rules' hooks (see :meth:`run`).
+        """
         ts, te, value = self.order
         ts_d, te_d = F.col(ts).cast("double"), F.col(te).cast("double")
-        # The time range spans the finite times; a series without a finite tend is
+        # The time range spans the finite times; a channel without a finite tend is
         # still cut by its tstart range.
-        series = rows.groupBy(*self.key).agg(
-            F.min(_nan_free(ts_d)).alias("_pd_first"),
-            F.greatest(F.max(_nan_free(te_d)), F.max(_nan_free(ts_d))).alias("_pd_end"),
-            F.count(F.lit(1)).alias("_pd_count"),
+        series = (
+            rows.join(F.broadcast(variants), on=self.channel_key)
+            .groupBy(*self.channel_key)
+            .agg(
+                F.min(_nan_free(ts_d)).alias("_pd_first"),
+                F.greatest(F.max(_nan_free(te_d)), F.max(_nan_free(ts_d))).alias("_pd_end"),
+                F.count(F.lit(1)).alias("_pd_count"),
+                F.max(F.size(_shipped(self.variant_ids))).alias("_pd_k"),
+            )
+            # Only the channels shipping a variant of the rules; filtering the aggregate
+            # keeps the broadcast of *variants* the same as for the other joins.
+            .where(F.col("_pd_k") > 0)
         )
         first, end = F.col("_pd_first"), F.col("_pd_end")
-        n_chunks = F.ceil(F.col("_pd_count") / F.lit(CHUNK_ROWS))
+        n_chunks = F.ceil(F.col("_pd_count") * F.col("_pd_k") / F.lit(CHUNK_ROWS))
         position = F.least(F.floor((ts_d - first) / (end - first) * n_chunks), n_chunks - 1)
         # Null and NaN tstarts go where the series order puts them: first and last.
         chunk = F.coalesce(
@@ -189,14 +259,14 @@ class SeriesPipeline:
             .when(end > first, position),
             F.lit(0).cast("long"),
         )
-        return rows.join(F.broadcast(series), on=self.key).select(
-            *self.key, ts, te, value, ts_d.alias(TS), te_d.alias(TE), chunk.alias(CHUNK)
+        return rows.join(F.broadcast(series), on=self.channel_key).select(
+            *self.channel_key, ts, te, value, ts_d.alias(TS), te_d.alias(TE), chunk.alias(CHUNK)
         )
 
     def _chunk_scan(self, df: DataFrame) -> DataFrame:
         """Neighbours within the chunk, and each run's breaks and segments."""
         value = self.order[2]
-        in_chunk = Window.partitionBy(*self.key, CHUNK).orderBy(*self.order)
+        in_chunk = Window.partitionBy(*self.channel_key, CHUNK).orderBy(*self.order)
         running = in_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
         df = (
             df.withColumn("_pd_first_in_chunk", F.row_number().over(in_chunk) == 1)
@@ -217,11 +287,8 @@ class SeriesPipeline:
             df = (
                 df.withColumn(
                     run_col(run.name, "brk"),
-                    _masked(
-                        run,
-                        F.when(F.col("_pd_first_in_chunk"), F.lit(0).cast("long")).otherwise(
-                            _breaks(run, prev, cur)
-                        ),
+                    F.when(F.col("_pd_first_in_chunk"), F.lit(0).cast("long")).otherwise(
+                        _breaks(run, prev, cur)
                     ),
                 )
                 .withColumn(run_col(run.name, "seg"), F.sum(brk).over(running))
@@ -261,14 +328,14 @@ class SeriesPipeline:
                 F.sum(brk).alias(run_col(run.name, "inner")),
                 F.max(F.when(brk == 1, F.col(TS))).alias(run_col(run.name, "last_start")),
             ]
-        chunks = df.groupBy(*self.key, CHUNK).agg(*aggregates)
+        chunks = df.groupBy(*self.channel_key, CHUNK).agg(*aggregates)
 
-        by_chunk = Window.partitionBy(*self.key).orderBy(CHUNK)
+        by_chunk = Window.partitionBy(*self.channel_key).orderBy(CHUNK)
         before = by_chunk.rowsBetween(Window.unboundedPreceding, -1)
         so_far = by_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
         everything = by_chunk.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
         later = (
-            Window.partitionBy(*self.key)
+            Window.partitionBy(*self.channel_key)
             .orderBy(F.col(CHUNK).desc())
             .rowsBetween(Window.unboundedPreceding, -1)
         )
@@ -279,7 +346,7 @@ class SeriesPipeline:
             ).withColumn(f"_pd_next_head_{field}", F.lead(head.getField(field)).over(by_chunk))
         prev_tail = Sample(*(F.col(f"_pd_prev_tail_{f}") for f in ("tstart", "tend", "value")))
         head_sample = Sample(*(head.getField(f) for f in ("tstart", "tend", "value")))
-        keep = [*self.key, CHUNK, "_pd_head", "_pd_tail"]
+        keep = [*self.channel_key, CHUNK, "_pd_head", "_pd_tail"]
         keep += [f"_pd_prev_tail_{f}" for f in ("tstart", "tend", "value")]
         keep += [f"_pd_next_head_{f}" for f in ("tstart", "tend", "value")]
         for run in self.runs:
@@ -292,7 +359,7 @@ class SeriesPipeline:
             chunks = (
                 chunks.withColumn(
                     run_col(run.name, "head_brk"),
-                    _masked(run, _breaks(run, prev_tail, head_sample)),
+                    _breaks(run, prev_tail, head_sample),
                 )
                 .withColumn(run_col(run.name, "breaks"), head_brk + inner)
                 .withColumn(
@@ -428,9 +495,16 @@ class SeriesPipeline:
 
 
 def _row_branch(
-    rows: DataFrame, rules: Sequence[tuple[PushdownRule, Mapping[int, Pushdown]]], config
+    rows: DataFrame,
+    rules: Sequence[tuple[PushdownRule, Mapping[int, Pushdown]]],
+    config,
+    schema: T.StructType,
 ) -> DataFrame:
-    """Raw rows unchanged, and the derived rows of per-sample rules."""
+    """Raw rows unchanged, and the derived rows of per-sample rules.
+
+    *rows* are tagged with :data:`VARIANT_COL`, one copy per variant; *schema* gives
+    the output columns.
+    """
     if not rules:
         return rows
     key = [config.container_id_col, config.channel_id_col, VARIANT_COL]
@@ -447,7 +521,7 @@ def _row_branch(
     kept = [(rule, ctx.kept_stage()) for rule, ctx in contexts]
     for rule, ctx in kept:
         df = _with_rule_columns(df, ctx, rule.kept_columns(ctx))
-    return _emit(df, kept, rows, order, raw=F.col(VARIANT_COL) == RAW_VARIANT)
+    return _emit(df, kept, schema, order, raw=F.col(VARIANT_COL) == RAW_VARIANT)
 
 
 # --- helpers shared by both branches ------------------------------------------------
@@ -476,9 +550,9 @@ def _keep(df: DataFrame, contexts, extra: Column) -> DataFrame:
 
 
 def _emit(
-    df: DataFrame, contexts, rows: DataFrame, order: Sequence[str], raw: Column | None
+    df: DataFrame, contexts, schema: T.StructType, order: Sequence[str], raw: Column | None
 ) -> DataFrame:
-    """Explode the rules' emitted rows into rows with the columns and types of *rows*.
+    """Explode the rules' emitted rows into rows with the columns and types of *schema*.
 
     *raw* marks rows passed through unchanged.
     """
@@ -499,10 +573,10 @@ def _emit(
         if col not in df.columns:
             # Columns beyond the channel-data shape (e.g. POI string values) are not
             # carried through the series scan; derived rows have none.
-            return F.lit(None).cast(rows.schema[col].dataType).alias(col)
+            return F.lit(None).cast(schema[col].dataType).alias(col)
         if col not in fields:
             return F.col(col)
-        derived = element.getField(fields[col]).cast(rows.schema[col].dataType)
+        derived = element.getField(fields[col]).cast(schema[col].dataType)
         # Times left out of an element keep the sample's own.
         keep = (
             original
@@ -511,18 +585,14 @@ def _emit(
         )
         return F.when(keep, F.col(col)).otherwise(derived).alias(col)
 
-    return df.withColumn(_ELEMENT, F.explode(elements)).select(*[out(c) for c in rows.columns])
+    return df.withColumn(_ELEMENT, F.explode(elements)).select(
+        *[out(c) for c in schema.fieldNames()]
+    )
 
 
 def _breaks(run: _Run, prev: Sample, cur: Sample) -> Column:
     """1 where *cur* starts a new run after *prev* (a null break counts as one)."""
     return F.coalesce(run.breaks(prev, cur), F.lit(True)).cast("long")
-
-
-def _masked(run: _Run, column: Column) -> Column:
-    if run.variants is None:
-        return column
-    return F.when(F.col(VARIANT_COL).isin(list(run.variants)), column)
 
 
 def _flag(name: str) -> Column:
