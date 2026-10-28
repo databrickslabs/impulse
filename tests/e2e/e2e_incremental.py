@@ -14,9 +14,9 @@ from e2e_utils import (
     add_rpm_histogram,
     assert_unchanged,
     check,
+    commits_since,
     config,
     copy_silver,
-    expected,
     gold,
     load_silver,
     new_report,
@@ -55,11 +55,8 @@ assert_unchanged(p, before, "container_id <= 40")
 
 # One MERGE per batch of at most `cap` containers (10 histogram bins each).
 new = spark.read.table(f"{silver}container_metrics").where("container_id > 40").count()
-histogram = f"{p.catalog}.{p.schema}.{p.prefix}_histogram_fact"
-# Other commits (e.g. OPTIMIZE by predictive optimization) don't count.
-commits = spark.sql(f"DESCRIBE HISTORY {histogram}").where(
-    f"version > {before['histogram_fact']} AND operation = 'MERGE'"
-)
+commits = commits_since(p, "histogram_fact", before["histogram_fact"])
+assert commits.where("operation != 'MERGE'").count() == 0, "a batch is not a single MERGE"
 batches = commits.count()
 assert batches == math.ceil(new / cap), f"{batches} batches for {new} containers"
 inserted = commits.selectExpr("int(operationMetrics['numTargetRowsInserted']) AS n")
@@ -68,5 +65,4 @@ assert inserted.where(f"n > {cap * 10}").count() == 0, "a batch exceeds the cap"
 # COMMAND ----------
 
 for table in tables:
-    actual = gold(p, table)
-    check(p, table, actual, expected(p, table, actual.schema, test="rpm_histogram"))
+    check(p, table, gold(p, table), test="rpm_histogram")

@@ -31,9 +31,17 @@ ws = WorkspaceClient()
 
 def params():
     """Task parameters. `prefix` is the task name and names the test's tables and expected files."""
-    names = ["catalog", "schema", "source_schema", "prefix", "expected_dir", "actual_dir"]
+    names = [
+        "catalog",
+        "schema",
+        "source_catalog",
+        "source_schema",
+        "prefix",
+        "expected_dir",
+        "actual_dir",
+    ]
     p = SimpleNamespace(**{n: dbutils.widgets.get(n) for n in names})
-    p.source = f"{p.catalog}.{p.source_schema}."
+    p.source = f"{p.source_catalog}.{p.source_schema}."
     return p
 
 
@@ -121,6 +129,18 @@ def versions(p, tables):
     }
 
 
+# Commits by predictive optimization and other table maintenance.
+MAINTENANCE_OPERATIONS = ["OPTIMIZE", "VACUUM START", "VACUUM END"]
+
+
+def commits_since(p, table, version):
+    """History of this test's gold `table` after `version`, without maintenance commits."""
+    name = f"{p.catalog}.{p.schema}.{p.prefix}_{table}"
+    return spark.sql(f"DESCRIBE HISTORY {name}").where(
+        (F.col("version") > version) & ~F.col("operation").isin(MAINTENANCE_OPERATIONS)
+    )
+
+
 def assert_unchanged(p, before, where):
     """The rows matching `where` (incl. _created_at) equal those at the versions in `before`."""
     for table, version in before.items():
@@ -181,14 +201,17 @@ def save_actual(p, name, df):
     return path
 
 
-def check(p, name, actual, expected_rows=None):
-    """Compare `actual` with `expected_rows` (default: this test's expected file).
+def check(p, name, actual, expected_rows=None, test=None, where=None):
+    """Compare `actual` with `expected_rows` (default: the expected file of `test`, by default
+    this one, filtered by the `where` condition if given).
 
     On a mismatch the actual rows are uploaded as CSV, so the expected file can be refreshed.
     """
     try:
         if expected_rows is None:
-            expected_rows = expected(p, name, actual.schema)
+            expected_rows = expected(p, name, actual.schema, test)
+            if where is not None:
+                expected_rows = expected_rows.where(where)
         # Absolute tolerance only: a relative one would allow seconds of drift on epoch timestamps.
         assertDataFrameEqual(actual, expected_rows, rtol=0, atol=1e-6, maxErrors=10)
     except Exception:

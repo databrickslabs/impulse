@@ -14,6 +14,7 @@ resources:
             base_parameters: &params
               catalog: ${var.catalog}
               schema: e2e_{{job.run_id}}
+              source_catalog: ${var.source_catalog}
               source_schema: ${var.source_schema}
               # Each test writes its tables with this prefix and reads expected/<prefix>/.
               prefix: "{{task.name}}"

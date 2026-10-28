@@ -11,6 +11,7 @@ from e2e_utils import (
     add_rpm_histogram,
     assert_histogram_covers_events,
     check,
+    commits_since,
     config,
     gold,
     new_report,
@@ -54,8 +55,8 @@ report.run()
 ids, before = table_ids(), versions(p, tables)
 report.run()
 assert table_ids() == ids, "the second run recreated gold tables"
-after = versions(p, tables)
-assert all(after[t] > before[t] for t in tables), f"not rewritten: {before} -> {after}"
+not_rewritten = [t for t in tables if not commits_since(p, t, before[t]).count()]
+assert not not_rewritten, f"not rewritten: {not_rewritten}"
 
 for table in tables:
     check(p, table, gold(p, table))

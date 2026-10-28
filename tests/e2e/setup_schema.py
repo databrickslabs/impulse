@@ -7,7 +7,7 @@
 # COMMAND ----------
 
 import pyspark.sql.functions as F
-from e2e_utils import check, expected, params, spark
+from e2e_utils import check, params, spark
 
 p = params()
 spark.sql(f"CREATE SCHEMA {p.catalog}.{p.schema}")
@@ -31,4 +31,4 @@ containers = (
     .pivot("key", ["experiment_id", "filename"])
     .agg(F.first("value"))
 )
-check(p, "containers", containers, expected(p, "containers", containers.schema, test=""))
+check(p, "containers", containers, test="")

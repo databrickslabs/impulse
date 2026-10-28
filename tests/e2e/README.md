@@ -31,7 +31,7 @@ CI runs it via `.github/workflows/e2e.yml` on every push to a PR into main, nigh
 
 ## Input data
 
-The reports read the silver tables in `<catalog>.<source_schema>` (bundle variables in `databricks.yml`). They were created from MF4 files with the [Impulse MF4 ingest solution accelerator](https://github.com/databricks-industry-solutions/impulse-mf4-ingest).
+The reports read the silver tables in `<source_catalog>.<source_schema>` (bundle variables in `databricks.yml`) and write to temporary schemas in `<catalog>`. They were created from MF4 files with the [Impulse MF4 ingest solution accelerator](https://github.com/databricks-industry-solutions/impulse-mf4-ingest).
 
 `expected/containers.csv` lists the MF4 file (`experiment_id` folder and `filename`) behind each container id. Use it to rebuild the silver layer from scratch with the accelerator. If the rebuild assigns different container ids, refresh the expected files.
 

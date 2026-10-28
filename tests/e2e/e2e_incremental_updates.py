@@ -16,6 +16,7 @@ from e2e_utils import (
     assert_histogram_covers_events,
     assert_unchanged,
     check,
+    commits_since,
     config,
     copy_silver,
     expected,
@@ -44,7 +45,8 @@ report.run()
 # 1. No changes: the fact tables must not be rewritten.
 before = versions(p, tables)
 report.run()
-assert versions(p, tables) == before, "a run without changes rewrote fact tables"
+rewritten = [t for t in tables if commits_since(p, t, before[t]).count()]
+assert not rewritten, f"a run without changes rewrote fact tables: {rewritten}"
 
 # COMMAND ----------
 
@@ -78,9 +80,9 @@ report = new_report(config(p, source=silver, incremental=incremental))
 add_rpm_histogram(report, bin_width=250)
 before = versions(p, tables)
 report.run()
-after = versions(p, tables)
-assert after["histogram_fact"] > before["histogram_fact"], "histogram was not recomputed"
-assert after["event_instance_fact"] == before["event_instance_fact"], "event was rewritten"
+commits = {t: commits_since(p, t, before[t]).count() for t in tables}
+assert commits["histogram_fact"] > 0, "histogram was not recomputed"
+assert commits["event_instance_fact"] == 0, "event was rewritten"
 
 # Reference: a full run of the same report on the same data.
 ref = f"{p.prefix}_ref"
