@@ -284,7 +284,82 @@ def test_seconds_as_double_with_fractional_rate(spark, chunk_rows):
         chunk_rows=chunk_rows,
     )[(1, 1, 1)]
     expected = _expected((tstarts, tends, values), 0.1)
+    _assert_close(actual, expected)
+
+
+def _assert_close(actual, expected):
+    """Equal values; grid times within one ulp, where numpy may fuse the multiply-add."""
     assert len(actual) == len(expected)
     nptest.assert_array_max_ulp(actual.tstarts, expected.tstarts, maxulp=1)
     nptest.assert_array_max_ulp(actual.tends, expected.tends, maxulp=1)
     nptest.assert_array_equal(actual.values, expected.values)
+
+
+def _as_seconds(series):
+    """*series* on an irregular seconds-as-double clock: times are not binary-exact."""
+    tstarts, tends, values = series
+    clock = [1234.5678 + t * 0.0371 for t in tstarts], [1234.5678 + t * 0.0371 for t in tends]
+    return (*clock, values)
+
+
+@pytest.mark.parametrize("chunk_rows", [None, 1, 3, 8])
+def test_random_double_time_series(spark, chunk_rows):
+    # Gaps, zero-duration samples and NaN values on a clock that is not binary-exact,
+    # at fractional rates below and above the sample spacing.
+    rng = np.random.default_rng(17)
+    rates = {1: 0.1, 2: 0.25, 3: 0.6}
+    series, expected = {}, {}
+    for cid, n in enumerate([1, 2, 40, 90, 150]):
+        samples = _as_seconds(random_series(rng, n))
+        for vid, rate in rates.items():
+            series[(cid, 1, vid)] = samples
+            expected[(cid, 1, vid)] = _expected(samples, rate)
+    assert sum(len(e) for e in expected.values()) > 300
+    actual = _resample_in_spark(
+        spark, series, rates, time_type=T.DoubleType(), chunk_rows=chunk_rows
+    )
+    assert actual.keys() == expected.keys()
+    for key, exp in expected.items():
+        _assert_close(actual[key], exp)
+
+
+@pytest.mark.filterwarnings("ignore:All-NaN slice encountered:RuntimeWarning")
+@pytest.mark.parametrize("chunk_rows", [None, 2, 7])
+def test_nan_tends(spark, chunk_rows):
+    # A NaN tend ends its block, and the block ends at its largest finite tend, so the
+    # sample with the NaN tend adds no grid points of its own.
+    nan = float("nan")
+    series = {
+        (0, 1, 1): ([0.0, 1.0, 2.0, 3.0], [1.0, nan, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]),
+        (1, 1, 1): ([0.0, 1.0, 2.0], [1.0, 2.0, nan], [1.0, 2.0, 3.0]),
+    }
+    rng = np.random.default_rng(23)
+    while len(series) < 12:
+        tstarts, tends, values = random_series(rng, int(rng.integers(2, 60)), nan_tend=True)
+        samples = ([float(t) for t in tstarts], tends, values)
+        try:
+            _expected(samples, 1)
+        except ValueError:
+            # A block without a finite tend has no end (see the next test).
+            continue
+        if any(np.isnan(tends)):
+            series[(len(series), 1, 1)] = samples
+    for key in list(series):
+        series[(key[0], 1, 2)] = series[key]
+    actual = _resample_in_spark(
+        spark, series, {1: 1, 2: 3}, time_type=T.DoubleType(), chunk_rows=chunk_rows
+    )
+    for (cid, ch, vid), samples in series.items():
+        _assert_same(actual[(cid, ch, vid)], _expected(samples, {1: 1, 2: 3}[vid]))
+
+
+@pytest.mark.filterwarnings("ignore:All-NaN slice encountered:RuntimeWarning")
+def test_block_without_a_finite_tend_fails_like_pandas(spark):
+    # A sample with a NaN tend after a block break forms a block without an end; the
+    # pandas evaluation fails on it, and so must the pushdown instead of guessing one.
+    nan = float("nan")
+    samples = ([0.0, 1.0, 2.0], [nan, 2.0, 3.0], [1.0, 2.0, 3.0])
+    with pytest.raises(ValueError):
+        _expected(samples, 1)
+    with pytest.raises(Exception, match="resample:"):
+        _resample_in_spark(spark, {(1, 1, 1): samples}, {1: 1}, time_type=T.DoubleType())
