@@ -1,0 +1,3 @@
+version = "0.10.0"
+wheel = "https://github.com/databrickslabs/impulse/releases/download/v0.10.0/databricks_impulse-0.10.0-py3-none-any.whl"
+environment_version = "4"

@@ -132,7 +132,7 @@ const Hero = () => {
             </p>
 
 
-            <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="mt-12 grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Button
                     variant="secondary"
                     outline={true}
@@ -155,6 +155,14 @@ const Hero = () => {
                     link="/docs/tutorial/demo"
                     size="large"
                     label="Demo"
+                    className="w-full"
+                />
+                <Button
+                    variant="secondary"
+                    outline={true}
+                    link="/app"
+                    size="large"
+                    label="Impulse App"
                     className="w-full"
                 />
             </div>

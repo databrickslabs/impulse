@@ -45,6 +45,11 @@ coverage:
 	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=html
 	open htmlcov/index.html
 
+# Run the end-to-end suite on Databricks. Needs the Databricks CLI and workspace auth.
+test-e2e:
+	databricks bundle deploy -t e2e
+	databricks bundle run e2e_tests -t e2e
+
 build:
 	uv build --require-hashes --build-constraints=.build-constraints.txt
 
@@ -67,4 +72,4 @@ fork-sync:
 	./.github/scripts/fork-sync-pr.sh $(PR)
 
 .DEFAULT: all
-.PHONY: all clean dev lint fmt test coverage build update-api-docs lock-dependencies fork-sync
+.PHONY: all clean dev lint fmt test test-e2e coverage build update-api-docs lock-dependencies fork-sync

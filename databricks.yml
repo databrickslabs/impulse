@@ -1,0 +1,37 @@
+# Bundle for the end-to-end tests: one serverless job that runs tests/e2e.
+bundle:
+  name: impulse-e2e
+
+artifacts:
+  impulse_wheel:
+    type: whl
+    # Clean first so the dist/*.whl glob in resources/e2e_job.yml matches one wheel.
+    build: rm -rf dist && uv build --wheel
+    path: .
+    # Version the wheel by build time, so serverless installs every deploy's code.
+    dynamic_version: true
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Catalog for the ephemeral test schemas.
+    default: maxim_catalog
+  source_catalog:
+    description: Catalog with the silver test data (read-only).
+    default: maxim_catalog
+  source_schema:
+    description: Schema under `source_catalog` with the silver test data (read-only).
+    default: default
+  suffix:
+    description: Suffix of the bundle root and job name, so each PR deploys its own copy.
+    default: ""
+
+targets:
+  # Workspace host and auth come from the environment.
+  e2e:
+    default: true
+    mode: development
+    workspace:
+      root_path: ~/.bundle/${bundle.name}/${bundle.target}${var.suffix}

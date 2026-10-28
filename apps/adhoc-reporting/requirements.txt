@@ -1,0 +1,27 @@
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.13.0
+certifi==2026.5.20
+cffi==2.0.0 ; platform_python_implementation != 'PyPy'
+charset-normalizer==3.4.7
+click==8.4.1
+colorama==0.4.6 ; sys_platform == 'win32'
+cryptography==48.0.0
+databricks-sdk==0.115.0
+fastapi==0.136.3
+google-auth==2.53.0
+h11==0.16.0
+idna==3.17
+protobuf==6.33.6
+pyasn1==0.6.3
+pyasn1-modules==0.4.2
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+pydantic==2.13.4
+pydantic-core==2.46.4
+pyyaml==6.0.3
+requests==2.34.2
+starlette==1.2.1
+typing-extensions==4.15.0
+typing-inspection==0.4.2
+urllib3==2.7.0
+uvicorn==0.48.0

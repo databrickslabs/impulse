@@ -1,0 +1,81 @@
+name: app
+
+# Tests the Impulse App in apps/adhoc-reporting/. Not a required check, and it runs only on PRs that
+# change the app: Codecov (require_ci_to_pass) holds back its status while any other check fails, so
+# an app check on framework PRs would affect the framework's CI. Framework changes (src/) run it
+# once they are on main, where the contract tests build the app's generated notebooks against the
+# framework source of that commit. To check a framework branch before merging, run it by hand.
+on:
+  pull_request:
+    types: [ opened, synchronize, ready_for_review ]
+    paths:
+      - 'apps/adhoc-reporting/**'
+      - '.github/workflows/app.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/adhoc-reporting/**'
+      - 'src/**'
+      - '.github/workflows/app.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Same fork gate as acceptance.yml: fork PRs get no OIDC token, so JFrog auth cannot run.
+  not-a-fork:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+    steps:
+      - run: echo "Not a fork PR, proceeding"
+
+  test:
+    name: Test the app
+    needs: not-a-fork
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    permissions:
+      id-token: write
+    defaults:
+      run:
+        working-directory: apps/adhoc-reporting
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # uv installs the Python versions the Makefile asks for: 3.11 for the app (the Databricks Apps
+      # runtime) and 3.12 for the framework contract tests.
+      - name: Install UV
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          version: "0.11.2"
+          checksum: "7ac2ca0449c8d68dae9b99e635cd3bc9b22a4cb1de64b7c43716398447d42981"
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      # After the setup steps: the action only configures the package managers it finds.
+      - name: Setup for JFrog
+        uses: ./.github/actions/jfrog-auth
+
+      - name: Unit and contract tests (pinned framework release)
+        run: make test
+
+      - name: Framework skills match the pinned release
+        run: make check-skills
+
+      - name: Contract tests (framework at this commit)
+        run: make test FRAMEWORK=../..
+
+      - name: Build the frontend
+        run: make frontend

@@ -51,6 +51,7 @@ logs/
 # Local development settings
 .env
 .env.local
+scripts/local/
 
 # macOS specific
 .DS_Store

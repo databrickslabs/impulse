@@ -97,11 +97,11 @@ def _gold_created_at_by_container_id(spark) -> dict[int, object]:
 def test_report_reads_through_selected_db(spark, set_allowed_container_ids):
     set_allowed_container_ids(1, 2)
     report = _create_report(spark)
-    report.determine_report()
+    report.run(persist_results=False)
 
     assert type(report.get_db()) is AllowListDB
-    # determine_report splits results into {"changed", "unchanged"} definition buckets; exactly
-    # one holds this run's histogram. Pull it out and check which containers it was computed for.
+    # The run splits results into {"changed", "unchanged"} definition buckets; exactly one
+    # holds this run's histogram. Pull it out and check which containers it was computed for.
     [histogram] = [df for df in report.aggregation_dfs["HISTOGRAM"].values() if df is not None]
     assert histogram.select("container_id").distinct().orderBy("container_id").collect() == [
         Row(container_id=1),
@@ -117,28 +117,27 @@ def test_report_restricts_to_single_allowed_container(spark, set_allowed_contain
     assert report.get_db().config.allowed_containers_table == _ALLOWED
 
     # ...and with only container 1 allowed, that is the only container the histogram covers.
-    report.determine_report()
+    report.run(persist_results=False)
     [histogram] = [df for df in report.aggregation_dfs["HISTOGRAM"].values() if df is not None]
     assert histogram.select("container_id").distinct().collect() == [Row(container_id=1)]
 
 
 def test_incremental_detection_reads_through_custom_db(spark, set_allowed_container_ids):
     set_allowed_container_ids(1)
-    first = _create_report(spark)
-    first.determine_report()
-    first.persist_results()
+    _create_report(spark).run()
     before = _gold_created_at_by_container_id(spark)
 
     set_allowed_container_ids(1, 2)
-    second = _create_report(spark, incremental=True)
-    second.determine_report()
-    second.persist_results()
+    _create_report(spark, incremental=True).run()
     after = _gold_created_at_by_container_id(spark)
 
+    # Silver holds containers 1-3; allowing only 1, the full run writes only container 1.
     assert set(before.keys()) == {1}
-    # The second run computes only the newly allowed container 2 (unchanged definition bucket).
-    [histogram] = [df for df in second.aggregation_dfs["HISTOGRAM"].values() if df is not None]
-    assert histogram.select("container_id").distinct().collect() == [Row(container_id=2)]
+    # Incremental detection reads through the custom DB: it adds the newly allowed 2, but not
+    # 3, which is in silver but not allowed (detection on the raw table would add it).
+    assert set(after.keys()) == {1, 2}
+    # ...and the run really was incremental: container 1 wasn't rewritten (every gold write
+    # stamps a fresh _created_at). Without this, a full re-run would also pass the check above.
     assert after[1] == before[1]
 
 

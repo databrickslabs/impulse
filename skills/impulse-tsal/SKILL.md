@@ -129,6 +129,14 @@ three `SampleSeries` (min, max, average).
 
 **User-defined functions**
 
+**Prefer native functionality.** Before writing a UDF, check whether the request can be expressed
+with native building blocks: the operators and signal methods above, the `Intervals` methods below,
+the event types (`impulse-events`), the aggregation classes (`impulse-aggregations`) and calculated
+channels (`impulse-channels`). Write a UDF only for the part native functionality cannot express,
+and keep everything else native. Native operations already handle empty inputs, gaps and unaligned
+channels (see the rules below). Future Impulse versions may also optimize the execution of native
+functionality, while logic inside a UDF stays opaque to the engine.
+
 ```python
 from impulse_query_engine.model.series import SampleSeries
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
@@ -160,6 +168,35 @@ derated = derate(power)
   `container_tags_table`** (else `ValueError`). See `impulse-data-model`.
 - Values are constant per container. The declaration **propagates** when the UDF is wrapped in an
   aggregation, event, or calculated channel — the wrapper does not redeclare anything.
+
+**Rules for correct UDF results** (when an input is a `SampleSeries`):
+
+- **Handle empty inputs.** Every UDF runs once at planning time, with every series input empty (and
+  every declared container tag/metric `None`), so the engine can infer the result type. Indexing
+  (`series.values[0]`, `series.tstarts[-1]`) fails on empty input. Guard with `if len(series) == 0:`
+  and return an empty result of the UDF's return type: `SampleSeries.empty()` for a series, `np.nan`
+  for a number. The built-in reducers (`sum()`, `min()`, `max()`, `mean()`) already return NaN.
+- **Return the same type on every path.** The type returned on the planning call fixes the output
+  column type; a return type that depends on the data (a `SampleSeries` on one branch, a float on
+  another) produces values that do not fit that column.
+- **Respect gaps.** A series may contain gaps; two samples are contiguous only if
+  `tstarts[i+1] == tends[i]` exactly. Compute neighbour-based logic (differences, gradients,
+  cumulative sums) per segment using `series.continuous_interval_indices` (inclusive `(start, end)`
+  index pairs), as `diff()`, `cumtrapz()` and `resample()` do.
+- **Synchronize before combining raw arrays of several series.** Channels have different timestamps,
+  so element-wise numpy on `a.values` and `b.values` pairs unrelated samples (or raises on a shape
+  mismatch). Operators (`a + b`, `a > b`) synchronize automatically; inside a UDF call
+  `a.synchronized(b)` or `a.synchronized_all([b, c])`, which return the series (self first) on shared
+  intervals covering only their overlap, so the result may be shorter or empty.
+
+```python
+import numpy as np
+
+@TimeSeriesExpression.udf
+def magnitude(x, y):
+    xs, ys = x.synchronized(y)
+    return SampleSeries(xs.tstarts, xs.tends, np.hypot(xs.values, ys.values))
+```
 
 ## What an expression evaluates to (the core data model)
 
