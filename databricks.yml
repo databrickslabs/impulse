@@ -17,7 +17,7 @@ include:
 variables:
   catalog:
     description: Catalog for the ephemeral test schemas.
-    default: impulse_tests_catalog
+    default: maxim_catalog
   source_catalog:
     description: Catalog with the silver test data (read-only).
     default: maxim_catalog
