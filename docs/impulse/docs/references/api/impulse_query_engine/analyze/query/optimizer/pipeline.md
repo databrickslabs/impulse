@@ -29,7 +29,7 @@ The rows a solve ships: raw rows (when *include_raw*) and all derived rows.
 per sample.
 - `variants` (`pyspark.sql.DataFrame`): ``(container_id, channel_id, VARIANTS_COL)``: the variant ids each matched
 channel ships, one row per channel (see :meth:`PushdownPlan.channel_variants`).
-Channels without a row are dropped.
+Channels without a row are dropped.  Both branches broadcast this one frame.
 - `plan` (`PushdownPlan`): The solve's pushdown plan.
 - `config` (`SolverConfig`): Provides the internal column names.
 - `include_raw` (`bool`): Whether to keep the raw rows (variant 0).
@@ -68,7 +68,8 @@ def run(rows: DataFrame, variants: DataFrame) -> DataFrame
 
 Replace the samples of the rules' variants with their derived rows.
 
-*rows* holds the channel data, one row per sample; *variants* the rules'
-variant ids of each channel, none empty.
+*rows* holds the channel data, one row per sample; *variants* the variant
+ids of each channel (see :func:`apply_pushdowns`).  Only channels shipping a
+variant of the rules are processed.
 
 
