@@ -24,6 +24,7 @@ from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers im
     plan_for,
     random_series,
     run,
+    top_level_items,
 )
 from impulse_query_engine.analyze.query.optimizer import apply_pushdowns
 
@@ -181,16 +182,6 @@ def test_random_series_across_chunk_sizes(spark):
             _assert_same(actual[key], exp)
 
 
-def _top_level_items(text):
-    items, depth, start = [], 0, 0
-    for i, char in enumerate(text):
-        depth += {"(": 1, ")": -1}.get(char, 0)
-        if char == "," and depth == 0:
-            items.append(text[start:i].strip())
-            start = i + 1
-    return [*items, text[start:].strip()]
-
-
 def _optimized_plan(spark) -> str:
     df, variants = channel_rows(spark, {(1, 1, 1): ([0, 1], [1, 2], [1.0, 2.0])})
     result = apply_pushdowns(df, variants, plan_for({1: _pushdown(1)}), CONFIG, include_raw=False)
@@ -205,7 +196,7 @@ def test_windows_over_samples_are_chunked(spark):
     channel_key = ["container_id", "channel_id"]
     seen = set()
     for spec in specs:
-        items = _top_level_items(re.sub(r"#\d+L?", "", spec))
+        items = top_level_items(re.sub(r"#\d+L?", "", spec))
         partition = [item for item in items if not item.endswith(("NULLS FIRST", "NULLS LAST"))]
         order = [item.split(" ")[0] for item in items[len(partition) :]]
         seen.add((tuple(partition), tuple(order)))

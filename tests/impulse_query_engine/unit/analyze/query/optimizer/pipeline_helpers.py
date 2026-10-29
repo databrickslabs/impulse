@@ -209,3 +209,14 @@ class ProbeRule(PushdownRule):
 
     def pushdown(self, selector: TimeSeriesSelector) -> Pushdown:
         return Pushdown(rule=self, selector=selector, params=(), consumed=(selector,))
+
+
+def top_level_items(text: str) -> list[str]:
+    """The comma-separated items of *text*, not splitting inside parentheses."""
+    items, depth, start = [], 0, 0
+    for i, char in enumerate(text):
+        depth += {"(": 1, ")": -1}.get(char, 0)
+        if char == "," and depth == 0:
+            items.append(text[start:i].strip())
+            start = i + 1
+    return [*items, text[start:].strip()]

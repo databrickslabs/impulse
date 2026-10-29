@@ -31,9 +31,17 @@ Windows never span more than a chunk of samples (or the chunk summaries of a
 channel), so the memory per task is bounded by the chunk size.
 
 Keeping one full read for the chunk pass and its summaries relies on both
-seeing the same projected rows: a fixed projection before the shuffle, a chunk
-id that cannot be null, the value as the last sort key, and summaries that
-depend on the chunk window.
+seeing the same plan below the shuffle:
+
+* The same projected rows: the raw sample columns and a chunk id that cannot be
+  null.  Windows over the samples read raw columns only; a derived window input
+  is computed before the shuffle, and each consumer would keep only the inputs
+  it uses.
+* The same runtime filters: the full read is joined with *variants* like the
+  narrow read, so both copies are pruned alike, and the summaries are joined on
+  keys the planner cannot trace to the scan, so no filter on the chunk pass is
+  built from its own summaries.
+* The value as the last sort key, and summaries that depend on the chunk window.
 """
 
 from __future__ import annotations
@@ -154,6 +162,22 @@ def _fan_out(df: DataFrame, variants: DataFrame, key: Sequence[str], ids: Sequen
     )
 
 
+def _opaque_join(df: DataFrame, small: DataFrame, on: Sequence[str]) -> DataFrame:
+    """*df* joined with the broadcast *small* on keys the planner cannot trace to a scan.
+
+    *df*'s keys are copied behind an always-true non-deterministic guard, so no
+    runtime filter built from *small* reaches *df*'s scans.  When *small* is
+    computed from *df*, such a filter would make the two copies of *df*'s plan
+    differ and keep them from sharing their shuffle.  The keys must not be null.
+    """
+    guarded = {c: f"_pd_join_{c}" for c in on}
+    # spark_partition_id() is never negative; Spark folds comparisons on rand() away.
+    guard = F.spark_partition_id() >= 0
+    left = df.select("*", *[F.when(guard, F.col(c)).alias(g) for c, g in guarded.items()])
+    right = small.select(*[F.col(c).alias(guarded.get(c, c)) for c in small.columns])
+    return left.join(F.broadcast(right), on=list(guarded.values())).drop(*guarded.values())
+
+
 def _output_schema(rows: DataFrame) -> T.StructType:
     """The columns and types of the shipped rows: those of *rows* plus the variant."""
     return T.StructType([*rows.schema.fields, T.StructField(VARIANT_COL, T.IntegerType())])
@@ -215,7 +239,7 @@ class SeriesPipeline:
         """
         df = self._chunked(rows, variants)
         df = self._chunk_scan(df)
-        df = df.join(F.broadcast(self._chunk_summaries(df)), on=[*self.channel_key, CHUNK])
+        df = _opaque_join(df, self._chunk_summaries(df), [*self.channel_key, CHUNK])
         df = self._resolve_neighbours_and_runs(df)
         # The rules' columns read the variant (SeriesContext.active, .param).
         df = _fan_out(df, variants, self.channel_key, self.variant_ids)
@@ -232,19 +256,18 @@ class SeriesPipeline:
     # --- stages ----------------------------------------------------------------------
 
     def _chunked(self, rows: DataFrame, variants: DataFrame) -> DataFrame:
-        """Channel boundaries and each sample's chunk, projected for the shuffle.
+        """Channel boundaries and each sample's chunk, with the raw sample columns.
 
         A channel with k variants gets k times as many chunks: its samples fan out
         per chunk before the rules' hooks (see :meth:`run`).
         """
         ts, te, value = self.order
         ts_d, te_d = F.col(ts).cast("double"), F.col(te).cast("double")
+        matched = rows.join(F.broadcast(variants), on=self.channel_key)
         # The time range spans the finite times; a channel without a finite tend is
         # still cut by its tstart range.
         series = (
-            rows.join(F.broadcast(variants), on=self.channel_key)
-            .groupBy(*self.channel_key)
-            .agg(
+            matched.groupBy(*self.channel_key).agg(
                 F.min(_nan_free(ts_d)).alias("_pd_first"),
                 F.greatest(F.max(_nan_free(te_d)), F.max(_nan_free(ts_d))).alias("_pd_end"),
                 F.count(F.lit(1)).alias("_pd_count"),
@@ -264,24 +287,27 @@ class SeriesPipeline:
             .when(end > first, position),
             F.lit(0).cast("long"),
         )
-        return rows.join(F.broadcast(series), on=self.channel_key).select(
-            *self.channel_key, ts, te, value, ts_d.alias(TS), te_d.alias(TE), chunk.alias(CHUNK)
+        return matched.join(F.broadcast(series), on=self.channel_key).select(
+            *self.channel_key, ts, te, value, chunk.alias(CHUNK)
         )
 
     def _chunk_scan(self, df: DataFrame) -> DataFrame:
         """Neighbours within the chunk, and each run's breaks and segments."""
-        value = self.order[2]
+        ts, te, value = self.order
         in_chunk = Window.partitionBy(*self.channel_key, CHUNK).orderBy(*self.order)
         running = in_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        # The neighbour windows read the raw columns and cast their results.
         df = (
             df.withColumn("_pd_first_in_chunk", F.row_number().over(in_chunk) == 1)
             .withColumn("_pd_last_in_chunk", F.lead(F.lit(True)).over(in_chunk).isNull())
-            .withColumn("_pd_lag_ts", F.lag(TS).over(in_chunk))
-            .withColumn("_pd_lag_te", F.lag(TE).over(in_chunk))
+            .withColumn("_pd_lag_ts", F.lag(ts).over(in_chunk).cast("double"))
+            .withColumn("_pd_lag_te", F.lag(te).over(in_chunk).cast("double"))
             .withColumn("_pd_lag_value", F.lag(value).over(in_chunk))
-            .withColumn("_pd_lead_ts", F.lead(TS).over(in_chunk))
-            .withColumn("_pd_lead_te", F.lead(TE).over(in_chunk))
+            .withColumn("_pd_lead_ts", F.lead(ts).over(in_chunk).cast("double"))
+            .withColumn("_pd_lead_te", F.lead(te).over(in_chunk).cast("double"))
             .withColumn("_pd_lead_value", F.lead(value).over(in_chunk))
+            .withColumn(TS, F.col(ts).cast("double"))
+            .withColumn(TE, F.col(te).cast("double"))
         )
         prev = Sample(
             F.col("_pd_lag_ts"), F.col("_pd_lag_te"), F.col("_pd_lag_value").cast("double")

@@ -35,6 +35,7 @@ from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers im
     plan_for,
     random_series,
     run,
+    top_level_items,
 )
 
 _X = TimeSeriesSelector(TagSelector("channel_name") == "x")
@@ -277,8 +278,33 @@ def test_samples_are_shuffled_once_per_channel(spark):
         i for i, line in enumerate(lines) if re.search(r"- Exchange \w+\(.*_pd_chunk", line)
     )
     assert not any("Generate" in line for line in _subtree(lines, shuffle))
-    # One broadcast of the variants for the boundaries and the fan-out, one for the raw rows.
-    assert len([s for s in _scans(final) if VARIANTS_COL in s]) == 2
+    # One broadcast of the variants for the boundaries and the fan-out, one of their keys
+    # for the full read, one for the raw rows.
+    assert len([s for s in _scans(final) if VARIANTS_COL in s]) == 3
+
+
+def test_samples_and_summaries_see_the_same_chunk_shuffle(spark):
+    # The samples and their chunk summaries both read the chunk shuffle, which they share
+    # only if their plans below it are equal.  Window inputs are computed before the
+    # shuffle and pruned per consumer, so the shuffle carries the raw columns only; the
+    # summaries are joined on guarded keys, so no runtime filter built from them can
+    # reach the samples' scan.
+    samples = random_series(np.random.default_rng(5), 30)
+    df, variants = channel_rows(spark, {(1, 1, 1): samples})
+    plan = plan_for({1: Classifier([DiffRule()])(_X.diff())})
+    result = apply_pushdowns(df, variants, plan, CONFIG, include_raw=False)
+    result.collect()
+    lines = _final_plan(result).splitlines()
+    shuffle = next(
+        i for i, line in enumerate(lines) if re.search(r"- Exchange \w+\(.*_pd_chunk", line)
+    )
+    projection = re.search(r"Project \[(.*)\]$", lines[shuffle + 1]).group(1)
+    columns = [re.sub(r"#\d+L?", "", c.split(" AS ")[-1]) for c in top_level_items(projection)]
+    assert columns == ["container_id", "channel_id", "tstart", "tend", "value", "_pd_chunk"]
+    optimized = re.sub(r"#\d+L?", "", result._jdf.queryExecution().optimizedPlan().toString())
+    for key in ("container_id", "channel_id", "_pd_chunk"):
+        guarded = f"CASE WHEN (SPARK_PARTITION_ID() >= 0) THEN {key} END AS _pd_join_{key}"
+        assert guarded in optimized
 
 
 def test_raw_rows_are_joined_for_raw_channels_only(spark):
