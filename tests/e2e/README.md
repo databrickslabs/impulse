@@ -35,12 +35,6 @@ The reports read the silver tables in `<source_catalog>.<source_schema>` (bundle
 
 `expected/containers.csv` lists the MF4 file (`experiment_id` folder and `filename`) behind each container id. Use it to rebuild the silver layer from scratch with the accelerator. If the rebuild assigns different container ids, refresh the expected files.
 
-To move the tests to another workspace, copy the five silver tables rather than rebuilding them. Then the container ids, and with them the expected files, stay valid:
-1. Export each table to Parquet, e.g. with the SQL Statement API (`ARROW_STREAM`, which keeps the column types).
-2. Upload the files to a volume in the new workspace.
-3. Create each table with ``CREATE TABLE <catalog>.<schema>.<table> CLUSTER BY (container_id[, channel_id]) AS SELECT * FROM parquet.`<file>` ``.
-4. Check the row counts against the source.
-
 ## Expected results
 
 `expected/<test>/<table>.csv` holds the expected gold rows of a test (without `_` bookkeeping columns). `incremental` and `container_filter` reuse `expected/rpm_histogram/`; `incremental_updates` compares with full reference runs instead of expected files.
