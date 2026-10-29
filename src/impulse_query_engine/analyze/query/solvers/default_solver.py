@@ -899,12 +899,13 @@ class DefaultSolver(QuerySolver):
 
         agg_exprs = [F.flatten(F.collect_list("selector_ids")).alias("selector_ids")]
         if has_unit_cols:
-            # collect_set serves a dual purpose: (a) it deduplicates so we
-            # can detect a conflict by size > 1, and (b) the single
-            # remaining element materializes the scalar unit value the
-            # downstream code expects.
-            agg_exprs.append(F.collect_set(source_unit_col).alias("_source_units"))
-            agg_exprs.append(F.collect_set(target_unit_col).alias("_target_units"))
+            # Distinct units: size > 1 is a conflict, else the single element is
+            # the unit.  Not collect_set: Databricks may plan copies of several
+            # collect_set differently, which blocks exchange reuse.
+            source_units = F.array_distinct(F.collect_list(source_unit_col))
+            target_units = F.array_distinct(F.collect_list(target_unit_col))
+            agg_exprs.append(source_units.alias("_source_units"))
+            agg_exprs.append(target_units.alias("_target_units"))
 
         grouped = merged.groupBy(
             self.config.container_id_col,
