@@ -14,8 +14,9 @@ resources:
         # JSON merged into the report config per section, e.g. {"query_engine": {"enable_pushdown": true}}.
         - {name: config_overrides, default: "{}"}
         - {name: baseline_ref, default: main}
-        # Fails the run if wall time, executor time or executor Python memory is this much above the baseline.
-        - {name: max_regression, default: "0.25"}
+        # Fails the run if wall time, executor time or executor Python memory is this much above the
+        # baseline. Identical runs differ by less than 1 %.
+        - {name: max_regression, default: "0.10"}
 
       # A fixed-size cluster, so that runs are comparable: no autoscaling, on-demand nodes only (no
       # spot losses during a measurement), no Photon. All tasks share it; the benchmark runs alone.
@@ -35,6 +36,9 @@ resources:
               # Memory of the pandas UDF workers in the executors' metrics.
               spark.executor.processTreeMetrics.enabled: "true"
               spark.executor.metrics.pollingInterval: "1s"
+              # The metrics sum the Spark UI's stages; keep all of a run's (default 1000).
+              spark.ui.retainedStages: "10000"
+              spark.ui.retainedJobs: "10000"
             custom_tags:
               project: impulse-benchmark
 
@@ -52,7 +56,6 @@ resources:
               prefix: bench
               expected_dir: ${workspace.file_path}/tests/e2e/expected
               actual_dir: ${workspace.root_path}/actual
-              job_id: "{{job.id}}"
               # The notebooks %pip install the bundle's wheel from here.
               wheel_dir: ${workspace.artifact_path}/.internal
               job_run_id: "{{job.run_id}}"

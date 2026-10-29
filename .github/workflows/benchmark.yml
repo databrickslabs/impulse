@@ -18,13 +18,12 @@ on:
 permissions:
   contents: read
 
-# One run at a time: they share the bundle and the results table. Runs queue, none is cancelled.
+# One run per ref at a time, as runs of a ref share its bundle. GitHub keeps one pending run per
+# group, so a newer run of the same ref replaces a pending one; runs of other refs are their own
+# groups and run in parallel, each on its own fixed-size cluster.
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  BUNDLE_VAR_suffix: -benchmark
 
 jobs:
   benchmark:
@@ -60,6 +59,12 @@ jobs:
       - name: Install Databricks CLI
         uses: databricks/setup-cli@8821c27b1fe57472264eeb6e50c1f31d69552f28 # v1.10.0
 
+      # Each ref deploys its own copy of the bundle (job and wheel), removed after the run.
+      - name: Name the ref's bundle
+        run: |
+          ref=$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'a-zA-Z0-9-' '-' | cut -c1-40)
+          echo "BUNDLE_VAR_suffix=-benchmark-$ref" >> "$GITHUB_ENV"
+
       # Also builds the wheel.
       - name: Deploy bundle
         run: databricks bundle deploy -t e2e
@@ -79,17 +84,23 @@ jobs:
             --arg config_overrides "$CONFIG_OVERRIDES" \
             --arg baseline_ref "$BASELINE_REF" \
             '{job_id: $job_id, job_parameters: ($ARGS.named | del(.job_id))}')
-          result=$(databricks jobs run-now --json "$request" --timeout 1h -o json | jq -r '.state.result_state')
+          run_id=$(databricks jobs run-now --json "$request" --no-wait -o json | jq -r '.run_id')
+          echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "Run $run_id"
+          while true; do
+            state=$(databricks jobs get-run "$run_id" -o json | jq -r '.state.life_cycle_state')
+            case "$state" in TERMINATED|SKIPPED|INTERNAL_ERROR) break;; esac
+            sleep 60
+          done
+          result=$(databricks jobs get-run "$run_id" -o json | jq -r '.state.result_state')
           echo "Result: $result"
           test "$result" = SUCCESS
 
-      # The comparison table of the latest run, also when it failed.
+      # The comparison table of this workflow's run, also when it failed.
       - name: Report results
-        if: always()
+        if: always() && env.RUN_ID != ''
         run: |
-          job_id=$(databricks bundle summary -t e2e -o json | jq -r '.resources.jobs.benchmark.id')
-          run_id=$(databricks jobs list-runs --job-id "$job_id" --limit 1 -o json | jq -r '.[0].run_id')
-          task_run_id=$(databricks jobs get-run "$run_id" -o json \
+          task_run_id=$(databricks jobs get-run "$RUN_ID" -o json \
             | jq -r '.tasks[] | select(.task_key == "compare") | .run_id')
           databricks jobs get-run-output "$task_run_id" -o json \
             | jq -r '.notebook_output.result // "No comparison: see the job run."' \
@@ -97,7 +108,10 @@ jobs:
 
       # A cancelled workflow leaves the job run going; stop it too.
       - name: Cancel benchmark job run
-        if: cancelled()
-        run: |
-          job_id=$(databricks bundle summary -t e2e -o json | jq -r '.resources.jobs.benchmark.id')
-          databricks jobs cancel-all-runs --job-id "$job_id"
+        if: cancelled() && env.RUN_ID != ''
+        run: databricks jobs cancel-run "$RUN_ID"
+
+      # The results stay in the results table.
+      - name: Remove the ref's bundle
+        if: always()
+        run: databricks bundle destroy -t e2e --auto-approve

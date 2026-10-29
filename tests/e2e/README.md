@@ -63,10 +63,10 @@ The report (`benchmark/benchmark_report.py`) runs on the [Renumics fleet telemet
 
 | Task | Notebook | Does |
 |---|---|---|
-| `setup` | `bench_setup` | Creates the results table `<catalog>.<bench_results_schema>.results` and the run's schema `bench_<run_id>`, drops this job's schemas older than one day, fills in the DBUs of earlier runs, and checks the source data against `expected/benchmark/containers.csv` |
+| `setup` | `bench_setup` | Creates the results table `<catalog>.<bench_results_schema>.results`, or adds new metric columns to it, and the run's schema `bench_<run_id>`. Drops this job's schemas older than one day, fills in the DBUs of earlier runs, and checks that the source data is the full dataset |
 | `run` | `run_benchmark` | Scenario `full`: the report into the empty schema. Scenario `incremental_noop`: an incremental rerun with nothing to update. Appends one row per scenario to the results table |
-| `compare` | `bench_compare` | Compares the run with the median of the last 5 successful runs on `baseline_ref` (same benchmark version, compute and no overrides) and returns the table as markdown |
-| `gate` | `bench_gate` | Fails if a scenario failed, or if the `full` scenario's `wall_s`, `executor_run_time_s` or `peak_executor_python_rss_bytes` is more than `max_regression` (default 25 %) above the baseline |
+| `compare` | `bench_compare` | Compares the run with the median of the last 5 runs on `baseline_ref` that passed the gate (same benchmark version, compute and no overrides). Returns the table as markdown and stores the verdict in `gate_passed`, so a run with a regression never becomes part of a baseline |
+| `gate` | `bench_gate` | Fails if a scenario failed, or if the `full` scenario's `wall_s`, `executor_run_time_s` or `peak_executor_python_rss_bytes` is more than `max_regression` (default 10 %) above the baseline. Identical runs differ by less than 1 % |
 | `teardown` | `bench_teardown` | Drops the run's schema, also after a failure |
 
 ### Cluster
@@ -102,7 +102,7 @@ Per scenario:
 make benchmark
 ```
 
-This deploys the bundle and runs the job with the default parameters (`git_ref=manual`). CI runs `.github/workflows/benchmark.yml` nightly on main. Once the workflow is on main, you can also start it on any branch or tag (Actions > benchmark > Run workflow), optionally with `config_overrides` and `baseline_ref`. The comparison table is written to the workflow's summary. The bundle suffix is `-benchmark`, and runs queue: they share one bundle and the results table.
+This deploys the bundle and runs the job with the default parameters (`git_ref=manual`). CI runs `.github/workflows/benchmark.yml` nightly on main. Once the workflow is on main, you can also start it on any branch or tag (Actions > benchmark > Run workflow), optionally with `config_overrides` and `baseline_ref`. The comparison table is written to the workflow's summary. Each ref deploys its own copy of the bundle (suffix `-benchmark-<ref>`), which is removed after the run; the results table is shared. Runs of different refs run in parallel, each on its own cluster. For one ref, GitHub keeps one pending run, so a newer run replaces a pending one.
 
 `config_overrides` is JSON merged into the report config per section, e.g. `{"query_engine": {"enable_pushdown": true}}`. A run with overrides compares with the baseline runs, which have none.
 
@@ -117,7 +117,7 @@ FROM impulse_testing_catalog.impulse_benchmark.results ORDER BY ts DESC
 
 ## Re-creating the benchmark dataset
 
-The benchmark reads `<source_catalog>.<bench_source_schema>` (`impulse_testing_catalog.impulse_renumics` by default). The silver tables there come from the [Synthetic Vehicle Fleet Telemetry](https://huggingface.co/datasets/renumics/synthetic-vehicle-fleet-telemetry) dataset by Renumics (CC BY-SA 4.0). The bundle in `benchmark/ingest/` builds them: it downloads ~52 GB and takes about 35 minutes on serverless.
+The benchmark reads `<source_catalog>.<bench_source_schema>` (`impulse_testing_catalog.impulse_renumics` by default). The silver tables there come from the [Synthetic Vehicle Fleet Telemetry](https://huggingface.co/datasets/renumics/synthetic-vehicle-fleet-telemetry) dataset on Hugging Face (CC BY-SA 4.0). It is published by [Renumics](https://renumics.com/), based on joint work between Volkswagen AG Group Innovation, IPG Automotive and Renumics; see `NOTICE.md` for the citation. The bundle in `benchmark/ingest/` builds them: it downloads ~52 GB and takes about 35 minutes on serverless.
 
 1. **Prerequisites:**
    - Databricks CLI authentication to the workspace, e.g. a profile (`-p <profile>`) or `DATABRICKS_HOST` with a token. The bundle has no workspace URL.
@@ -150,7 +150,7 @@ The benchmark reads `<source_catalog>.<bench_source_schema>` (`impulse_testing_c
           (SELECT count(*) FROM impulse_testing_catalog.impulse_renumics.channels)
    ```
 
-   The benchmark's `setup` task also compares every container's vehicle, trip, channel count and sample count with `expected/benchmark/containers.csv`. If a rebuild assigns other container ids or counts, it fails and uploads the actual rows. Review them, save them as the expected file, and bump `BENCHMARK_VERSION`, since the old baseline no longer applies.
+   The benchmark's `setup` task also checks the number of containers and samples, and a checksum of every container's id, channel count and sample count (constants in `bench_setup.py`). This keeps data derived from the dataset out of the repository. If a rebuild assigns other container ids or counts, `setup` fails and prints the actual rows. Review them, update the constants, and bump `BENCHMARK_VERSION`, since the old baseline no longer applies.
 6. **Grant the CI service principal read access:**
 
    ```sql

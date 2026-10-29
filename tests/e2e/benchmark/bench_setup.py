@@ -1,9 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Benchmark: setup
-# MAGIC Creates the results table and the run's schema, drops benchmark schemas left over from
-# MAGIC cancelled runs, fills in the DBUs of earlier runs, and checks that the source data still
-# MAGIC matches `expected/benchmark/containers.csv`.
+# MAGIC Creates the results table (or adds new columns to it) and the run's schema, drops
+# MAGIC benchmark schemas left over from cancelled runs, fills in the DBUs of earlier runs, and checks
+# MAGIC that the source data is still the full dataset.
 
 # COMMAND ----------
 
@@ -19,14 +19,20 @@ whl = max(glob.glob(f"{dbutils.widgets.get('wheel_dir')}/databricks_impulse-*.wh
 
 # COMMAND ----------
 
+import hashlib
+
 import pyspark.sql.functions as F
 from bench_utils import RESULTS_SCHEMA, params, spark
-from e2e_utils import check
 
 p = params()
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {p.catalog}.{p.results_schema}")
-columns = ", ".join(f"`{f.name}` {f.dataType.simpleString()}" for f in RESULTS_SCHEMA.fields)
-spark.sql(f"CREATE TABLE IF NOT EXISTS {p.results} ({columns})")
+ddl = lambda fields: ", ".join(f"`{f.name}` {f.dataType.simpleString()}" for f in fields)
+spark.sql(f"CREATE TABLE IF NOT EXISTS {p.results} ({ddl(RESULTS_SCHEMA.fields)})")
+# Metrics added since the table was created.
+existing = set(spark.read.table(p.results).columns)
+missing = [f for f in RESULTS_SCHEMA.fields if f.name not in existing]
+if missing:
+    spark.sql(f"ALTER TABLE {p.results} ADD COLUMNS ({ddl(missing)})")
 spark.sql(f"CREATE SCHEMA {p.catalog}.{p.schema}")
 
 # COMMAND ----------
@@ -47,9 +53,12 @@ try:
     spark.sql(f"""
         MERGE INTO {p.results} r
         USING (
+            -- Each CI run deploys its own job, so match the runs, not the job.
             SELECT usage_metadata.job_run_id AS job_run_id, sum(usage_quantity) AS dbus
             FROM system.billing.usage
-            WHERE usage_metadata.job_id = '{p.job_id}' AND usage_unit = 'DBU'
+            WHERE usage_unit = 'DBU' AND usage_metadata.job_run_id IN (
+                SELECT job_run_id FROM {p.results} WHERE dbus IS NULL
+            )
             GROUP BY 1
         ) u
         ON r.job_run_id = u.job_run_id AND r.dbus IS NULL
@@ -60,14 +69,38 @@ except Exception as e:  # The principal may not read system tables.
 
 # COMMAND ----------
 
+# The dataset as ingested by benchmark/ingest: 100 trips, their channel and sample counts. Only
+# counts and a checksum, so the repository holds no data derived from the dataset.
+EXPECTED_CONTAINERS = 100
+EXPECTED_SAMPLES = 5_076_151_061
+# SHA-256 of the sorted lines "<container_id>,<channels>,<samples>", joined by newlines.
+EXPECTED_CHECKSUM = "d4e2d13aa60176a4fb6f27b7d3784c27556fff1c90adca9b2c8079448cbe160d"
+
 containers = (
     spark.read.table(f"{p.source}container_metrics")
+    .select("container_id")
     .join(
         spark.read.table(f"{p.source}channel_metrics")
         .groupBy("container_id")
         .agg(F.count("*").alias("channels"), F.sum("sample_count").alias("samples")),
         "container_id",
+        "left",
     )
-    .select("container_id", "vehicle_key", "trip_name", "channels", "samples")
+    .collect()
 )
-check(p, "containers", containers, test="benchmark")
+lines = sorted(f"{r.container_id},{r.channels},{r.samples}" for r in containers)
+checksum = hashlib.sha256("\n".join(lines).encode()).hexdigest()
+samples = sum(r.samples or 0 for r in containers)
+if (len(containers), samples, checksum) != (
+    EXPECTED_CONTAINERS,
+    EXPECTED_SAMPLES,
+    EXPECTED_CHECKSUM,
+):
+    print("container_id,channels,samples")
+    print("\n".join(lines))
+    raise AssertionError(
+        f"source data isn't the benchmark dataset: {len(containers)} containers, {samples} samples, "
+        f"checksum {checksum}; expected {EXPECTED_CONTAINERS}, {EXPECTED_SAMPLES}, "
+        f"{EXPECTED_CHECKSUM}. The actual rows are printed above."
+    )
+print(f"source data OK: {len(containers)} containers, {samples} samples")

@@ -1,12 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Benchmark: compare
-# MAGIC Compares this run with its baseline: the median of the last 5 successful runs on
-# MAGIC `baseline_ref` with the same benchmark version and compute, and no config overrides. Returns
-# MAGIC the comparison as markdown and sets the task value `regressions`, which `gate` checks:
-# MAGIC a failed scenario, or
-# MAGIC a gated metric of the `full` scenario more than `max_regression` above the baseline.
-# MAGIC Gold tables that differ from the baseline's are reported as a warning.
+# MAGIC Compares this run with its baseline: the median of the last 5 runs on `baseline_ref` that
+# MAGIC passed the gate, with the same benchmark version and compute, and no config overrides.
+# MAGIC Returns the comparison as markdown and sets the task value `regressions`, which `gate`
+# MAGIC checks: a failed scenario, or a gated metric of the `full` scenario more than
+# MAGIC `max_regression` above the baseline. The verdict is stored in `gate_passed`, so a run with a
+# MAGIC regression never becomes part of a baseline. Gold tables that differ from the baseline's are
+# MAGIC reported as a warning.
 
 # COMMAND ----------
 
@@ -43,6 +44,7 @@ first = next(iter(current.values()))
 baseline_rows = (
     results.where(
         (F.col("status") == "success")
+        & F.col("gate_passed")
         & (F.col("git_ref") == p.baseline_ref)
         & (F.col("benchmark_version") == first.benchmark_version)
         & (F.col("compute") == first.compute)
@@ -127,5 +129,8 @@ else:
 markdown = "\n".join(lines)
 print(markdown)
 
+spark.sql(
+    f"UPDATE {p.results} SET gate_passed = {not regressions} WHERE job_run_id = '{p.job_run_id}'"
+)
 dbutils.jobs.taskValues.set(key="regressions", value=json.dumps(regressions))
 dbutils.notebook.exit(markdown)

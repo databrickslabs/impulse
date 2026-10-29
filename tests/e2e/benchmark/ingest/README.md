@@ -22,6 +22,6 @@ Workspace host and auth come from the environment or a CLI profile (`-p`). The b
 
 Adapted from the `impulse-renumics-fleet-cockpit` ingest, which is in turn adapted from [`impulse-mf4-ingest`](https://github.com/databricks-industry-solutions/impulse-mf4-ingest).
 
-## License
+## Dataset and license
 
-The code is under the Databricks License of this repository. The dataset is published by Renumics under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Every table derived from it (the silver tables and the benchmark's gold tables) is an adaptation and must be shared under the same license.
+The code is under the Databricks License of this repository. The dataset is [Synthetic Vehicle Fleet Telemetry](https://huggingface.co/datasets/renumics/synthetic-vehicle-fleet-telemetry) on Hugging Face, published by [Renumics](https://renumics.com/) under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). It is based on joint work between Volkswagen AG Group Innovation, IPG Automotive and Renumics. See `NOTICE.md` for the citation.

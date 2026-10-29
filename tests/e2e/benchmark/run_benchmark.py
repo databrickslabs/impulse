@@ -48,22 +48,27 @@ def record(scenario, status, metrics=None, error=None, prints=None):
         **(metrics or {}),
         "fingerprint": prints,
     }
-    spark.createDataFrame([row], RESULTS_SCHEMA).write.mode("append").saveAsTable(p.results)
+    df = spark.createDataFrame([row], RESULTS_SCHEMA)
+    df.write.mode("append").option("mergeSchema", "true").saveAsTable(p.results)
 
 
 # COMMAND ----------
 
 summary = {}
 for scenario in ["full", "incremental_noop"]:
-    # A new report object per run, as a scheduled job would build it.
-    report = Report(name="benchmark", spark=spark, workspace_client=WorkspaceClient(), config=cfg)
-    build_report(report)
     measurement = Measurement()
     try:
+        # A new report object per run, as a scheduled job would build it. Errors in the
+        # definition or the config overrides are recorded like errors of the run.
+        report = Report(
+            name="benchmark", spark=spark, workspace_client=WorkspaceClient(), config=cfg
+        )
+        build_report(report)
         with measurement:
             report.run()
     except Exception as e:
-        record(scenario, "failed", {"wall_s": measurement.wall_s}, error=repr(e)[:4000])
+        wall_s = getattr(measurement, "wall_s", None)
+        record(scenario, "failed", {"wall_s": wall_s}, error=repr(e)[:4000])
         raise
     metrics = measurement.metrics()
     prints = fingerprint(p) if scenario == "full" else None
