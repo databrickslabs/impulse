@@ -2,7 +2,7 @@ resources:
   jobs:
     benchmark:
       name: "impulse benchmark${var.suffix}"
-      # Includes the cluster start (~5 min).
+      # Includes the cluster start (~4 min). A run takes ~31 min.
       timeout_seconds: 3600
       max_concurrent_runs: 1
 

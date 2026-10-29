@@ -1,4 +1,5 @@
-# Bundle for the end-to-end tests and the performance benchmark: serverless jobs that run tests/e2e.
+# Bundle for the end-to-end tests (serverless) and the performance benchmark (fixed-size job
+# cluster): jobs that run tests/e2e.
 bundle:
   name: impulse-e2e
 

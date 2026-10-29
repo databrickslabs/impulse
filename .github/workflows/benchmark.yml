@@ -1,7 +1,7 @@
 name: benchmark
 
-# Performance benchmark on Databricks serverless (resources/benchmark_job.yml): nightly on
-# main, and on demand on any branch or tag (Actions > benchmark > Run workflow).
+# Performance benchmark on a fixed-size Databricks job cluster (resources/benchmark_job.yml):
+# nightly on main, and on demand on any branch or tag (Actions > benchmark > Run workflow).
 on:
   schedule:
     # 02:00 UTC daily, before the nightly e2e run.
@@ -28,7 +28,7 @@ env:
 
 jobs:
   benchmark:
-    name: Benchmark on Databricks (serverless)
+    name: Benchmark on Databricks (job cluster)
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest

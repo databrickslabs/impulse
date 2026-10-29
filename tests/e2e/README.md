@@ -77,7 +77,7 @@ All tasks run on one job cluster of fixed size, so that runs are comparable:
 - no autoscaling, no Photon;
 - on-demand nodes only, so no spot instance is lost during a measurement.
 
-The bundle variables `bench_spark_version`, `bench_node_type` and `bench_num_workers` set it. The cluster spec is stored with each run (`compute`), and runs only compare with runs of the same spec, so a new spec starts a new baseline. The cluster start (~4 min) isn't measured.
+The bundle variables `bench_spark_version`, `bench_node_type` and `bench_num_workers` set it. The cluster spec is stored with each run (`compute`), and runs only compare with runs of the same spec, so a new spec starts a new baseline. The cluster start (~4 min) isn't measured. The `full` scenario takes ~23 min and the whole job ~31 min. The job's principal needs the `allow-cluster-create` entitlement.
 
 The notebooks install the wheel the bundle built (task parameter `wheel_dir`) with `%pip`, rather than as a cluster library: in the benchmark workspace, a cluster library keeps the notebooks from starting ("Hive metastore initialization failed").
 
@@ -94,7 +94,7 @@ Per scenario:
 | `peak_driver_jvm_heap_bytes` | The driver's JVM heap peak (over the cluster's lifetime) |
 | `peak_driver_python_rss_bytes` | Peak memory of the notebook's Python process, where Impulse plans and collects (psutil, every second) |
 | `dbus` | `system.billing.usage`. It arrives hours later, so a later run's `setup` fills it in (needs `SELECT` on the system table) |
-| `fingerprint` | Row count and rounded sums of the numeric columns of each gold table. If it differs from the baseline's, `compare` warns: a faster run with other results isn't comparable |
+| `fingerprint` | Row count and sums of the numeric columns of each gold table, without ids and hashes, which differ per run. If it differs from the baseline's, `compare` warns: a faster run with other results isn't comparable |
 
 ### Running
 
@@ -102,7 +102,7 @@ Per scenario:
 make benchmark
 ```
 
-This deploys the bundle and runs the job with the default parameters (`git_ref=manual`). CI runs `.github/workflows/benchmark.yml` nightly on main. You can also start it on any branch or tag (Actions > benchmark > Run workflow), optionally with `config_overrides` and `baseline_ref`. The comparison table is written to the workflow's summary. The bundle suffix is `-benchmark`, and runs queue: they share one bundle and the results table.
+This deploys the bundle and runs the job with the default parameters (`git_ref=manual`). CI runs `.github/workflows/benchmark.yml` nightly on main. Once the workflow is on main, you can also start it on any branch or tag (Actions > benchmark > Run workflow), optionally with `config_overrides` and `baseline_ref`. The comparison table is written to the workflow's summary. The bundle suffix is `-benchmark`, and runs queue: they share one bundle and the results table.
 
 `config_overrides` is JSON merged into the report config per section, e.g. `{"query_engine": {"enable_pushdown": true}}`. A run with overrides compares with the baseline runs, which have none.
 
