@@ -277,8 +277,21 @@ def test_samples_are_shuffled_once_per_channel(spark):
         i for i, line in enumerate(lines) if re.search(r"- Exchange \w+\(.*_pd_chunk", line)
     )
     assert not any("Generate" in line for line in _subtree(lines, shuffle))
-    # One broadcast of the variants for the boundaries, the fan-out and the raw rows.
-    assert len([s for s in _scans(final) if VARIANTS_COL in s]) == 1
+    # One broadcast of the variants for the boundaries and the fan-out, one for the raw rows.
+    assert len([s for s in _scans(final) if VARIANTS_COL in s]) == 2
+
+
+def test_raw_rows_are_joined_for_raw_channels_only(spark):
+    # The row branch broadcasts only the channels shipping raw rows, so the pushed
+    # channel's samples are dropped at the join instead of being exploded and filtered.
+    samples = random_series(np.random.default_rng(13), 20)
+    series = {(1, 1, 1): samples, (1, 1, 2): samples, (2, 1, 0): samples}
+    df, variants = channel_rows(spark, series)
+    plan = plan_for({1: Classifier([DiffRule()])(_X.diff()), 2: _offset(1.0)})
+    result = apply_pushdowns(df, variants, plan, CONFIG)
+    optimized = re.sub(r"#\d+L?", "", result._jdf.queryExecution().optimizedPlan().toString())
+    shipping = r"size\(filter\(__impulse_variants, lambdafunction\(lambda \w+ IN \(0,2\).*\) > 0"
+    assert re.search(shipping, optimized)
 
 
 def _final_plan(df) -> str:

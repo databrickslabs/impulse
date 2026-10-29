@@ -147,6 +147,21 @@ def test_only_linear_window_frames(spark):
     assert "specifiedwindowframe(RowFrame, unboundedpreceding$(), currentrow$())" in plan
 
 
+def test_keep_filter_does_not_inline_the_rule_columns(spark):
+    # Spark pushes filters through deterministic projections by substituting column
+    # definitions; resample's grid-index columns refer to each other several times, so an
+    # inlined keep condition would grow to about 100k characters.
+    df, variants = channel_rows(
+        spark, {(1, 1, 1): ([0, 1], [1, 2], [1.0, 2.0]), (1, 1, 2): ([0, 1], [1, 2], [1.0, 2.0])}
+    )
+    plan = plan_for({1: _pushdown(1), 2: _pushdown(2)})
+    result = apply_pushdowns(df, variants, plan, CONFIG, include_raw=False)
+    optimized = result._jdf.queryExecution().optimizedPlan().toString()
+    conditions = re.findall(r"Filter (.*)", optimized)
+    assert conditions and not any("raise_error" in c for c in conditions)
+    assert max(len(c) for c in conditions) < 1_000
+
+
 def test_random_series_across_chunk_sizes(spark):
     rng = np.random.default_rng(3)
     rates = {1: 1, 2: 3, 3: 7}

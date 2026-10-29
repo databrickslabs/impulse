@@ -80,6 +80,7 @@ from .pushdown import (
 CHUNK_ROWS = 100_000
 
 _ELEMENT = "_pd_element"
+_KEPT = "_pd_kept"
 
 
 def apply_pushdowns(
@@ -95,7 +96,7 @@ def apply_pushdowns(
     variants : pyspark.sql.DataFrame
         ``(container_id, channel_id, VARIANTS_COL)``: the variant ids each matched
         channel ships, one row per channel (see :meth:`PushdownPlan.channel_variants`).
-        Channels without a row are dropped.  Both branches broadcast this one frame.
+        Channels without a row are dropped.
     plan : PushdownPlan
         The solve's pushdown plan.
     config : SolverConfig
@@ -116,7 +117,11 @@ def apply_pushdowns(
     parts = []
     row_variants = ([RAW_VARIANT] if include_raw else []) + _variant_ids(per_sample)
     if row_variants:
-        tagged = _fan_out(rows, variants, key, row_variants).select(*rows.columns, VARIANT_COL)
+        # Only the channels shipping a row-branch variant, so the join drops the others.
+        shipping = variants.select(*key, _shipped(row_variants).alias(VARIANTS_COL))
+        tagged = rows.join(F.broadcast(shipping.where(F.size(VARIANTS_COL) > 0)), on=key).select(
+            *rows.columns, F.explode(VARIANTS_COL).alias(VARIANT_COL)
+        )
         parts.append(_row_branch(tagged, per_sample, config, schema))
     if ordered:
         parts.append(SeriesPipeline(ordered, config).run(rows, variants))
@@ -138,8 +143,8 @@ def _fan_out(df: DataFrame, variants: DataFrame, key: Sequence[str], ids: Sequen
     """*df* with one row per variant among *ids* its channel ships, in :data:`VARIANT_COL`.
 
     Channels shipping none of *ids* are dropped.  Unlike ``explode``, ``explode_outer``
-    adds no inferred filter to the broadcast side of the join, so all joins with
-    *variants* share one broadcast.
+    adds no inferred filter to the broadcast side of the join, so the pipeline's joins
+    with *variants* share one broadcast.
     """
     return (
         df.join(F.broadcast(variants), on=key)
@@ -539,14 +544,23 @@ def _keep_col(rule: PushdownRule) -> str:
 
 
 def _keep(df: DataFrame, contexts, extra: Column) -> DataFrame:
-    """Drop the samples no rule keeps (*extra* marks samples kept regardless)."""
+    """Drop the samples no rule keeps (*extra* marks samples kept regardless).
+
+    The filter reads a flag column behind an always-true non-deterministic guard.
+    Spark pushes filters through deterministic projections by substituting their
+    column definitions, without a cost check; rule columns that refer to each other
+    several times would then multiply into one huge condition.  The guard stops the
+    pushdown, so the rule columns are computed once, in their own projections.
+    """
     keep = extra
     for rule, ctx in contexts:
         df = df.withColumn(
             _keep_col(rule), F.coalesce(F.when(ctx.active, rule.keep(ctx)), F.lit(False))
         )
         keep = keep | F.col(_keep_col(rule))
-    return df.where(keep)
+    # spark_partition_id() is never negative; Spark folds comparisons on rand() away.
+    guarded = F.when(F.spark_partition_id() >= 0, keep)
+    return df.withColumn(_KEPT, guarded).where(F.col(_KEPT)).drop(_KEPT)
 
 
 def _emit(
