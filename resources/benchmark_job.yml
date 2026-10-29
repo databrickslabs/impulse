@@ -1,0 +1,81 @@
+resources:
+  jobs:
+    benchmark:
+      name: "impulse benchmark${var.suffix}"
+      # Includes the cluster start (~5 min).
+      timeout_seconds: 3600
+      max_concurrent_runs: 1
+
+      # Set by .github/workflows/benchmark.yml; the defaults are for runs started by hand.
+      parameters:
+        - {name: git_sha, default: unknown}
+        - {name: git_ref, default: manual}
+        - {name: trigger, default: manual}
+        # JSON merged into the report config per section, e.g. {"query_engine": {"enable_pushdown": true}}.
+        - {name: config_overrides, default: "{}"}
+        - {name: baseline_ref, default: main}
+        # Fails the run if wall time, executor time or executor Python memory is this much above the baseline.
+        - {name: max_regression, default: "0.25"}
+
+      # A fixed-size cluster, so that runs are comparable: no autoscaling, on-demand nodes only (no
+      # spot losses during a measurement), no Photon. All tasks share it; the benchmark runs alone.
+      job_clusters:
+        - job_cluster_key: bench_cluster
+          new_cluster:
+            spark_version: ${var.bench_spark_version}
+            node_type_id: ${var.bench_node_type}
+            driver_node_type_id: ${var.bench_node_type}
+            num_workers: ${var.bench_num_workers}
+            runtime_engine: STANDARD
+            data_security_mode: SINGLE_USER
+            aws_attributes:
+              availability: ON_DEMAND
+              first_on_demand: 1000
+            spark_conf:
+              # Memory of the pandas UDF workers in the executors' metrics.
+              spark.executor.processTreeMetrics.enabled: "true"
+              spark.executor.metrics.pollingInterval: "1s"
+            custom_tags:
+              project: impulse-benchmark
+
+      tasks:
+        - task_key: setup
+          job_cluster_key: bench_cluster
+          notebook_task:
+            notebook_path: ../tests/e2e/benchmark/bench_setup.py
+            base_parameters: &params
+              catalog: ${var.catalog}
+              schema: bench_{{job.run_id}}
+              source_catalog: ${var.source_catalog}
+              source_schema: ${var.bench_source_schema}
+              results_schema: ${var.bench_results_schema}
+              prefix: bench
+              expected_dir: ${workspace.file_path}/tests/e2e/expected
+              actual_dir: ${workspace.root_path}/actual
+              job_id: "{{job.id}}"
+              # The notebooks %pip install the bundle's wheel from here.
+              wheel_dir: ${workspace.artifact_path}/.internal
+              job_run_id: "{{job.run_id}}"
+
+        - task_key: run
+          job_cluster_key: bench_cluster
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
+
+        - task_key: compare
+          job_cluster_key: bench_cluster
+          depends_on: [{task_key: run}]
+          # Also reports a failed run.
+          run_if: ALL_DONE
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_compare.py, base_parameters: *params}
+
+        - task_key: gate
+          job_cluster_key: bench_cluster
+          depends_on: [{task_key: compare}]
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_gate.py, base_parameters: *params}
+
+        - task_key: teardown
+          job_cluster_key: bench_cluster
+          depends_on: [{task_key: run}]
+          run_if: ALL_DONE
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_teardown.py, base_parameters: *params}
