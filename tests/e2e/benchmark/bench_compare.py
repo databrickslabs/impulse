@@ -28,11 +28,12 @@ import statistics
 
 import pyspark.sql.functions as F
 from bench_utils import params, spark
-from benchmark_metrics import METRICS
+from benchmark_metrics import GATED, METRICS, compute_kind
 
 p = params()
 BASELINE_RUNS = 5
-GATED = ["wall_s", "executor_run_time_s", "peak_executor_python_rss_bytes"]
+# The gated metrics of this compute (no executor memory on serverless).
+GATED = GATED[compute_kind()]
 # Fingerprint sums may differ in the last digits, as Spark sums in any order.
 FINGERPRINT_RTOL = 1e-6
 
@@ -100,6 +101,8 @@ for scenario, run in current.items():
     lines += [f"| Metric | This run | Baseline (n={len(base)}) | Δ |", "|---|---|---|---|"]
     for metric in METRICS:
         value = run[metric]
+        if value is None:  # A metric of the other compute.
+            continue
         values = [r[metric] for r in base if r[metric] is not None]
         median = statistics.median(values) if values else None
         # No relative change against a baseline of (nearly) nothing.

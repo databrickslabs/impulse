@@ -34,6 +34,7 @@ from databricks.sdk import WorkspaceClient
 from impulse_reporting.core.report import Report
 
 p = params()
+task_run_id = dbutils.widgets.get("task_run_id")
 cfg = report_config(p)
 print(json.dumps(cfg, indent=2))
 
@@ -56,7 +57,7 @@ def record(scenario, status, metrics=None, error=None, prints=None):
 
 summary = {}
 for scenario in ["full", "incremental_noop"]:
-    measurement = Measurement()
+    measurement = Measurement(task_run_id)
     try:
         # A new report object per run, as a scheduled job would build it. Errors in the
         # definition or the config overrides are recorded like errors of the run.

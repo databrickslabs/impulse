@@ -69,47 +69,61 @@ jobs:
       - name: Deploy bundle
         run: databricks bundle deploy -t e2e
 
-      - name: Run benchmark job
+      # Both jobs run the same report in parallel: `benchmark` on the fixed-size job cluster,
+      # `benchmark_serverless` on serverless.
+      - name: Run benchmark jobs
         env:
           CONFIG_OVERRIDES: ${{ inputs.config_overrides || '{}' }}
           BASELINE_REF: ${{ inputs.baseline_ref || 'main' }}
         # Not `bundle run --params`: it splits values at commas, which the JSON overrides contain.
         run: |
-          job_id=$(databricks bundle summary -t e2e -o json | jq -r '.resources.jobs.benchmark.id')
-          request=$(jq -n \
-            --argjson job_id "$job_id" \
-            --arg git_sha "$GITHUB_SHA" \
-            --arg git_ref "$GITHUB_REF_NAME" \
-            --arg trigger "$GITHUB_EVENT_NAME" \
-            --arg config_overrides "$CONFIG_OVERRIDES" \
-            --arg baseline_ref "$BASELINE_REF" \
-            '{job_id: $job_id, job_parameters: ($ARGS.named | del(.job_id))}')
-          run_id=$(databricks jobs run-now --json "$request" --no-wait -o json | jq -r '.run_id')
-          echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
-          echo "Run $run_id"
-          while true; do
-            state=$(databricks jobs get-run "$run_id" -o json | jq -r '.state.life_cycle_state')
-            case "$state" in TERMINATED|SKIPPED|INTERNAL_ERROR) break;; esac
-            sleep 60
+          summary=$(databricks bundle summary -t e2e -o json)
+          run_ids=""
+          for job in benchmark benchmark_serverless; do
+            job_id=$(jq -r --arg job "$job" '.resources.jobs[$job].id' <<< "$summary")
+            request=$(jq -n \
+              --argjson job_id "$job_id" \
+              --arg git_sha "$GITHUB_SHA" \
+              --arg git_ref "$GITHUB_REF_NAME" \
+              --arg trigger "$GITHUB_EVENT_NAME" \
+              --arg config_overrides "$CONFIG_OVERRIDES" \
+              --arg baseline_ref "$BASELINE_REF" \
+              '{job_id: $job_id, job_parameters: ($ARGS.named | del(.job_id))}')
+            run_id=$(databricks jobs run-now --json "$request" --no-wait -o json | jq -r '.run_id')
+            echo "$job: run $run_id"
+            run_ids="$run_ids $run_id"
           done
-          result=$(databricks jobs get-run "$run_id" -o json | jq -r '.state.result_state')
-          echo "Result: $result"
-          test "$result" = SUCCESS
+          echo "RUN_IDS=$run_ids" >> "$GITHUB_ENV"
+          failed=0
+          for run_id in $run_ids; do
+            while true; do
+              state=$(databricks jobs get-run "$run_id" -o json | jq -r '.state.life_cycle_state')
+              case "$state" in TERMINATED|SKIPPED|INTERNAL_ERROR) break;; esac
+              sleep 60
+            done
+            result=$(databricks jobs get-run "$run_id" -o json | jq -r '.state.result_state')
+            echo "Run $run_id: $result"
+            test "$result" = SUCCESS || failed=1
+          done
+          exit $failed
 
-      # The comparison table of this workflow's run, also when it failed.
+      # The comparison tables of this workflow's runs, also when they failed.
       - name: Report results
-        if: always() && env.RUN_ID != ''
+        if: always() && env.RUN_IDS != ''
         run: |
-          task_run_id=$(databricks jobs get-run "$RUN_ID" -o json \
-            | jq -r '.tasks[] | select(.task_key == "compare") | .run_id')
-          databricks jobs get-run-output "$task_run_id" -o json \
-            | jq -r '.notebook_output.result // "No comparison: see the job run."' \
-            >> "$GITHUB_STEP_SUMMARY"
+          for run_id in $RUN_IDS; do
+            task_run_id=$(databricks jobs get-run "$run_id" -o json \
+              | jq -r '.tasks[] | select(.task_key == "compare") | .run_id')
+            databricks jobs get-run-output "$task_run_id" -o json \
+              | jq -r '.notebook_output.result // "No comparison: see the job run."' \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+          done
 
-      # A cancelled workflow leaves the job run going; stop it too.
-      - name: Cancel benchmark job run
-        if: cancelled() && env.RUN_ID != ''
-        run: databricks jobs cancel-run "$RUN_ID"
+      # A cancelled workflow leaves the job runs going; stop them too.
+      - name: Cancel benchmark job runs
+        if: cancelled() && env.RUN_IDS != ''
+        run: for run_id in $RUN_IDS; do databricks jobs cancel-run "$run_id" --no-wait; done
 
       # The results stay in the results table.
       - name: Remove the ref's bundle

@@ -11,7 +11,7 @@ from pyspark.sql import types as T
 
 # The e2e helpers are one folder up.
 sys.path.append(os.path.abspath(".."))
-from benchmark_metrics import METRICS, cluster_spec  # noqa: E402
+from benchmark_metrics import METRICS, cluster_spec, is_serverless  # noqa: E402
 from benchmark_report import BENCHMARK_VERSION, MEASUREMENT_DIMENSIONS  # noqa: E402
 from e2e_utils import config, spark  # noqa: E402
 
@@ -27,6 +27,8 @@ PARAMS = [
     "git_sha",
     "git_ref",
     "trigger",
+    "compute_overrides",
+    "environment_version",
     "config_overrides",
     "baseline_ref",
     "max_regression",
@@ -62,6 +64,9 @@ class Params:
             setattr(self, name, dbutils.widgets.get(name))
         self.source = f"{self.source_catalog}.{self.source_schema}."
         self.results = f"{self.catalog}.{self.results_schema}.results"
+        # Settings the compute needs (part of `compute`), and the run's experiment (compared with
+        # baselines that have none).
+        self.compute_overrides = json.loads(self.compute_overrides or "{}")
         self.overrides = json.loads(self.config_overrides or "{}")
         self.max_regression = float(self.max_regression)
 
@@ -71,16 +76,26 @@ def params():
 
 
 def report_config(p):
-    """The benchmark's report config, with the run's `config_overrides` merged per section."""
+    """The benchmark's report config, with `compute_overrides`, then `config_overrides`, merged
+    per section."""
     cfg = config(
         p,
         incremental={"enabled": True, "silver_last_modified_column": "_ingested_at"},
         calculated_channels={"emit_channel_metrics": True},
     )
     cfg["measurement_dimensions"] = MEASUREMENT_DIMENSIONS
-    for key, value in p.overrides.items():
-        cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
+    for overrides in [p.compute_overrides, p.overrides]:
+        for key, value in overrides.items():
+            cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
     return cfg
+
+
+def compute(p):
+    """The compute a run measured on, with its overrides; runs compare only within one."""
+    name = f"serverless env {p.environment_version}" if is_serverless() else cluster_spec()
+    if p.compute_overrides:
+        name += f" {json.dumps(p.compute_overrides, sort_keys=True)}"
+    return name
 
 
 def run_info(p):
@@ -93,7 +108,7 @@ def run_info(p):
         # The wheel's version has a build-time suffix (dynamic_version in databricks.yml).
         "impulse_version": version("databricks-impulse").split("+")[0],
         "benchmark_version": BENCHMARK_VERSION,
-        "compute": cluster_spec(),
+        "compute": compute(p),
         "config_overrides": json.dumps(p.overrides, sort_keys=True),
     }
 

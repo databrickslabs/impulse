@@ -47,20 +47,20 @@ Add a notebook `e2e_<name>.py` that builds a report with `config(p)` and `new_re
 
 ## Performance benchmark
 
-Measures the runtime and memory of one report on a large dataset, so that changes and releases can be compared with a baseline. The job is defined in `resources/benchmark_job.yml`, and its notebooks are in `benchmark/`.
+Measures the runtime and memory of one report on a large dataset, so that changes and releases can be compared with a baseline. Two jobs run the same report with the same notebooks (`benchmark/`): `benchmark` on a [fixed-size job cluster](#cluster) (`resources/benchmark_job.yml`), and `benchmark_serverless` on [serverless](#serverless) (`resources/benchmark_serverless_job.yml`).
 
 The report (`benchmark/benchmark_report.py`) runs on the [Renumics fleet telemetry](#re-creating-the-benchmark-dataset): 100 trips, 680 signals, 5.08 B samples. Channel batching is Impulse's default, so each trip's ~50 channels are solved together. It uses:
 - six events: the trip, driving cycles (merged intervals), charging and recuperation (battery thresholds), slow-downs (points in time) and 5-minute windows;
 - two calculated channels;
 - 1D and 2D histograms, statistics per event and point values;
-- statistics of 40 signals resampled to 1 Hz. These are what Spark pushdown can speed up.
+- statistics of 40 signals resampled to 1 Hz, in 4 aggregations of 10. These are what Spark pushdown can speed up.
 
 | Task | Notebook | Does |
 |---|---|---|
 | `setup` | `bench_setup` | Creates the results table `<catalog>.<bench_results_schema>.results`, or adds new metric columns to it, and the run's schema `bench_<run_id>`. Drops this job's schemas older than one day, fills in the DBUs of earlier runs, and checks that the source data is the full dataset |
 | `run` | `run_benchmark` | Scenario `full`: the report into the empty schema. Scenario `incremental_noop`: an incremental rerun with nothing to update. Appends one row per scenario to the results table |
-| `compare` | `bench_compare` | Compares the run with the median of the last 5 runs on `baseline_ref` that passed the gate (same benchmark version, compute and no overrides). Returns the table as markdown and stores the verdict in `gate_passed`, so a run with a regression never becomes part of a baseline |
-| `gate` | `bench_gate` | Fails if a scenario failed, or if the `full` scenario's `wall_s`, `executor_run_time_s` or `peak_executor_python_rss_bytes` is more than `max_regression` (default 10 %) above the baseline. Identical runs differ by less than 1 % |
+| `compare` | `bench_compare` | Compares the run with the median of the last 5 runs on `baseline_ref` that passed the gate (same benchmark version, compute and no `config_overrides`). Returns the table as markdown and stores the verdict in `gate_passed`, so a run with a regression never becomes part of a baseline |
+| `gate` | `bench_gate` | Fails if a scenario failed, or if a gated metric of the `full` scenario is more than `max_regression` above the baseline. On the job cluster: `wall_s`, `executor_run_time_s`, `peak_executor_python_rss_bytes`, default 10 % (identical runs differ by less than 1 %). On serverless: `wall_s`, `task_time_s`, `peak_driver_python_rss_bytes`, default 25 % |
 | `teardown` | `bench_teardown` | Drops the run's schema, also after a failure |
 
 ### Cluster
@@ -75,9 +75,15 @@ The bundle variables `bench_spark_version`, `bench_node_type` and `bench_num_wor
 
 The notebooks install the wheel the bundle built (task parameter `wheel_dir`) with `%pip`, rather than as a cluster library: in the benchmark workspace, a cluster library keeps the notebooks from starting ("Hive metastore initialization failed").
 
+### Serverless
+
+`benchmark_serverless` runs on serverless environment 5 (bundle variable `bench_serverless_environment_version`). Its compute isn't fixed, so its numbers vary more and compare only with other serverless runs.
+
+A serverless Python worker has a fixed amount of memory, which the report with Impulse's default batching exceeds. So the job's `compute_overrides` parameter caps solves at 10 channels (`max_channels_per_batch: 10`, 6 solves) and excludes trip 39. With one solve per trip (the default) or 20 channels per solve, many tasks run their worker out of memory; with 10, none does. That trip is 4.35 h long while the others last at most 1 h; with ~1.7 M rows per channel it doesn't fit a serverless worker even with 3 channels per solve. `compute_overrides` is merged into the report config before `config_overrides` and is stored with the compute, so runs only compare with runs of the same.
+
 ### Metrics
 
-Per scenario:
+Per scenario, on the job cluster:
 
 | Metric | Source |
 |---|---|
@@ -90,13 +96,16 @@ Per scenario:
 | `dbus` | `system.billing.usage`. It arrives hours later, so a later run's `setup` fills it in (needs `SELECT` on the system table) |
 | `fingerprint` | Row count and sums of the numeric columns of each gold table, without ids and hashes, which differ per run. If it differs from the baseline's, `compare` warns: a faster run with other results isn't comparable |
 
+Serverless has no Spark UI and no executor memory metrics. There, `num_queries`, `max_query_s`, `task_time_s`, `photon_task_time_s`, `read_bytes`, `read_rows`, `written_bytes`, `written_rows`, `spilled_bytes`, `num_tasks` and `failed_tasks` come from the query history of the task run, summed over the queries the scenario ran. `wall_s`, `peak_driver_python_rss_bytes`, `dbus` and `fingerprint` are measured as on the job cluster. A run fills the columns of its compute; the others stay empty.
+
 ### Running
 
 ```bash
-make benchmark
+make benchmark              # job cluster
+make benchmark-serverless   # serverless
 ```
 
-This deploys the bundle and runs the job with the default parameters (`git_ref=manual`). CI runs `.github/workflows/benchmark.yml` nightly on main. Once the workflow is on main, you can also start it on any branch or tag (Actions > benchmark > Run workflow), optionally with `config_overrides` and `baseline_ref`. The comparison table is written to the workflow's summary. Each ref deploys its own copy of the bundle (suffix `-benchmark-<ref>`), which is removed after the run; the results table is shared. Runs of different refs run in parallel, each on its own cluster. For one ref, GitHub keeps one pending run, so a newer run replaces a pending one.
+This deploys the bundle and runs the job with the default parameters (`git_ref=manual`). CI runs `.github/workflows/benchmark.yml` nightly on main; it starts both jobs in parallel and writes both comparison tables to the summary. Once the workflow is on main, you can also start it on any branch or tag (Actions > benchmark > Run workflow), optionally with `config_overrides` and `baseline_ref`. The comparison table is written to the workflow's summary. Each ref deploys its own copy of the bundle (suffix `-benchmark-<ref>`), which is removed after the run; the results table is shared. Runs of different refs run in parallel, each on its own cluster. For one ref, GitHub keeps one pending run, so a newer run replaces a pending one.
 
 `config_overrides` is JSON merged into the report config per section, e.g. `{"query_engine": {"enable_pushdown": true}}`. A run with overrides compares with the baseline runs, which have none.
 

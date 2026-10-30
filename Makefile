@@ -55,6 +55,11 @@ benchmark:
 	databricks bundle deploy -t e2e
 	databricks bundle run benchmark -t e2e
 
+# The same benchmark on serverless.
+benchmark-serverless:
+	databricks bundle deploy -t e2e
+	databricks bundle run benchmark_serverless -t e2e
+
 build:
 	uv build --require-hashes --build-constraints=.build-constraints.txt
 
@@ -77,4 +82,4 @@ fork-sync:
 	./.github/scripts/fork-sync-pr.sh $(PR)
 
 .DEFAULT: all
-.PHONY: all clean dev lint fmt test test-e2e benchmark coverage build update-api-docs lock-dependencies fork-sync
+.PHONY: all clean dev lint fmt test test-e2e benchmark benchmark-serverless coverage build update-api-docs lock-dependencies fork-sync

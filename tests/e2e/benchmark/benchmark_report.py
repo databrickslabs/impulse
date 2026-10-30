@@ -2,8 +2,8 @@
 
 A mix of the report features: container, interval, point and time-window events, 1D and 2D
 histograms, statistics per event, point values, calculated channels, and statistics of 40
-signals resampled to 1 Hz (the resamples can be pushed down to Spark). Channel batching is
-Impulse's default: all ~50 channels of a trip in one solve.
+signals resampled to 1 Hz in 4 aggregations of 10 (the resamples can be pushed down to Spark).
+Channel batching is Impulse's default: all ~50 channels of a trip in one solve.
 
 Bump `BENCHMARK_VERSION` on any change of the report or its config: runs only compare with
 runs of the same version.
@@ -22,7 +22,7 @@ from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from impulse_reporting.events.time_window_event import TimeWindowEvent
 
-BENCHMARK_VERSION = 1
+BENCHMARK_VERSION = 2
 
 US = 1e6  # Timestamps are epoch microseconds.
 
@@ -34,6 +34,9 @@ MEASUREMENT_DIMENSIONS = [
     "start_ts",
     "stop_ts",
 ]
+
+# Signals per StatsAggregator of the 1 Hz overview.
+OVERVIEW_GROUP = 10
 
 # 40 signals at ~100 Hz, logged in every trip.
 WIDE_SIGNALS = [
@@ -237,16 +240,18 @@ def build_report(report):
         )
     report.add_page(page)
 
-    # Overview of 40 signals at 1 Hz.
+    # Overview of 40 signals at 1 Hz, in aggregations of 10.
     page = Page(page_number=3)
-    page.add_aggregation(
-        StatsAggregator(
-            name="trip_overview_1hz",
-            input_expressions=[ch(name).resample(1 * US) for name in WIDE_SIGNALS],
-            channel_names=WIDE_SIGNALS,
-            statistics=["min", "mean", "max"],
-            event=trip,
+    for i in range(0, len(WIDE_SIGNALS), OVERVIEW_GROUP):
+        names = WIDE_SIGNALS[i : i + OVERVIEW_GROUP]
+        page.add_aggregation(
+            StatsAggregator(
+                name=f"trip_overview_1hz_{i // OVERVIEW_GROUP}",
+                input_expressions=[ch(name).resample(1 * US) for name in names],
+                channel_names=names,
+                statistics=["min", "mean", "max"],
+                event=trip,
+            )
         )
-    )
     report.add_page(page)
     return report

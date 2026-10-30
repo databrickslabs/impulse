@@ -17,6 +17,9 @@ resources:
         # Fails the run if wall time, executor time or executor Python memory is this much above the
         # baseline. Identical runs differ by less than 1 %.
         - {name: max_regression, default: "0.10"}
+        # Settings the compute needs, merged into the report config before config_overrides. Part of
+        # the compute: runs compare only with runs of the same.
+        - {name: compute_overrides, default: "{}"}
 
       # A fixed-size cluster, so that runs are comparable: no autoscaling, on-demand nodes only (no
       # spot losses during a measurement), no Photon. All tasks share it; the benchmark runs alone.
@@ -59,6 +62,9 @@ resources:
               # The notebooks %pip install the bundle's wheel from here.
               wheel_dir: ${workspace.artifact_path}/.internal
               job_run_id: "{{job.run_id}}"
+              task_run_id: "{{task.run_id}}"
+              # Serverless only.
+              environment_version: ""
 
         - task_key: run
           job_cluster_key: bench_cluster
