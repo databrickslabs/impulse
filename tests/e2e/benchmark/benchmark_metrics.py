@@ -10,8 +10,6 @@ ran in the scenario's time window (task time, bytes read and written, spill). Ex
 isn't available there.
 
 On both, the driver's Python memory, where Impulse plans and collects, is sampled with psutil.
-DBUs come from `system.billing.usage`, which lags by hours; `setup` fills them in for earlier
-runs.
 """
 
 import threading

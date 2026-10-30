@@ -57,7 +57,7 @@ The report (`benchmark/benchmark_report.py`) runs on the [Renumics fleet telemet
 
 | Task | Notebook | Does |
 |---|---|---|
-| `setup` | `bench_setup` | Creates the results table `<catalog>.<bench_results_schema>.results`, or adds new metric columns to it, and the run's schema `bench_<run_id>`. Drops this job's schemas older than one day, fills in the DBUs of earlier runs, and checks that the source data is the full dataset |
+| `setup` | `bench_setup` | Creates the results table `<catalog>.<bench_results_schema>.results`, or adds new metric columns to it, and the run's schema `bench_<run_id>`. Drops this job's schemas older than one day and checks that the source data is the full dataset |
 | `run` | `run_benchmark` | Scenario `full`: the report into the empty schema. Scenario `incremental_noop`: an incremental rerun with nothing to update. Appends one row per scenario to the results table |
 | `compare` | `bench_compare` | Compares the run with the median of the last 5 runs on `baseline_ref` that passed the gate (same benchmark version, compute and no `config_overrides`). Returns the table as markdown and stores the verdict in `gate_passed`, so a run with a regression never becomes part of a baseline |
 | `gate` | `bench_gate` | Fails if a scenario failed, or if a gated metric of the `full` scenario is more than `max_regression` above the baseline. On the job cluster: `wall_s`, `executor_run_time_s`, `peak_executor_python_rss_bytes`, default 10 % (identical runs differ by less than 1 %). On serverless: `wall_s`, `task_time_s`, `peak_driver_python_rss_bytes`, default 25 % |
@@ -93,10 +93,9 @@ Per scenario, on the job cluster:
 | `peak_executor_jvm_rss_bytes`, `peak_executor_jvm_heap_bytes`, `peak_executor_onheap_execution_bytes` | The executors' JVM memory peaks, same source |
 | `peak_driver_jvm_heap_bytes` | The driver's JVM heap peak (over the cluster's lifetime) |
 | `peak_driver_python_rss_bytes` | Peak memory of the notebook's Python process, where Impulse plans and collects (psutil, every second) |
-| `dbus` | `system.billing.usage`. It arrives hours later, so a later run's `setup` fills it in (needs `SELECT` on the system table) |
 | `fingerprint` | Row count and sums of the numeric columns of each gold table, without ids and hashes, which differ per run. If it differs from the baseline's, `compare` warns: a faster run with other results isn't comparable |
 
-Serverless has no Spark UI and no executor memory metrics. There, `num_queries`, `max_query_s`, `task_time_s`, `photon_task_time_s`, `read_bytes`, `read_rows`, `written_bytes`, `written_rows`, `spilled_bytes`, `num_tasks` and `failed_tasks` come from the query history of the task run, summed over the queries the scenario ran. `wall_s`, `peak_driver_python_rss_bytes`, `dbus` and `fingerprint` are measured as on the job cluster. A run fills the columns of its compute; the others stay empty.
+Serverless has no Spark UI and no executor memory metrics. There, `num_queries`, `max_query_s`, `task_time_s`, `photon_task_time_s`, `read_bytes`, `read_rows`, `written_bytes`, `written_rows`, `spilled_bytes`, `num_tasks` and `failed_tasks` come from the query history of the task run, summed over the queries the scenario ran. `wall_s`, `peak_driver_python_rss_bytes` and `fingerprint` are measured as on the job cluster. A run fills the columns of its compute; the others stay empty.
 
 ### Running
 
@@ -114,7 +113,7 @@ Bump `BENCHMARK_VERSION` in `benchmark_report.py` whenever the report or its con
 To query the results:
 
 ```sql
-SELECT ts, git_ref, git_sha, impulse_version, scenario, status, wall_s, executor_run_time_s, peak_executor_python_rss_bytes, dbus
+SELECT ts, git_ref, git_sha, impulse_version, scenario, status, wall_s, executor_run_time_s, peak_executor_python_rss_bytes
 FROM impulse_testing_catalog.impulse_benchmark.results ORDER BY ts DESC
 ```
 

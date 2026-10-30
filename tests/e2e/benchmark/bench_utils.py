@@ -50,7 +50,6 @@ RESULTS_SCHEMA = T.StructType(
         T.StructField("status", T.StringType()),
         T.StructField("error", T.StringType()),
         *[T.StructField(m, T.DoubleType()) for m in METRICS],
-        T.StructField("dbus", T.DoubleType()),
         # Set by `compare`: only runs that passed the gate are part of a baseline.
         T.StructField("gate_passed", T.BooleanType()),
         T.StructField("fingerprint", T.MapType(T.StringType(), T.DoubleType())),

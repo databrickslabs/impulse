@@ -2,8 +2,8 @@
 # MAGIC %md
 # MAGIC # Benchmark: setup
 # MAGIC Creates the results table (or adds new columns to it) and the run's schema, drops
-# MAGIC benchmark schemas left over from cancelled runs, fills in the DBUs of earlier runs, and checks
-# MAGIC that the source data is still the full dataset.
+# MAGIC benchmark schemas left over from cancelled runs, and checks that the source data is still the
+# MAGIC full dataset.
 
 # COMMAND ----------
 
@@ -45,27 +45,6 @@ stale = spark.sql(
 )
 for row in stale.collect():
     spark.sql(f"DROP SCHEMA {p.catalog}.{row.schema_name} CASCADE")
-
-# COMMAND ----------
-
-# Billing data arrives hours after a run, so each run fills in the DBUs of earlier ones.
-try:
-    spark.sql(f"""
-        MERGE INTO {p.results} r
-        USING (
-            -- Each CI run deploys its own job, so match the runs, not the job.
-            SELECT usage_metadata.job_run_id AS job_run_id, sum(usage_quantity) AS dbus
-            FROM system.billing.usage
-            WHERE usage_unit = 'DBU' AND usage_metadata.job_run_id IN (
-                SELECT job_run_id FROM {p.results} WHERE dbus IS NULL
-            )
-            GROUP BY 1
-        ) u
-        ON r.job_run_id = u.job_run_id AND r.dbus IS NULL
-        WHEN MATCHED THEN UPDATE SET r.dbus = u.dbus
-        """)
-except Exception as e:  # The principal may not read system tables.
-    print(f"DBUs not updated: {e}")
 
 # COMMAND ----------
 
