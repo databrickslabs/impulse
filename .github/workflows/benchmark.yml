@@ -1,11 +1,16 @@
 name: benchmark
 
-# Performance benchmark on a fixed-size Databricks job cluster (resources/benchmark_job.yml):
-# nightly on main, and on demand on any branch or tag (Actions > benchmark > Run workflow).
+# Performance benchmark on Databricks (resources/benchmark_job.yml, benchmark_serverless_job.yml):
+# after every merge into main, and on demand on any branch or tag (Actions > benchmark > Run
+# workflow). A run takes hours, so there is no schedule, and merges that only change docs are
+# skipped.
 on:
-  schedule:
-    # 02:00 UTC daily, before the nightly e2e run.
-    - cron: "0 2 * * *"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "**/*.mdx"
   workflow_dispatch:
     inputs:
       config_overrides:
