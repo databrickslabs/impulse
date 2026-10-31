@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
@@ -1426,18 +1427,38 @@ class DefaultSolver(QuerySolver):
         ch_col = col_map["ch"]
         container_id = pdf[cid_col].iloc[0]
 
-        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": []}
-
+        columns = {"tstart": [], "tend": [], "value": []}
+        channel_ids, lengths = [], []
         for cc in selections:
             tstarts, tends, values = cc.build(cache)
-            for tstart, tend, value in zip(tstarts, tends, values, strict=False):
-                cols[cid_col].append(container_id)
-                cols[ch_col].append(cc.channel_id)
-                cols["tstart"].append(tstart)
-                cols["tend"].append(tend)
-                cols["value"].append(value)
+            if not len(tstarts) == len(tends) == len(values):
+                raise ValueError(
+                    f"Calculated channel {cc.identity} built arrays of different lengths: "
+                    f"tstarts={len(tstarts)}, tends={len(tends)}, values={len(values)}"
+                )
+            columns["tstart"].append(np.asarray(tstarts))
+            columns["tend"].append(np.asarray(tends))
+            columns["value"].append(np.asarray(values))
+            channel_ids.append(cc.channel_id)
+            lengths.append(len(tstarts))
+            # Otherwise the last channel's arrays outlive the clear() below.
+            del tstarts, tends, values
 
-        return pd.DataFrame(cols)
+        # Concatenate one column at a time and free its parts right away, so peak
+        # memory stays close to the output size.
+        for name, parts in columns.items():
+            columns[name] = np.concatenate(parts) if parts else np.empty(0)
+            parts.clear()
+        total = sum(lengths)
+        return pd.DataFrame(
+            {
+                # A scalar broadcast shares one object across rows for string ids.
+                cid_col: pd.Series(container_id, index=pd.RangeIndex(total)),
+                ch_col: np.repeat(np.asarray(channel_ids, dtype=np.int64), lengths),
+                **columns,
+            },
+            copy=False,
+        )
 
     @staticmethod
     def _identity_map_expr(identity: dict[str, str]) -> "F.Column":
