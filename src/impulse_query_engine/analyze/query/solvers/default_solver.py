@@ -1427,27 +1427,47 @@ class DefaultSolver(QuerySolver):
         ch_col = col_map["ch"]
         container_id = pdf[cid_col].iloc[0]
 
-        # One frame per channel built from whole arrays (not per-value Python
-        # objects) keeps peak memory low for containers with many output rows.
-        frames = []
+        parts = {"tstart": [], "tend": [], "value": []}
+        channel_ids, lengths = [], []
         for cc in selections:
             tstarts, tends, values = cc.build(cache)
-            n = len(tstarts)
-            frames.append(
-                pd.DataFrame(
-                    {
-                        cid_col: np.full(n, container_id),
-                        ch_col: np.full(n, cc.channel_id),
-                        "tstart": np.asarray(tstarts),
-                        "tend": np.asarray(tends),
-                        "value": np.asarray(values),
-                    }
+            if not len(tstarts) == len(tends) == len(values):
+                raise ValueError(
+                    f"Calculated channel {cc.identity} built arrays of different lengths: "
+                    f"tstarts={len(tstarts)}, tends={len(tends)}, values={len(values)}"
                 )
-            )
+            parts["tstart"].append(np.asarray(tstarts))
+            parts["tend"].append(np.asarray(tends))
+            parts["value"].append(np.asarray(values))
+            channel_ids.append(cc.channel_id)
+            lengths.append(len(tstarts))
+            # Leave *parts* as the only owner so clearing it below frees the arrays.
+            del tstarts, tends, values
 
-        if not frames:
-            return pd.DataFrame({c: [] for c in (cid_col, ch_col, "tstart", "tend", "value")})
-        return pd.concat(frames, ignore_index=True)
+        # Concatenate one column at a time and drop its parts right away, so peak
+        # memory stays close to the output size; copy=False keeps pandas from
+        # copying the arrays again.
+        columns = {}
+        for name, arrays in parts.items():
+            columns[name] = np.concatenate(arrays) if arrays else np.empty(0)
+            arrays.clear()
+        total = sum(lengths)
+        if isinstance(container_id, str):
+            # fill() repeats one reference (np.full would create one str per row);
+            # the explicit dtype skips pandas' object-type inference and its buffers.
+            container_ids = np.empty(total, dtype=object)
+            container_ids.fill(container_id)
+            container_ids = pd.Series(container_ids, dtype=object, copy=False)
+        else:
+            container_ids = np.full(total, container_id)
+        return pd.DataFrame(
+            {
+                cid_col: container_ids,
+                ch_col: np.repeat(np.asarray(channel_ids, dtype=np.int64), lengths),
+                **columns,
+            },
+            copy=False,
+        )
 
     @staticmethod
     def _identity_map_expr(identity: dict[str, str]) -> "F.Column":

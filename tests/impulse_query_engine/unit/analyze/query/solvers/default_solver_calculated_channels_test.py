@@ -394,7 +394,8 @@ class TestSolveCalculatedChannelsUdf:
     """
 
     def test_explodes_arrays_into_narrow_rows(self):
-        cc = _MockCalcChannel(channel_id=10, arrays=([0, 100], [100, 200], [3.0, 4.0]))
+        series = SampleSeries([0, 100], [100, 200], [3.0, 4.0])
+        cc = _MockCalcChannel(channel_id=10, arrays=(series.tstarts, series.tends, series.values))
         result = DefaultSolver._solve_calculated_channels_udf(
             _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
         )
@@ -405,11 +406,12 @@ class TestSolveCalculatedChannelsUdf:
         assert list(result["tstart"]) == [0, 100]
         assert list(result["tend"]) == [100, 200]
         assert list(result["value"]) == [3.0, 4.0]
+        # SampleSeries yields float64 times; the Spark output schema casts them.
         assert result.dtypes.to_dict() == {
             "container_id": "int64",
             "channel_id": "int64",
-            "tstart": "int64",
-            "tend": "int64",
+            "tstart": "float64",
+            "tend": "float64",
             "value": "float64",
         }
 
@@ -419,7 +421,30 @@ class TestSolveCalculatedChannelsUdf:
             _udf_input_pdf().assign(container_id="c1"), selections=[cc], col_map=_UDF_COL_MAP
         )
         assert list(result["container_id"]) == ["c1", "c1"]
-        assert result["container_id"].dtype == object
+        assert pd.api.types.is_string_dtype(result["container_id"])
+        # Every row shares one str object rather than holding its own copy.
+        assert result["container_id"].iloc[0] is result["container_id"].iloc[1]
+
+    def test_mismatched_lengths_raise(self):
+        cc = _MockCalcChannel(
+            channel_id=10, arrays=([0, 100], [100], [3.0, 4.0]), identity={"channel_name": "bad"}
+        )
+        with pytest.raises(ValueError, match="'channel_name': 'bad'.*different lengths"):
+            DefaultSolver._solve_calculated_channels_udf(
+                _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
+            )
+
+    def test_empty_results_have_consistent_dtypes(self):
+        empty = SampleSeries([], [], [])
+        cc = _MockCalcChannel(channel_id=10, arrays=(empty.tstarts, empty.tends, empty.values))
+        no_rows = DefaultSolver._solve_calculated_channels_udf(
+            _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
+        )
+        no_selections = DefaultSolver._solve_calculated_channels_udf(
+            _udf_input_pdf(), selections=[], col_map=_UDF_COL_MAP
+        )
+        assert len(no_rows) == len(no_selections) == 0
+        assert no_rows.dtypes.to_dict() == no_selections.dtypes.to_dict()
 
     def test_udf_preserves_native_values_no_truncation(self):
         # The UDF no longer casts: it emits the native SampleSeries values, and the
