@@ -75,9 +75,9 @@ def params():
     return Params()
 
 
-def report_config(p, container_metrics_table=None, containers=None, scenario_config=None):
-    """The benchmark's report config, with `scenario_config`, `compute_overrides`, then
-    `config_overrides`, merged per section.
+def report_config(p, container_metrics_table=None, containers=None):
+    """The benchmark's report config, with `compute_overrides`, then `config_overrides`, merged
+    per section.
 
     `container_metrics_table` replaces the source's (a copy that `incremental_delta` updates);
     `containers` limits the run to the first n trips (`container_id < n`) or to a list of trips.
@@ -90,7 +90,7 @@ def report_config(p, container_metrics_table=None, containers=None, scenario_con
     cfg["measurement_dimensions"] = MEASUREMENT_DIMENSIONS
     if container_metrics_table:
         cfg["source"]["container_metrics_table"] = container_metrics_table
-    for overrides in [scenario_config or {}, p.compute_overrides, p.overrides]:
+    for overrides in [p.compute_overrides, p.overrides]:
         for key, value in overrides.items():
             cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
     if containers is not None:
@@ -139,9 +139,8 @@ def run_info(p):
 def fingerprint(p):
     """Row count and rounded sums of the numeric columns of each gold table.
 
-    Ids, hashes and bookkeeping columns are skipped; they differ between runs (a config hash
-    covers the run's schema name). Sums are in double, as
-    sums of epoch-µs timestamps overflow a long.
+    Ids, hashes and bookkeeping columns are skipped, as they differ between runs. Sums are in
+    double: sums of epoch-µs timestamps overflow a long.
     """
     result = {}
     tables = spark.sql(f"SHOW TABLES IN {p.catalog}.{p.schema}").collect()

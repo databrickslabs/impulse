@@ -1,22 +1,19 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Benchmark: run
-# MAGIC Runs and measures the scenarios of this task (`TASKS` in `benchmark_report.py`, by task key),
-# MAGIC each into the task's own schema:
+# MAGIC Runs and measures this task's scenarios (`TASKS` in `benchmark_report.py`):
 # MAGIC
-# MAGIC - `run`: `full`, the mixed report into an empty schema (all trips); `incremental_noop`, an
-# MAGIC   incremental rerun with nothing to update; `incremental_delta`, an incremental rerun after 5
-# MAGIC   trips were re-ingested.
+# MAGIC - `run`: `full` (into an empty schema), `incremental_noop` (nothing to update) and
+# MAGIC   `incremental_delta` (5 trips re-ingested).
 # MAGIC - `run_wide`: `wide_report`, the wide report.
 # MAGIC - `run_udfs`: `python_udfs`, the report of Python extensions.
 # MAGIC
-# MAGIC Appends one row per scenario to the results table. A failed scenario is recorded too,
-# MAGIC with its error, and fails the task.
+# MAGIC Appends one row per scenario to the results table; a failed scenario is recorded and fails
+# MAGIC the task.
 
 # COMMAND ----------
 
-# Impulse is installed per notebook: as a cluster library, the bundle's wheel keeps the
-# notebook from starting ("Hive metastore initialization failed").
+# The bundle's wheel, installed per notebook: as a cluster library it breaks the metastore init.
 import glob
 
 whl = max(glob.glob(f"{dbutils.widgets.get('wheel_dir')}/databricks_impulse-*.whl"))
@@ -35,7 +32,6 @@ from bench_utils import RESULTS_SCHEMA, fingerprint, params, report_config, run_
 from benchmark_metrics import Measurement, compute_kind
 from benchmark_report import (
     DELTA_CONTAINERS,
-    SCENARIO_CONFIG,
     SCENARIO_CONTAINERS,
     TASKS,
     build_report,
@@ -66,7 +62,7 @@ if "incremental_delta" in scenarios:
 
 
 def scenario_config(scenario):
-    return report_config(p, silver_copy, containers.get(scenario), SCENARIO_CONFIG.get(scenario))
+    return report_config(p, silver_copy, containers.get(scenario))
 
 
 def builder(scenario, cfg):

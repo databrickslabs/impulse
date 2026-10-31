@@ -6,8 +6,7 @@
 # MAGIC   (`channels`, `channel_metrics`, `channel_tags`, `container_metrics`, `container_tags`)
 # MAGIC * Verifies the source dataset (`source_path`) is present — download it first with the
 # MAGIC   `Renumics_HF_Download` job
-# MAGIC * `reset=True` drops **only the tables owned by this accelerator** — never the schema, which
-# MAGIC   also holds the raw-data volume
+# MAGIC * `reset=True` drops only this bundle's tables, never the schema (it holds the raw volume)
 
 # COMMAND ----------
 
@@ -27,7 +26,7 @@ from utils.notebook_helpers import (
 # COMMAND ----------
 
 # DBTITLE 1,Define widgets
-dbutils.widgets.dropdown("reset", "False", ["True", "False"], "drop accelerator tables")
+dbutils.widgets.dropdown("reset", "False", ["True", "False"], "drop the ingest tables")
 catalog, schema = read_catalog_schema_widgets(dbutils)
 source_path = read_source_path_widget(dbutils)
 channels_format = read_channels_format_widget(dbutils)
@@ -51,7 +50,7 @@ print(f"source trip directories: {len(trip_dirs)}")
 
 # DBTITLE 1,Create schema and tables
 if reset:
-    print(f"reset=True: dropping accelerator tables in {catalog}.{schema}")
+    print(f"reset=True: dropping the ingest tables in {catalog}.{schema}")
     utils.drop_owned_tables(spark, catalog, schema)
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")

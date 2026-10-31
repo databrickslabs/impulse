@@ -2,9 +2,8 @@
 # MAGIC %md
 # MAGIC ### Ingest the fact signals of the current batch into `channels`
 # MAGIC * Reads only the `trip_hash=*` directories of the containers in the current run
-# MAGIC * Uses an explicit schema with the 11 columns common to all source files (the optional
-# MAGIC   `_ducklake_internal_*` columns are dropped) and `recursiveFileLookup`, so the
-# MAGIC   `trip_hash=`/`partition=` directory names are not inferred as conflicting partition columns
+# MAGIC * Reads with an explicit schema of the 11 common columns and `recursiveFileLookup`, so the
+# MAGIC   `trip_hash=`/`partition=` directories aren't inferred as partition columns
 # MAGIC * Maps `session_id → container_id`, `signal_id → channel_id`, timestamps → epoch µs and
 # MAGIC   `coalesce(float_value, int_value) → value`
 # MAGIC * `channels_format=RLE` (default) writes `[tstart, tend)` intervals; `RAW` writes samples

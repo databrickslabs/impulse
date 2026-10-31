@@ -1,19 +1,12 @@
 """The benchmark reports on the Renumics fleet telemetry (100 trips, epoch-µs timestamps).
 
-- `build_report` (scenarios `full`, `incremental_noop`, `incremental_delta`): a mix of the report
-  features: container, interval, point and time-window events, 1D and 2D histograms,
-  statistics per event, point values, calculated channels, and statistics of 40 signals
-  resampled to 1 Hz in 4 aggregations of 10 (the resamples can be pushed down to Spark). With
-  Impulse's default batching, all ~50 channels of a trip are solved together.
-- `build_wide_report` (`wide_report`): a wide definition with many channels and events: the
-  statistics of all 603 signals of every trip (more than one solve per trip), threshold events
-  per signal with their statistics and histograms, distance-weighted histograms and a chain of
-  calculated channels.
-- `build_udf_report` (`python_udfs`): Python extensions (`benchmark_udfs.py`): UDF calculated
-  channels, a UDF event detector and custom statistics.
+- `build_report` (`full`, `incremental_noop`, `incremental_delta`): a mix of the report features,
+  ~50 channels per trip in one solve.
+- `build_wide_report` (`wide_report`): 603 signals, many events and histograms, a chain of
+  calculated channels; more than one solve per trip.
+- `build_udf_report` (`python_udfs`): Python extensions (`benchmark_udfs.py`).
 
-Bump `BENCHMARK_VERSION` on any change of a report, its config or the scenarios: runs only
-compare with runs of the same version.
+Bump `BENCHMARK_VERSION` on any change of a report, its config or the scenarios.
 """
 
 import math
@@ -62,9 +55,6 @@ SCENARIO_CONTAINERS = {
     "cluster": {},
     "serverless": {"python_udfs": 30},
 }
-
-# Report config of a scenario, merged before `compute_overrides` (whose caps win).
-SCENARIO_CONFIG = {}
 
 # Trips re-ingested before `incremental_delta`: 5 %, of all powertrains and of typical lengths.
 DELTA_CONTAINERS = [7, 16, 28, 45, 73]
@@ -335,9 +325,8 @@ def _round(x):
 def build_wide_report(report, signals, max_channels=None):
     """Adds the wide report to `report`; `signals` as returned by `wide_signal_stats`.
 
-    An aggregation is solved in one batch, so with `max_channels_per_batch` set (on serverless)
-    as `max_channels`, the statistics chunks and the chain of calculated channels are shortened
-    to fit it.
+    With `max_channels` (`max_channels_per_batch`), the statistics chunks and the chain are
+    shortened to fit a batch, as an aggregation is solved in one batch.
     """
     stats_chunk = min(WIDE_STATS_CHUNK, max_channels or WIDE_STATS_CHUNK)
     chain_length = min(WIDE_CHAIN_LENGTH, (max_channels or WIDE_CHAIN_LENGTH + 1) - 1)

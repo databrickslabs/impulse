@@ -1,15 +1,9 @@
 """Runtime and memory metrics of a benchmark scenario, on the job cluster or on serverless.
 
-On the job cluster, Spark metrics come from the Spark UI REST API of the driver: the stages a
-scenario ran (those with a higher id than any stage before it), summed, and their executor
-memory peaks. Executor process-tree metrics (the RSS of the pandas UDF workers) need
-`spark.executor.processTreeMetrics.enabled`.
-
-Serverless has no Spark UI, so its metrics come from the query history: the queries the task run
-ran in the scenario's time window (task time, bytes read and written, spill). Executor memory
-isn't available there.
-
-On both, the driver's Python memory, where Impulse plans and collects, is sampled with psutil.
+- Job cluster: the Spark UI REST API of the driver, summed over the scenario's stages, with the
+  executors' memory peaks (process-tree metrics need `spark.executor.processTreeMetrics.enabled`).
+- Serverless: the query history of the task run in the scenario's time window; no executor memory.
+- Both: the driver's Python memory, sampled with psutil.
 """
 
 import threading
@@ -77,7 +71,7 @@ SERVERLESS_METRICS = [
 # Columns of the results table; a run fills those of its compute, the others stay empty.
 METRICS = list(dict.fromkeys(CLUSTER_METRICS + SERVERLESS_METRICS))
 
-# Metrics of the `full` scenario that `gate` checks, by compute.
+# Metrics `gate` checks, by compute.
 GATED = {
     "cluster": ["wall_s", "executor_run_time_s", "peak_executor_python_rss_bytes"],
     "serverless": ["wall_s", "task_time_s", "peak_driver_python_rss_bytes"],

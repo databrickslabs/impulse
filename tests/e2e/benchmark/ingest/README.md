@@ -20,7 +20,7 @@ How the ingest behaves on reruns and failures:
 
 Workspace host and auth come from the environment or a CLI profile (`-p`). The bundle variables `catalog`, `schema` and `raw_volume` choose where the data goes. The defaults match the benchmark job's `source_catalog` / `bench_source_schema`.
 
-Adapted from the `impulse-renumics-fleet-cockpit` ingest, which is in turn adapted from [`impulse-mf4-ingest`](https://github.com/databricks-industry-solutions/impulse-mf4-ingest).
+Based on the [`impulse-mf4-ingest`](https://github.com/databricks-industry-solutions/impulse-mf4-ingest) solution accelerator.
 
 ## Dataset and license
 

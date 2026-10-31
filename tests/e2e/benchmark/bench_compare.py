@@ -1,18 +1,14 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Benchmark: compare
-# MAGIC Compares this run with its baseline: the median of the last 5 runs on `baseline_ref` that
-# MAGIC passed the gate, with the same benchmark version and compute, and no config overrides.
-# MAGIC Returns the comparison as markdown and sets the task value `regressions`, which `gate`
-# MAGIC checks: a failed or missing scenario, or a gated metric of a gated scenario more than
-# MAGIC `max_regression` above the baseline. The verdict is stored in `gate_passed`, so a run with a
-# MAGIC regression never becomes part of a baseline. Gold tables that differ from the baseline's,
-# MAGIC or after `incremental_delta` from those after `full`, are reported as a warning.
+# MAGIC Compares each scenario with the median of its last 5 runs on `baseline_ref` that passed the
+# MAGIC gate (same benchmark version and compute, no config overrides). Returns markdown, stores the
+# MAGIC verdict in `gate_passed` and sets the task value `regressions` for `gate`. Warns when gold
+# MAGIC tables differ from the baseline's, or `incremental_delta`'s from `full`'s.
 
 # COMMAND ----------
 
-# Impulse is installed per notebook: as a cluster library, the bundle's wheel keeps the
-# notebook from starting ("Hive metastore initialization failed").
+# The bundle's wheel, installed per notebook: as a cluster library it breaks the metastore init.
 import glob
 
 whl = max(glob.glob(f"{dbutils.widgets.get('wheel_dir')}/databricks_impulse-*.whl"))
@@ -72,7 +68,7 @@ def fmt(metric, value):
 
 
 def fingerprint_diff(actual, expected):
-    # Hashes differ per run (older rows still have them).
+    # Hashes differ per run.
     keys = sorted(k for k in set(actual or {}) | set(expected or {}) if not k.endswith("_hash"))
     return [
         k

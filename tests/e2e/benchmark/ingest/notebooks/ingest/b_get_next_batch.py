@@ -8,9 +8,8 @@
 # MAGIC 3. Up to `max_containers_per_run` `unprocessed` containers (lowest `container_id` first),
 # MAGIC    assigned a fresh `run_id`
 # MAGIC
-# MAGIC `max_containers_per_run` bounds how much fact data one job run reads (~0.5 GB of source
-# MAGIC Parquet / ~50M samples per container) so the 52 GB dataset is loaded incrementally.
-# MAGIC Emits task value `next_run_id` (`noop` when there is nothing to do).
+# MAGIC `max_containers_per_run` bounds the data one run reads (~50 M samples per container).
+# MAGIC Emits the task value `next_run_id` (`noop` when there is nothing to do).
 
 # COMMAND ----------
 

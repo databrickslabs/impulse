@@ -1,14 +1,12 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Benchmark: setup
-# MAGIC Creates the results table (or adds new columns to it) and the run's schema, drops
-# MAGIC benchmark schemas left over from cancelled runs, and checks that the source data is still the
-# MAGIC full dataset.
+# MAGIC Creates the results table (or adds new columns) and the run's schema, drops schemas left over
+# MAGIC from cancelled runs, and checks that the source data is the full dataset.
 
 # COMMAND ----------
 
-# Impulse is installed per notebook: as a cluster library, the bundle's wheel keeps the
-# notebook from starting ("Hive metastore initialization failed").
+# The bundle's wheel, installed per notebook: as a cluster library it breaks the metastore init.
 import glob
 
 whl = max(glob.glob(f"{dbutils.widgets.get('wheel_dir')}/databricks_impulse-*.whl"))
@@ -37,8 +35,7 @@ spark.sql(f"CREATE SCHEMA {p.catalog}.{p.schema}")
 
 # COMMAND ----------
 
-# Only this job's own schemas: bench_<run id>[_<task>], owned by the running principal, older
-# than a day.
+# This job's own schemas (bench_<run id>[_<task>]) older than a day.
 stale = spark.sql(
     f"SELECT schema_name FROM {p.catalog}.information_schema.schemata "
     "WHERE schema_name RLIKE '^bench_[0-9]+(_[a-z]+)?$' AND schema_owner = current_user() "

@@ -6,8 +6,7 @@
 
 # COMMAND ----------
 
-# Impulse is installed per notebook: as a cluster library, the bundle's wheel keeps the
-# notebook from starting ("Hive metastore initialization failed").
+# The bundle's wheel, installed per notebook: as a cluster library it breaks the metastore init.
 import glob
 
 whl = max(glob.glob(f"{dbutils.widgets.get('wheel_dir')}/databricks_impulse-*.whl"))

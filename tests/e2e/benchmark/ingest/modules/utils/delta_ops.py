@@ -43,7 +43,7 @@ def create_table_if_missing(
 
 
 def drop_owned_tables(spark, catalog: str, schema: str) -> None:
-    """Drop the status and silver tables owned by this accelerator (never the schema)."""
+    """Drop the status and silver tables owned by this bundle (never the schema)."""
     for table_name in OWNED_TABLES:
         spark.sql(f"DROP TABLE IF EXISTS {catalog}.{schema}.{table_name}")
 

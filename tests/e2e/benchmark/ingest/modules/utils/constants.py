@@ -1,4 +1,4 @@
-"""Shared constants for the Renumics fleet telemetry → Impulse ingest accelerator."""
+"""Shared constants of the Renumics fleet telemetry → Impulse silver ingest."""
 
 DEFAULT_CATALOG = "impulse_testing_catalog"
 DEFAULT_SCHEMA = "impulse_renumics"
@@ -43,7 +43,7 @@ SILVER_TABLES = (
     CONTAINER_TAGS_TABLE,
 )
 
-# Tables owned by this accelerator; only these are dropped on reset (never the schema,
+# Tables owned by this bundle; only these are dropped on reset (never the schema,
 # which also holds the raw-data volume).
 OWNED_TABLES = (STATUS_TABLE, *SILVER_TABLES)
 
