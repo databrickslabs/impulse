@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 import pandas as pd
 
@@ -69,6 +70,25 @@ class SeriesCache(ABC):
             The loaded series object.
         """
         pass
+
+    def materialized(self, expression) -> Any | None:
+        """Return the precomputed result of *expression*, if the cache holds one.
+
+        Consulted by :meth:`TimeSeriesOp.build` before evaluating the node, so a
+        subtree computed ahead of time (e.g. pushed down to Spark) replaces its
+        in-memory evaluation.  Default: no precomputed results.
+
+        Parameters
+        ----------
+        expression : TimeSeriesExpression
+            The node about to be built.
+
+        Returns
+        -------
+        Any or None
+            The precomputed result, or ``None`` to evaluate *expression* normally.
+        """
+        return None
 
     @property
     def container_tags(self) -> dict:

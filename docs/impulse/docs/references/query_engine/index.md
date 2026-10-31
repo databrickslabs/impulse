@@ -12,6 +12,9 @@ silver-layer data. It has two parts:
 - **[Query Solvers](query_solvers.md)** — the `DefaultSolver` that knows how your silver tables are
   laid out, reads them, and evaluates the expressions per container.
 
+[How a Query Is Solved](solving.md) walks through a `solve()` call stage by stage, from the
+metadata tables to the per-container results.
+
 ## Two ways to use it
 
 - **Directly, for ad-hoc analysis.** Build a query against a `MeasurementDB` and solve it
