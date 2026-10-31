@@ -198,3 +198,17 @@ Datasets and other non-code assets distributed with this repository, with their 
 - **Copyright / Attribution:** Weber, Marc — Institute for Information Processing Technology (ITIV), KIT
 
 Source data for `tests/data/` and `demos/data/`. Restructured into the framework's silver-layer schema (containers, channels, tags, metrics). Cite as: Weber, Marc (2019). *Automotive OBD-II Dataset*. Institute for Information Processing Technology (ITIV), KIT. DOI: 10.5445/IR/1000085073.
+
+---
+
+## Datasets Downloaded for Testing
+
+Used only by the tests, not by the Impulse framework. Not part of this repository: the tests download them.
+
+### Synthetic Vehicle Fleet Telemetry
+
+- **License:** CC-BY-SA-4.0 ([https://creativecommons.org/licenses/by-sa/4.0/](https://creativecommons.org/licenses/by-sa/4.0/))
+- **Source:** [https://huggingface.co/datasets/renumics/synthetic-vehicle-fleet-telemetry](https://huggingface.co/datasets/renumics/synthetic-vehicle-fleet-telemetry) (revision `017ec8f02e0753d8b092cf9229e1372d92a7b635`)
+- **Copyright / Attribution:** Renumics, based on joint work between Volkswagen AG Group Innovation, IPG Automotive and Renumics
+
+Downloaded by `tests/e2e/benchmark/ingest/` for the performance benchmark. Cite as: Renumics, Volkswagen AG Group Innovation, IPG Automotive (2026). *Synthetic Vehicle Fleet Telemetry*. Hugging Face. [https://huggingface.co/datasets/renumics/synthetic-vehicle-fleet-telemetry](https://huggingface.co/datasets/renumics/synthetic-vehicle-fleet-telemetry).

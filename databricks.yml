@@ -1,4 +1,5 @@
-# Bundle for the end-to-end tests: one serverless job that runs tests/e2e.
+# Bundle for the end-to-end tests (serverless) and the performance benchmark (fixed-size job
+# cluster): jobs that run tests/e2e.
 bundle:
   name: impulse-e2e
 
@@ -17,16 +18,37 @@ include:
 variables:
   catalog:
     description: Catalog for the ephemeral test schemas.
-    default: maxim_catalog
+    default: impulse_testing_catalog
   source_catalog:
     description: Catalog with the silver test data (read-only).
-    default: maxim_catalog
+    default: impulse_testing_catalog
   source_schema:
     description: Schema under `source_catalog` with the silver test data (read-only).
     default: default
   suffix:
     description: Suffix of the bundle root and job name, so each PR deploys its own copy.
     default: ""
+  bench_source_schema:
+    description: >
+      Schema under `source_catalog` with the benchmark's silver data (read-only), created by
+      tests/e2e/benchmark/ingest.
+    default: impulse_renumics
+  bench_results_schema:
+    description: Schema under `catalog` with the benchmark results table, kept across runs.
+    default: impulse_benchmark
+  # The benchmark's fixed-size job cluster. Runs only compare within one cluster spec.
+  bench_spark_version:
+    description: Databricks Runtime of the benchmark cluster (Python 3.12 for Impulse).
+    default: 17.3.x-scala2.13
+  bench_node_type:
+    description: Driver and worker node type of the benchmark cluster (memory-optimized).
+    default: r6id.2xlarge
+  bench_num_workers:
+    description: Workers of the benchmark cluster (fixed, no autoscaling).
+    default: 8
+  bench_serverless_environment_version:
+    description: Serverless environment of the benchmark_serverless job.
+    default: "5"
 
 targets:
   # Workspace host and auth come from the environment.
