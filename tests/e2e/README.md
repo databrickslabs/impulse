@@ -47,31 +47,35 @@ Add a notebook `e2e_<name>.py` that builds a report with `config(p)` and `new_re
 
 ## Performance benchmark
 
-Measures the runtime and memory of one report on a large dataset, so that changes and releases can be compared with a baseline. Two jobs run the same report with the same notebooks (`benchmark/`): `benchmark` on a [fixed-size job cluster](#cluster) (`resources/benchmark_job.yml`), and `benchmark_serverless` on [serverless](#serverless) (`resources/benchmark_serverless_job.yml`).
+Measures the runtime and memory of Impulse reports on a large dataset, so that changes and releases can be compared with a baseline. Two jobs run the same scenarios with the same notebooks (`benchmark/`): `benchmark` on [fixed-size job clusters](#cluster) (`resources/benchmark_job.yml`), and `benchmark_serverless` on [serverless](#serverless) (`resources/benchmark_serverless_job.yml`). Both read the [Renumics fleet telemetry](#re-creating-the-benchmark-dataset): 100 trips, 680 signals, 5.08 B samples.
 
-The report (`benchmark/benchmark_report.py`) runs on the [Renumics fleet telemetry](#re-creating-the-benchmark-dataset): 100 trips, 680 signals, 5.08 B samples. Channel batching is Impulse's default, so each trip's ~50 channels are solved together. It uses:
-- six events: the trip, driving cycles (merged intervals), charging and recuperation (battery thresholds), slow-downs (points in time) and 5-minute windows;
-- two calculated channels;
-- 1D and 2D histograms, statistics per event and point values;
-- statistics of 40 signals resampled to 1 Hz, in 4 aggregations of 10. These are what Spark pushdown can speed up.
+The scenarios cover first runs and incremental reruns after new data in the silver layer, a mixed report, a wide definition and Python extensions. The reports are in `benchmark/benchmark_report.py`:
+
+| Scenario | Report | Trips | Measures |
+|---|---|---|---|
+| `full` | The mixed report: six events (the trip, driving cycles with merged intervals, charging and recuperation from battery thresholds, slow-downs as points in time, 5-minute windows), two calculated channels, 1D and 2D histograms, statistics per event, point values, and statistics of 40 signals resampled to 1 Hz in 4 aggregations of 10 (what Spark pushdown can speed up). With Impulse's default batching, each trip's ~50 channels are solved together | all | A first run into an empty schema |
+| `incremental_noop` | The same | all | An incremental rerun with nothing to update: the fixed cost of a triggered run |
+| `incremental_delta` | The same | all | An incremental rerun after 5 trips were re-ingested (`DELTA_CONTAINERS`, their `_ingested_at` updated in a copy of `container_metrics`): detection, recomputation and the update of the gold tables. Its gold tables must equal `full`'s |
+| `wide_report` | A wide definition: statistics of all 603 signals logged in every trip (aggregations of 50, 2 solves per trip), 120 threshold events (p90/p10 of 60 signals, debounced and merged) with statistics of 5 signals each, a 101-bin histogram per threshold signal, 26 weighted histograms and a chain of 20 calculated channels | all | A first run |
+| `python_udfs` | Python extensions (`benchmark/benchmark_udfs.py`): UDF calculated channels (smoothed gradient, Butterworth low-pass, energy integral, edge counter), a UDF event detector (hysteresis), per-channel and cross-channel custom statistics, and histograms over them | `SCENARIO_CONTAINERS` | A first run |
 
 | Task | Notebook | Does |
 |---|---|---|
 | `setup` | `bench_setup` | Creates the results table `<catalog>.<bench_results_schema>.results`, or adds new metric columns to it, and the run's schema `bench_<run_id>`. Drops this job's schemas older than one day and checks that the source data is the full dataset |
-| `run` | `run_benchmark` | Scenario `full`: the report into the empty schema. Scenario `incremental_noop`: an incremental rerun with nothing to update. Appends one row per scenario to the results table |
-| `compare` | `bench_compare` | Compares the run with the median of the last 5 runs on `baseline_ref` that passed the gate (same benchmark version, compute and no `config_overrides`). Returns the table as markdown and stores the verdict in `gate_passed`, so a run with a regression never becomes part of a baseline |
-| `gate` | `bench_gate` | Fails if a scenario failed, or if a gated metric of the `full` scenario is more than `max_regression` above the baseline. On the job cluster: `wall_s`, `executor_run_time_s`, `peak_executor_python_rss_bytes`, default 10 % (identical runs differ by less than 1 %). On serverless: `wall_s`, `task_time_s`, `peak_driver_python_rss_bytes`, default 25 % |
-| `teardown` | `bench_teardown` | Drops the run's schema, also after a failure |
+| `run`, `run_wide`, `run_udfs` | `run_benchmark` | In parallel, each on its own compute and schema (`TASKS` in `benchmark_report.py`): `run` runs `full`, `incremental_noop`, `incremental_delta`; `run_wide` runs `wide_report` (job cluster only); `run_udfs` runs `python_udfs`. Appends one row per scenario to the results table |
+| `compare` | `bench_compare` | Compares each scenario with the median of its last 5 runs on `baseline_ref` that passed the gate (same benchmark version, compute and no `config_overrides`). Returns the tables as markdown and stores the verdict in `gate_passed`, so a run with a regression never becomes part of a baseline |
+| `gate` | `bench_gate` | Fails if a scenario failed or didn't run, or if a gated metric of `full`, `wide_report` or `python_udfs` is more than `max_regression` above the baseline. On the job cluster: `wall_s`, `executor_run_time_s`, `peak_executor_python_rss_bytes`, default 10 % (identical runs differ by less than 1 %). On serverless: `wall_s`, `task_time_s`, `peak_driver_python_rss_bytes`, default 25 %. The incremental scenarios are short, so they're reported but not gated |
+| `teardown` | `bench_teardown` | Drops the run's schemas, also after a failure |
 
 ### Cluster
 
-All tasks run on one job cluster of fixed size, so that runs are comparable:
+Each run task has its own job cluster of the same fixed size, so that runs are comparable and the tasks don't disturb each other's measurements; `setup`, `compare`, `gate` and `teardown` share the first:
 - Databricks Runtime 17.3 LTS;
 - a driver and 8 workers of the memory-optimized `r6id.2xlarge` (8 cores, 64 GB each);
 - no autoscaling, no Photon;
 - on-demand nodes only, so no spot instance is lost during a measurement.
 
-The bundle variables `bench_spark_version`, `bench_node_type` and `bench_num_workers` set it. The cluster spec is stored with each run (`compute`), and runs only compare with runs of the same spec, so a new spec starts a new baseline. The cluster start (~4 min) isn't measured. The `full` scenario takes ~23 min and the whole job ~31 min. The job's principal needs the `allow-cluster-create` entitlement.
+The bundle variables `bench_spark_version`, `bench_node_type` and `bench_num_workers` set it. The cluster spec is stored with each run (`compute`), and runs only compare with runs of the same spec, so a new spec starts a new baseline. The cluster starts (~4 min) aren't measured. The `run` task takes ~33 min, `run_udfs` ~12 min; `run_wide` is the longest task (timeout 12 h). The job's principal needs the `allow-cluster-create` entitlement.
 
 The notebooks install the wheel the bundle built (task parameter `wheel_dir`) with `%pip`, rather than as a cluster library: in the benchmark workspace, a cluster library keeps the notebooks from starting ("Hive metastore initialization failed").
 
@@ -79,7 +83,7 @@ The notebooks install the wheel the bundle built (task parameter `wheel_dir`) wi
 
 `benchmark_serverless` runs on serverless environment 5 (bundle variable `bench_serverless_environment_version`). Its compute isn't fixed, so its numbers vary more and compare only with other serverless runs.
 
-A serverless Python worker has a fixed amount of memory, which the report with Impulse's default batching exceeds. So the job's `compute_overrides` parameter caps solves at 10 channels (`max_channels_per_batch: 10`, 6 solves) and excludes trip 39. With one solve per trip (the default) or 20 channels per solve, many tasks run their worker out of memory; with 10, none does. That trip is 4.35 h long while the others last at most 1 h; with ~1.7 M rows per channel it doesn't fit a serverless worker even with 3 channels per solve. `compute_overrides` is merged into the report config before `config_overrides` and is stored with the compute, so runs only compare with runs of the same.
+Serverless Python workers have limited memory, so the job's `compute_overrides` cap solves at 10 channels and exclude trip 39 (4.35 h); otherwise workers run out of memory. `compute_overrides` is stored with the compute, so runs only compare with runs of the same. For the same reason, serverless skips `wide_report` (`COMPUTE_SCENARIOS`) and runs `python_udfs` on 30 trips. Each run task has its own environment.
 
 ### Metrics
 
@@ -108,7 +112,7 @@ This deploys the bundle and runs the job with the default parameters (`git_ref=m
 
 `config_overrides` is JSON merged into the report config per section, e.g. `{"query_engine": {"enable_pushdown": true}}`. A run with overrides compares with the baseline runs, which have none.
 
-Bump `BENCHMARK_VERSION` in `benchmark_report.py` whenever the report or its config changes. Runs only compare with runs of the same version, so the next runs on main start a new baseline.
+Bump `BENCHMARK_VERSION` in `benchmark_report.py` whenever a report, its config or a scenario changes. Runs only compare with runs of the same version, so the next runs on main start a new baseline.
 
 To query the results:
 

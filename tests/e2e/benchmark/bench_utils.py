@@ -33,6 +33,7 @@ PARAMS = [
     "baseline_ref",
     "max_regression",
     "job_run_id",
+    "task_key",
 ]
 
 RESULTS_SCHEMA = T.StructType(
@@ -74,18 +75,41 @@ def params():
     return Params()
 
 
-def report_config(p):
-    """The benchmark's report config, with `compute_overrides`, then `config_overrides`, merged
-    per section."""
+def report_config(p, container_metrics_table=None, containers=None, scenario_config=None):
+    """The benchmark's report config, with `scenario_config`, `compute_overrides`, then
+    `config_overrides`, merged per section.
+
+    `container_metrics_table` replaces the source's (a copy that `incremental_delta` updates);
+    `containers` limits the run to the first n trips (`container_id < n`) or to a list of trips.
+    """
     cfg = config(
         p,
         incremental={"enabled": True, "silver_last_modified_column": "_ingested_at"},
         calculated_channels={"emit_channel_metrics": True},
     )
     cfg["measurement_dimensions"] = MEASUREMENT_DIMENSIONS
-    for overrides in [p.compute_overrides, p.overrides]:
+    if container_metrics_table:
+        cfg["source"]["container_metrics_table"] = container_metrics_table
+    for overrides in [scenario_config or {}, p.compute_overrides, p.overrides]:
         for key, value in overrides.items():
             cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
+    if containers is not None:
+        # Added to every filter group (the groups are OR-combined), e.g. serverless's.
+        container_id = lambda op, value: {
+            "column_name": "container_id",
+            "comparator": op,
+            "value": value,
+        }
+        limits = (
+            [[container_id("<", containers)]]
+            if isinstance(containers, int)
+            else [[container_id("==", c)] for c in containers]
+        )
+        filters = dict(cfg.get("container_filters") or {})
+        filters["metric_filters"] = [
+            [*group, *limit] for group in filters.get("metric_filters") or [[]] for limit in limits
+        ]
+        cfg["container_filters"] = filters
     return cfg
 
 

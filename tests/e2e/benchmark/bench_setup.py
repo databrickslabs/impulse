@@ -37,10 +37,11 @@ spark.sql(f"CREATE SCHEMA {p.catalog}.{p.schema}")
 
 # COMMAND ----------
 
-# Only this job's own schemas: bench_<run id>, owned by the running principal, older than a day.
+# Only this job's own schemas: bench_<run id>[_<task>], owned by the running principal, older
+# than a day.
 stale = spark.sql(
     f"SELECT schema_name FROM {p.catalog}.information_schema.schemata "
-    "WHERE schema_name RLIKE '^bench_[0-9]+$' AND schema_owner = current_user() "
+    "WHERE schema_name RLIKE '^bench_[0-9]+(_[a-z]+)?$' AND schema_owner = current_user() "
     "AND created < current_timestamp() - INTERVAL 1 DAY"
 )
 for row in stale.collect():

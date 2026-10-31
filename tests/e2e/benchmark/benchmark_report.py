@@ -1,18 +1,37 @@
-"""The benchmark report on the Renumics fleet telemetry (100 trips, epoch-µs timestamps).
+"""The benchmark reports on the Renumics fleet telemetry (100 trips, epoch-µs timestamps).
 
-A mix of the report features: container, interval, point and time-window events, 1D and 2D
-histograms, statistics per event, point values, calculated channels, and statistics of 40
-signals resampled to 1 Hz in 4 aggregations of 10 (the resamples can be pushed down to Spark).
-Channel batching is Impulse's default: all ~50 channels of a trip in one solve.
+- `build_report` (scenarios `full`, `incremental_noop`, `incremental_delta`): a mix of the report
+  features: container, interval, point and time-window events, 1D and 2D histograms,
+  statistics per event, point values, calculated channels, and statistics of 40 signals
+  resampled to 1 Hz in 4 aggregations of 10 (the resamples can be pushed down to Spark). With
+  Impulse's default batching, all ~50 channels of a trip are solved together.
+- `build_wide_report` (`wide_report`): a wide definition with many channels and events: the
+  statistics of all 603 signals of every trip (more than one solve per trip), threshold events
+  per signal with their statistics and histograms, distance-weighted histograms and a chain of
+  calculated channels.
+- `build_udf_report` (`python_udfs`): Python extensions (`benchmark_udfs.py`): UDF calculated
+  channels, a UDF event detector and custom statistics.
 
-Bump `BENCHMARK_VERSION` on any change of the report or its config: runs only compare with
-runs of the same version.
+Bump `BENCHMARK_VERSION` on any change of a report, its config or the scenarios: runs only
+compare with runs of the same version.
 """
 
 import math
 
-from impulse_reporting.aggregations.histogram import HistogramDuration
-from impulse_reporting.aggregations.histogram2d import Histogram2DDuration
+import benchmark_udfs as udfs
+import numpy as np
+from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
+from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
+    CrossChannelStatistic,
+    PerChannelStatistic,
+)
+
+from impulse_reporting.aggregations.histogram import (
+    HistogramCustomWeights,
+    HistogramDistance,
+    HistogramDuration,
+)
+from impulse_reporting.aggregations.histogram2d import Histogram2DDistance, Histogram2DDuration
 from impulse_reporting.aggregations.point_value_aggregator import PointValueAggregator
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
@@ -22,7 +41,33 @@ from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from impulse_reporting.events.time_window_event import TimeWindowEvent
 
-BENCHMARK_VERSION = 2
+BENCHMARK_VERSION = 3
+
+# Scenarios of each run task (by task key), in order, and their schema suffix.
+TASKS = {
+    "run": ("", ["full", "incremental_noop", "incremental_delta"]),
+    "run_wide": ("_wide", ["wide_report"]),
+    "run_udfs": ("_udfs", ["python_udfs"]),
+}
+SCENARIOS = [scenario for _, scenarios in TASKS.values() for scenario in scenarios]
+
+# Scenarios per compute. Serverless skips `wide_report`: its workers run out of memory.
+COMPUTE_SCENARIOS = {
+    "cluster": SCENARIOS,
+    "serverless": [s for s in SCENARIOS if s != "wide_report"],
+}
+
+# Scenarios on the first n trips or on listed trips, by compute; the others take all trips.
+SCENARIO_CONTAINERS = {
+    "cluster": {},
+    "serverless": {"python_udfs": 30},
+}
+
+# Report config of a scenario, merged before `compute_overrides` (whose caps win).
+SCENARIO_CONFIG = {}
+
+# Trips re-ingested before `incremental_delta`: 5 %, of all powertrains and of typical lengths.
+DELTA_CONTAINERS = [7, 16, 28, 45, 73]
 
 US = 1e6  # Timestamps are epoch microseconds.
 
@@ -92,8 +137,11 @@ def build_report(report):
         expr=(current < -5) & (speed_kmh > 5),
         desc="HV current < -5 A above 5 km/h",
     )
+    # Drop zero-length intervals at a trip's end: their end points duplicate the previous ones.
     slow_down = PointsInTimeEvent(
-        name="slow_down", expr=(speed_kmh > 50).end_points(), desc="Speed drops to 50 km/h"
+        name="slow_down",
+        expr=(speed_kmh > 50).filter(1).end_points(),
+        desc="Speed drops to 50 km/h",
     )
     five_min = TimeWindowEvent(name="five_min", window_length=300 * US, desc="5-minute windows")
     for event in [trip, driving, charging, recuperation, slow_down, five_min]:
@@ -253,5 +301,307 @@ def build_report(report):
                 event=trip,
             )
         )
+    report.add_page(page)
+    return report
+
+
+# The wide report: statistics of every signal in chunks (an aggregation is solved in one batch),
+# and threshold events, histograms and statistics for a subset.
+WIDE_STATS_CHUNK = 50
+WIDE_THRESHOLD_SIGNALS = 60
+WIDE_DISTANCE_SIGNALS = 20
+WIDE_CHAIN_LENGTH = 20
+
+
+def wide_signal_stats(spark, source):
+    """The signals logged in every trip, sorted by name, with medians over the trips of their
+    `channel_metrics` (`std`, `min`, `max`, `pz10`, `pz90`). Deterministic, as `setup` checks
+    the dataset."""
+    rows = spark.sql(f"""
+        SELECT channel_name AS name, median(std) AS std, median(min) AS lo, median(max) AS hi,
+               median(pz10) AS p10, median(pz90) AS p90
+        FROM {source}channel_metrics
+        GROUP BY channel_name
+        HAVING count(DISTINCT container_id) = (SELECT count(*) FROM {source}container_metrics)
+        ORDER BY channel_name
+        """).collect()
+    return [r.asDict() for r in rows]
+
+
+def _round(x):
+    return float(f"{x:.6g}")
+
+
+def build_wide_report(report, signals, max_channels=None):
+    """Adds the wide report to `report`; `signals` as returned by `wide_signal_stats`.
+
+    An aggregation is solved in one batch, so with `max_channels_per_batch` set (on serverless)
+    as `max_channels`, the statistics chunks and the chain of calculated channels are shortened
+    to fit it.
+    """
+    stats_chunk = min(WIDE_STATS_CHUNK, max_channels or WIDE_STATS_CHUNK)
+    chain_length = min(WIDE_CHAIN_LENGTH, (max_channels or WIDE_CHAIN_LENGTH + 1) - 1)
+    query = report.get_db().query
+    ch = lambda name: query.channel(channel_name=name)
+    varying = [
+        s
+        for s in signals
+        if s["std"] and s["hi"] > s["lo"] and s["p90"] is not None and s["p90"] > s["p10"]
+    ]
+    pick = lambda n, offset=0: [
+        varying[(offset + i * len(varying) // n) % len(varying)] for i in range(n)
+    ]
+
+    trip = ContainerEvent(name="trip", desc="Whole trip")
+    report.add_event(trip)
+
+    # Statistics of every signal over the trip.
+    page = Page(page_number=1)
+    names = [s["name"] for s in signals]
+    for i in range(0, len(names), stats_chunk):
+        chunk = names[i : i + stats_chunk]
+        page.add_aggregation(
+            StatsAggregator(
+                name=f"signal_stats_{i // stats_chunk:02d}",
+                input_expressions=[ch(n) for n in chunk],
+                channel_names=chunk,
+                statistics=["start", "end", "min", "max", "mean"],
+                event=trip,
+            )
+        )
+    report.add_page(page)
+
+    # Limit events (above p90, below p10) with stats of 5 signals, and a histogram per signal.
+    page = Page(page_number=2)
+    index = {s["name"]: i for i, s in enumerate(varying)}
+    for i, s in enumerate(pick(WIDE_THRESHOLD_SIGNALS)):
+        signal = ch(s["name"])
+        group = [varying[(index[s["name"]] + k) % len(varying)]["name"] for k in range(5)]
+        for side, expr in [
+            ("high", signal > _round(s["p90"])),
+            ("low", signal < _round(s["p10"])),
+        ]:
+            event = BasicEvent(
+                name=f"limit_{i:02d}_{side}",
+                expr=expr.debounce(0.5 * US).merge_intervals(2 * US),
+                desc=f"{s['name']} {'above p90' if side == 'high' else 'below p10'}",
+            )
+            report.add_event(event)
+            page.add_aggregation(
+                StatsAggregator(
+                    name=f"limit_{i:02d}_{side}_stats",
+                    input_expressions=[ch(n) for n in group],
+                    channel_names=group,
+                    statistics=["min", "max", "mean"],
+                    event=event,
+                )
+            )
+        page.add_aggregation(
+            HistogramDuration(
+                name=f"limit_{i:02d}_hist",
+                base_expr=signal,
+                bins=[_round(b) for b in np.linspace(s["lo"], s["hi"], 101)],
+                event=trip,
+                channel_name=s["name"],
+                values_unit="us",
+            )
+        )
+    report.add_page(page)
+
+    # Distance-weighted and custom-weighted histograms.
+    page = Page(page_number=3)
+    distance = ch("Vhcl.Distance")
+    bins = lambda s, n=21: [_round(b) for b in np.linspace(s["lo"], s["hi"], n)]
+    distance_signals = pick(
+        WIDE_DISTANCE_SIGNALS, offset=len(varying) // (2 * WIDE_DISTANCE_SIGNALS)
+    )
+    for i, s in enumerate(distance_signals):
+        page.add_aggregation(
+            HistogramDistance(
+                name=f"distance_hist_{i:02d}",
+                base_expr=ch(s["name"]),
+                weights_expr=distance,
+                bins=bins(s),
+                event=trip,
+                channel_name=s["name"],
+                weights_channel_name="Vhcl.Distance",
+            )
+        )
+    for i in range(4):
+        x, y = distance_signals[2 * i], distance_signals[2 * i + 1]
+        page.add_aggregation(
+            Histogram2DDistance(
+                name=f"distance_2d_{i}",
+                x_expr=ch(x["name"]),
+                y_expr=ch(y["name"]),
+                weights_expr=distance,
+                x_bins=bins(x),
+                y_bins=bins(y),
+                event=trip,
+                x_channel_name=x["name"],
+                y_channel_name=y["name"],
+            )
+        )
+    v = ch("Vhcl.v")
+    hv_power_kw = ch("PT.PwrSupply.HV1.Voltage") * ch("PT.BattHV.Current") / 1000
+    for name, base, base_bins in [
+        ("speed_kmh", v.where(v < 100) * 3.6, _bins(0, 260, 10)),
+        ("engine_rpm", ch("PT.Engine.rotv") * (60 / (2 * math.pi)), _bins(0, 8000, 250)),
+    ]:
+        page.add_aggregation(
+            HistogramCustomWeights(
+                name=f"{name}_by_hv_power",
+                base_expr=base,
+                weights_expr=hv_power_kw,
+                bins=base_bins,
+                event=trip,
+                channel_name=name,
+                weights_channel_name="hv_power_kw",
+            )
+        )
+    report.add_page(page)
+
+    # A chain of calculated channels, each on the previous one, and their statistics.
+    page = Page(page_number=4)
+    chain_inputs = pick(chain_length + 1, offset=1)
+    expr = ch(chain_inputs[0]["name"]) - ch(chain_inputs[1]["name"])
+    chain = []
+    for i in range(chain_length):
+        if i:
+            expr = expr * 0.5 + ch(chain_inputs[i + 1]["name"])
+        name = f"chain_{i:02d}"
+        report.add_calculated_channel(
+            CalculatedChannel(name=name, expr=expr, identity={"channel_name": name})
+        )
+        chain.append((name, expr))
+    page.add_aggregation(
+        StatsAggregator(
+            name="chain_stats",
+            input_expressions=[e for _, e in chain],
+            channel_names=[n for n, _ in chain],
+            statistics=["min", "max", "mean"],
+            event=trip,
+        )
+    )
+    report.add_page(page)
+    return report
+
+
+def build_udf_report(report):
+    """Adds the report of Python extensions (`benchmark_udfs`) to `report`."""
+    query = report.get_db().query
+    ch = lambda name: query.channel(channel_name=name)
+    udf = TimeSeriesExpression.udf
+
+    v = ch("Vhcl.v")
+    speed_kmh = v.where(v < 100) * 3.6
+    brake = ch("VC.Brake")
+    current, voltage = ch("PT.BattHV.Current"), ch("PT.PwrSupply.HV1.Voltage")
+    signals = {
+        "accel_smooth": udf(udfs.smoothed_gradient)(v),
+        "ax_lowpass": udf(udfs.lowpass)(ch("Car.ax")),
+        "energy_kwh": udf(udfs.cumulative_energy_kwh)(voltage, current),
+        "brake_applications": udf(udfs.rising_edge_count)(brake),
+    }
+    for name, expr in signals.items():
+        report.add_calculated_channel(
+            CalculatedChannel(name=name, expr=expr, identity={"channel_name": name})
+        )
+
+    trip = ContainerEvent(name="trip", desc="Whole trip")
+    driving = BasicEvent(
+        name="driving_cycle",
+        expr=(speed_kmh > 1).merge_intervals(30 * US).filter(60 * US),
+        desc="Moving > 1 km/h; stops < 30 s merged, cycles >= 60 s",
+    )
+    braking = BasicEvent(
+        name="braking",
+        expr=udf(udfs.hysteresis)(brake),
+        desc="Brake pedal above 0.2 until below 0.05 (UDF detector)",
+    )
+    for event in [trip, driving, braking]:
+        report.add_event(event)
+
+    page = Page(page_number=1)
+    page.add_aggregation(
+        StatsAggregator(
+            name="udf_channel_stats",
+            input_expressions=list(signals.values()),
+            channel_names=list(signals),
+            statistics=["min", "max", "mean", "end"],
+            event=driving,
+        )
+    )
+    custom_signals = {
+        "speed_kmh": speed_kmh,
+        "accel_smooth": signals["accel_smooth"],
+        "ax_lowpass": signals["ax_lowpass"],
+        **{
+            name: ch(name)
+            for name in ["Car.ay", "VC.Gas", "VC.Brake", "Vhcl.Steer.Ang", "PT.Engine.rotv"]
+        },
+    }
+    page.add_aggregation(
+        StatsAggregator(
+            name="driving_percentiles",
+            input_expressions=list(custom_signals.values()),
+            channel_names=list(custom_signals),
+            statistics=["mean"],
+            event=driving,
+            per_channel_custom_statistics=[
+                PerChannelStatistic(
+                    func=udfs.percentiles_and_integral,
+                    aggregation_labels=["p5", "p50", "p95", "integral"],
+                )
+            ],
+        )
+    )
+    page.add_aggregation(
+        StatsAggregator(
+            name="braking_stats",
+            input_expressions=[brake, voltage, current, speed_kmh],
+            channel_names=["VC.Brake", "voltage_v", "current_a", "speed_kmh"],
+            statistics=["max"],
+            event=braking,
+            cross_channel_custom_statistics=[
+                CrossChannelStatistic(
+                    func=udfs.energy_kwh,
+                    aggregation_labels=["energy_kwh"],
+                    inputs=["voltage_v", "current_a"],
+                    channel_name="hv_energy",
+                ),
+                CrossChannelStatistic(
+                    func=udfs.time_share_above,
+                    aggregation_labels=["brake_share"],
+                    inputs=["VC.Brake"],
+                    channel_name="brake_share",
+                    params={"threshold": 0.1},
+                ),
+            ],
+        )
+    )
+    page.add_aggregation(
+        HistogramDuration(
+            name="accel_smooth_hist",
+            base_expr=signals["accel_smooth"],
+            bins=_bins(-10, 10, 0.5),
+            event=driving,
+            channel_name="accel_smooth",
+            bins_unit="m/s^2",
+            values_unit="us",
+        )
+    )
+    page.add_aggregation(
+        HistogramCustomWeights(
+            name="speed_by_energy",
+            base_expr=speed_kmh,
+            weights_expr=signals["energy_kwh"],
+            bins=_bins(0, 260, 10),
+            event=trip,
+            channel_name="speed_kmh",
+            weights_channel_name="energy_kwh",
+            math_fct_for_weights="diff",
+        )
+    )
     report.add_page(page)
     return report
