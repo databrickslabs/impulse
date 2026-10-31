@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
@@ -1426,18 +1427,27 @@ class DefaultSolver(QuerySolver):
         ch_col = col_map["ch"]
         container_id = pdf[cid_col].iloc[0]
 
-        cols = {cid_col: [], ch_col: [], "tstart": [], "tend": [], "value": []}
-
+        # One frame per channel built from whole arrays (not per-value Python
+        # objects) keeps peak memory low for containers with many output rows.
+        frames = []
         for cc in selections:
             tstarts, tends, values = cc.build(cache)
-            for tstart, tend, value in zip(tstarts, tends, values, strict=False):
-                cols[cid_col].append(container_id)
-                cols[ch_col].append(cc.channel_id)
-                cols["tstart"].append(tstart)
-                cols["tend"].append(tend)
-                cols["value"].append(value)
+            n = len(tstarts)
+            frames.append(
+                pd.DataFrame(
+                    {
+                        cid_col: np.full(n, container_id),
+                        ch_col: np.full(n, cc.channel_id),
+                        "tstart": np.asarray(tstarts),
+                        "tend": np.asarray(tends),
+                        "value": np.asarray(values),
+                    }
+                )
+            )
 
-        return pd.DataFrame(cols)
+        if not frames:
+            return pd.DataFrame({c: [] for c in (cid_col, ch_col, "tstart", "tend", "value")})
+        return pd.concat(frames, ignore_index=True)
 
     @staticmethod
     def _identity_map_expr(identity: dict[str, str]) -> "F.Column":

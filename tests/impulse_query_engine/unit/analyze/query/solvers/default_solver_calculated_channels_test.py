@@ -405,6 +405,21 @@ class TestSolveCalculatedChannelsUdf:
         assert list(result["tstart"]) == [0, 100]
         assert list(result["tend"]) == [100, 200]
         assert list(result["value"]) == [3.0, 4.0]
+        assert result.dtypes.to_dict() == {
+            "container_id": "int64",
+            "channel_id": "int64",
+            "tstart": "int64",
+            "tend": "int64",
+            "value": "float64",
+        }
+
+    def test_string_container_id_repeated_per_row(self):
+        cc = _MockCalcChannel(channel_id=10, arrays=([0, 100], [100, 200], [3.0, 4.0]))
+        result = DefaultSolver._solve_calculated_channels_udf(
+            _udf_input_pdf().assign(container_id="c1"), selections=[cc], col_map=_UDF_COL_MAP
+        )
+        assert list(result["container_id"]) == ["c1", "c1"]
+        assert result["container_id"].dtype == object
 
     def test_udf_preserves_native_values_no_truncation(self):
         # The UDF no longer casts: it emits the native SampleSeries values, and the
