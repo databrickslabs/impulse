@@ -75,12 +75,12 @@ def params():
     return Params()
 
 
-def report_config(p, container_metrics_table=None, containers=None):
+def report_config(p, container_metrics_table=None, container_filters=None):
     """The benchmark's report config, with `compute_overrides`, then `config_overrides`, merged
     per section.
 
     `container_metrics_table` replaces the source's (a copy that `incremental_delta` updates);
-    `containers` limits the run to the first n trips (`container_id < n`) or to a list of trips.
+    `container_filters` are added to every filter group (the groups are OR-combined).
     """
     cfg = config(
         p,
@@ -93,22 +93,10 @@ def report_config(p, container_metrics_table=None, containers=None):
     for overrides in [p.compute_overrides, p.overrides]:
         for key, value in overrides.items():
             cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
-    if containers is not None:
-        # Added to every filter group (the groups are OR-combined), e.g. serverless's.
-        container_id = lambda op, value: {
-            "column_name": "container_id",
-            "comparator": op,
-            "value": value,
-        }
-        limits = (
-            [[container_id("<", containers)]]
-            if isinstance(containers, int)
-            else [[container_id("==", c)] for c in containers]
-        )
+    if container_filters:
         filters = dict(cfg.get("container_filters") or {})
-        filters["metric_filters"] = [
-            [*group, *limit] for group in filters.get("metric_filters") or [[]] for limit in limits
-        ]
+        groups = filters.get("metric_filters") or [[]]
+        filters["metric_filters"] = [[*group, *container_filters] for group in groups]
         cfg["container_filters"] = filters
     return cfg
 

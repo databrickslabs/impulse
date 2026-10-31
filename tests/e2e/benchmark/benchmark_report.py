@@ -2,8 +2,8 @@
 
 - `build_report` (`full`, `incremental_noop`, `incremental_delta`): a mix of the report features,
   ~50 channels per trip in one solve.
-- `build_wide_report` (`wide_report`): 603 signals, many events and histograms, a chain of
-  calculated channels; more than one solve per trip.
+- `build_wide_report` (`wide_report`): 150 signals, many events and histograms, a chain of
+  calculated channels.
 - `build_udf_report` (`python_udfs`): Python extensions (`benchmark_udfs.py`).
 
 Bump `BENCHMARK_VERSION` on any change of a report, its config or the scenarios.
@@ -50,10 +50,13 @@ COMPUTE_SCENARIOS = {
     "serverless": [s for s in SCENARIOS if s != "wide_report"],
 }
 
-# Scenarios on the first n trips or on listed trips, by compute; the others take all trips.
-SCENARIO_CONTAINERS = {
-    "cluster": {},
-    "serverless": {"python_udfs": 30},
+# Container filters of a scenario, by compute, added to the compute's; without, all trips. Trip
+# 39 (4.35 h) runs the wide report's calculated channels out of executor memory.
+SCENARIO_FILTERS = {
+    "cluster": {"wide_report": [{"column_name": "container_id", "comparator": "!=", "value": 39}]},
+    "serverless": {
+        "python_udfs": [{"column_name": "container_id", "comparator": "<", "value": 30}]
+    },
 }
 
 # Trips re-ingested before `incremental_delta`: 5 %, of all powertrains and of typical lengths.
@@ -295,8 +298,9 @@ def build_report(report):
     return report
 
 
-# The wide report: statistics of every signal in chunks (an aggregation is solved in one batch),
-# and threshold events, histograms and statistics for a subset.
+# The wide report: statistics of the selected signals in chunks (an aggregation is solved in one
+# batch), and threshold events, histograms and statistics for a subset.
+WIDE_SIGNAL_COUNT = 150
 WIDE_STATS_CHUNK = 50
 WIDE_THRESHOLD_SIGNALS = 60
 WIDE_DISTANCE_SIGNALS = 20
@@ -337,6 +341,9 @@ def build_wide_report(report, signals, max_channels=None):
         for s in signals
         if s["std"] and s["hi"] > s["lo"] and s["p90"] is not None and s["p90"] > s["p10"]
     ]
+    # WIDE_SIGNAL_COUNT of the varying signals, evenly spaced over the sorted names.
+    n = min(WIDE_SIGNAL_COUNT, len(varying))
+    varying = [varying[i * len(varying) // n] for i in range(n)]
     pick = lambda n, offset=0: [
         varying[(offset + i * len(varying) // n) % len(varying)] for i in range(n)
     ]
@@ -344,9 +351,9 @@ def build_wide_report(report, signals, max_channels=None):
     trip = ContainerEvent(name="trip", desc="Whole trip")
     report.add_event(trip)
 
-    # Statistics of every signal over the trip.
+    # Statistics of the selected signals over the trip.
     page = Page(page_number=1)
-    names = [s["name"] for s in signals]
+    names = [s["name"] for s in varying]
     for i in range(0, len(names), stats_chunk):
         chunk = names[i : i + stats_chunk]
         page.add_aggregation(

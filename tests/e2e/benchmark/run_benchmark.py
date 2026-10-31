@@ -32,7 +32,7 @@ from bench_utils import RESULTS_SCHEMA, fingerprint, params, report_config, run_
 from benchmark_metrics import Measurement, compute_kind
 from benchmark_report import (
     DELTA_CONTAINERS,
-    SCENARIO_CONTAINERS,
+    SCENARIO_FILTERS,
     TASKS,
     build_report,
     build_udf_report,
@@ -52,7 +52,7 @@ task_run_id = dbutils.widgets.get("task_run_id")
 suffix, scenarios = TASKS[p.task_key]
 p.schema += suffix
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {p.catalog}.{p.schema}")
-containers = SCENARIO_CONTAINERS[compute_kind()]
+scenario_filters = SCENARIO_FILTERS[compute_kind()]
 
 # `incremental_delta` re-ingests trips in a copy of container_metrics, read by the task's scenarios.
 silver_copy = None
@@ -62,7 +62,7 @@ if "incremental_delta" in scenarios:
 
 
 def scenario_config(scenario):
-    return report_config(p, silver_copy, containers.get(scenario))
+    return report_config(p, silver_copy, scenario_filters.get(scenario))
 
 
 def builder(scenario, cfg):
