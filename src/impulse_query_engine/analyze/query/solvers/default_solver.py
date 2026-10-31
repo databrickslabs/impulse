@@ -1427,7 +1427,7 @@ class DefaultSolver(QuerySolver):
         ch_col = col_map["ch"]
         container_id = pdf[cid_col].iloc[0]
 
-        parts = {"tstart": [], "tend": [], "value": []}
+        columns = {"tstart": [], "tend": [], "value": []}
         channel_ids, lengths = [], []
         for cc in selections:
             tstarts, tends, values = cc.build(cache)
@@ -1436,33 +1436,24 @@ class DefaultSolver(QuerySolver):
                     f"Calculated channel {cc.identity} built arrays of different lengths: "
                     f"tstarts={len(tstarts)}, tends={len(tends)}, values={len(values)}"
                 )
-            parts["tstart"].append(np.asarray(tstarts))
-            parts["tend"].append(np.asarray(tends))
-            parts["value"].append(np.asarray(values))
+            columns["tstart"].append(np.asarray(tstarts))
+            columns["tend"].append(np.asarray(tends))
+            columns["value"].append(np.asarray(values))
             channel_ids.append(cc.channel_id)
             lengths.append(len(tstarts))
-            # Leave *parts* as the only owner so clearing it below frees the arrays.
+            # Otherwise the last channel's arrays outlive the clear() below.
             del tstarts, tends, values
 
-        # Concatenate one column at a time and drop its parts right away, so peak
-        # memory stays close to the output size; copy=False keeps pandas from
-        # copying the arrays again.
-        columns = {}
-        for name, arrays in parts.items():
-            columns[name] = np.concatenate(arrays) if arrays else np.empty(0)
-            arrays.clear()
+        # Concatenate one column at a time and free its parts right away, so peak
+        # memory stays close to the output size.
+        for name, parts in columns.items():
+            columns[name] = np.concatenate(parts) if parts else np.empty(0)
+            parts.clear()
         total = sum(lengths)
-        if isinstance(container_id, str):
-            # fill() repeats one reference (np.full would create one str per row);
-            # the explicit dtype skips pandas' object-type inference and its buffers.
-            container_ids = np.empty(total, dtype=object)
-            container_ids.fill(container_id)
-            container_ids = pd.Series(container_ids, dtype=object, copy=False)
-        else:
-            container_ids = np.full(total, container_id)
         return pd.DataFrame(
             {
-                cid_col: container_ids,
+                # A scalar broadcast shares one object across rows for string ids.
+                cid_col: pd.Series(container_id, index=pd.RangeIndex(total)),
                 ch_col: np.repeat(np.asarray(channel_ids, dtype=np.int64), lengths),
                 **columns,
             },

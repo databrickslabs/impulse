@@ -434,18 +434,6 @@ class TestSolveCalculatedChannelsUdf:
                 _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
             )
 
-    def test_empty_results_have_consistent_dtypes(self):
-        empty = SampleSeries([], [], [])
-        cc = _MockCalcChannel(channel_id=10, arrays=(empty.tstarts, empty.tends, empty.values))
-        no_rows = DefaultSolver._solve_calculated_channels_udf(
-            _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
-        )
-        no_selections = DefaultSolver._solve_calculated_channels_udf(
-            _udf_input_pdf(), selections=[], col_map=_UDF_COL_MAP
-        )
-        assert len(no_rows) == len(no_selections) == 0
-        assert no_rows.dtypes.to_dict() == no_selections.dtypes.to_dict()
-
     def test_udf_preserves_native_values_no_truncation(self):
         # The UDF no longer casts: it emits the native SampleSeries values, and the
         # grouped-map output schema (source-derived) drives the final coercion.
@@ -460,12 +448,18 @@ class TestSolveCalculatedChannelsUdf:
         assert result["value"].iloc[0] == 5.0
 
     def test_empty_arrays_produce_zero_rows_full_width(self):
-        cc = _MockCalcChannel(channel_id=10, arrays=([], [], []))
+        empty = SampleSeries.empty()
+        cc = _MockCalcChannel(channel_id=10, arrays=(empty.tstarts, empty.tends, empty.values))
         result = DefaultSolver._solve_calculated_channels_udf(
             _udf_input_pdf(), selections=[cc], col_map=_UDF_COL_MAP
         )
         assert len(result) == 0
         assert list(result.columns) == ["container_id", "channel_id", "tstart", "tend", "value"]
+        # No selections at all yields the same columns and dtypes.
+        no_selections = DefaultSolver._solve_calculated_channels_udf(
+            _udf_input_pdf(), selections=[], col_map=_UDF_COL_MAP
+        )
+        assert no_selections.dtypes.to_dict() == result.dtypes.to_dict()
 
     def test_multi_channel_emits_rows_per_channel_id(self):
         cc_a = _MockCalcChannel(channel_id=10, arrays=([0], [100], [3.0]))
