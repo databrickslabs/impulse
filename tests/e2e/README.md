@@ -62,7 +62,7 @@ The scenarios cover first runs and incremental reruns after new data in the silv
 | Task | Notebook | Does |
 |---|---|---|
 | `setup` | `bench_setup` | Creates the results table `<catalog>.<bench_results_schema>.results`, or adds new metric columns to it, and the run's schema `bench_<run_id>`. Drops this job's schemas older than one day and checks that the source data is the full dataset |
-| `run`, `run_wide`, `run_udfs` | `run_benchmark` | In parallel, each on its own compute and schema (`TASKS` in `benchmark_report.py`): `run` runs `full`, `incremental_noop`, `incremental_delta`; `run_wide` runs `wide_report`; `run_udfs` runs `python_udfs`. Appends one row per scenario to the results table |
+| `run`, `run_wide`, `run_udfs` | `run_benchmark` | In parallel, each on its own compute and schema (`TASKS` in `benchmark_report.py`): `run` runs `full`, `incremental_noop`, `incremental_delta`; `run_wide` runs `wide_report` (job cluster only); `run_udfs` runs `python_udfs`. Appends one row per scenario to the results table |
 | `compare` | `bench_compare` | Compares each scenario with the median of its last 5 runs on `baseline_ref` that passed the gate (same benchmark version, compute and no `config_overrides`). Returns the tables as markdown and stores the verdict in `gate_passed`, so a run with a regression never becomes part of a baseline |
 | `gate` | `bench_gate` | Fails if a scenario failed or didn't run, or if a gated metric of `full`, `wide_report` or `python_udfs` is more than `max_regression` above the baseline. On the job cluster: `wall_s`, `executor_run_time_s`, `peak_executor_python_rss_bytes`, default 10 % (identical runs differ by less than 1 %). On serverless: `wall_s`, `task_time_s`, `peak_driver_python_rss_bytes`, default 25 %. The incremental scenarios are short, so they're reported but not gated |
 | `teardown` | `bench_teardown` | Drops the run's schemas, also after a failure |
@@ -83,7 +83,7 @@ The notebooks install the wheel the bundle built (task parameter `wheel_dir`) wi
 
 `benchmark_serverless` runs on serverless environment 5 (bundle variable `bench_serverless_environment_version`). Its compute isn't fixed, so its numbers vary more and compare only with other serverless runs.
 
-Serverless Python workers have limited memory, so the job's `compute_overrides` cap solves at 10 channels and exclude trip 39 (4.35 h); otherwise workers run out of memory. `compute_overrides` is stored with the compute, so runs only compare with runs of the same. For the same reason, `python_udfs` runs on 30 trips there. Each run task has its own environment.
+Serverless Python workers have limited memory, so the job's `compute_overrides` cap solves at 10 channels and exclude trip 39 (4.35 h); otherwise workers run out of memory. `compute_overrides` is stored with the compute, so runs only compare with runs of the same. For the same reason, serverless skips `wide_report` (`COMPUTE_SCENARIOS`) and runs `python_udfs` on 30 trips. Each run task has its own environment.
 
 ### Metrics
 

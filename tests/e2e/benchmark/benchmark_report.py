@@ -44,6 +44,12 @@ TASKS = {
 }
 SCENARIOS = [scenario for _, scenarios in TASKS.values() for scenario in scenarios]
 
+# Scenarios per compute. Serverless skips `wide_report`: its workers run out of memory.
+COMPUTE_SCENARIOS = {
+    "cluster": SCENARIOS,
+    "serverless": [s for s in SCENARIOS if s != "wide_report"],
+}
+
 # Container filters of a scenario, by compute, added to the compute's; without, all trips. Trip
 # 39 (4.35 h) runs the wide report's calculated channels out of executor memory.
 SCENARIO_FILTERS = {
