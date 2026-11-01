@@ -75,7 +75,7 @@ Each run task has its own job cluster of the same fixed size, so that runs are c
 - no autoscaling, no Photon;
 - on-demand nodes only, so no spot instance is lost during a measurement.
 
-The bundle variables `bench_spark_version`, `bench_node_type` and `bench_num_workers` set it. The cluster spec is stored with each run (`compute`), and runs only compare with runs of the same spec, so a new spec starts a new baseline. The cluster starts (~4 min) aren't measured. The `run` task takes ~33 min, `run_udfs` ~12 min; `run_wide` is the longest task (timeout 12 h). The job's principal needs the `allow-cluster-create` entitlement.
+The bundle variables `bench_spark_version`, `bench_node_type` and `bench_num_workers` set it. The cluster spec is stored with each run (`compute`), and runs only compare with runs of the same spec, so a new spec starts a new baseline. The cluster starts (~4 min) aren't measured. The `run` task takes ~37 min, `run_udfs` ~13 min and `run_wide` ~82 min, so the whole job takes ~1.5 h (timeout 12 h). The job's principal needs the `allow-cluster-create` entitlement.
 
 The notebooks install the wheel the bundle built (task parameter `wheel_dir`) with `%pip`, rather than as a cluster library: in the benchmark workspace, a cluster library keeps the notebooks from starting ("Hive metastore initialization failed").
 
