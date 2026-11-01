@@ -1,0 +1,90 @@
+resources:
+  jobs:
+    benchmark_serverless:
+      name: "impulse benchmark serverless${var.suffix}"
+      timeout_seconds: 7200
+      max_concurrent_runs: 1
+
+      # The same report and tasks as the `benchmark` job, on serverless. Set by
+      # .github/workflows/benchmark.yml; the defaults are for runs started by hand.
+      parameters:
+        - {name: git_sha, default: unknown}
+        - {name: git_ref, default: manual}
+        - {name: trigger, default: manual}
+        # JSON merged into the report config per section, e.g. {"query_engine": {"enable_pushdown": true}}.
+        - {name: config_overrides, default: "{}"}
+        - {name: baseline_ref, default: main}
+        # Serverless compute isn't fixed, so its runs vary more than the job cluster's.
+        - {name: max_regression, default: "0.25"}
+        # A serverless Python worker runs out of memory with all ~50 channels of a trip in one
+        # solve, and with trip 39 (4.35 h, ~1.7 M rows per channel) even with 3. Part of the
+        # compute: runs compare only with runs of the same.
+        - name: compute_overrides
+          default: >-
+            {"query_engine": {"max_channels_per_batch": 10},
+            "container_filters": {"metric_filters": [[{"column_name": "container_id", "comparator": "!=", "value": 39}]]}}
+
+      tasks:
+        - task_key: setup
+          environment_key: bench_env
+          disable_auto_optimization: true
+          notebook_task:
+            notebook_path: ../tests/e2e/benchmark/bench_setup.py
+            base_parameters: &params
+              catalog: ${var.catalog}
+              schema: bench_{{job.run_id}}
+              source_catalog: ${var.source_catalog}
+              source_schema: ${var.bench_source_schema}
+              results_schema: ${var.bench_results_schema}
+              prefix: bench
+              expected_dir: ${workspace.file_path}/tests/e2e/expected
+              actual_dir: ${workspace.root_path}/actual
+              # The notebooks %pip install the bundle's wheel from here.
+              wheel_dir: ${workspace.artifact_path}/.internal
+              job_run_id: "{{job.run_id}}"
+              # The query history is filtered by it.
+              task_run_id: "{{task.run_id}}"
+              # Selects a run task's scenarios (TASKS in benchmark_report.py).
+              task_key: "{{task.name}}"
+              environment_version: ${var.bench_serverless_environment_version}
+
+        # full, incremental_noop, incremental_delta. Each run task has its own environment. No
+        # `run_wide` (COMPUTE_SCENARIOS in benchmark_report.py).
+        - task_key: run
+          environment_key: bench_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
+
+        - task_key: run_udfs
+          environment_key: bench_env_udfs
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
+
+        - task_key: compare
+          environment_key: bench_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: run}, {task_key: run_udfs}]
+          # Also reports a failed run.
+          run_if: ALL_DONE
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_compare.py, base_parameters: *params}
+
+        - task_key: gate
+          environment_key: bench_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: compare}]
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_gate.py, base_parameters: *params}
+
+        - task_key: teardown
+          environment_key: bench_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: run}, {task_key: run_udfs}]
+          run_if: ALL_DONE
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_teardown.py, base_parameters: *params}
+
+      environments:
+        - environment_key: bench_env
+          spec: &bench_env
+            environment_version: ${var.bench_serverless_environment_version}
+        - {environment_key: bench_env_udfs, spec: *bench_env}

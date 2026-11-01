@@ -1,0 +1,106 @@
+resources:
+  jobs:
+    Renumics_Ingest:
+      name: Renumics_Fleet_Telemetry_Impulse_Ingest
+      max_concurrent_runs: 1
+      environments:
+        - environment_key: ingest_env
+          spec:
+            environment_version: "4"
+      tasks:
+        - task_key: setup
+          environment_key: ingest_env
+          max_retries: 0
+          notebook_task:
+            notebook_path: ../notebooks/ingest/a_setup.py
+            source: WORKSPACE
+        - task_key: detect_new_containers
+          environment_key: ingest_env
+          max_retries: 0
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ../notebooks/ingest/b_detect_new_containers.py
+            source: WORKSPACE
+        - task_key: get_next_batch
+          environment_key: ingest_env
+          max_retries: 0
+          depends_on:
+            - task_key: detect_new_containers
+          run_if: ALL_SUCCESS
+          notebook_task:
+            notebook_path: ../notebooks/ingest/b_get_next_batch.py
+            source: WORKSPACE
+        - task_key: check_data_availability
+          depends_on:
+            - task_key: get_next_batch
+          run_if: ALL_SUCCESS
+          condition_task:
+            op: NOT_EQUAL
+            left: "{{tasks.[get_next_batch].values.[next_run_id]}}"
+            right: "noop"
+        - task_key: signals_to_delta
+          environment_key: ingest_env
+          max_retries: 0
+          depends_on:
+            - task_key: check_data_availability
+              outcome: "true"
+          run_if: ALL_SUCCESS
+          notebook_task:
+            notebook_path: ../notebooks/ingest/c_signals_to_delta.py
+            source: WORKSPACE
+        - task_key: channel_metadata
+          environment_key: ingest_env
+          max_retries: 0
+          depends_on:
+            - task_key: signals_to_delta
+          run_if: ALL_SUCCESS
+          notebook_task:
+            notebook_path: ../notebooks/ingest/d_channel_metadata.py
+            source: WORKSPACE
+        - task_key: container_metadata
+          environment_key: ingest_env
+          max_retries: 0
+          depends_on:
+            - task_key: channel_metadata
+          run_if: ALL_SUCCESS
+          notebook_task:
+            notebook_path: ../notebooks/ingest/d_container_metadata.py
+            source: WORKSPACE
+        - task_key: conversion_failed
+          environment_key: ingest_env
+          max_retries: 0
+          depends_on:
+            - task_key: container_metadata
+            - task_key: signals_to_delta
+            - task_key: channel_metadata
+          run_if: AT_LEAST_ONE_FAILED
+          notebook_task:
+            notebook_path: ../notebooks/ingest/e_update_processing_status_failed.py
+            source: WORKSPACE
+        - task_key: conversion_succeeded
+          environment_key: ingest_env
+          max_retries: 0
+          depends_on:
+            - task_key: container_metadata
+          run_if: ALL_SUCCESS
+          notebook_task:
+            notebook_path: ../notebooks/ingest/e_update_processing_status_succeeded.py
+            source: WORKSPACE
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: source_path
+          default: ${var.source_path}
+        - name: channels_format
+          default: ${var.channels_format}
+        - name: max_containers_per_run
+          default: ${var.max_containers_per_run}
+        - name: reset
+          default: "False"
+        - name: reprocess_current_run
+          default: "True"
+        - name: reprocess_last_failed_run
+          default: "True"
