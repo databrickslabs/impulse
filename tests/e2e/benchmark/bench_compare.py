@@ -25,13 +25,13 @@ import statistics
 import pyspark.sql.functions as F
 from bench_utils import params, spark
 from benchmark_metrics import GATED, METRICS, compute_kind
-from benchmark_report import COMPUTE_SCENARIOS
+from benchmark_report import SCENARIOS
 
 p = params()
 BASELINE_RUNS = 5
 # Gated metrics of this compute, checked in the longer scenarios.
 GATED = GATED[compute_kind()]
-GATED_SCENARIOS = {"full", "wide_report", "python_udfs"} & set(COMPUTE_SCENARIOS[compute_kind()])
+GATED_SCENARIOS = {"full", "wide_report", "python_udfs"}
 # Fingerprint sums may differ in the last digits, as Spark sums in any order.
 FINGERPRINT_RTOL = 1e-6
 
@@ -87,7 +87,7 @@ lines = [
     f"`{p.baseline_ref}`.",
 ]
 regressions, warnings = [], []
-for scenario in COMPUTE_SCENARIOS[compute_kind()]:
+for scenario in SCENARIOS:
     run = current.get(scenario)
     if run is None:  # Its task failed before recording anything.
         lines += ["", f"### `{scenario}` (not run)"]

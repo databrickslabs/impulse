@@ -2,7 +2,7 @@ resources:
   jobs:
     benchmark_serverless:
       name: "impulse benchmark serverless${var.suffix}"
-      timeout_seconds: 7200
+      timeout_seconds: 43200
       max_concurrent_runs: 1
 
       # The same report and tasks as the `benchmark` job, on serverless. Set by
@@ -48,10 +48,15 @@ resources:
               task_key: "{{task.name}}"
               environment_version: ${var.bench_serverless_environment_version}
 
-        # full, incremental_noop, incremental_delta. Each run task has its own environment. No
-        # `run_wide` (COMPUTE_SCENARIOS in benchmark_report.py).
+        # full, incremental_noop, incremental_delta. Each run task has its own environment.
         - task_key: run
           environment_key: bench_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
+
+        - task_key: run_wide
+          environment_key: bench_env_wide
           disable_auto_optimization: true
           depends_on: [{task_key: setup}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
@@ -65,7 +70,7 @@ resources:
         - task_key: compare
           environment_key: bench_env
           disable_auto_optimization: true
-          depends_on: [{task_key: run}, {task_key: run_udfs}]
+          depends_on: [{task_key: run}, {task_key: run_wide}, {task_key: run_udfs}]
           # Also reports a failed run.
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_compare.py, base_parameters: *params}
@@ -79,7 +84,7 @@ resources:
         - task_key: teardown
           environment_key: bench_env
           disable_auto_optimization: true
-          depends_on: [{task_key: run}, {task_key: run_udfs}]
+          depends_on: [{task_key: run}, {task_key: run_wide}, {task_key: run_udfs}]
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_teardown.py, base_parameters: *params}
 
@@ -87,4 +92,5 @@ resources:
         - environment_key: bench_env
           spec: &bench_env
             environment_version: ${var.bench_serverless_environment_version}
+        - {environment_key: bench_env_wide, spec: *bench_env}
         - {environment_key: bench_env_udfs, spec: *bench_env}

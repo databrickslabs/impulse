@@ -2,7 +2,7 @@
 
 - `build_report` (`full`, `incremental_noop`, `incremental_delta`): a mix of the report features,
   ~50 channels per trip in one solve.
-- `build_wide_report` (`wide_report`): 150 signals, many events and histograms, a chain of
+- `build_wide_report` (`wide_report`): 100 channels, many events and histograms, a chain of
   calculated channels.
 - `build_udf_report` (`python_udfs`): Python extensions (`benchmark_udfs.py`).
 
@@ -34,7 +34,7 @@ from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from impulse_reporting.events.time_window_event import TimeWindowEvent
 
-BENCHMARK_VERSION = 3
+BENCHMARK_VERSION = 4
 
 # Scenarios of each run task (by task key), in order, and their schema suffix.
 TASKS = {
@@ -43,12 +43,6 @@ TASKS = {
     "run_udfs": ("_udfs", ["python_udfs"]),
 }
 SCENARIOS = [scenario for _, scenarios in TASKS.values() for scenario in scenarios]
-
-# Scenarios per compute. Serverless skips `wide_report`: its workers run out of memory.
-COMPUTE_SCENARIOS = {
-    "cluster": SCENARIOS,
-    "serverless": [s for s in SCENARIOS if s != "wide_report"],
-}
 
 # Container filters of a scenario, by compute, added to the compute's; without, all trips. Trip
 # 39 (4.35 h) runs the wide report's calculated channels out of executor memory.
@@ -300,11 +294,12 @@ def build_report(report):
 
 # The wide report: statistics of the selected signals in chunks (an aggregation is solved in one
 # batch), and threshold events, histograms and statistics for a subset.
-WIDE_SIGNAL_COUNT = 150
+# 95 signals plus the helper channels make 100 channels.
+WIDE_SIGNAL_COUNT = 95
 WIDE_STATS_CHUNK = 50
 WIDE_THRESHOLD_SIGNALS = 60
 WIDE_DISTANCE_SIGNALS = 20
-WIDE_CHAIN_LENGTH = 20
+WIDE_CHAIN_LENGTH = 10
 
 
 def wide_signal_stats(spark, source):

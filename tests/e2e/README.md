@@ -56,13 +56,13 @@ The scenarios cover first runs and incremental reruns after new data in the silv
 | `full` | The mixed report: six events (the trip, driving cycles with merged intervals, charging and recuperation from battery thresholds, slow-downs as points in time, 5-minute windows), two calculated channels, 1D and 2D histograms, statistics per event, point values, and statistics of 40 signals resampled to 1 Hz in 4 aggregations of 10 (what Spark pushdown can speed up). With Impulse's default batching, each trip's ~50 channels are solved together | all | A first run into an empty schema |
 | `incremental_noop` | The same | all | An incremental rerun with nothing to update: the fixed cost of a triggered run |
 | `incremental_delta` | The same | all | An incremental rerun after 5 trips were re-ingested (`DELTA_CONTAINERS`, their `_ingested_at` updated in a copy of `container_metrics`): detection, recomputation and the update of the gold tables. Its gold tables must equal `full`'s |
-| `wide_report` | A wide definition: statistics of 150 signals logged in every trip (aggregations of 50, one solve per trip with the default batching), 120 threshold events (p90/p10 of 60 signals, debounced and merged) with statistics of 5 signals each, a 101-bin histogram per threshold signal, 26 weighted histograms and a chain of 20 calculated channels | all but trip 39 (`SCENARIO_FILTERS`) | A first run |
+| `wide_report` | A wide definition: 100 channels: statistics of 95 signals logged in every trip (aggregations of 50, one solve per trip with the default batching), 120 threshold events (p90/p10 of 60 signals, debounced and merged) with statistics of 5 signals each, a 101-bin histogram per threshold signal, 26 weighted histograms and a chain of 10 calculated channels | all but trip 39 (`SCENARIO_FILTERS`) | A first run |
 | `python_udfs` | Python extensions (`benchmark/benchmark_udfs.py`): UDF calculated channels (smoothed gradient, Butterworth low-pass, energy integral, edge counter), a UDF event detector (hysteresis), per-channel and cross-channel custom statistics, and histograms over them | all (30 on serverless) | A first run |
 
 | Task | Notebook | Does |
 |---|---|---|
 | `setup` | `bench_setup` | Creates the results table `<catalog>.<bench_results_schema>.results`, or adds new metric columns to it, and the run's schema `bench_<run_id>`. Drops this job's schemas older than one day and checks that the source data is the full dataset |
-| `run`, `run_wide`, `run_udfs` | `run_benchmark` | In parallel, each on its own compute and schema (`TASKS` in `benchmark_report.py`): `run` runs `full`, `incremental_noop`, `incremental_delta`; `run_wide` runs `wide_report` (job cluster only); `run_udfs` runs `python_udfs`. Appends one row per scenario to the results table |
+| `run`, `run_wide`, `run_udfs` | `run_benchmark` | In parallel, each on its own compute and schema (`TASKS` in `benchmark_report.py`): `run` runs `full`, `incremental_noop`, `incremental_delta`; `run_wide` runs `wide_report`; `run_udfs` runs `python_udfs`. Appends one row per scenario to the results table |
 | `compare` | `bench_compare` | Compares each scenario with the median of its last 5 runs on `baseline_ref` that passed the gate (same benchmark version, compute and no `config_overrides`). Returns the tables as markdown and stores the verdict in `gate_passed`, so a run with a regression never becomes part of a baseline |
 | `gate` | `bench_gate` | Fails if a scenario failed or didn't run, or if a gated metric of `full`, `wide_report` or `python_udfs` is more than `max_regression` above the baseline. On the job cluster: `wall_s`, `executor_run_time_s`, `peak_executor_python_rss_bytes`, default 10 % (identical runs differ by less than 1 %). On serverless: `wall_s`, `task_time_s`, `peak_driver_python_rss_bytes`, default 25 %. The incremental scenarios are short, so they're reported but not gated |
 | `teardown` | `bench_teardown` | Drops the run's schemas, also after a failure |
@@ -71,7 +71,7 @@ The scenarios cover first runs and incremental reruns after new data in the silv
 
 Each run task has its own job cluster of the same fixed size, so that runs are comparable and the tasks don't disturb each other's measurements; `setup`, `compare`, `gate` and `teardown` share the first:
 - Databricks Runtime 17.3 LTS;
-- a driver and 8 workers of the memory-optimized `r6id.2xlarge` (8 cores, 64 GB each);
+- a driver and 4 workers of the memory-optimized `r6id.2xlarge` (8 cores, 64 GB each), 32 worker cores;
 - no autoscaling, no Photon;
 - on-demand nodes only, so no spot instance is lost during a measurement.
 
@@ -83,7 +83,7 @@ The notebooks install the wheel the bundle built (task parameter `wheel_dir`) wi
 
 `benchmark_serverless` runs on serverless environment 5 (bundle variable `bench_serverless_environment_version`). Its compute isn't fixed, so its numbers vary more and compare only with other serverless runs.
 
-Serverless Python workers have limited memory, so the job's `compute_overrides` cap solves at 10 channels and exclude trip 39 (4.35 h); otherwise workers run out of memory. `compute_overrides` is stored with the compute, so runs only compare with runs of the same. For the same reason, serverless skips `wide_report` (`COMPUTE_SCENARIOS`) and runs `python_udfs` on 30 trips. Each run task has its own environment.
+Serverless Python workers have limited memory, so the job's `compute_overrides` cap solves at 10 channels and exclude trip 39 (4.35 h); otherwise workers run out of memory. `compute_overrides` is stored with the compute, so runs only compare with runs of the same. For the same reason, `python_udfs` runs on 30 trips there. Each run task has its own environment.
 
 ### Metrics
 

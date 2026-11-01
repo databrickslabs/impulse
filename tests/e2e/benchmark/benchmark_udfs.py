@@ -3,6 +3,8 @@
 Impulse's extension points: UDF calculated channels (smoothing, filtering, integrals, edge
 counters), a UDF event detector that returns `Intervals`, and custom statistics. They are
 vectorised numpy, so the scenario measures Impulse's UDF overhead rather than Python loops.
+A series can have gaps: smoothing, filters, edges and states are computed per continuous block
+(`SampleSeries.continuous_interval_indices`), as `SampleSeries.diff` does.
 
 Impulse cloudpickles the functions to the executors, which can't import this workspace file:
 `run_benchmark` registers the module to be pickled by value.
@@ -20,8 +22,13 @@ KWH_PER_W_US = 1 / (3.6e6 * US)
 
 
 def _uniform(series, rate_hz):
-    """The series resampled to `rate_hz`, so that it is evenly spaced."""
+    """The series resampled to `rate_hz`, evenly spaced within each continuous block."""
     return series.resample(US / rate_hz)
+
+
+def _blocks(series):
+    """`(start, stop)` slices of the series' continuous blocks."""
+    return [(i, j + 1) for i, j in series.continuous_interval_indices]
 
 
 def smoothed_gradient(series, rate_hz=10.0, window_s=3.0):
@@ -30,10 +37,13 @@ def smoothed_gradient(series, rate_hz=10.0, window_s=3.0):
         return series
     s = _uniform(series, rate_hz)
     n = max(1, round(window_s * rate_hz))
-    # Padded with the edge values, so the average doesn't drop towards zero at the ends.
-    padded = np.pad(s.values, (n // 2, n - 1 - n // 2), mode="edge")
-    smooth = np.convolve(padded, np.ones(n) / n, mode="valid")
-    gradient = np.gradient(smooth, s.tstarts / US) if len(s) > 1 else np.zeros(len(s))
+    gradient = np.zeros(len(s))
+    for i, j in _blocks(s):
+        # Padded with the edge values, so the average doesn't drop towards zero at the ends.
+        padded = np.pad(s.values[i:j], (n // 2, n - 1 - n // 2), mode="edge")
+        smooth = np.convolve(padded, np.ones(n) / n, mode="valid")
+        if j - i > 1:
+            gradient[i:j] = np.gradient(smooth, s.tstarts[i:j] / US)
     return SampleSeries(s.tstarts, s.tends, gradient)
 
 
@@ -43,10 +53,12 @@ def lowpass(series, cutoff_hz=1.0, rate_hz=20.0, order=2):
         return series
     s = _uniform(series, rate_hz)
     b, a = butter(order, cutoff_hz / (rate_hz / 2))
-    # filtfilt needs more samples than its padding.
-    if len(s) <= 3 * max(len(a), len(b)):
-        return s
-    return SampleSeries(s.tstarts, s.tends, filtfilt(b, a, s.values))
+    filtered = s.values.copy()
+    for i, j in _blocks(s):
+        # filtfilt needs more samples than its padding; shorter blocks stay unfiltered.
+        if j - i > 3 * max(len(a), len(b)):
+            filtered[i:j] = filtfilt(b, a, s.values[i:j])
+    return SampleSeries(s.tstarts, s.tends, filtered)
 
 
 def cumulative_energy_kwh(voltage, current):
@@ -62,22 +74,29 @@ def rising_edge_count(series, threshold=0.1):
     if len(series) == 0:
         return series
     above = series.values > threshold
-    edges = np.concatenate([[False], above[1:] & ~above[:-1]])
+    edges = np.zeros(len(series), dtype=bool)
+    # The first sample of a block has no predecessor, so it is no edge.
+    for i, j in _blocks(series):
+        edges[i + 1 : j] = above[i + 1 : j] & ~above[i : j - 1]
     return SampleSeries(series.tstarts, series.tends, np.cumsum(edges).astype(np.float64))
 
 
 def hysteresis(series, on=0.2, off=0.05):
     """Intervals that start where the series rises above `on` and end where it falls below
     `off`."""
-    if len(series) == 0:
-        return Intervals(np.array([]), np.array([]))
-    v = series.values
-    # 1 above `on`, 0 below `off`, otherwise (-1) the state of the last sample that set one.
-    marks = np.where(v > on, 1, np.where(v < off, 0, -1))
-    last_mark = np.maximum.accumulate(np.where(marks >= 0, np.arange(len(v)), 0))
-    state = (marks[last_mark] == 1).astype(int)
-    change = np.diff(np.concatenate([[0], state, [0]]))
-    starts, stops = np.flatnonzero(change == 1), np.flatnonzero(change == -1) - 1
+    starts, stops = [], []
+    # Per block: the state starts off and an interval ends at the latest at the block's end.
+    for i, j in _blocks(series):
+        v = series.values[i:j]
+        # 1 above `on`, 0 below `off`, otherwise (-1) the state of the last sample that set one.
+        marks = np.where(v > on, 1, np.where(v < off, 0, -1))
+        last_mark = np.maximum.accumulate(np.where(marks >= 0, np.arange(len(v)), 0))
+        state = (marks[last_mark] == 1).astype(int)
+        change = np.diff(np.concatenate([[0], state, [0]]))
+        starts.append(i + np.flatnonzero(change == 1))
+        stops.append(i + np.flatnonzero(change == -1) - 1)
+    starts = np.concatenate(starts) if starts else np.array([], dtype=int)
+    stops = np.concatenate(stops) if stops else np.array([], dtype=int)
     return Intervals(series.tstarts[starts], series.tends[stops])
 
 

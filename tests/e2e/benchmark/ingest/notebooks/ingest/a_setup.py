@@ -16,7 +16,7 @@
 
 import utils
 from utils import schema_definitions
-from utils.constants import CHANNELS_TABLE, FACT_DIR, STATUS_TABLE
+from utils.constants import CHANNELS_TABLE, CHANNELS_TARGET_FILE_SIZE_BYTES, FACT_DIR, STATUS_TABLE
 from utils.notebook_helpers import (
     read_catalog_schema_widgets,
     read_channels_format_widget,
@@ -62,7 +62,11 @@ utils.create_table_if_missing(
 channels_table = f"{catalog}.{schema}.{CHANNELS_TABLE}"
 expected_channels_schema = schema_definitions.channels_schema(channels_format)
 if not utils.create_table_if_missing(
-    spark, channels_table, expected_channels_schema, ["container_id", "channel_id"]
+    spark,
+    channels_table,
+    expected_channels_schema,
+    ["container_id", "channel_id"],
+    target_file_size_bytes=CHANNELS_TARGET_FILE_SIZE_BYTES,
 ):
     existing_cols = set(spark.read.table(channels_table).columns)
     expected_cols = set(expected_channels_schema.fieldNames())

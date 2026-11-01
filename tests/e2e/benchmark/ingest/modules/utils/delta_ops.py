@@ -24,6 +24,7 @@ def create_table_if_missing(
     table_name: str,
     schema: StructType,
     cluster_by: list[str],
+    target_file_size_bytes: int = DELTA_TARGET_FILE_SIZE_BYTES,
 ) -> bool:
     """Create an empty, liquid-clustered Delta table. Returns True when it was created."""
     if spark.catalog.tableExists(table_name):
@@ -37,7 +38,7 @@ def create_table_if_missing(
     )
     spark.sql(
         f"ALTER TABLE {table_name} "
-        f"SET TBLPROPERTIES (delta.targetFileSize = '{DELTA_TARGET_FILE_SIZE_BYTES}')"
+        f"SET TBLPROPERTIES (delta.targetFileSize = '{target_file_size_bytes}')"
     )
     return True
 

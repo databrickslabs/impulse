@@ -45,7 +45,7 @@ variables:
     default: r6id.2xlarge
   bench_num_workers:
     description: Workers of the benchmark cluster (fixed, no autoscaling).
-    default: 8
+    default: 4
   bench_serverless_environment_version:
     description: Serverless environment of the benchmark_serverless job.
     default: "5"
