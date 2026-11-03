@@ -30,7 +30,6 @@ resources:
     impulse_app:
       name: ${var.app_name}
       description: Impulse report builder
-      source_code_path: .
       user_api_scopes:
         - sql
         - workspace.workspace
@@ -48,7 +47,23 @@ resources:
           group_name: ${var.end_user_group}
 
 targets:
+  # Uploads this folder, local changes included.
   dev:
     default: true
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    resources:
+      apps:
+        impulse_app:
+          source_code_path: .
+  # Deploys the checked-out commit from GitHub instead, for workspaces that only allow app deployments from Git.
+  github:
+    resources:
+      apps:
+        impulse_app:
+          git_repository:
+            url: https://github.com/databrickslabs/impulse
+            provider: gitHub
+          git_source:
+            commit: ${bundle.git.commit}
+            source_code_path: ${bundle.git.bundle_root_path}
