@@ -6,7 +6,8 @@ title: Install
 # Install
 
 Check the [requirements](requirements.md) first. The commands run on your machine with the
-Databricks CLI authenticated against the workspace; `-p <profile>` selects the CLI profile.
+Databricks CLI authenticated against the workspace; `-p <profile>` selects the CLI profile. To
+install without the CLI, see [Install from the Databricks UI](#install-from-the-databricks-ui).
 
 ## 1. Get the code
 
@@ -18,21 +19,16 @@ cd impulse/apps/adhoc-reporting
 Use `main` or check out a release tag (`git checkout vX.Y.Z`). Either way, `impulse.lock` pins the
 Impulse release that report jobs install.
 
-## 2. Build the frontend
+## 2. Deploy
 
 ```bash
-cd frontend && npm ci && npm run build && cd ..
+databricks apps deploy --var warehouse_id=<warehouse id> -p <profile>
 ```
 
-## 3. Deploy
-
-```bash
-databricks bundle deploy --var warehouse_id=<warehouse id> -p <profile>
-databricks bundle run impulse_app --var warehouse_id=<warehouse id> -p <profile>
-```
-
-`bundle run` starts the app and prints its URL. Pass the same `--var` values to both commands. The
-bundle has these variables:
+The command creates the app with its SQL warehouse, user authorization scopes and permissions,
+uploads the code, starts the app and prints its URL. Run it again to update the app. The warehouse
+id is shown on the warehouse's page in the workspace and by `databricks warehouses list -p <profile>`.
+The bundle has these variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -40,7 +36,11 @@ bundle has these variables:
 | `app_name` | `impulse-app` | Name of the app, part of its URL |
 | `end_user_group` | `users` | Group that gets `CAN_USE` on the app |
 
-## 4. Grant the service principal access
+If the workspace only allows app deployments from Git, add `-t github` to the command, also for
+later updates. The app then deploys the checked-out commit from GitHub instead of the uploaded
+folder, so that commit must be in github.com/databrickslabs/impulse, for example a release tag.
+
+## 3. Grant the service principal access
 
 Report jobs run as the app's service principal. A catalog or schema owner grants it access once
 per silver and gold schema:
@@ -56,6 +56,24 @@ The application id is the `service_principal_client_id` in the output of
 checks the access of both the user and the service principal and shows the exact statements when
 something is missing.
 
+## Install from the Databricks UI
+
+Without Git and the CLI, create the app from GitHub in the workspace:
+
+1. Open **Databricks Apps** from the app switcher, click **Create app** and **Create a custom app**,
+   and enter a name, for example `impulse-app`.
+2. Under **Configure Git repository**, enter `https://github.com/databrickslabs/impulse` with the
+   provider **GitHub**, a release tag with the reference type **Tag**, and the source code path
+   `apps/adhoc-reporting`.
+3. Under **Configure**, add the resource **SQL warehouse** with the permission **Can use** and keep
+   its resource key `sql-warehouse`. Add the user authorization scopes `sql`, `workspace.workspace`,
+   `model-serving`, `catalog.catalogs:read`, `catalog.schemas:read` and `catalog.tables:read`.
+4. Click **Create app**. The app deploys as soon as its compute is running.
+5. Click **Share** and give the group `users` **Can use**.
+
+Then grant the service principal access as in [step 3](#3-grant-the-service-principal-access).
+Keep managing an app installed this way in the UI; the deploy command manages only apps it created.
+
 ## Serverless without GitHub access
 
 Report jobs install the Impulse wheel pinned in `impulse.lock` from its GitHub release. If
@@ -68,7 +86,8 @@ wheel_override = "/Volumes/<catalog>/<schema>/<volume>/databricks_impulse-<versi
 ```
 
 The wheel's dependencies still come from PyPI or the workspace's package repository. Upload the
-new wheel and update the path with each upgrade.
+new wheel and update the path with each upgrade. This needs the deploy command without `-t github`:
+deployments from GitHub, including those from the UI, use the unchanged `impulse.lock`.
 
 ## Data model
 
@@ -95,6 +114,8 @@ meaning, and tests the configuration against a schema with the admin's permissio
 
 ## Upgrade
 
-Pull the new version or check out a newer release tag, build the frontend and deploy again as
-above. Reports are stored in each user's workspace folder and keep working; each report job uses
-the Impulse version pinned by the deployed app.
+Pull the new version or check out a newer release tag and run the deploy command again. For an app
+installed from the UI, open the menu next to **Deploy** on the app's page, choose **Deploy using a
+different source**, and deploy the new tag from Git with the source code path
+`apps/adhoc-reporting`. Reports are stored in each user's workspace folder and keep working; each
+report job uses the Impulse version pinned by the deployed app.
