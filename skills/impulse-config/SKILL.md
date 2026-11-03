@@ -98,7 +98,7 @@ Omit entirely for `DefaultSolver` + `data_type="RLE"`.
 
 | Field                   | Default            | Description                                                                                       |
 |-------------------------|--------------------|---------------------------------------------------------------------------------------------------|
-| `solver`                | `"DefaultSolver"`  | The solver. `"DeltaSolver"` / `"KeyValueStoreSolver"` are **deprecated aliases** for `DefaultSolver`. |
+| `solver`                | `"DefaultSolver"`  | Registered name of the solver. `"DeltaSolver"` / `"KeyValueStoreSolver"` are **deprecated aliases** for `DefaultSolver`. A custom solver (registered with `register_solver`, imported before the config is parsed) is selected by its name; its own settings go in `solver_config`, validated by the config class it registered. |
 | `data_type`             | `"RLE"`            | `"RLE"` for interval-encoded `[tstart, tend)` samples; `"RAW"` for `(timestamp, value)` samples.  |
 | `raw_encoder`           | `null` (→ `"RLE"`) | How RAW point data becomes intervals. `"RLE"` collapses equal-valued runs (default); `"INTERVAL"` keeps every sample, only deriving `tend` + dropping exact duplicates. Only used when `data_type="RAW"`. |
 | `drop_implausible_data` | `false`            | Drop `channels` rows where `is_plausible = false`. **Requires `data_type="RAW"`** (RLE raises).   |

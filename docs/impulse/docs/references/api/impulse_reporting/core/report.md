@@ -179,7 +179,11 @@ Create a sink based on the provided configuration.
 def create_solver(spark: SparkSession, config: ImpulseConfig) -> QuerySolver
 ```
 
-Create a query solver based on the provided configuration.
+Create the query solver selected by ``query_engine.solver``.
+
+Resolves the registered solver name (``"DeltaSolver"`` and
+``"KeyValueStoreSolver"`` are deprecated aliases of ``"DefaultSolver"``)
+and builds it with its ``from_config`` hook.
 
 **Arguments**:
 
@@ -188,11 +192,12 @@ Create a query solver based on the provided configuration.
 
 **Raises**:
 
-- `ValueError`: If the solver type is unknown.
+- `KeyError`: If the solver name is not registered (normally already reported when the
+config is parsed).
 
 **Returns**:
 
-`QuerySolver`: An instance of the appropriate query solver based on the configuration.
+`QuerySolver`: An instance of the registered solver.
 
 #### get\_sink\_config
 

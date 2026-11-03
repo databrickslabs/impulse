@@ -49,6 +49,15 @@ silver layer.
 ``RawEncoder.INTERVAL`` only derives ``tend`` and drops exact
 duplicates.  Only consulted when ``is_raw_data`` is ``True``.
 
+#### from\_config
+
+```python
+def from_config(cls, ctx: SolverBuildContext) -> DefaultSolver
+```
+
+Build the solver with the Spark session and RAW-data flags from the report config.
+
+
 #### filter\_container\_tags
 
 ```python
