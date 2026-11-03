@@ -32,9 +32,12 @@ Run the commands from this folder. `make test` needs no workspace. The other tar
 | `make smoke` | Runs the fixture report on serverless without writing gold tables |
 | `make smoke-persist` | Same, but writes the fixture report's gold tables, which `make live` reads |
 | `make eval` | Runs the assistant scenarios against FMAPI |
+| `make frontend` | Builds the frontend into `frontend/dist/` |
 | `make deploy` | Builds the frontend and deploys the app (commit the app first) |
 | `make logs` | Shows the app logs |
 | `make lock` | Updates `uv.lock` and `requirements.txt`, keeping both lockfiles on the public registries |
+
+The built frontend in `frontend/dist/` is committed, because deployments from Git don't build it. After changing `frontend/`, run `make frontend` and commit the rebuilt `frontend/dist/` with the change. CI fails when the two differ, and `make deploy` refuses to deploy until the rebuild is committed.
 
 ## Updating Impulse
 

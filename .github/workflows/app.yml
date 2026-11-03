@@ -79,3 +79,13 @@ jobs:
 
       - name: Build the frontend
         run: make frontend
+
+      # Deployments from Git don't build the frontend, so frontend/dist is committed. The build is
+      # deterministic, so after rebuilding, any difference means the commit lacks the rebuilt frontend.
+      - name: The committed frontend matches its source
+        run: |
+          if [ -n "$(git status --porcelain -- frontend/dist)" ]; then
+            git status --short -- frontend/dist
+            echo "::error::frontend/dist doesn't match frontend/src. Run 'make frontend' in apps/adhoc-reporting and commit frontend/dist."
+            exit 1
+          fi

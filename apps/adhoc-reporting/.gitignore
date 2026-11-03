@@ -8,7 +8,7 @@ node_modules/
 CLAUDE.md
 .databricks/
 .vscode/
-frontend/dist/
+!frontend/dist/
 *.tsbuildinfo
 .isaac/
 .env
