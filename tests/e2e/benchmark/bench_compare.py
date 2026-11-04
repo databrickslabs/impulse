@@ -5,7 +5,7 @@
 # MAGIC gate (same benchmark version and compute, no config overrides). Returns markdown, stores the
 # MAGIC verdict in `gate_passed` and sets the task value `regressions` for `gate`. Warns when gold
 # MAGIC tables differ from the baseline's, or `incremental_delta`'s from `full`'s. Gold tables of
-# MAGIC `full_pushdown` that differ from `full`'s are a regression.
+# MAGIC `full_pushdown` that aren't bit-identical to `full`'s (`rows_hash`) are a regression.
 
 # COMMAND ----------
 
@@ -33,10 +33,12 @@ BASELINE_RUNS = 5
 # Gated metrics of this compute, checked in the longer scenarios.
 GATED = GATED[compute_kind()]
 GATED_SCENARIOS = {"full", "full_pushdown", "wide_report", "python_udfs"} & set(
-    COMPUTE_SCENARIOS[compute_kind()]
+    p.selected(COMPUTE_SCENARIOS[compute_kind()])
 )
 # Fingerprint sums may differ in the last digits, as Spark sums in any order.
 FINGERPRINT_RTOL = 1e-6
+# With and without pushdown, in one run: the sums of the gold tables without `rows_hash`.
+PUSHDOWN_RTOL = 1e-12
 
 results = spark.read.table(p.results)
 current = {r.scenario: r for r in results.where(F.col("job_run_id") == p.job_run_id).collect()}
@@ -70,15 +72,21 @@ def fmt(metric, value):
     return f"{value:,.0f}"
 
 
-def fingerprint_diff(actual, expected):
-    # Hashes differ per run.
-    keys = sorted(k for k in set(actual or {}) | set(expected or {}) if not k.endswith("_hash"))
+def fingerprint_diff(actual, expected, rtol=FINGERPRINT_RTOL, exact_hashes=False):
+    """Keys that differ; the `rows_hash`es (exactly) only with `exact_hashes`, as last digits
+    of the values may change between commits."""
+    keys = sorted(
+        k
+        for k in set(actual or {}) | set(expected or {})
+        if not k.endswith("_hash") or (exact_hashes and k.endswith(".rows_hash"))
+    )
     return [
         k
         for k in keys
         if k not in actual
         or k not in expected
-        or abs(actual[k] - expected[k]) > FINGERPRINT_RTOL * max(abs(expected[k]), 1.0)
+        or (k.endswith("_hash") and actual[k] != expected[k])
+        or abs(actual[k] - expected[k]) > rtol * max(abs(expected[k]), 1.0)
     ]
 
 
@@ -90,7 +98,7 @@ lines = [
     f"`{p.baseline_ref}`.",
 ]
 regressions, warnings = [], []
-for scenario in COMPUTE_SCENARIOS[compute_kind()]:
+for scenario in p.selected(COMPUTE_SCENARIOS[compute_kind()]):
     run = current.get(scenario)
     if run is None:  # Its task failed before recording anything.
         lines += ["", f"### `{scenario}` (not run)"]
@@ -141,13 +149,21 @@ if full and pushdown and full.status == "success" and pushdown.status == "succes
     if full.fingerprint is None or pushdown.fingerprint is None:
         regressions.append("full_pushdown: no fingerprint to compare with full's")
     else:
-        diff = fingerprint_diff(pushdown.fingerprint, full.fingerprint)
+        diff = fingerprint_diff(
+            pushdown.fingerprint, full.fingerprint, rtol=PUSHDOWN_RTOL, exact_hashes=True
+        )
+        hashed = sorted(
+            k.removesuffix(".rows_hash") for k in full.fingerprint if k.endswith(".rows_hash")
+        )
         if diff:
             regressions.append(f"full_pushdown: gold tables differ from full's: {diff[:10]}")
+        elif not hashed:
+            regressions.append("full_pushdown: no rows_hash to compare with full's")
         else:
             lines += [
                 "",
-                f"✅ `full_pushdown`: gold tables equal `full`'s ({len(full.fingerprint)} sums).",
+                f"✅ `full_pushdown`: gold tables bit-identical to `full`'s ({', '.join(hashed)}); "
+                f"the others' sums within {PUSHDOWN_RTOL:g}.",
             ]
     changes = [
         f"`{m}` {(pushdown[m] - full[m]) / full[m]:+.1%}"

@@ -34,6 +34,7 @@ PARAMS = [
     "max_regression",
     "job_run_id",
     "task_key",
+    "scenarios",
 ]
 
 RESULTS_SCHEMA = T.StructType(
@@ -69,6 +70,12 @@ class Params:
         self.compute_overrides = json.loads(self.compute_overrides or "{}")
         self.overrides = json.loads(self.config_overrides or "{}")
         self.max_regression = float(self.max_regression)
+        # Comma-separated scenarios to run; empty for all.
+        self.scenarios = {s.strip() for s in self.scenarios.split(",") if s.strip()}
+
+    def selected(self, scenarios):
+        """`scenarios` without those the `scenarios` parameter leaves out."""
+        return [s for s in scenarios if not self.scenarios or s in self.scenarios]
 
 
 def params():
@@ -124,16 +131,33 @@ def run_info(p):
     }
 
 
-def fingerprint(p):
-    """Row count and rounded sums of the numeric columns of each gold table.
+# Gold tables whose values Spark aggregates in no fixed order, so they aren't bit-identical
+# between runs: no `rows_hash`.
+NONDETERMINISTIC_TABLES = {"calculated_channel_metrics"}
+# `rows_hash` is a sum modulo 2^52, so that it's exact as a double.
+ROWS_HASH_MODULUS = 2**52
 
-    Ids, hashes and bookkeeping columns are skipped, as they differ between runs. Sums are in
-    double: sums of epoch-µs timestamps overflow a long.
+
+def _hashable(field):
+    if isinstance(field.dataType, T.MapType):  # Maps can't be hashed; their entries can.
+        return F.array_sort(F.map_entries(F.col(field.name)))
+    return F.col(field.name)
+
+
+def fingerprint(p):
+    """Row count and rounded sums of the numeric columns of each gold table, and an exact,
+    order-independent hash of its rows (`rows_hash`).
+
+    The sums skip ids, hashes and bookkeeping columns, as they differ between runs. They're in
+    double: sums of epoch-µs timestamps overflow a long. `rows_hash` sums the xxHash64 of each
+    row's columns, ids included, but no bookkeeping or `_hash` columns: equal if and only if the
+    rows are, bit for bit, apart from hash collisions.
     """
     result = {}
     tables = spark.sql(f"SHOW TABLES IN {p.catalog}.{p.schema}").collect()
     for name in sorted(t.tableName for t in tables if t.tableName.startswith(f"{p.prefix}_")):
         df = spark.read.table(f"{p.catalog}.{p.schema}.{name}")
+        table = name.removeprefix(f"{p.prefix}_")
         numeric = [
             f.name
             for f in df.schema.fields
@@ -144,7 +168,14 @@ def fingerprint(p):
         aggs = [F.count(F.lit(1)).alias("count")] + [
             F.sum(F.when(~F.isnan(c), F.col(c).cast("double"))).alias(c) for c in numeric
         ]
+        if table not in NONDETERMINISTIC_TABLES:
+            hashed = [
+                _hashable(f)
+                for f in df.schema.fields
+                if not f.name.startswith("_") and not f.name.endswith("_hash")
+            ]
+            row_hash = F.xxhash64(*hashed).cast("decimal(20,0)")
+            aggs.append(F.pmod(F.sum(row_hash), F.lit(ROWS_HASH_MODULUS)).alias("rows_hash"))
         row = df.agg(*aggs).first().asDict()
-        table = name.removeprefix(f"{p.prefix}_")
         result.update({f"{table}.{k}": float(v) for k, v in row.items() if v is not None})
     return result

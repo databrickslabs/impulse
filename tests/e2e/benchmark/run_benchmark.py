@@ -52,6 +52,7 @@ cloudpickle.register_pickle_by_value(benchmark_udfs)
 p = params()
 task_run_id = dbutils.widgets.get("task_run_id")
 suffix, scenarios = TASKS[p.task_key]
+scenarios = p.selected(scenarios)
 p.schema += suffix
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {p.catalog}.{p.schema}")
 scenario_filters = SCENARIO_FILTERS[compute_kind()]

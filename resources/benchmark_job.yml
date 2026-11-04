@@ -20,6 +20,9 @@ resources:
         # Settings the compute needs, merged into the report config before config_overrides. Part of
         # the compute: runs compare only with runs of the same.
         - {name: compute_overrides, default: "{}"}
+        # Comma-separated scenarios to run, e.g. "full,full_pushdown"; empty for all. Tasks
+        # without a selected scenario do nothing.
+        - {name: scenarios, default: ""}
 
       # A fixed-size cluster, so that runs are comparable: no autoscaling, on-demand nodes only (no
       # spot losses during a measurement), no Photon. Each run task has its own identical cluster,

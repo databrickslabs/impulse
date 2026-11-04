@@ -19,6 +19,9 @@ resources:
         # A serverless Python worker runs out of memory with all ~50 channels of a trip in one
         # solve, and with trip 39 (4.35 h, ~1.7 M rows per channel) even with 3. Part of the
         # compute: runs compare only with runs of the same.
+        # Comma-separated scenarios to run, e.g. "full,full_pushdown"; empty for all. Tasks
+        # without a selected scenario do nothing.
+        - {name: scenarios, default: ""}
         - name: compute_overrides
           default: >-
             {"query_engine": {"max_channels_per_batch": 10},
