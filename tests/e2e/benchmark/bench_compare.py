@@ -4,7 +4,8 @@
 # MAGIC Compares each scenario with the median of its last 5 runs on `baseline_ref` that passed the
 # MAGIC gate (same benchmark version and compute, no config overrides). Returns markdown, stores the
 # MAGIC verdict in `gate_passed` and sets the task value `regressions` for `gate`. Warns when gold
-# MAGIC tables differ from the baseline's, or `incremental_delta`'s from `full`'s.
+# MAGIC tables differ from the baseline's, or `incremental_delta`'s from `full`'s. Gold tables of
+# MAGIC `full_pushdown` that differ from `full`'s are a regression.
 
 # COMMAND ----------
 
@@ -31,7 +32,9 @@ p = params()
 BASELINE_RUNS = 5
 # Gated metrics of this compute, checked in the longer scenarios.
 GATED = GATED[compute_kind()]
-GATED_SCENARIOS = {"full", "wide_report", "python_udfs"} & set(COMPUTE_SCENARIOS[compute_kind()])
+GATED_SCENARIOS = {"full", "full_pushdown", "wide_report", "python_udfs"} & set(
+    COMPUTE_SCENARIOS[compute_kind()]
+)
 # Fingerprint sums may differ in the last digits, as Spark sums in any order.
 FINGERPRINT_RTOL = 1e-6
 
@@ -131,6 +134,27 @@ if full and delta and full.fingerprint is not None and delta.fingerprint is not 
     diff = fingerprint_diff(delta.fingerprint, full.fingerprint)
     if diff:
         warnings.append(f"incremental_delta: gold tables differ from full's: {diff[:10]}")
+
+# Pushdown changes how, not what, is computed: the gold tables equal those without it.
+pushdown = current.get("full_pushdown")
+if full and pushdown and full.status == "success" and pushdown.status == "success":
+    if full.fingerprint is None or pushdown.fingerprint is None:
+        regressions.append("full_pushdown: no fingerprint to compare with full's")
+    else:
+        diff = fingerprint_diff(pushdown.fingerprint, full.fingerprint)
+        if diff:
+            regressions.append(f"full_pushdown: gold tables differ from full's: {diff[:10]}")
+        else:
+            lines += [
+                "",
+                f"✅ `full_pushdown`: gold tables equal `full`'s ({len(full.fingerprint)} sums).",
+            ]
+    changes = [
+        f"`{m}` {(pushdown[m] - full[m]) / full[m]:+.1%}"
+        for m in GATED
+        if pushdown[m] is not None and full[m]
+    ]
+    lines += ["", f"`full_pushdown` vs `full` of this run: {', '.join(changes)}."]
 
 lines.append("")
 lines += [f"⚠️ {w}" for w in warnings]

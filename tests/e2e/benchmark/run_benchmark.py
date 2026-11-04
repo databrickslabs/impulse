@@ -7,6 +7,7 @@
 # MAGIC   `incremental_delta` (5 trips re-ingested).
 # MAGIC - `run_wide`: `wide_report`, the wide report.
 # MAGIC - `run_udfs`: `python_udfs`, the report of Python extensions.
+# MAGIC - `run_pushdown`: `full_pushdown`, the `full` report with Spark pushdown.
 # MAGIC
 # MAGIC Appends one row per scenario to the results table; a failed scenario is recorded and fails
 # MAGIC the task.
@@ -32,6 +33,7 @@ from bench_utils import RESULTS_SCHEMA, fingerprint, params, report_config, run_
 from benchmark_metrics import Measurement, compute_kind
 from benchmark_report import (
     DELTA_CONTAINERS,
+    SCENARIO_CONFIG,
     SCENARIO_FILTERS,
     TASKS,
     build_report,
@@ -62,7 +64,9 @@ if "incremental_delta" in scenarios:
 
 
 def scenario_config(scenario):
-    return report_config(p, silver_copy, scenario_filters.get(scenario))
+    return report_config(
+        p, silver_copy, scenario_filters.get(scenario), SCENARIO_CONFIG.get(scenario)
+    )
 
 
 def builder(scenario, cfg):

@@ -75,9 +75,9 @@ def params():
     return Params()
 
 
-def report_config(p, container_metrics_table=None, container_filters=None):
-    """The benchmark's report config, with `compute_overrides`, then `config_overrides`, merged
-    per section.
+def report_config(p, container_metrics_table=None, container_filters=None, scenario_config=None):
+    """The benchmark's report config, with `compute_overrides`, `config_overrides`, then
+    `scenario_config` merged per section.
 
     `container_metrics_table` replaces the source's (a copy that `incremental_delta` updates);
     `container_filters` are added to every filter group (the groups are OR-combined).
@@ -90,7 +90,7 @@ def report_config(p, container_metrics_table=None, container_filters=None):
     cfg["measurement_dimensions"] = MEASUREMENT_DIMENSIONS
     if container_metrics_table:
         cfg["source"]["container_metrics_table"] = container_metrics_table
-    for overrides in [p.compute_overrides, p.overrides]:
+    for overrides in [p.compute_overrides, p.overrides, scenario_config or {}]:
         for key, value in overrides.items():
             cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
     if container_filters:
