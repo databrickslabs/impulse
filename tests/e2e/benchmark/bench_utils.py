@@ -83,8 +83,9 @@ def params():
 
 
 def report_config(p, container_metrics_table=None, container_filters=None, scenario_config=None):
-    """The benchmark's report config, with `compute_overrides`, `config_overrides`, then
-    `scenario_config` merged per section.
+    """The benchmark's report config, with `compute_overrides`, `scenario_config`, then
+    `config_overrides` merged per section; a `None` value removes a setting, so that its default
+    applies.
 
     `container_metrics_table` replaces the source's (a copy that `incremental_delta` updates);
     `container_filters` are added to every filter group (the groups are OR-combined).
@@ -97,9 +98,13 @@ def report_config(p, container_metrics_table=None, container_filters=None, scena
     cfg["measurement_dimensions"] = MEASUREMENT_DIMENSIONS
     if container_metrics_table:
         cfg["source"]["container_metrics_table"] = container_metrics_table
-    for overrides in [p.compute_overrides, p.overrides, scenario_config or {}]:
+    for overrides in [p.compute_overrides, scenario_config or {}, p.overrides]:
         for key, value in overrides.items():
-            cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
+            if isinstance(value, dict):
+                merged = {**cfg.get(key, {}), **value}
+                cfg[key] = {k: v for k, v in merged.items() if v is not None}
+            else:
+                cfg[key] = value
     if container_filters:
         filters = dict(cfg.get("container_filters") or {})
         groups = filters.get("metric_filters") or [[]]

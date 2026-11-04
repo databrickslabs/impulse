@@ -56,6 +56,7 @@ scenarios = p.selected(scenarios)
 p.schema += suffix
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {p.catalog}.{p.schema}")
 scenario_filters = SCENARIO_FILTERS[compute_kind()]
+scenario_configs = SCENARIO_CONFIG[compute_kind()]
 
 # `incremental_delta` re-ingests trips in a copy of container_metrics, read by the task's scenarios.
 silver_copy = None
@@ -66,7 +67,7 @@ if "incremental_delta" in scenarios:
 
 def scenario_config(scenario):
     return report_config(
-        p, silver_copy, scenario_filters.get(scenario), SCENARIO_CONFIG.get(scenario)
+        p, silver_copy, scenario_filters.get(scenario), scenario_configs.get(scenario)
     )
 
 

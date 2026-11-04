@@ -45,8 +45,17 @@ TASKS = {
 }
 SCENARIOS = [scenario for _, scenarios in TASKS.values() for scenario in scenarios]
 
-# Report config of a scenario, merged per section after the compute's and the run's overrides.
-SCENARIO_CONFIG = {"full_pushdown": {"query_engine": {"enable_pushdown": True}}}
+# Report config of a scenario, by compute, merged per section after the compute's overrides and
+# before the run's (`report_config`); `None` removes a setting. With pushdown, most of the
+# resampled signals reach the pandas UDF at 1 Hz, so serverless workers fit a trip's ~50
+# channels in one solve: `full_pushdown` drops the compute's cap of 10 for Impulse's default.
+_PUSHDOWN = {"enable_pushdown": True}
+SCENARIO_CONFIG = {
+    "cluster": {"full_pushdown": {"query_engine": _PUSHDOWN}},
+    "serverless": {
+        "full_pushdown": {"query_engine": {**_PUSHDOWN, "max_channels_per_batch": None}}
+    },
+}
 
 # Scenarios per compute. Serverless skips `wide_report`: its workers run out of memory.
 COMPUTE_SCENARIOS = {
