@@ -88,8 +88,8 @@ distance_km = veh_spd.resample(1e6).cumtrapz() / 3600 / 1e6   # speed (km/h) -> 
 ```
 
 With Spark pushdown on (`query_engine.enable_pushdown`, or `DefaultSolver(spark, enable_pushdown=True)`),
-a `resample` on a physical channel can be computed in Spark before the pandas evaluation, when every
-use of that channel in the solve is pushed down. Meant for downsampling; see `impulse-config`.
+supported operations such as `resample` are computed in Spark before the pandas evaluation, when every
+use of their channel in the solve is pushed down; see `impulse-config`.
 
 **Filtering**
 

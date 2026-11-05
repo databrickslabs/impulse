@@ -108,9 +108,9 @@ With Spark pushdown on (`query_engine.enable_pushdown`, or `DefaultSolver(spark,
 see `impulse-config`), when every calculated channel of a `solve_calculated_channels` call (in a
 `Report`: of a batch) is a pushed-down expression as a whole, e.g.
 `CalculatedChannel(veh_spd.resample(1e6), {...})`, its rows are produced entirely in Spark and no
-pandas UDF runs. If any calculated channel of the call needs the pandas evaluation, e.g.
-`veh_spd.resample(1e6) * 3.6`, all of them are evaluated in the UDF as usual; their pushed-down parts
-still run in Spark. Either way the rows are identical.
+pandas UDF runs. If any calculated channel of the call needs the pandas evaluation, all of them are
+evaluated in the UDF as usual; their pushed-down parts still run in Spark. Either way the rows are
+identical.
 
 ## Output schema
 

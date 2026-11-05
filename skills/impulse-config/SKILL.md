@@ -5,7 +5,7 @@ description: >
   silver input tables, the gold output location, and tunes the solver. Use when the user asks to
   "configure an Impulse report", set the source/sink tables, filter which containers are processed,
   choose RLE vs RAW, turn on incremental processing, run without writing (sinkless), remap column
-  names, scope by project, or speed up resample-heavy reports with Spark pushdown. Covers source, unity_sink, container_filters, query_engine, solver_config,
+  names, scope by project, or speed up reports with Spark pushdown. Covers source, unity_sink, container_filters, query_engine, solver_config,
   custom measurement DBs, incremental, full_recalculation, measurement_dimensions, and calculated_channels,
   all validated by Pydantic.
 ---
@@ -104,7 +104,7 @@ Omit entirely for `DefaultSolver` + `data_type="RLE"`.
 | `drop_implausible_data` | `false`            | Drop `channels` rows where `is_plausible = false`. **Requires `data_type="RAW"`** (RLE raises).   |
 | `max_channels_per_batch` | `500`             | Max distinct channels (`channel(...)` / `poi_channel(...)` selections) read per solve batch. Applies to events, aggregations, and calculated channels (counts their *input* channels). `batch_size` is a **deprecated alias** (warns; removed in a future release). |
 | `max_containers_per_batch` | `null`          | Max containers solved at once, to bound per-solve memory. `null` disables the cap; when set it must be `>= 1`. On an **incremental** run, `run()` commits at most this many upserted containers per iteration and loops until all are processed (see `impulse-reporting`). On a **full** run, and when a changed definition recomputes over all containers, the containers are split into chunks of about this size and solved chunk by chunk. Chunk sizes are approximate. |
-| `enable_pushdown`       | `false`            | Computes supported expression subtrees natively in Spark before the pandas UDF, so fewer rows are shipped to it: currently `channel.resample(rate)` on a physical `channel(...)` / `channel_with_alias(...)` selection. A channel is pushed down only when every use of it in a solve batch is, e.g. `rpm.resample(1e6)` next to `rpm.max()` keeps `rpm` in pandas. Results are unchanged. Meant for downsampling: upsampling produces more rows than the raw channel. |
+| `enable_pushdown`       | `false`            | Computes supported expression subtrees (e.g. `channel.resample(rate)`) natively in Spark before the pandas UDF, so fewer rows are shipped to it. Subtrees no rule supports are evaluated in pandas as usual. A channel is pushed down only when every use of it in a solve batch is; otherwise its raw rows are shipped as before. Results are unchanged. |
 | `solver_config`         | `null`             | Per-table column mappings, per-table filters, and project scoping (below).                        |
 | `measurement_db`        | `"MeasurementDB"`  | Registered name of the MeasurementDB (the read seam). The default reads the silver tables directly; a custom one reshapes a different source schema at read time. See [Custom measurement DB](#custom-measurement-db). |
 | `measurement_db_config` | `null`             | Keyword args for the selected MeasurementDB's config class, merged with `source` (e.g. extra tables, prefilter keys). |
