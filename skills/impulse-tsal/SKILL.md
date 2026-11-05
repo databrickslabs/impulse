@@ -87,6 +87,10 @@ All methods are available on any `TimeSeriesExpression`.
 distance_km = veh_spd.resample(1e6).cumtrapz() / 3600 / 1e6   # speed (km/h) -> cumulative km
 ```
 
+With Spark pushdown on (`query_engine.enable_pushdown`, or `DefaultSolver(spark, enable_pushdown=True)`),
+supported operations such as `resample` are computed in Spark before the pandas evaluation, when every
+use of their channel in the solve is pushed down; see `impulse-config`.
+
 **Filtering**
 
 | Method              | Description                                                                                          |

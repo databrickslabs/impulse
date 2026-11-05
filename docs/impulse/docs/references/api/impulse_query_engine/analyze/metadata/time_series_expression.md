@@ -353,6 +353,10 @@ def build(cache: SeriesCache)
 
 Build the time series from cache.
 
+A result the cache already holds for this node (see
+:meth:`SeriesCache.materialized`) is returned as-is, without building the
+operands.
+
 **Arguments**:
 
 - `cache` (`SeriesCache`): Cache containing time series data.

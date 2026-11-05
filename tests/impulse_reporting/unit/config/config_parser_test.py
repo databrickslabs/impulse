@@ -532,6 +532,40 @@ def test_impulse_config_from_dict_no_query_engine_provided():
     assert config.query_engine.solver == Solvers.DEFAULT_SOLVER
 
 
+@pytest.mark.parametrize(
+    ("query_engine", "expected"), [({}, False), ({"enable_pushdown": True}, True)]
+)
+def test_impulse_config_enable_pushdown(query_engine, expected):
+    """Spark pushdown is opt-in."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "DefaultSolver", **query_engine},
+    }
+    assert ImpulseConfig.model_validate(config_json).query_engine.enable_pushdown is expected
+
+
+@pytest.mark.parametrize(
+    ("query_engine", "expected"), [({}, 500_000), ({"pushdown_chunk_rows": 1000}, 1000)]
+)
+def test_impulse_config_pushdown_chunk_rows(query_engine, expected):
+    """The pushdown chunk size defaults to 500 000 rows and can be set."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "DefaultSolver", **query_engine},
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.pushdown_chunk_rows == expected
+
+
+def test_impulse_config_pushdown_chunk_rows_rejects_non_positive():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "DefaultSolver", "pushdown_chunk_rows": 0},
+    }
+    with pytest.raises(ValidationError, match="pushdown_chunk_rows must be >= 1"):
+        ImpulseConfig.model_validate(config_json)
+
+
 def test_impulse_config_from_dict_no_measurement_dim_provided():
     """Test ImpulseConfig with no measurement dimension info provided."""
     config_json = impulse_config_JSON.copy()
