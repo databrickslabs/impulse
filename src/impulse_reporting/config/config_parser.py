@@ -8,6 +8,7 @@ from typing import Annotated, Any, Self
 import pydantic
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator, ConfigDict
 
+from impulse_query_engine.analyze.query.optimizer import CHUNK_ROWS
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
 from impulse_query_engine.measurement_db import AbstractMeasurementDB, MeasurementDBConfig
 from impulse_query_engine.measurement_db_registry import resolve_measurement_db
@@ -401,6 +402,12 @@ class QueryEngine(BaseModel):
         before the pandas UDF, so fewer rows are shipped to it.  A channel is
         only pushed down when every use of it in a solve batch is.  Meant for
         downsampling.
+    pushdown_chunk_rows : int, default=500000
+        Average number of rows per chunk when Spark processes a pushed-down
+        channel (a sample counts once per pushed-down expression that reads
+        it).  The chunks of a channel run in parallel, one per task: larger
+        chunks mean fewer tasks with more memory each.  Must be ``>= 1``; only
+        used with ``enable_pushdown``.
 
     Notes
     -----
@@ -430,6 +437,7 @@ class QueryEngine(BaseModel):
     max_channels_per_batch: int = 500
     max_containers_per_batch: int | None = None
     enable_pushdown: bool = False
+    pushdown_chunk_rows: int = CHUNK_ROWS
 
     @model_validator(mode="before")
     @classmethod
@@ -497,6 +505,14 @@ class QueryEngine(BaseModel):
             raise ValueError(
                 "max_containers_per_batch must be >= 1 when set (None disables the cap)."
             )
+        return value
+
+    @field_validator("pushdown_chunk_rows", mode="after")
+    @classmethod
+    def _validate_pushdown_chunk_rows(cls, value: int) -> int:
+        """Average rows per chunk of a pushed-down channel in the Spark pushdown pass."""
+        if value < 1:
+            raise ValueError("pushdown_chunk_rows must be >= 1.")
         return value
 
     @model_validator(mode="after")

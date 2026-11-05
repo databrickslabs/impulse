@@ -21,7 +21,6 @@ from impulse_query_engine.analyze.query.optimizer import (
     PushdownPlan,
     QueryOptimizer,
     ResamplePushdownRule,
-    pipeline,
 )
 from impulse_query_engine.analyze.query.solvers.default_solver import (
     DefaultSolver,
@@ -57,10 +56,8 @@ def _unit_conversion_config() -> SolverConfig:
     )
 
 
-@pytest.fixture
-def small_chunks(monkeypatch):
-    """Run the pushdown pipeline in chunks of a few samples, so channels span many chunks."""
-    monkeypatch.setattr(pipeline, "CHUNK_ROWS", 7)
+#: ``pushdown_chunk_rows`` of a few samples, so channels span many chunks.
+SMALL_CHUNKS = 7
 
 
 def _final_plan(df) -> str:
@@ -138,7 +135,12 @@ def _solve_both(spark, db, make_selections, **solver_kwargs) -> tuple[pd.DataFra
     """``toPandas`` results with pushdown off and on, sorted by container."""
     results = []
     for enable_pushdown in (False, True):
-        solver = DefaultSolver(spark, enable_pushdown=enable_pushdown, **solver_kwargs)
+        solver = DefaultSolver(
+            spark,
+            enable_pushdown=enable_pushdown,
+            pushdown_chunk_rows=SMALL_CHUNKS,
+            **solver_kwargs,
+        )
         query = db.query
         pdf = query.select(*make_selections(query)).toPandas(spark, solver=solver)
         results.append(pdf.sort_values("container_id").reset_index(drop=True))
@@ -163,7 +165,6 @@ def _derived_rows(pdf: pd.DataFrame, col: str) -> int:
     return sum(len(s) for s in pdf[col])
 
 
-@pytest.mark.usefixtures("small_chunks")
 class TestIdenticalResults:
     def test_resample_only(self, spark: SparkSession, key_value_store_db, udf_rows):
         off, on = _solve_both(
@@ -184,7 +185,13 @@ class TestIdenticalResults:
     ):
         q = key_value_store_db.query
         result = q.select(q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm")).solve(
-            spark, solver=DefaultSolver(spark, config=_kvs_config(), enable_pushdown=True)
+            spark,
+            solver=DefaultSolver(
+                spark,
+                config=_kvs_config(),
+                enable_pushdown=True,
+                pushdown_chunk_rows=SMALL_CHUNKS,
+            ),
         )
         assert len(result.collect()) > 0  # executes result's own plan, which the checks read
         assert channel_data_scans(result) == PUSHED_SCANS
@@ -198,7 +205,15 @@ class TestIdenticalResults:
         result = q.select(
             q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm"),
             q.channel(channel_name="Vehicle Speed Sensor").max().alias("speed_max"),
-        ).solve(spark, solver=DefaultSolver(spark, config=_kvs_config(), enable_pushdown=True))
+        ).solve(
+            spark,
+            solver=DefaultSolver(
+                spark,
+                config=_kvs_config(),
+                enable_pushdown=True,
+                pushdown_chunk_rows=SMALL_CHUNKS,
+            ),
+        )
         rows = result.collect()
         assert rows and all(row["speed_max"] > 0 for row in rows)
         assert channel_data_scans(result) == MIXED_SCANS
@@ -437,3 +452,33 @@ class TestTimeSeriesCacheVariants:
 
 def _rpm(uses_alias: bool = False) -> TimeSeriesSelector:
     return TimeSeriesSelector(TagSelector("channel_name") == "rpm", uses_alias=uses_alias)
+
+
+def test_pushdown_chunk_rows_must_be_positive(spark: SparkSession):
+    with pytest.raises(ValueError, match="pushdown_chunk_rows must be >= 1"):
+        DefaultSolver(spark, enable_pushdown=True, pushdown_chunk_rows=0)
+
+
+@pytest.mark.parametrize(
+    ("solver_kwargs", "expected"), [({}, 500_000), ({"pushdown_chunk_rows": 9}, 9)]
+)
+def test_pushdown_chunk_rows_reaches_the_pipeline(
+    spark: SparkSession, key_value_store_db, monkeypatch, solver_kwargs, expected
+):
+    from impulse_query_engine.analyze.query.solvers import default_solver
+
+    seen = []
+
+    def recording(*args, chunk_rows, **kwargs):
+        seen.append(chunk_rows)
+        return apply(*args, chunk_rows=chunk_rows, **kwargs)
+
+    apply = default_solver.apply_pushdowns
+    monkeypatch.setattr(default_solver, "apply_pushdowns", recording)
+    q = key_value_store_db.query
+    solver = DefaultSolver(spark, config=_kvs_config(), enable_pushdown=True, **solver_kwargs)
+    result = q.select(q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm")).solve(
+        spark, solver=solver
+    )
+    assert len(result.collect()) > 0
+    assert seen and set(seen) == {expected}

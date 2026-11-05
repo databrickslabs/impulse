@@ -216,6 +216,20 @@ merged with the ``source`` tables.
 before the pandas UDF, so fewer rows are shipped to it.  A channel is
 only pushed down when every use of it in a solve batch is.  Meant for
 downsampling.
+- `pushdown_chunk_rows` (`int, default=500000`): Average number of rows per chunk when Spark processes a pushed-down
+channel (a sample counts once per pushed-down expression that reads
+it).  The chunks of a channel run in parallel, one per task: larger
+chunks mean fewer tasks with more memory each.  Must be ``>= 1``; only
+used with ``enable_pushdown``.
+
+#### batch\_size
+
+```python
+def batch_size() -> int
+```
+
+Deprecated alias for :attr:`max_channels_per_batch`.
+
 
 #### validate\_drop\_implausible\_data\_requires\_raw
 

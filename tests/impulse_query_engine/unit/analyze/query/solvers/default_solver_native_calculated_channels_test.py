@@ -25,10 +25,10 @@ from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers im
 from tests.impulse_query_engine.unit.analyze.query.solvers.default_solver_pushdown_test import (
     PUSHED_SCANS,
     SAMPLE_SHUFFLE,
+    SMALL_CHUNKS,
     channel_data_scans,
     container_shuffles_of_channel_data,
     shuffles,
-    small_chunks,
 )
 
 RATE = 1e7  # 10 s in µs; the fixture channels are sampled roughly every 0.9 s
@@ -70,7 +70,9 @@ def _solve(spark, db, make_channels, enable_pushdown, udf_calls=None, **solver_k
     if udf_calls is not None:
         udf_calls.append(0)
     q = db.query
-    solver = DefaultSolver(spark, enable_pushdown=enable_pushdown, **solver_kwargs)
+    solver = DefaultSolver(
+        spark, enable_pushdown=enable_pushdown, pushdown_chunk_rows=SMALL_CHUNKS, **solver_kwargs
+    )
     return q.select(*make_channels(q)).solve_calculated_channels(spark, solver=solver)
 
 
@@ -105,7 +107,6 @@ def _solve_both(spark, db, make_channels, udf_calls, **solver_kwargs) -> pd.Data
     return _assert_same(native, udf), native
 
 
-@pytest.mark.usefixtures("small_chunks")
 class TestNativeCalculatedChannels:
     def test_resampled_channels_skip_the_udf(self, spark, key_value_store_db, udf_calls):
         def channels(q):

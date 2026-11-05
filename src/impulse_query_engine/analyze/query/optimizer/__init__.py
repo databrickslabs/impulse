@@ -1,5 +1,5 @@
 from .context import ELEMENT_TYPE, Run, RunBreak, Sample, SeriesContext
-from .pipeline import SeriesPipeline, apply_pushdowns
+from .pipeline import CHUNK_ROWS, SeriesPipeline, apply_pushdowns
 from .plan import PushdownPlan
 from .pushdown import (
     RAW_VARIANT,
@@ -15,6 +15,7 @@ from .resample_rule import ResamplePushdownRule
 from .traversal import Classifier
 
 __all__ = [
+    "CHUNK_ROWS",
     "ELEMENT_TYPE",
     "RAW_VARIANT",
     "VARIANT_COL",

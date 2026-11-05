@@ -8,7 +8,7 @@ Spark execution of a pushdown plan: one shared pass for all rules.
 
 #### CHUNK\_ROWS
 
-Average number of rows per chunk of a channel, counting a sample once per variant.
+Default ``chunk_rows``: average rows per chunk of a channel, a sample counted once per variant.
 
 
 #### apply\_pushdowns
@@ -18,7 +18,8 @@ def apply_pushdowns(rows: DataFrame,
                     variants: DataFrame,
                     plan: PushdownPlan,
                     config,
-                    include_raw: bool = True) -> DataFrame
+                    include_raw: bool = True,
+                    chunk_rows: int = CHUNK_ROWS) -> DataFrame
 ```
 
 The rows a solve ships: raw rows (when *include_raw*) and all derived rows.
@@ -33,6 +34,8 @@ Channels without a row are dropped.
 - `plan` (`PushdownPlan`): The solve's pushdown plan.
 - `config` (`SolverConfig`): Provides the internal column names.
 - `include_raw` (`bool`): Whether to keep the raw rows (variant 0).
+- `chunk_rows` (`int`): Average number of rows per chunk of a channel in the ordered pass, counting a
+sample once per variant.
 
 **Returns**:
 
@@ -50,7 +53,7 @@ Chunking and everything that crosses chunk edges runs once per channel; its
 samples fan out into one series per variant only for the rules' hooks.  The
 shuffle therefore carries each sample once, while a task after it processes
 about k rows per shuffled sample of a channel with k variants (chunks are k
-times smaller to keep the rows per chunk at :data:`CHUNK_ROWS`).
+times smaller to keep the rows per chunk at *chunk_rows*).
 
 Rule runs are computed for every channel of the pass; a rule only reads its
 own runs, on its own series.
@@ -59,6 +62,7 @@ own runs, on its own series.
 
 - `rules` (`Sequence of (PushdownRule, Mapping[int, Pushdown])`): Ordered rules with their variants in this solve.
 - `config` (`SolverConfig`): Provides the internal column names.
+- `chunk_rows` (`int`): Average number of rows per chunk of a channel, counting a sample once per variant.
 
 #### run
 

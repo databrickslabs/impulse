@@ -15,14 +15,14 @@ does not grow with the number of rules:
 The ordered pass, per channel (its samples ordered by ``(tstart, tend, value)``):
 
 1. Channel boundaries give each sample its chunk: equal time slices holding
-   about :data:`CHUNK_ROWS` / k samples on average for a channel with k variants.
+   about ``chunk_rows`` / k samples on average for a channel with k variants.
 2. A window per chunk derives each sample's neighbours and run breaks.
 3. One summary row per chunk, scanned in chunk order, carries what crosses chunk
    boundaries: neighbours at chunk edges, run numbers and starts, the channel's
    sample count and last sample, and block ends.
 4. The samples fan out into one row per variant: a series, one channel's samples
    of one variant.  Stages 1 to 3 are the same for every variant of a channel,
-   so they run once; a chunk again holds about :data:`CHUNK_ROWS` rows.
+   so they run once; a chunk again holds about ``chunk_rows`` rows.
 5. Rules add per-sample columns (``row_columns``) and select samples (``keep``).
 6. Kept samples get their block end; rules add ``kept_columns``.
 7. Rules ``emit`` the derived rows.
@@ -84,15 +84,20 @@ from .pushdown import (
     check_name,
 )
 
-#: Average number of rows per chunk of a channel, counting a sample once per variant.
-CHUNK_ROWS = 100_000
+#: Default ``chunk_rows``: average rows per chunk of a channel, a sample counted once per variant.
+CHUNK_ROWS = 500_000
 
 _ELEMENT = "_pd_element"
 _KEPT = "_pd_kept"
 
 
 def apply_pushdowns(
-    rows: DataFrame, variants: DataFrame, plan: PushdownPlan, config, include_raw: bool = True
+    rows: DataFrame,
+    variants: DataFrame,
+    plan: PushdownPlan,
+    config,
+    include_raw: bool = True,
+    chunk_rows: int = CHUNK_ROWS,
 ) -> DataFrame:
     """The rows a solve ships: raw rows (when *include_raw*) and all derived rows.
 
@@ -111,6 +116,9 @@ def apply_pushdowns(
         Provides the internal column names.
     include_raw : bool
         Whether to keep the raw rows (variant 0).
+    chunk_rows : int
+        Average number of rows per chunk of a channel in the ordered pass, counting a
+        sample once per variant.
 
     Returns
     -------
@@ -132,7 +140,7 @@ def apply_pushdowns(
         )
         parts.append(_row_branch(tagged, per_sample, config, schema))
     if ordered:
-        parts.append(SeriesPipeline(ordered, config).run(rows, variants))
+        parts.append(SeriesPipeline(ordered, config, chunk_rows).run(rows, variants))
     if not parts:
         return rows.withColumn(VARIANT_COL, F.lit(None).cast(T.IntegerType())).limit(0)
     return reduce(lambda a, b: a.unionByName(b), parts)
@@ -198,7 +206,7 @@ class SeriesPipeline:
     samples fan out into one series per variant only for the rules' hooks.  The
     shuffle therefore carries each sample once, while a task after it processes
     about k rows per shuffled sample of a channel with k variants (chunks are k
-    times smaller to keep the rows per chunk at :data:`CHUNK_ROWS`).
+    times smaller to keep the rows per chunk at *chunk_rows*).
 
     Rule runs are computed for every channel of the pass; a rule only reads its
     own runs, on its own series.
@@ -209,11 +217,21 @@ class SeriesPipeline:
         Ordered rules with their variants in this solve.
     config : SolverConfig
         Provides the internal column names.
+    chunk_rows : int
+        Average number of rows per chunk of a channel, counting a sample once per variant.
     """
 
-    def __init__(self, rules: Sequence[tuple[PushdownRule, Mapping[int, Pushdown]]], config):
+    def __init__(
+        self,
+        rules: Sequence[tuple[PushdownRule, Mapping[int, Pushdown]]],
+        config,
+        chunk_rows: int = CHUNK_ROWS,
+    ):
+        if chunk_rows < 1:
+            raise ValueError(f"chunk_rows must be >= 1, got {chunk_rows}")
         self.rules = list(rules)
         self.config = config
+        self.chunk_rows = chunk_rows
         self.channel_key = [config.container_id_col, config.channel_id_col]
         self.key = [*self.channel_key, VARIANT_COL]
         self.order = [config.tstart_col, config.tend_col, config.value_col]
@@ -278,7 +296,7 @@ class SeriesPipeline:
             .where(F.col("_pd_k") > 0)
         )
         first, end = F.col("_pd_first"), F.col("_pd_end")
-        n_chunks = F.ceil(F.col("_pd_count") * F.col("_pd_k") / F.lit(CHUNK_ROWS))
+        n_chunks = F.ceil(F.col("_pd_count") * F.col("_pd_k") / F.lit(self.chunk_rows))
         position = F.least(F.floor((ts_d - first) / (end - first) * n_chunks), n_chunks - 1)
         # Null and NaN tstarts go where the series order puts them: first and last.
         chunk = F.coalesce(

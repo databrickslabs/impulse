@@ -53,6 +53,11 @@ duplicates.  Only consulted when ``is_raw_data`` is ``True``.
 fewer rows are shipped to it (see :class:`QueryOptimizer`).  A channel
 is only pushed down when every use of it in the solve is.  Default
 ``False``.
+- `pushdown_chunk_rows` (`int`): Average number of rows per chunk when Spark processes a pushed-down
+channel (a sample counts once per pushed-down expression that reads
+it).  The chunks of a channel run in parallel, one per task: larger
+chunks mean fewer tasks with more memory each.  Must be ``>= 1``;
+only used with ``enable_pushdown``.  Default ``500000``.
 
 #### filter\_container\_tags
 

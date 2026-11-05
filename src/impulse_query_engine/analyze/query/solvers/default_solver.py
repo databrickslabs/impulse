@@ -19,6 +19,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.analyze.query.optimizer import (
+    CHUNK_ROWS,
     RAW_VARIANT,
     VARIANT_COL,
     VARIANTS_COL,
@@ -347,6 +348,12 @@ class DefaultSolver(QuerySolver):
         fewer rows are shipped to it (see :class:`QueryOptimizer`).  A channel
         is only pushed down when every use of it in the solve is.  Default
         ``False``.
+    pushdown_chunk_rows : int, optional
+        Average number of rows per chunk when Spark processes a pushed-down
+        channel (a sample counts once per pushed-down expression that reads
+        it).  The chunks of a channel run in parallel, one per task: larger
+        chunks mean fewer tasks with more memory each.  Must be ``>= 1``;
+        only used with ``enable_pushdown``.  Default ``500000``.
     """
 
     def __init__(
@@ -357,13 +364,17 @@ class DefaultSolver(QuerySolver):
         drop_implausible_data: bool = False,
         raw_encoder: RawEncoder = RawEncoder.RLE,
         enable_pushdown: bool = False,
+        pushdown_chunk_rows: int = CHUNK_ROWS,
     ):
+        if pushdown_chunk_rows < 1:
+            raise ValueError(f"pushdown_chunk_rows must be >= 1, got {pushdown_chunk_rows}")
         super().__init__(config=config)
         self.spark = spark
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
         self.raw_encoder: RawEncoder = raw_encoder
         self.optimizer: QueryOptimizer | None = QueryOptimizer() if enable_pushdown else None
+        self.pushdown_chunk_rows: int = pushdown_chunk_rows
         # In RAW mode an is_plausible channels filter drops samples before raw
         # encoding, bridging intervals instead of splitting them. Reject it.
         self.config.reject_implausible_channels_filter_in_raw(is_raw=self.is_raw_data)
@@ -1331,7 +1342,14 @@ class DefaultSolver(QuerySolver):
         variants = channels_df.select(
             *key, plan.channel_variants(F.col("selector_ids")).alias(VARIANTS_COL)
         )
-        return apply_pushdowns(channels_q, variants, plan, self.config, include_raw=include_raw)
+        return apply_pushdowns(
+            channels_q,
+            variants,
+            plan,
+            self.config,
+            include_raw=include_raw,
+            chunk_rows=self.pushdown_chunk_rows,
+        )
 
     @staticmethod
     def _query_contains_poi_selections(selections: Iterable[Any]) -> bool:

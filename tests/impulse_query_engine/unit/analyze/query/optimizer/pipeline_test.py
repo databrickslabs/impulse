@@ -16,6 +16,7 @@ import pytest
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.optimizer import (
+    CHUNK_ROWS,
     VARIANT_COL,
     VARIANTS_COL,
     Classifier,
@@ -31,7 +32,6 @@ from tests.impulse_query_engine.unit.analyze.query.optimizer.pipeline_helpers im
     OffsetRule,
     ProbeRule,
     channel_rows,
-    chunk_rows,
     plan_for,
     random_series,
     run,
@@ -252,12 +252,11 @@ def test_chunks_scale_with_the_variants_of_a_channel(spark):
     )
     diff, probe = DiffRule(), ProbeRule("probe_value", lambda ctx: ctx.value)
     rules = [(diff, {1: Classifier([diff])(_X.diff())}), (probe, {2: probe.pushdown(_X)})]
-    with chunk_rows(4):
-        chunks = SeriesPipeline(rules, CONFIG)._chunked(df, variants)
-        per_channel = chunks.groupBy("container_id", "channel_id").agg(
-            F.countDistinct("_pd_chunk").alias("chunks"), F.count(F.lit(1)).alias("samples")
-        )
-        counts = {(r[0], r[1]): (r["chunks"], r["samples"]) for r in per_channel.collect()}
+    chunks = SeriesPipeline(rules, CONFIG, chunk_rows=4)._chunked(df, variants)
+    per_channel = chunks.groupBy("container_id", "channel_id").agg(
+        F.countDistinct("_pd_chunk").alias("chunks"), F.count(F.lit(1)).alias("samples")
+    )
+    counts = {(r[0], r[1]): (r["chunks"], r["samples"]) for r in per_channel.collect()}
     assert counts == {(1, 1): (6, 12), (2, 1): (3, 12)}
 
 
@@ -368,11 +367,15 @@ def test_null_and_nan_tstarts_keep_their_place_in_the_series(spark, chunk_size):
     )
     prev = ProbeRule("prev_start", lambda ctx: ctx.prev.tstart).pushdown(_X)
     nxt = ProbeRule("next_start", lambda ctx: ctx.next.tstart).pushdown(_X)
-    with chunk_rows(chunk_size):
-        result = apply_pushdowns(
-            df, variants, plan_for({1: prev, 2: nxt}), CONFIG, include_raw=False
-        )
-        by_variant = {v: _values_by_tend(result.where(F.col(VARIANT_COL) == v)) for v in (1, 2)}
+    result = apply_pushdowns(
+        df,
+        variants,
+        plan_for({1: prev, 2: nxt}),
+        CONFIG,
+        include_raw=False,
+        chunk_rows=chunk_size or CHUNK_ROWS,
+    )
+    by_variant = {v: _values_by_tend(result.where(F.col(VARIANT_COL) == v)) for v in (1, 2)}
     expected_prev = {0.5: None, 1.0: None, 2.0: 0.0, 3.0: 1.0, 4.0: 2.0, 5.0: 3.0, 5.5: 4.0}
     expected_next = {0.5: 0.0, 1.0: 1.0, 2.0: 2.0, 3.0: 3.0, 4.0: 4.0, 5.0: nan, 5.5: None}
     for actual, expected in ((by_variant[1], expected_prev), (by_variant[2], expected_next)):
@@ -385,10 +388,9 @@ def test_series_without_a_finite_tend_is_still_chunked(spark):
     samples = ([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], [nan] * 6, [1.0] * 6)
     df, variants = channel_rows(spark, {(1, 1, 1): samples}, time_type=T.DoubleType())
     rule = DiffRule()
-    with chunk_rows(2):
-        pipeline = SeriesPipeline([(rule, {1: Classifier([rule])(_X.diff())})], CONFIG)
-        chunks = pipeline._chunked(df, variants)
-        assert chunks.select("_pd_chunk").distinct().count() == 3
+    pipeline = SeriesPipeline([(rule, {1: Classifier([rule])(_X.diff())})], CONFIG, chunk_rows=2)
+    chunks = pipeline._chunked(df, variants)
+    assert chunks.select("_pd_chunk").distinct().count() == 3
 
 
 def test_rule_names_cannot_collide_with_pipeline_columns(spark):

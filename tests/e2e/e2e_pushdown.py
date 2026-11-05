@@ -19,7 +19,6 @@ from e2e_utils import channel, check, config, event_ids, gold, new_report, param
 from pyspark.sql import Window
 from pyspark.testing import assertDataFrameEqual
 
-from impulse_query_engine.analyze.query.optimizer import pipeline
 from impulse_reporting.aggregations.histogram import HistogramDuration
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.channels.calculated_channel import CalculatedChannel
@@ -37,11 +36,14 @@ NATIVE_LOG = "Calculated channels solved natively in Spark"
 CALCULATED_RATES = {}
 
 
-def build(prefix, pushdown):
+def build(prefix, pushdown, chunk_rows=None):
+    query_engine = {"enable_pushdown": pushdown}
+    if chunk_rows is not None:
+        query_engine["pushdown_chunk_rows"] = chunk_rows
     cfg = config(
         p,
         calculated_channels={"emit_channel_metrics": True},
-        query_engine={"enable_pushdown": pushdown},
+        query_engine=query_engine,
     )
     cfg["unity_sink"]["table_prefix"] = prefix
     report = new_report(cfg)
@@ -122,16 +124,11 @@ def solver_logs():
 
 
 def run(prefix, pushdown, chunk_rows=None):
-    """Run the report into `<prefix>_*`; returns the solver's log messages."""
-    report = build(prefix, pushdown)
-    default_chunk_rows = pipeline.CHUNK_ROWS
-    if chunk_rows is not None:
-        pipeline.CHUNK_ROWS = chunk_rows
-    try:
-        with solver_logs() as messages:
-            report.run()
-    finally:
-        pipeline.CHUNK_ROWS = default_chunk_rows
+    """Run the report into `<prefix>_*` (`chunk_rows`: `pushdown_chunk_rows`); returns the
+    solver's log messages."""
+    report = build(prefix, pushdown, chunk_rows)
+    with solver_logs() as messages:
+        report.run()
     return messages
 
 

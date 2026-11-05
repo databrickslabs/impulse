@@ -1,8 +1,6 @@
 """Helpers for pushdown pipeline tests: a runner and test-only rules."""
 
-import contextlib
 from collections.abc import Callable
-from unittest import mock
 
 import numpy as np
 import pyspark.sql.functions as F
@@ -15,6 +13,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
 from impulse_query_engine.analyze.query.optimizer import (
+    CHUNK_ROWS,
     VARIANT_COL,
     VARIANTS_COL,
     Pushdown,
@@ -22,22 +21,11 @@ from impulse_query_engine.analyze.query.optimizer import (
     PushdownRule,
     SeriesContext,
     apply_pushdowns,
-    pipeline,
 )
 from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 CONFIG = SolverConfig()
-
-
-@contextlib.contextmanager
-def chunk_rows(n: int | None):
-    """Run the pipeline with *n* rows per chunk (the default when ``None``)."""
-    if n is None:
-        yield
-        return
-    with mock.patch.object(pipeline, "CHUNK_ROWS", n):
-        yield
 
 
 def channel_rows(spark, series_by_key, time_type=T.LongType()) -> tuple[DataFrame, DataFrame]:
@@ -102,15 +90,19 @@ def run(
 ) -> dict[tuple, SampleSeries]:
     """Run *pushdowns* on the series; ``{(cid, ch, variant): SampleSeries}`` like the cache."""
     df, variants = channel_rows(spark, series_by_key, time_type)
-    with chunk_rows(chunk_size):
-        result = apply_pushdowns(
-            df, variants, plan_for(pushdowns), CONFIG, include_raw=include_raw
-        )
-        expected = [*df.schema.fields, T.StructField(VARIANT_COL, T.IntegerType())]
-        assert [(f.name, f.dataType) for f in result.schema] == [
-            (f.name, f.dataType) for f in expected
-        ]
-        pdf = result.toPandas()
+    result = apply_pushdowns(
+        df,
+        variants,
+        plan_for(pushdowns),
+        CONFIG,
+        include_raw=include_raw,
+        chunk_rows=chunk_size or CHUNK_ROWS,
+    )
+    expected = [*df.schema.fields, T.StructField(VARIANT_COL, T.IntegerType())]
+    assert [(f.name, f.dataType) for f in result.schema] == [
+        (f.name, f.dataType) for f in expected
+    ]
+    pdf = result.toPandas()
     out = {}
     for key, group in pdf.groupby(["container_id", "channel_id", VARIANT_COL]):
         group = group.sort_values(["tstart", "tend"], kind="stable")

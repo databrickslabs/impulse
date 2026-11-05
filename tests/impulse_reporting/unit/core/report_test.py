@@ -333,6 +333,25 @@ def test_create_solver_forwards_enable_pushdown(enable_pushdown):
     assert (report.get_solver().optimizer is not None) is enable_pushdown
 
 
+def test_create_solver_forwards_pushdown_chunk_rows():
+    """``query_engine.pushdown_chunk_rows`` reaches the solver."""
+    config = {
+        **DUMMY_KEY_VALUE_STORE_CONFIG,
+        "query_engine": {
+            **DUMMY_KEY_VALUE_STORE_CONFIG["query_engine"],
+            "enable_pushdown": True,
+            "pushdown_chunk_rows": 1000,
+        },
+    }
+    report = Report(
+        name="test_report",
+        spark=None,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=config,
+    )
+    assert report.get_solver().pushdown_chunk_rows == 1000
+
+
 def test_create_solver_delta_default_config():
     """DeltaSolver created without solver_config gets a default SolverConfig (no renames)."""
     from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
