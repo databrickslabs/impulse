@@ -198,39 +198,6 @@ spacing (upsampling) produces **more** rows than the raw channel, so enable push
 that downsample.
 :::
 
-Results match the pandas evaluation exactly for integer timestamp columns with an integral
-`sample_rate` (e.g. µs or ns epochs), and for double timestamps whose grid is exact in binary
-floating point. For double timestamps with a fractional rate such as `0.1`, the grid points can
-differ in the last bit from numpy builds that fuse multiply-add operations. The order of samples
-that share the same `tstart` is unspecified, as in the pandas evaluation, and channels whose
-`[tstart, tend)` intervals overlap are not supported (the RLE and interval encoders never
-produce overlaps).
-
-#### How Spark runs pushed-down subtrees
-
-All pushed-down subtrees of a solve share one pass over the channel data:
-
-- Spark cuts each pushed channel into chunks, equal time slices, and processes the chunks in
-  parallel. A chunk holds about 100 000 samples on average, divided by the number of pushed-down
-  expressions that read the channel (e.g. about 50 000 for `spd.resample(1e6)` next to
-  `spd.resample(5e6)`), as each of them computes on every sample of the chunk. A task holds one
-  chunk at a time, not a whole channel or container; with strongly varying sampling density a
-  chunk can hold more samples.
-- Within a chunk the samples are ordered by `tstart`, then `tend`, then value; samples with equal
-  times are ordered by value. For `resample`, each sample is assigned the grid bucket it falls
-  into, and only the last sample of each bucket emits rows: the grid points up to the next
-  sample's bucket.
-- What crosses a chunk boundary (neighbouring samples, gaps, the start and end of a continuous
-  block) comes from one summary row per chunk.
-- Each sample is shuffled once, however many pushed-down expressions read its channel: chunks,
-  neighbours and continuous blocks are computed once per channel, and only the expressions' own
-  computations run per expression.
-
-The channel data is read **twice**, however many expressions are pushed down: once in full, and
-once with only `container_id`, `channel_id`, `tstart` and `tend` (the channel boundaries that
-define the chunks). Channels that are also used outside pushed-down subtrees, e.g. `rpm.max()`
-next to `spd.resample(1e6)`, are read once more for their raw rows.
-
 ### Calculated channels without the pandas UDF
 
 When every calculated channel of a `solve_calculated_channels` call (in a report: of a solve

@@ -77,9 +77,8 @@ aliased channels, their source and target units.
 Pushed-down subtrees are computed **in Spark, before any pandas code runs**, and only the rest of
 each expression is left for the pandas UDF. The optimizer is rule-based: each rule computes one
 kind of subtree on the rows of one channel, e.g. `resample(...)` or filter conditions such as
-`veh_spd > 0`. All rules share the same reads of the channel data; rules that need a channel's
-samples in order run in parallel per chunk of the channel (see
-[How Spark runs pushed-down subtrees](query_solvers.md#how-spark-runs-pushed-down-subtrees)).
+`veh_spd > 0`. All rules share the same reads of the channel data (see
+[Spark pushdown](query_solvers.md#spark-pushdown-opt-in)).
 
 The example expression forms this tree (`event` is used twice, so it appears twice):
 
