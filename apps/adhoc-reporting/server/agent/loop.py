@@ -18,7 +18,7 @@ from server.user import User
 
 logger = logging.getLogger(__name__)
 
-MAX_ROUNDS = 12
+MAX_ROUNDS = 20
 MAX_TOOL_RESULT = 24000
 HISTORY_TURNS = 8
 HISTORY_TOOL_RESULT = 1500
