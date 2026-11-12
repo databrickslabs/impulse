@@ -20,6 +20,9 @@ resources:
         # Settings the compute needs, merged into the report config before config_overrides. Part of
         # the compute: runs compare only with runs of the same.
         - {name: compute_overrides, default: "{}"}
+        # Comma-separated scenarios to run, e.g. "full,full_pushdown"; empty for all. Tasks
+        # without a selected scenario do nothing.
+        - {name: scenarios, default: ""}
 
       # A fixed-size cluster, so that runs are comparable: no autoscaling, on-demand nodes only (no
       # spot losses during a measurement), no Photon. Each run task has its own identical cluster,
@@ -47,6 +50,7 @@ resources:
               project: impulse-benchmark
         - {job_cluster_key: bench_cluster_wide, new_cluster: *bench_cluster}
         - {job_cluster_key: bench_cluster_udfs, new_cluster: *bench_cluster}
+        - {job_cluster_key: bench_cluster_pushdown, new_cluster: *bench_cluster}
 
       tasks:
         - task_key: setup
@@ -87,9 +91,19 @@ resources:
           depends_on: [{task_key: setup}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
+        # full_pushdown: `full` with Spark pushdown.
+        - task_key: run_pushdown
+          job_cluster_key: bench_cluster_pushdown
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
+
         - task_key: compare
           job_cluster_key: bench_cluster
-          depends_on: [{task_key: run}, {task_key: run_wide}, {task_key: run_udfs}]
+          depends_on:
+            - {task_key: run}
+            - {task_key: run_wide}
+            - {task_key: run_udfs}
+            - {task_key: run_pushdown}
           # Also reports a failed run.
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_compare.py, base_parameters: *params}
@@ -101,6 +115,10 @@ resources:
 
         - task_key: teardown
           job_cluster_key: bench_cluster
-          depends_on: [{task_key: run}, {task_key: run_wide}, {task_key: run_udfs}]
+          depends_on:
+            - {task_key: run}
+            - {task_key: run_wide}
+            - {task_key: run_udfs}
+            - {task_key: run_pushdown}
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_teardown.py, base_parameters: *params}

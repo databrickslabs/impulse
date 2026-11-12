@@ -58,6 +58,12 @@ resources:
           depends_on: [{task_key: setup}]
           notebook_task: {notebook_path: ../tests/e2e/e2e_events.py, base_parameters: *params}
 
+        - task_key: pushdown
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_pushdown.py, base_parameters: *params}
+
         # Runs only when all tests passed. Otherwise it ends as "upstream failed", which fails
         # the job run, and the schema is kept for debugging.
         - task_key: teardown
@@ -70,6 +76,7 @@ resources:
             - {task_key: container_filter}
             - {task_key: incremental_updates}
             - {task_key: events}
+            - {task_key: pushdown}
           notebook_task: {notebook_path: ../tests/e2e/teardown.py, base_parameters: *params}
 
       environments:

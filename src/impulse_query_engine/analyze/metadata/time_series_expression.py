@@ -1226,6 +1226,10 @@ class TimeSeriesOp(TimeSeriesExpression):
         """
         Build the time series from cache.
 
+        A result the cache already holds for this node (see
+        :meth:`SeriesCache.materialized`) is returned as-is, without building the
+        operands.
+
         Parameters
         ----------
         cache : SeriesCache
@@ -1236,6 +1240,10 @@ class TimeSeriesOp(TimeSeriesExpression):
         Any
             Built time series object.
         """
+        # Looked up on the type so caches without the hook (or test doubles) are skipped.
+        materialized = getattr(type(cache), "materialized", None)
+        if materialized is not None and (result := materialized(cache, self)) is not None:
+            return result
         argsb = [a.build(cache) if isinstance(a, TimeSeriesExpression) else a for a in self.args]
         kwargsb = {
             k: a.build(cache) if isinstance(a, TimeSeriesExpression) else a
