@@ -1,2 +1,0 @@
-# The built frontend is committed because deployments from Git don't build it. Hide it in diffs on GitHub.
-frontend/dist/** linguist-generated=true

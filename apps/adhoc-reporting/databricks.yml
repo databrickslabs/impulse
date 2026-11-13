@@ -47,7 +47,6 @@ resources:
           group_name: ${var.end_user_group}
 
 targets:
-  # Uploads this folder, local changes included.
   dev:
     default: true
     workspace:
@@ -56,7 +55,6 @@ targets:
       apps:
         impulse_app:
           source_code_path: .
-  # Deploys the checked-out commit from GitHub instead, for workspaces that only allow app deployments from Git.
   github:
     resources:
       apps:

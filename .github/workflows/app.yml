@@ -80,8 +80,6 @@ jobs:
       - name: Build the frontend
         run: make frontend
 
-      # Deployments from Git don't build the frontend, so frontend/dist is committed. The build is
-      # deterministic, so after rebuilding, any difference means the commit lacks the rebuilt frontend.
       - name: The committed frontend matches its source
         run: |
           if [ -n "$(git status --porcelain -- frontend/dist)" ]; then
