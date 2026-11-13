@@ -54,5 +54,5 @@ the [query engine](/docs/references/query_engine) isn't part of the app.
 ## Next steps
 
 - [Requirements](requirements.md): workspace features, data and permissions.
-- [Install](install.md): build, deploy and grant access.
+- [Install](install.md): deploy and grant access.
 - [Architecture](architecture.md): components, identities and where data is stored.
