@@ -20,6 +20,13 @@ def preflight(name: ReportName, user: User = Depends(current_user)) -> dict:
     return runs.preflight(user, generated.config)
 
 
+@router.post("/grants")
+def grant(name: ReportName, user: User = Depends(current_user)) -> dict:
+    _, generated = _generated(user, name)
+    runs.grant(user, generated.config)
+    return {"granted": name}
+
+
 @router.post("/runs")
 def start(name: ReportName, user: User = Depends(current_user)) -> dict:
     _, generated = _generated(user, name)

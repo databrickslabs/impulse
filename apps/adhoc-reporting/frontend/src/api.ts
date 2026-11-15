@@ -48,6 +48,7 @@ export const api = {
   channels: (catalog: string, schema: string, uuts: string[], window: Window) =>
     request<{ channels: Channel[]; issues: string[] }>("POST", "/api/data/channels", { catalog, schema, uuts, window }),
   preflight: (name: string) => request<Preflight>("POST", `${reportPath(name)}/preflight`),
+  grant: (name: string) => request<{ granted: string }>("POST", `${reportPath(name)}/grants`),
   run: (name: string) => request<{ preflight: Preflight; run: { job_id: number; run_id: number } | null }>("POST", `${reportPath(name)}/runs`),
   runs: (name: string) => request<{ runs: RunSummary[] }>("GET", `${reportPath(name)}/runs`).then((r) => r.runs),
   runDetail: (name: string, runId: number) => request<RunSummary>("GET", `${reportPath(name)}/runs/${runId}`),

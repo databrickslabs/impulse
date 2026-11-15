@@ -54,9 +54,10 @@ GRANT USE SCHEMA, SELECT, MODIFY, CREATE TABLE ON SCHEMA <catalog>.<gold schema>
 ```
 
 The application id is the `service_principal_client_id` in the output of
-`databricks apps get impulse-app -p <profile>`. Before each run, the Review & run step
-checks the access of both the user and the service principal and shows the exact statements when
-something is missing.
+`databricks apps get impulse-app -p <profile>`. You can also skip this step and grant from the app:
+before each run, the Review & run step checks the access of both the user and the service
+principal. When the service principal lacks access, the step shows the exact statements to copy,
+and **Grant and run** runs them as the signed-in user, if that user may grant them.
 
 ## Install from the Databricks UI
 

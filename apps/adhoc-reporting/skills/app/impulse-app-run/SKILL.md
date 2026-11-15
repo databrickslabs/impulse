@@ -21,7 +21,8 @@ Call `run_report` only when the user asks. It first checks access:
 - The user needs SELECT on every source table and CREATE TABLE in the output schema. Missing privileges are
   listed under `preflight.user`; the user asks a data owner for them.
 - Report jobs run as the app's service principal. Missing privileges are listed under `preflight.app`, and
-  `preflight.grants` holds the GRANT statements an admin runs once. Show them unchanged.
+  `preflight.grants` holds the GRANT statements an admin runs once. Show them unchanged, and tell the user
+  that someone who may grant them can also click **Grant and run** on the Review & run step.
 
 When it starts, the run takes one to three minutes on serverless compute. Tell the user the app shows
 progress on the Review & run step; call `get_run_status` when the user asks how it is going.
