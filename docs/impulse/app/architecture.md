@@ -46,8 +46,9 @@ flowchart LR
   read.
 - **The app's service principal.** Report jobs run as the service principal, which needs access to
   the silver and gold schemas. Before each run the app checks that both the user and the service
-  principal can read the source tables and create tables in the output schema, and it shows the
-  missing `GRANT` statements otherwise. The user gets `CAN_MANAGE_RUN` on their report's job.
+  principal can read the source tables and create tables in the output schema. Otherwise it shows
+  the missing `GRANT` statements, which **Grant and run** executes as the signed-in user if that
+  user may grant them. The user gets `CAN_MANAGE_RUN` on their report's job.
 
 ## How a report runs
 

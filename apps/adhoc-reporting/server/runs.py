@@ -108,6 +108,20 @@ def preflight(user: User, config: dict) -> dict:
     }
 
 
+def grant(user: User, config: dict) -> None:
+    tables = list(config["source"].values())
+    sink = config["unity_sink"]
+    app_id, _ = runner_identity()
+    failures = []
+    for statement in grant_script(app_id, tables, sink).splitlines():
+        try:
+            sql.query(user, statement)
+        except ApiError as e:
+            failures.append(e)
+    if failures and _checks(User(app_id, runner()), tables, sink):
+        raise failures[0]
+
+
 def _job_name(email: str, report: str) -> str:
     return f"Impulse {report} ({email})"
 

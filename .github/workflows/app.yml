@@ -1,6 +1,6 @@
 name: app
 
-# Tests the Impulse App in apps/adhoc-reporting/. Not a required check, and it runs only on PRs that
+# Tests the Impulse App in apps/adhoc-reporting/. The test job runs only on PRs that
 # change the app: Codecov (require_ci_to_pass) holds back its status while any other check fails, so
 # an app check on framework PRs would affect the framework's CI. Framework changes (src/) run it
 # once they are on main, where the contract tests build the app's generated notebooks against the
@@ -8,9 +8,6 @@ name: app
 on:
   pull_request:
     types: [ opened, synchronize, ready_for_review ]
-    paths:
-      - 'apps/adhoc-reporting/**'
-      - '.github/workflows/app.yml'
   push:
     branches:
       - main
@@ -37,9 +34,29 @@ jobs:
     steps:
       - run: echo "Not a fork PR, proceeding"
 
+  changes:
+    needs: not-a-fork
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    outputs:
+      app: ${{ steps.diff.outputs.app }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+
+      - name: Does the PR change the app?
+        id: diff
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git diff --quiet HEAD^ HEAD -- apps/adhoc-reporting .github/workflows/app.yml; then
+            echo "app=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Test the app
-    needs: not-a-fork
+    needs: [ not-a-fork, changes ]
+    if: ${{ !cancelled() && needs.not-a-fork.result != 'skipped' && needs.changes.outputs.app != 'false' }}
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -79,3 +96,11 @@ jobs:
 
       - name: Build the frontend
         run: make frontend
+
+      - name: The committed frontend matches its source
+        run: |
+          if [ -n "$(git status --porcelain -- frontend/dist)" ]; then
+            git status --short -- frontend/dist
+            echo "::error::frontend/dist doesn't match frontend/src. Run 'make frontend' in apps/adhoc-reporting and commit frontend/dist."
+            exit 1
+          fi

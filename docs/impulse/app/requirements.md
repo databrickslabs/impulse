@@ -36,14 +36,14 @@ Users need:
 
 Report jobs run as the app's service principal. It needs `USE CATALOG`, `USE SCHEMA` and `SELECT`
 on the silver data, and additionally `MODIFY` and `CREATE TABLE` on the gold schema; see
-[Grant the service principal access](install.md#4-grant-the-service-principal-access).
+[Grant the service principal access](install.md#3-grant-the-service-principal-access).
 
 ## Tools for the installation
 
 - Git.
 - The [Databricks CLI](https://docs.databricks.com/aws/en/dev-tools/cli/), authenticated against
   the workspace. The installation was tested with v1.21.0.
-- Node.js 22.12 or later, to build the frontend.
 
-Python isn't needed for the installation: the Databricks Apps runtime installs the app's Python
-dependencies.
+Without them, install the app [from the Databricks UI](install.md#install-from-the-databricks-ui).
+Neither Node.js nor Python is needed: the built frontend is part of the repository, and the
+Databricks Apps runtime installs the app's Python dependencies.
