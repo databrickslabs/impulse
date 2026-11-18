@@ -19,9 +19,9 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from impulse_query_engine.analyze.query.solvers.default_solver import TimeSeriesCache
+
+    from .plan import PushedNode
     from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
 
     from .context import RunBreak, SeriesContext
@@ -164,8 +164,8 @@ class PushdownRule(abc.ABC):
         ``consumed`` includes the operand's and :meth:`supports` covers both.  A
         pushdown computing on a pushed operand's result sets ``source`` to it.
 
-        Purely syntactic: it runs on the driver while planning and again inside
-        the UDF to recognize the node, so it must not depend on data or schemas.
+        Runs on the driver while planning, before :meth:`supports` checks the
+        channel data's schema; the UDF serves the accepted nodes by identity.
         """
 
     def supports(self, pushdown: Pushdown, context: PushdownContext) -> bool:
@@ -213,9 +213,27 @@ class PushdownRule(abc.ABC):
             left out keep the sample's own ``tstart`` / ``tend``.
         """
 
-    def decode(self, rows: pd.DataFrame, pushdown: Pushdown, cache: TimeSeriesCache) -> Any:
-        """Build the subtree's result from one container/channel/variant slice."""
-        return cache.to_sample_series(rows, uses_alias=pushdown.selector.uses_alias)
+    def decode(self, pushed: PushedNode, cache: TimeSeriesCache) -> Any:
+        """Build a pushed-down node's result from its variant's derived rows in *cache*.
+
+        Runs in the UDF.  The default loads them through the selector the rule computes
+        from, like raw rows, as a :class:`SampleSeries` (multiplied by the conversion
+        factor for an aliased selector); a rule reading several selectors overrides it.
+        The raw rows of a pushed-down channel are not shipped, so a container without
+        derived rows must give the subtree's empty result.
+
+        Raises
+        ------
+        ValueError
+            If the default is used for a node with more or fewer than one selector.
+        """
+        if len(pushed.selectors) != 1:
+            raise ValueError(
+                f"rule {self.name!r} reads {len(pushed.selectors)} selectors; "
+                "the default decode reads exactly one"
+            )
+        (selector,) = pushed.selectors
+        return selector.build(cache, variant=pushed.variant)
 
     def emits_result_rows(self, pushdown: Pushdown) -> bool:
         """Whether *pushdown*'s derived rows are its result's samples as they are.

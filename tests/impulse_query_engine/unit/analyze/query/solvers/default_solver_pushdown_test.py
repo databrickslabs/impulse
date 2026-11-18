@@ -3,12 +3,15 @@
 
 import re
 from collections import Counter
+from functools import partial
 
 import numpy as np
 import numpy.testing as nptest
 import pandas as pd
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
 import pytest
+from pyspark.serializers import CloudPickleSerializer
 from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
@@ -18,7 +21,10 @@ from impulse_query_engine.analyze.query.optimizer import (
     RAW_VARIANT,
     VARIANT_COL,
     Classifier,
+    PushdownContext,
     PushdownPlan,
+    PushdownRule,
+    PushedNode,
     QueryOptimizer,
     ResamplePushdownRule,
 )
@@ -37,6 +43,7 @@ from impulse_query_engine.model.series.sample_series import SampleSeries
 from tests.conftest import spark
 
 RATE = 1e7  # 10 s; the fixture channels are sampled roughly every 0.9 s
+_LONG_TIMES = PushdownContext(T.LongType(), T.LongType())
 
 
 def _kvs_config() -> SolverConfig:
@@ -372,9 +379,10 @@ class TestTimeSeriesCacheVariants:
     """Channel 5 carries raw rows (variant 0) and ``resample(10)`` rows (variant 1)."""
 
     @staticmethod
-    def _cache(rule, node) -> TimeSeriesCache:
+    def _cache(rule, node, derived_rows: bool = True) -> TimeSeriesCache:
         pushdown = Classifier([rule])(node)
-        plan = PushdownPlan.build([rule], [pushdown], [pushdown.selector.selector_id])
+        sid = pushdown.selector.selector_id
+        plan = PushdownPlan.build([rule], [pushdown], [sid], nodes=[(node, pushdown)])
         pdf = pd.DataFrame(
             {
                 "container_id": [1] * 5,
@@ -384,9 +392,14 @@ class TestTimeSeriesCacheVariants:
                 "tend": [10, 20, 5, 10, 20],
                 "value": [1.0, 3.0, 1.0, 2.0, 3.0],
                 "conversion_factor": [2.0] * 5,
-                "selector_ids": [[pushdown.selector.selector_id], None, None, None, None],
+                "selector_ids": [[sid], None, None, None, None],
             }
         )
+        if not derived_rows:
+            # The channel matches, but this container ships no derived rows for it.
+            pdf = pdf.iloc[2:].reset_index(drop=True)
+            pdf.at[0, "selector_ids"] = [sid]
+            pdf[VARIANT_COL] = RAW_VARIANT
         col_map = {
             "cid": "container_id",
             "ch": "channel_id",
@@ -395,7 +408,9 @@ class TestTimeSeriesCacheVariants:
             "val": "value",
             "conv": "conversion_factor",
         }
-        return TimeSeriesCache(pdf, col_map=col_map, plan=plan)
+        return TimeSeriesCache(
+            pdf, col_map=col_map, pushed=plan.pushed_nodes, rules={rule.name: rule}
+        )
 
     def test_raw_and_derived_rows_are_served_separately(self):
         node = _rpm().resample(10)
@@ -411,26 +426,47 @@ class TestTimeSeriesCacheVariants:
         cache = self._cache(ResamplePushdownRule(), node)
         nptest.assert_array_equal(node.build(cache).values, [2.0, 6.0])
 
-    def test_falls_back_without_derived_rows(self):
+    def test_other_nodes_are_evaluated_from_raw_rows(self):
         rpm = _rpm()
         cache = self._cache(ResamplePushdownRule(), rpm.resample(10))
         other_rate = rpm.resample(5)  # not part of the plan
         assert cache.materialized(other_rate) is None
         nptest.assert_array_equal(other_rate.build(cache).tstarts, [0, 5, 10, 15])
+        # Served by identity: an equal but separate node is not pushed down.
+        assert cache.materialized(rpm.resample(10)) is None
+
+    def test_pushed_node_without_derived_rows_is_empty(self):
+        node = _rpm().resample(10)
+        cache = self._cache(ResamplePushdownRule(), node, derived_rows=False)
+        result = node.build(cache)
+        assert isinstance(result, SampleSeries) and len(result) == 0
+
+    def test_default_decode_reads_exactly_one_selector(self):
+        node = _rpm().resample(10)
+        cache = self._cache(ResamplePushdownRule(), node)
+        two = PushedNode(node, 1, "resample", (_rpm(), _rpm(uses_alias=True)))
+        with pytest.raises(ValueError, match="reads 2 selectors"):
+            ResamplePushdownRule().decode(two, cache)
+
+    def test_unknown_rule_name_raises(self):
+        node = _rpm().resample(10)
+        cache = self._cache(ResamplePushdownRule(), node)
+        cache._rules = {}
+        with pytest.raises(KeyError, match="no pushdown rule named 'resample'"):
+            cache.materialized(node)
 
     def test_rule_decides_the_result_type(self):
         class _IntervalsRule(ResamplePushdownRule):
-            def decode(self, rows, pushdown, cache):
-                return Intervals(
-                    rows[cache.tstart_col].to_numpy(), rows[cache.tend_col].to_numpy()
-                )
+            def decode(self, pushed, cache):
+                rows = pushed.selectors[0].build(cache, variant=pushed.variant)
+                return Intervals(rows.tstarts, rows.tends)
 
         node = _rpm().resample(10)
         result = self._cache(_IntervalsRule(), node).materialized(node)
         assert isinstance(result, Intervals)
         nptest.assert_array_equal(result.tstarts, [0, 10])
 
-    def test_each_node_is_classified_once_per_container(self):
+    def test_the_udf_does_not_classify(self):
         matched = []
 
         class _Recording(ResamplePushdownRule):
@@ -442,8 +478,7 @@ class TestTimeSeriesCacheVariants:
         cache = self._cache(_Recording(), resampled)
         matched.clear()
         integral = resampled.cumtrapz().build(cache)
-        # The root and the served resample, each matched once across both lookups.
-        assert len(matched) == 2 and len({id(node) for node in matched}) == 2
+        assert matched == []
         nptest.assert_array_equal(integral.tstarts, [0, 10])
 
     def test_optimizer_default_rules(self):
@@ -452,6 +487,52 @@ class TestTimeSeriesCacheVariants:
 
 def _rpm(uses_alias: bool = False) -> TimeSeriesSelector:
     return TimeSeriesSelector(TagSelector("channel_name") == "rpm", uses_alias=uses_alias)
+
+
+def _contains(value, types) -> bool:
+    """Whether *value*, or a list, tuple or dict inside it, holds an instance of *types*."""
+    if isinstance(value, types):
+        return True
+    if isinstance(value, list | tuple):
+        return any(_contains(v, types) for v in value)
+    if isinstance(value, dict):
+        return any(_contains(v, types) for v in value.values())
+    return False
+
+
+def test_the_udf_gets_the_pushed_nodes_not_the_plan(spark: SparkSession):
+    """Pickled like Spark Connect does, the payload's nodes are the selections' nodes."""
+    resampled = _rpm().resample(10)
+    selections = [resampled.cumtrapz().alias("distance"), resampled.alias("rpm_10")]
+    plan = QueryOptimizer().optimize(selections, _LONG_TIMES)
+    assert len(plan.pushed_nodes) == 1 and plan.pushed_nodes[0].node is resampled
+    udf = partial(
+        DefaultSolver._solve_udf,
+        selections=selections,
+        col_map={},
+        pushed=plan.pushed_nodes,
+    )
+    assert not _contains(list(udf.keywords.values()), (PushdownPlan, PushdownRule))
+
+    serializer = CloudPickleSerializer()
+    loaded, _ = serializer.loads(serializer.dumps((udf, None)))
+    (entry,) = loaded.keywords["pushed"]
+    distance, rpm_10 = loaded.keywords["selections"]
+    assert entry.node is distance.args[0] and entry.node is rpm_10
+    assert entry.selectors[0] is rpm_10.args[0]
+    assert (entry.variant, entry.rule) == (1, "resample")
+
+
+def test_rules_the_udf_cannot_decode_fail_on_the_driver(spark: SparkSession, key_value_store_db):
+    class _Custom(ResamplePushdownRule):
+        pass
+
+    solver = DefaultSolver(spark, config=_kvs_config(), enable_pushdown=True)
+    solver.optimizer = QueryOptimizer([_Custom()])
+    q = key_value_store_db.query
+    selection = q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm")
+    with pytest.raises(ValueError, match="not a built-in rule"):
+        q.select(selection).solve(spark, solver=solver)
 
 
 def test_pushdown_chunk_rows_must_be_positive(spark: SparkSession):

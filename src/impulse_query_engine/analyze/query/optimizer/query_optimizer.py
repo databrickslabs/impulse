@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Sequence
-from functools import partial
+from collections.abc import Iterable, Mapping, Sequence
+from functools import cache, partial
+from types import MappingProxyType
 from typing import Any
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
@@ -18,6 +19,12 @@ from .traversal import Classifier, discover
 def default_rules() -> tuple[PushdownRule, ...]:
     """All built-in pushdown rules."""
     return (ResamplePushdownRule(),)
+
+
+@cache
+def builtin_rules() -> Mapping[str, PushdownRule]:
+    """The built-in rules by name: how the UDF resolves a :class:`PushedNode`'s rule."""
+    return MappingProxyType({rule.name: rule for rule in default_rules()})
 
 
 class QueryOptimizer:
@@ -97,7 +104,7 @@ class QueryOptimizer:
                 break
             candidates = kept
 
-        return PushdownPlan.build(self.rules, [p for _, p in candidates], total)
+        return PushdownPlan.build(self.rules, [p for _, p in candidates], total, nodes=candidates)
 
 
 def _accepted(node: TimeSeriesExpression, pushdown: Pushdown, context: PushdownContext) -> bool:

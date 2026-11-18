@@ -58,9 +58,8 @@ class Classifier:
     cache, other node types (UDFs, aggregations, events, …) would evaluate on
     missing raw rows instead.
 
-    Classification is syntactic, so the driver and the UDF classify alike.
-    Results are memoized per node object: use one classifier per optimization or
-    per container, and never store it on a plan or a node.
+    Classification runs on the driver only.  Results are memoized per node object:
+    use one classifier per optimization, and never store it on a plan or a node.
 
     Parameters
     ----------

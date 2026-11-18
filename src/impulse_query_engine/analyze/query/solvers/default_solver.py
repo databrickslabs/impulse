@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -23,11 +23,13 @@ from impulse_query_engine.analyze.query.optimizer import (
     RAW_VARIANT,
     VARIANT_COL,
     VARIANTS_COL,
-    Classifier,
     PushdownContext,
     PushdownPlan,
+    PushdownRule,
+    PushedNode,
     QueryOptimizer,
     apply_pushdowns,
+    builtin_rules,
 )
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
@@ -52,7 +54,8 @@ class TimeSeriesCache(SeriesCache):
         col_map: dict[str, str],
         container_tag_cols=None,
         container_metric_cols=None,
-        plan: PushdownPlan | None = None,
+        pushed: Iterable[PushedNode] = (),
+        rules: Mapping[str, PushdownRule] | None = None,
     ):
         """
         Initialize the TimeSeriesCache.
@@ -83,9 +86,13 @@ class TimeSeriesCache(SeriesCache):
         container_metric_cols : list of str, optional
             Columns on *pdf* holding container-level metric values, exposed
             via :attr:`container_metrics`.  These are constant per container.
-        plan : PushdownPlan, optional
-            Pushdowns whose derived rows *pdf* carries; :meth:`materialized`
-            serves the matching subtrees from them.
+        pushed : Iterable of PushedNode, optional
+            The pushed-down nodes whose derived rows *pdf* carries, unpickled
+            together with the expressions built on this cache: :meth:`materialized`
+            serves these node objects from their variant's rows.
+        rules : Mapping[str, PushdownRule], optional
+            Rules by name that decode the pushed-down nodes; defaults to the
+            built-in rules.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -99,9 +106,9 @@ class TimeSeriesCache(SeriesCache):
         self._value_string_col = col_map.get("value_string")
         self._container_tag_cols = list(container_tag_cols or [])
         self._container_metric_cols = list(container_metric_cols or [])
-        self._plan = plan
-        # Classifies each node once for all lookups of this container.
-        self._classify = Classifier(plan.rules) if plan is not None else None
+        # By node identity; the entries keep their nodes alive, so the ids stay unique.
+        self._pushed = {id(entry.node): entry for entry in pushed}
+        self._rules = builtin_rules() if rules is None else rules
         has_variants = VARIANT_COL in pdf.columns
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
@@ -158,6 +165,7 @@ class TimeSeriesCache(SeriesCache):
         uses_alias: bool = False,
         series_type=None,
         value_type=SeriesValueType.DOUBLE,
+        variant: int = RAW_VARIANT,
     ):
         """
         Load a time series blob from the DataFrame.
@@ -191,12 +199,15 @@ class TimeSeriesCache(SeriesCache):
         value_type : SeriesValueType, optional
             For a POI selector, its declared value type; ``STRING`` reads the
             string value column, otherwise the numeric one.
+        variant : int, optional
+            The pushdown variant to read: the raw rows (``RAW_VARIANT``, default)
+            or a pushdown's derived rows.
 
         Returns
         -------
         SampleSeries or PointsInTimeSeries
         """
-        s = self._slice(mid, cid, RAW_VARIANT)
+        s = self._slice(mid, cid, variant)
 
         if series_type == SeriesType.POINTS_IN_TIME:
             # The selector's declared value type picks the column; the constructor
@@ -214,10 +225,11 @@ class TimeSeriesCache(SeriesCache):
         return self.to_sample_series(s, uses_alias=uses_alias)
 
     def materialized(self, expression):
-        """Serve a pushed-down subtree from its derived rows.
+        """Serve a pushed-down node from its derived rows.
 
-        Returns ``None`` (evaluate normally) when *expression* is not pushed down
-        or its channel carries no derived rows in this container.
+        Returns ``None`` (evaluate normally) when the node object *expression* is not
+        pushed down.  A pushed-down node is always decoded from its variant's rows,
+        also when this container has none: its channel's raw rows are not shipped.
 
         Parameters
         ----------
@@ -228,22 +240,19 @@ class TimeSeriesCache(SeriesCache):
         -------
         Any or None
             The rule-decoded result, or ``None``.
+
+        Raises
+        ------
+        KeyError
+            If the node's rule is not among the cache's rules.
         """
-        if self._plan is None:
+        entry = self._pushed.get(id(expression))
+        if entry is None:
             return None
-        hit = self._plan.lookup(expression, self._classify)
-        if hit is None:
-            return None
-        pushdown, variant = hit
-        candidates = self.resolve(pushdown.selector)
-        if len(candidates) == 0:
-            return None
-        rows = self._slice(
-            candidates[self._cid_col].iloc[0], candidates[self._ch_col].iloc[0], variant
-        )
-        if len(rows) == 0:
-            return None
-        return pushdown.rule.decode(rows, pushdown, self)
+        rule = self._rules.get(entry.rule)
+        if rule is None:
+            raise KeyError(f"no pushdown rule named {entry.rule!r} to decode {expression}")
+        return rule.decode(entry, self)
 
     def to_sample_series(self, rows: pd.DataFrame, uses_alias: bool = False) -> SampleSeries:
         """Build a :class:`SampleSeries` from channel-data *rows* of one channel.
@@ -1113,7 +1122,7 @@ class DefaultSolver(QuerySolver):
         col_map: dict[str, str],
         container_tag_cols=None,
         container_metric_cols=None,
-        plan: PushdownPlan | None = None,
+        pushed: Iterable[PushedNode] = (),
     ) -> pd.DataFrame:
         """
         UDF to solve for a single container by applying selections.
@@ -1131,8 +1140,8 @@ class DefaultSolver(QuerySolver):
         container_metric_cols : list of str, optional
             Columns on *pdf* holding container-level metric values, exposed to
             expressions via ``cache.container_metrics``.
-        plan : PushdownPlan, optional
-            Pushdowns whose derived rows *pdf* carries.
+        pushed : Iterable of PushedNode, optional
+            The pushed-down nodes of *selections* whose derived rows *pdf* carries.
 
         Returns
         -------
@@ -1146,7 +1155,7 @@ class DefaultSolver(QuerySolver):
             col_map=col_map,
             container_tag_cols=container_tag_cols,
             container_metric_cols=container_metric_cols,
-            plan=plan,
+            pushed=pushed,
         )
         for s in selections:
             res = s.build(cache)
@@ -1196,7 +1205,7 @@ class DefaultSolver(QuerySolver):
                 col_map=col_map,
                 container_tag_cols=container_tag_cols,
                 container_metric_cols=container_metric_cols,
-                plan=plan,
+                pushed=plan.pushed_nodes if plan is not None else (),
             ),
             schema,
             F.PandasUDFType.GROUPED_MAP,
@@ -1299,6 +1308,8 @@ class DefaultSolver(QuerySolver):
         if plan is not None:
             if native_selections is not None:
                 targets = plan.native_targets(native_selections)
+            if targets is None:
+                self._check_udf_rules(plan)
             # Raw rows are only read by the UDF, for selectors that are not pushed down.
             include_raw = targets is None and bool(plan.raw_selector_ids)
             channel_data = self._apply_pushdowns(q, channels_df, plan, include_raw)
@@ -1320,6 +1331,26 @@ class DefaultSolver(QuerySolver):
             return None
         logger.info("Spark pushdown plan: %s", plan.describe())
         return plan
+
+    @staticmethod
+    def _check_udf_rules(plan: PushdownPlan) -> None:
+        """Fail on the driver if the UDF could not decode a pushed-down node of *plan*.
+
+        The UDF resolves rules by name among the built-in ones (:func:`builtin_rules`).
+
+        Raises
+        ------
+        ValueError
+            If a pushed-down node's rule is not the built-in rule of its name.
+        """
+        builtin = builtin_rules()
+        for pushdown in plan.pushdowns_by_variant.values():
+            rule = pushdown.rule
+            if type(rule) is not type(builtin.get(rule.name)):
+                raise ValueError(
+                    f"pushdown rule {rule.name!r} ({type(rule).__name__}) is not a built-in "
+                    "rule; the UDF can only decode the built-in rules"
+                )
 
     def _apply_pushdowns(
         self,
@@ -1558,7 +1589,7 @@ class DefaultSolver(QuerySolver):
         col_map: dict[str, str],
         container_tag_cols=None,
         container_metric_cols=None,
-        plan: PushdownPlan | None = None,
+        pushed: Iterable[PushedNode] = (),
     ) -> pd.DataFrame:
         """
         UDF to solve calculated channels for a single container.
@@ -1586,8 +1617,8 @@ class DefaultSolver(QuerySolver):
         container_metric_cols : list of str, optional
             Columns on *pdf* holding container-level metric values, exposed to
             expressions via ``cache.container_metrics``.
-        plan : PushdownPlan, optional
-            Pushdowns whose derived rows *pdf* carries.
+        pushed : Iterable of PushedNode, optional
+            The pushed-down nodes of *selections* whose derived rows *pdf* carries.
 
         Returns
         -------
@@ -1600,7 +1631,7 @@ class DefaultSolver(QuerySolver):
             col_map=col_map,
             container_tag_cols=container_tag_cols,
             container_metric_cols=container_metric_cols,
-            plan=plan,
+            pushed=pushed,
         )
         cid_col = col_map["cid"]
         ch_col = col_map["ch"]
@@ -1698,7 +1729,7 @@ class DefaultSolver(QuerySolver):
                 col_map=col_map,
                 container_tag_cols=container_tag_cols,
                 container_metric_cols=container_metric_cols,
-                plan=plan,
+                pushed=plan.pushed_nodes if plan is not None else (),
             ),
             schema,
             F.PandasUDFType.GROUPED_MAP,

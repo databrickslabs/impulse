@@ -6,13 +6,29 @@ title: impulse_query_engine.analyze.query.optimizer.plan
 The outcome of query optimization: which subtrees Spark computes ahead of the UDF.
 
 
+## PushedNode
+
+```python
+class PushedNode()
+```
+
+A pushed-down node as the UDF sees it: the node, its variant, its rule's name and
+
+the selectors the rule computes from.
+
+The UDF receives these instead of the plan.  They are pickled together with the
+selections, so :attr:`node` and :attr:`selectors` are the very objects inside them,
+and the UDF finds the node by identity.  The rule is named, not shipped, and
+resolved among the built-in rules (:func:`~.query_optimizer.builtin_rules`).
+
+
 ## PushdownPlan
 
 ```python
 class PushdownPlan()
 ```
 
-Pushdowns selected for one solve call, shipped to the solver and the UDF.
+Pushdowns selected for one solve call; the UDF receives only :attr:`pushed_nodes`.
 
 Variant ``0`` is the raw channel data; variants ``1..n`` are derived series,
 one per distinct :attr:`Pushdown.variant_key`.
@@ -24,12 +40,18 @@ one per distinct :attr:`Pushdown.variant_key`.
 - `pushdowns_by_variant` (`Mapping[int, Pushdown]`): Variant id to a representative pushdown (rule and parameters).
 - `variants_by_selector` (`Mapping[int, tuple of int]`): Selector id to the variant ids derived from it.
 - `raw_selector_ids` (`frozenset of int`): Selectors whose raw channel data is still required.
+- `pushed_nodes` (`tuple of PushedNode`): The pushed-down nodes of the solve's selections, each once: what the UDF
+receives.
 
 #### build
 
 ```python
-def build(rules: Iterable[PushdownRule], pushdowns: Iterable[Pushdown],
-          selector_ids: Iterable[int]) -> PushdownPlan
+def build(
+    rules: Iterable[PushdownRule],
+    pushdowns: Iterable[Pushdown],
+    selector_ids: Iterable[int],
+    nodes: Iterable[tuple[TimeSeriesExpression, Pushdown]] = ()
+) -> PushdownPlan
 ```
 
 Assign variant ids to *pushdowns*, in discovery order.
@@ -39,6 +61,8 @@ Assign variant ids to *pushdowns*, in discovery order.
 - `rules` (`Iterable[PushdownRule]`): The optimizer's rules.
 - `pushdowns` (`Iterable[Pushdown]`): Accepted pushdowns; each one's selector is pushed down entirely.
 - `selector_ids` (`Iterable[int]`): Ids of all selectors in the solve.
+- `nodes` (`Iterable of (TimeSeriesExpression, Pushdown)`): The accepted nodes of the selections and their pushdowns, among
+*pushdowns*; a node occurring more than once is recorded once.
 
 **Raises**:
 
@@ -75,6 +99,17 @@ Group the variants by the rule that computes them.
 
 - `ValueError`: If two different rules share a name: their pipeline columns would
 collide.
+
+#### variant\_of
+
+```python
+def variant_of(node: TimeSeriesExpression) -> tuple[Pushdown, int] | None
+```
+
+``(pushdown, variant)`` when the node object *node* is pushed down, else ``None``.
+
+By identity: a structurally equal but separate node is not pushed down.
+
 
 #### lookup
 

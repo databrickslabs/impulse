@@ -840,7 +840,9 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             return d
         return SampleSeries.deserialize(d)
 
-    def build(self, cache: SeriesCache) -> SampleSeries | PointsInTimeSeries:
+    def build(
+        self, cache: SeriesCache, variant: int | None = None
+    ) -> SampleSeries | PointsInTimeSeries:
         """
         Instantiate the selected series from cache data.
 
@@ -858,6 +860,9 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         ----------
         cache : SeriesCache
             Cache containing time series data.
+        variant : int, optional
+            Load the channel's derived rows of this pushdown variant instead of
+            its raw rows (``None``); only caches serving pushdowns accept it.
 
         Returns
         -------
@@ -879,6 +884,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             uses_alias=self.uses_alias,
             series_type=self._series_type,
             value_type=self._value_type,
+            **({} if variant is None else {"variant": variant}),
         )
 
     def get_required_tag_exprs(self) -> set[TagExpression]:

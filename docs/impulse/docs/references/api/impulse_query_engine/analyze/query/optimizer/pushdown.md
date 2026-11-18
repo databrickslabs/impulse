@@ -161,8 +161,8 @@ any operand of *node*.  A pushdown reading the channel's samples sets no
 ``consumed`` includes the operand's and :meth:`supports` covers both.  A
 pushdown computing on a pushed operand's result sets ``source`` to it.
 
-Purely syntactic: it runs on the driver while planning and again inside
-the UDF to recognize the node, so it must not depend on data or schemas.
+Runs on the driver while planning, before :meth:`supports` checks the
+channel data's schema; the UDF serves the accepted nodes by identity.
 
 
 #### supports
@@ -241,12 +241,20 @@ left out keep the sample's own ``tstart`` / ``tend``.
 #### decode
 
 ```python
-def decode(rows: pd.DataFrame, pushdown: Pushdown,
-           cache: TimeSeriesCache) -> Any
+def decode(pushed: PushedNode, cache: TimeSeriesCache) -> Any
 ```
 
-Build the subtree's result from one container/channel/variant slice.
+Build a pushed-down node's result from its variant's derived rows in *cache*.
 
+Runs in the UDF.  The default loads them through the selector the rule computes
+from, like raw rows, as a :class:`SampleSeries` (multiplied by the conversion
+factor for an aliased selector); a rule reading several selectors overrides it.
+The raw rows of a pushed-down channel are not shipped, so a container without
+derived rows must give the subtree's empty result.
+
+**Raises**:
+
+- `ValueError`: If the default is used for a node with more or fewer than one selector.
 
 #### emits\_result\_rows
 

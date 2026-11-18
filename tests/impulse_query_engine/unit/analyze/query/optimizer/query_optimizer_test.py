@@ -91,6 +91,18 @@ class TestPolicy:
         resampled = rpm.resample(1e6)
         plan = _plan(resampled + resampled, resampled.cumtrapz())
         assert plan.pushed_selector_ids == {rpm.selector_id}
+        # Recorded once for the UDF, however often the node object occurs.
+        (entry,) = plan.pushed_nodes
+        assert entry.node is resampled and (entry.variant, entry.rule) == (1, "resample")
+        # The selector the rule computes from, as the very object in the tree.
+        assert len(entry.selectors) == 1 and entry.selectors[0] is rpm
+        assert plan.variant_of(resampled)[1] == 1
+
+    def test_pushed_nodes_are_matched_by_identity(self, rpm):
+        resampled = rpm.resample(1e6)
+        plan = _plan(resampled)
+        assert plan.variant_of(resampled) is not None
+        assert plan.variant_of(rpm.resample(1e6)) is None
 
     def test_non_expression_selection_gives_empty_plan(self, rpm):
         assert _plan(rpm.resample(1e6), object()).is_empty

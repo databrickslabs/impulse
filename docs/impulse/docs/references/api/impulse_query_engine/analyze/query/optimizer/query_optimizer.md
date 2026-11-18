@@ -15,6 +15,15 @@ def default_rules() -> tuple[PushdownRule, ...]
 All built-in pushdown rules.
 
 
+#### builtin\_rules
+
+```python
+def builtin_rules() -> Mapping[str, PushdownRule]
+```
+
+The built-in rules by name: how the UDF resolves a :class:`PushedNode`'s rule.
+
+
 ## QueryOptimizer
 
 ```python

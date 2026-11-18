@@ -110,10 +110,16 @@ class TestNativeTargets:
 
     def test_rule_with_custom_decode_is_not_native(self, selectors):
         class _CustomDecode(ResamplePushdownRule):
-            def decode(self, rows, pushdown, cache):
-                return super().decode(rows, pushdown, cache)
+            def decode(self, pushed, cache):
+                return super().decode(pushed, cache)
 
         channels = [_cc(selectors["pushed"].resample(1e6), "rpm_1s")]
         plan = QueryOptimizer([_CustomDecode()]).optimize(channels, _LONG)
         assert not plan.is_empty
         assert plan.native_targets(channels) is None
+
+    def test_native_targets_match_nodes_by_identity(self, selectors):
+        channels = [_cc(selectors["pushed"].resample(1e6), "rpm_1s")]
+        plan = QueryOptimizer().optimize(channels, _LONG)
+        assert plan.native_targets(channels) is not None
+        assert plan.native_targets([_cc(selectors["pushed"].resample(1e6), "rpm_1s")]) is None

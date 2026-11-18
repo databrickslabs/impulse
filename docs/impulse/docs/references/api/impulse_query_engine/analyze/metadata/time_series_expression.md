@@ -90,7 +90,8 @@ returned as-is; only a :class:`SampleSeries` (binary) blob is decoded.
 #### build
 
 ```python
-def build(cache: SeriesCache) -> SampleSeries | PointsInTimeSeries
+def build(cache: SeriesCache,
+          variant: int | None = None) -> SampleSeries | PointsInTimeSeries
 ```
 
 Instantiate the selected series from cache data.

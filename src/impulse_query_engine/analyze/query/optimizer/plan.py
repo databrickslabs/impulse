@@ -9,15 +9,35 @@ from typing import Any
 import pyspark.sql.functions as F
 from pyspark.sql import Column
 
-from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
+from impulse_query_engine.analyze.metadata.time_series_expression import (
+    TimeSeriesExpression,
+    TimeSeriesSelector,
+)
 
 from .pushdown import RAW_VARIANT, Pushdown, PushdownRule
 from .traversal import Classifier
 
 
 @dataclass(frozen=True, eq=False)
+class PushedNode:
+    """A pushed-down node as the UDF sees it: the node, its variant, its rule's name and
+    the selectors the rule computes from.
+
+    The UDF receives these instead of the plan.  They are pickled together with the
+    selections, so :attr:`node` and :attr:`selectors` are the very objects inside them,
+    and the UDF finds the node by identity.  The rule is named, not shipped, and
+    resolved among the built-in rules (:func:`~.query_optimizer.builtin_rules`).
+    """
+
+    node: TimeSeriesExpression
+    variant: int
+    rule: str
+    selectors: tuple[TimeSeriesSelector, ...]
+
+
+@dataclass(frozen=True, eq=False)
 class PushdownPlan:
-    """Pushdowns selected for one solve call, shipped to the solver and the UDF.
+    """Pushdowns selected for one solve call; the UDF receives only :attr:`pushed_nodes`.
 
     Variant ``0`` is the raw channel data; variants ``1..n`` are derived series,
     one per distinct :attr:`Pushdown.variant_key`.
@@ -34,6 +54,9 @@ class PushdownPlan:
         Selector id to the variant ids derived from it.
     raw_selector_ids : frozenset of int
         Selectors whose raw channel data is still required.
+    pushed_nodes : tuple of PushedNode
+        The pushed-down nodes of the solve's selections, each once: what the UDF
+        receives.
     """
 
     rules: tuple[PushdownRule, ...] = ()
@@ -41,12 +64,16 @@ class PushdownPlan:
     pushdowns_by_variant: Mapping[int, Pushdown] = field(default_factory=dict)
     variants_by_selector: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
     raw_selector_ids: frozenset[int] = frozenset()
+    pushed_nodes: tuple[PushedNode, ...] = ()
+    # Node identity to its pushdown and variant, on the driver (the plan holds the nodes).
+    _by_node: Mapping[int, tuple[Pushdown, int]] = field(default_factory=dict, repr=False)
 
     @staticmethod
     def build(
         rules: Iterable[PushdownRule],
         pushdowns: Iterable[Pushdown],
         selector_ids: Iterable[int],
+        nodes: Iterable[tuple[TimeSeriesExpression, Pushdown]] = (),
     ) -> PushdownPlan:
         """Assign variant ids to *pushdowns*, in discovery order.
 
@@ -58,6 +85,9 @@ class PushdownPlan:
             Accepted pushdowns; each one's selector is pushed down entirely.
         selector_ids : Iterable[int]
             Ids of all selectors in the solve.
+        nodes : Iterable of (TimeSeriesExpression, Pushdown)
+            The accepted nodes of the selections and their pushdowns, among
+            *pushdowns*; a node occurring more than once is recorded once.
 
         Raises
         ------
@@ -78,12 +108,23 @@ class PushdownPlan:
             variants = variants_by_selector.setdefault(pushdown.selector.selector_id, [])
             if variant_ids[key] not in variants:
                 variants.append(variant_ids[key])
+        by_node: dict[int, tuple[Pushdown, int]] = {}
+        pushed_nodes: list[PushedNode] = []
+        for node, pushdown in nodes:
+            if id(node) not in by_node:
+                variant = variant_ids[pushdown.variant_key]
+                by_node[id(node)] = (pushdown, variant)
+                pushed_nodes.append(
+                    PushedNode(node, variant, pushdown.rule.name, (pushdown.selector,))
+                )
         return PushdownPlan(
             rules=tuple(rules),
             variant_ids=variant_ids,
             pushdowns_by_variant=pushdowns_by_variant,
             variants_by_selector={sid: tuple(v) for sid, v in variants_by_selector.items()},
             raw_selector_ids=frozenset(selector_ids) - variants_by_selector.keys(),
+            pushed_nodes=tuple(pushed_nodes),
+            _by_node=by_node,
         )
 
     @property
@@ -113,6 +154,13 @@ class PushdownPlan:
                 raise ValueError(f"two different pushdown rules are named {rule.name!r}")
             group[1][variant] = pushdown
         return list(groups.values())
+
+    def variant_of(self, node: TimeSeriesExpression) -> tuple[Pushdown, int] | None:
+        """``(pushdown, variant)`` when the node object *node* is pushed down, else ``None``.
+
+        By identity: a structurally equal but separate node is not pushed down.
+        """
+        return self._by_node.get(id(node))
 
     def lookup(
         self, node: TimeSeriesExpression, classify: Classifier | None = None
@@ -159,11 +207,10 @@ class PushdownPlan:
         if not selections:
             return None
         targets: dict[int, dict[int, list[tuple[int, bool]]]] = {}
-        classify = Classifier(self.rules)
         for selection in selections:
             if not isinstance(selection, CalculatedChannel):
                 return None
-            hit = self.lookup(selection.expr, classify)
+            hit = self.variant_of(selection.expr)
             if hit is None or not hit[0].rule.emits_result_rows(hit[0]):
                 return None
             pushdown, variant = hit
