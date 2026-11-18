@@ -161,8 +161,7 @@ any operand of *node*.  A pushdown reading the channel's samples sets no
 ``consumed`` includes the operand's and :meth:`supports` covers both.  A
 pushdown computing on a pushed operand's result sets ``source`` to it.
 
-Runs on the driver while planning, before :meth:`supports` checks the
-channel data's schema; the UDF serves the accepted nodes by identity.
+Purely syntactic and driver-only: checks of the channel data belong in
 
 
 #### supports
@@ -244,17 +243,12 @@ left out keep the sample's own ``tstart`` / ``tend``.
 def decode(pushed: PushedNode, cache: TimeSeriesCache) -> Any
 ```
 
-Build a pushed-down node's result from its variant's derived rows in *cache*.
+Build a pushed-down node's result in the UDF from its variant's derived rows.
 
-Runs in the UDF.  The default loads them through the selector the rule computes
-from, like raw rows, as a :class:`SampleSeries` (multiplied by the conversion
-factor for an aliased selector); a rule reading several selectors overrides it.
-The raw rows of a pushed-down channel are not shipped, so a container without
-derived rows must give the subtree's empty result.
+``selector.build(cache, variant=pushed.variant)`` loads them like raw rows.  A
+container without derived rows must give the empty result: the raw rows of a
+pushed-down channel are not shipped.
 
-**Raises**:
-
-- `ValueError`: If the default is used for a node with more or fewer than one selector.
 
 #### emits\_result\_rows
 
@@ -264,6 +258,8 @@ def emits_result_rows(pushdown: Pushdown) -> bool
 
 Whether *pushdown*'s derived rows are its result's samples as they are.
 
-Holds when the result is a :class:`SampleSeries` built by the default
+``True`` only if :meth:`decode` returns them unchanged as a :class:`SampleSeries`
+(apart from the alias conversion factor).  Calculated channels that are such a
+pushdown as a whole are then emitted from Spark, without :meth:`decode`.
 
 

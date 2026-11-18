@@ -12,14 +12,11 @@ The outcome of query optimization: which subtrees Spark computes ahead of the UD
 class PushedNode()
 ```
 
-A pushed-down node as the UDF sees it: the node, its variant, its rule's name and
+A pushed-down node as the UDF receives it.
 
-the selectors the rule computes from.
-
-The UDF receives these instead of the plan.  They are pickled together with the
-selections, so :attr:`node` and :attr:`selectors` are the very objects inside them,
-and the UDF finds the node by identity.  The rule is named, not shipped, and
-resolved among the built-in rules (:func:`~.query_optimizer.builtin_rules`).
+Pickled with the selections, so :attr:`node` and :attr:`selectors` (the selectors
+the rule computes from) are the objects inside them; the UDF finds the node by
+identity.  :attr:`rule` names a built-in rule (:func:`~.query_optimizer.builtin_rules`).
 
 
 ## PushdownPlan
@@ -40,8 +37,7 @@ one per distinct :attr:`Pushdown.variant_key`.
 - `pushdowns_by_variant` (`Mapping[int, Pushdown]`): Variant id to a representative pushdown (rule and parameters).
 - `variants_by_selector` (`Mapping[int, tuple of int]`): Selector id to the variant ids derived from it.
 - `raw_selector_ids` (`frozenset of int`): Selectors whose raw channel data is still required.
-- `pushed_nodes` (`tuple of PushedNode`): The pushed-down nodes of the solve's selections, each once: what the UDF
-receives.
+- `pushed_nodes` (`tuple of PushedNode`): Each pushed-down node of the selections once; what the UDF receives.
 
 #### build
 
@@ -61,8 +57,7 @@ Assign variant ids to *pushdowns*, in discovery order.
 - `rules` (`Iterable[PushdownRule]`): The optimizer's rules.
 - `pushdowns` (`Iterable[Pushdown]`): Accepted pushdowns; each one's selector is pushed down entirely.
 - `selector_ids` (`Iterable[int]`): Ids of all selectors in the solve.
-- `nodes` (`Iterable of (TimeSeriesExpression, Pushdown)`): The accepted nodes of the selections and their pushdowns, among
-*pushdowns*; a node occurring more than once is recorded once.
+- `nodes` (`Iterable of (TimeSeriesExpression, Pushdown)`): Accepted ``(node, pushdown)`` pairs; a repeated node is recorded once.
 
 **Raises**:
 
@@ -106,9 +101,9 @@ collide.
 def variant_of(node: TimeSeriesExpression) -> tuple[Pushdown, int] | None
 ```
 
-``(pushdown, variant)`` when the node object *node* is pushed down, else ``None``.
+``(pushdown, variant)`` if the node object *node* is pushed down, else ``None``.
 
-By identity: a structurally equal but separate node is not pushed down.
+Matched by identity, not structure.
 
 
 #### lookup

@@ -147,7 +147,18 @@ def _selector_op(node, operand, operation: str) -> TimeSeriesSelector | None:
     return selector if selector.series_type is SeriesType.CONTINUOUS else None
 
 
-class DiffRule(PushdownRule):
+class _SampleRows:
+    """Test-only rules' results: the derived rows of their one selector, as samples."""
+
+    def decode(self, pushed, cache):
+        (selector,) = pushed.selectors
+        return selector.build(cache, variant=pushed.variant)
+
+    def emits_result_rows(self, pushdown):
+        return True
+
+
+class DiffRule(_SampleRows, PushdownRule):
     """Test-only ``channel.diff()``: the value change within a block, 0 at block starts."""
 
     name = "diff"
@@ -165,7 +176,7 @@ class DiffRule(PushdownRule):
         return F.array(ctx.element(value=ctx.col("diff")))
 
 
-class OffsetRule(PushdownRule):
+class OffsetRule(_SampleRows, PushdownRule):
     """Test-only per-sample rule adding its ``offset`` parameter to every value."""
 
     name = "offset"
@@ -178,7 +189,7 @@ class OffsetRule(PushdownRule):
         return F.array(ctx.element(value=ctx.value + ctx.param("offset")))
 
 
-class ProbeRule(PushdownRule):
+class ProbeRule(_SampleRows, PushdownRule):
     """Test-only rule emitting every sample with ``probe(ctx)`` as its value."""
 
     match = OffsetRule.match

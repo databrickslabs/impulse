@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import numbers
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
@@ -18,8 +18,15 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
 
+from impulse_query_engine.model.series.sample_series import SampleSeries
+
 from .context import SeriesContext
 from .pushdown import Operand, Pushdown, PushdownContext, PushdownRule
+
+if TYPE_CHECKING:
+    from impulse_query_engine.analyze.query.solvers.default_solver import TimeSeriesCache
+
+    from .plan import PushedNode
 
 _RATE = "sample_rate"
 _DEFAULT_RATE = 1.0
@@ -126,6 +133,16 @@ class ResamplePushdownRule(PushdownRule):
         return F.when(~ctx.col("resampled"), F.array(ctx.element(value=ctx.value))).when(
             c_stop > c, points
         )
+
+    def decode(self, pushed: PushedNode, cache: TimeSeriesCache) -> SampleSeries:
+        # One channel: the selector the rule matched. Its derived rows are the resampled
+        # samples.
+        (selector,) = pushed.selectors
+        return selector.build(cache, variant=pushed.variant)
+
+    def emits_result_rows(self, pushdown: Pushdown) -> bool:
+        # The derived rows are the resampled samples, as decode loads them.
+        return True
 
 
 def _next_in_block(ctx: SeriesContext) -> Column:

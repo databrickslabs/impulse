@@ -21,7 +21,7 @@ All built-in pushdown rules.
 def builtin_rules() -> Mapping[str, PushdownRule]
 ```
 
-The built-in rules by name: how the UDF resolves a :class:`PushedNode`'s rule.
+The built-in rules by name; the UDF resolves :attr:`PushedNode.rule` here.
 
 
 ## QueryOptimizer

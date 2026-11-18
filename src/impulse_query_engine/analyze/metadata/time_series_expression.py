@@ -861,8 +861,8 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         cache : SeriesCache
             Cache containing time series data.
         variant : int, optional
-            Load the channel's derived rows of this pushdown variant instead of
-            its raw rows (``None``); only caches serving pushdowns accept it.
+            Pushdown variant to load instead of the raw rows (``None``); only
+            caches serving pushdowns accept it.
 
         Returns
         -------

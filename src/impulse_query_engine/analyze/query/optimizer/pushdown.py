@@ -164,8 +164,8 @@ class PushdownRule(abc.ABC):
         ``consumed`` includes the operand's and :meth:`supports` covers both.  A
         pushdown computing on a pushed operand's result sets ``source`` to it.
 
-        Runs on the driver while planning, before :meth:`supports` checks the
-        channel data's schema; the UDF serves the accepted nodes by identity.
+        Purely syntactic and driver-only: checks of the channel data belong in
+        :meth:`supports`.
         """
 
     def supports(self, pushdown: Pushdown, context: PushdownContext) -> bool:
@@ -213,36 +213,20 @@ class PushdownRule(abc.ABC):
             left out keep the sample's own ``tstart`` / ``tend``.
         """
 
+    @abc.abstractmethod
     def decode(self, pushed: PushedNode, cache: TimeSeriesCache) -> Any:
-        """Build a pushed-down node's result from its variant's derived rows in *cache*.
+        """Build a pushed-down node's result in the UDF from its variant's derived rows.
 
-        Runs in the UDF.  The default loads them through the selector the rule computes
-        from, like raw rows, as a :class:`SampleSeries` (multiplied by the conversion
-        factor for an aliased selector); a rule reading several selectors overrides it.
-        The raw rows of a pushed-down channel are not shipped, so a container without
-        derived rows must give the subtree's empty result.
-
-        Raises
-        ------
-        ValueError
-            If the default is used for a node with more or fewer than one selector.
+        ``selector.build(cache, variant=pushed.variant)`` loads them like raw rows.  A
+        container without derived rows must give the empty result: the raw rows of a
+        pushed-down channel are not shipped.
         """
-        if len(pushed.selectors) != 1:
-            raise ValueError(
-                f"rule {self.name!r} reads {len(pushed.selectors)} selectors; "
-                "the default decode reads exactly one"
-            )
-        (selector,) = pushed.selectors
-        return selector.build(cache, variant=pushed.variant)
 
+    @abc.abstractmethod
     def emits_result_rows(self, pushdown: Pushdown) -> bool:
         """Whether *pushdown*'s derived rows are its result's samples as they are.
 
-        Holds when the result is a :class:`SampleSeries` built by the default
-        :meth:`decode`: the variant's rows, with values multiplied by the
-        conversion factor for aliased selectors, are then exactly the result, so
-        it can be emitted without the pandas evaluation.
+        ``True`` only if :meth:`decode` returns them unchanged as a :class:`SampleSeries`
+        (apart from the alias conversion factor).  Calculated channels that are such a
+        pushdown as a whole are then emitted from Spark, without :meth:`decode`.
         """
-        return (
-            type(self).decode is PushdownRule.decode and self.result_type(pushdown) is SampleSeries
-        )

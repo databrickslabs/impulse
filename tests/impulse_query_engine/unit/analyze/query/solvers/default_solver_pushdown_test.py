@@ -24,7 +24,6 @@ from impulse_query_engine.analyze.query.optimizer import (
     PushdownContext,
     PushdownPlan,
     PushdownRule,
-    PushedNode,
     QueryOptimizer,
     ResamplePushdownRule,
 )
@@ -441,13 +440,6 @@ class TestTimeSeriesCacheVariants:
         result = node.build(cache)
         assert isinstance(result, SampleSeries) and len(result) == 0
 
-    def test_default_decode_reads_exactly_one_selector(self):
-        node = _rpm().resample(10)
-        cache = self._cache(ResamplePushdownRule(), node)
-        two = PushedNode(node, 1, "resample", (_rpm(), _rpm(uses_alias=True)))
-        with pytest.raises(ValueError, match="reads 2 selectors"):
-            ResamplePushdownRule().decode(two, cache)
-
     def test_unknown_rule_name_raises(self):
         node = _rpm().resample(10)
         cache = self._cache(ResamplePushdownRule(), node)
@@ -563,3 +555,30 @@ def test_pushdown_chunk_rows_reaches_the_pipeline(
     )
     assert len(result.collect()) > 0
     assert seen and set(seen) == {expected}
+
+
+class _CompleteRule(PushdownRule):
+    name = "complete"
+
+    def match(self, node, operand):
+        return None
+
+    def emit(self, ctx):
+        return None
+
+    def decode(self, pushed, cache):
+        return None
+
+    def emits_result_rows(self, pushdown):
+        return True
+
+
+@pytest.mark.parametrize("missing", ["decode", "emits_result_rows"])
+def test_every_rule_must_implement_decode_and_emits_result_rows(missing):
+    _CompleteRule()
+    members = {
+        k: v for k, v in vars(_CompleteRule).items() if k != missing and not k.startswith("__")
+    }
+    incomplete = type("_Incomplete", (PushdownRule,), members)
+    with pytest.raises(TypeError, match=missing):
+        incomplete()

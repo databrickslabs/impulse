@@ -87,12 +87,11 @@ class TimeSeriesCache(SeriesCache):
             Columns on *pdf* holding container-level metric values, exposed
             via :attr:`container_metrics`.  These are constant per container.
         pushed : Iterable of PushedNode, optional
-            The pushed-down nodes whose derived rows *pdf* carries, unpickled
-            together with the expressions built on this cache: :meth:`materialized`
-            serves these node objects from their variant's rows.
+            Pushed-down nodes whose derived rows *pdf* carries, unpickled with the
+            expressions built on this cache; :meth:`materialized` serves them by
+            identity.
         rules : Mapping[str, PushdownRule], optional
-            Rules by name that decode the pushed-down nodes; defaults to the
-            built-in rules.
+            Rules by name that decode them; defaults to the built-in rules.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -106,7 +105,7 @@ class TimeSeriesCache(SeriesCache):
         self._value_string_col = col_map.get("value_string")
         self._container_tag_cols = list(container_tag_cols or [])
         self._container_metric_cols = list(container_metric_cols or [])
-        # By node identity; the entries keep their nodes alive, so the ids stay unique.
+        # By id(node); the entries keep their nodes alive, so the ids stay unique.
         self._pushed = {id(entry.node): entry for entry in pushed}
         self._rules = builtin_rules() if rules is None else rules
         has_variants = VARIANT_COL in pdf.columns
@@ -200,8 +199,7 @@ class TimeSeriesCache(SeriesCache):
             For a POI selector, its declared value type; ``STRING`` reads the
             string value column, otherwise the numeric one.
         variant : int, optional
-            The pushdown variant to read: the raw rows (``RAW_VARIANT``, default)
-            or a pushdown's derived rows.
+            Rows to read: raw (``RAW_VARIANT``, default) or a pushdown's derived rows.
 
         Returns
         -------
@@ -227,9 +225,9 @@ class TimeSeriesCache(SeriesCache):
     def materialized(self, expression):
         """Serve a pushed-down node from its derived rows.
 
-        Returns ``None`` (evaluate normally) when the node object *expression* is not
-        pushed down.  A pushed-down node is always decoded from its variant's rows,
-        also when this container has none: its channel's raw rows are not shipped.
+        Returns ``None`` (evaluate normally) unless the node object *expression* is
+        pushed down.  A pushed-down node is always decoded, also without derived rows
+        in this container: its channel's raw rows are not shipped.
 
         Parameters
         ----------
@@ -358,11 +356,10 @@ class DefaultSolver(QuerySolver):
         is only pushed down when every use of it in the solve is.  Default
         ``False``.
     pushdown_chunk_rows : int, optional
-        Average number of rows per chunk when Spark processes a pushed-down
-        channel (a sample counts once per pushed-down expression that reads
-        it).  The chunks of a channel run in parallel, one per task: larger
-        chunks mean fewer tasks with more memory each.  Must be ``>= 1``;
-        only used with ``enable_pushdown``.  Default ``500000``.
+        Average number of rows per chunk of a pushed-down channel (a sample
+        counts once per pushed-down expression reading it).  A chunk is processed
+        as one group: larger chunks need more memory per group.  Must be
+        ``>= 1``; only used with ``enable_pushdown``.  Default ``500000``.
     """
 
     def __init__(
@@ -1336,12 +1333,10 @@ class DefaultSolver(QuerySolver):
     def _check_udf_rules(plan: PushdownPlan) -> None:
         """Fail on the driver if the UDF could not decode a pushed-down node of *plan*.
 
-        The UDF resolves rules by name among the built-in ones (:func:`builtin_rules`).
-
         Raises
         ------
         ValueError
-            If a pushed-down node's rule is not the built-in rule of its name.
+            If a rule is not the built-in rule of its name (:func:`builtin_rules`).
         """
         builtin = builtin_rules()
         for pushdown in plan.pushdowns_by_variant.values():

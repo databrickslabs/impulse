@@ -20,13 +20,11 @@ from .traversal import Classifier
 
 @dataclass(frozen=True, eq=False)
 class PushedNode:
-    """A pushed-down node as the UDF sees it: the node, its variant, its rule's name and
-    the selectors the rule computes from.
+    """A pushed-down node as the UDF receives it.
 
-    The UDF receives these instead of the plan.  They are pickled together with the
-    selections, so :attr:`node` and :attr:`selectors` are the very objects inside them,
-    and the UDF finds the node by identity.  The rule is named, not shipped, and
-    resolved among the built-in rules (:func:`~.query_optimizer.builtin_rules`).
+    Pickled with the selections, so :attr:`node` and :attr:`selectors` (the selectors
+    the rule computes from) are the objects inside them; the UDF finds the node by
+    identity.  :attr:`rule` names a built-in rule (:func:`~.query_optimizer.builtin_rules`).
     """
 
     node: TimeSeriesExpression
@@ -55,8 +53,7 @@ class PushdownPlan:
     raw_selector_ids : frozenset of int
         Selectors whose raw channel data is still required.
     pushed_nodes : tuple of PushedNode
-        The pushed-down nodes of the solve's selections, each once: what the UDF
-        receives.
+        Each pushed-down node of the selections once; what the UDF receives.
     """
 
     rules: tuple[PushdownRule, ...] = ()
@@ -65,7 +62,7 @@ class PushdownPlan:
     variants_by_selector: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
     raw_selector_ids: frozenset[int] = frozenset()
     pushed_nodes: tuple[PushedNode, ...] = ()
-    # Node identity to its pushdown and variant, on the driver (the plan holds the nodes).
+    # id(node) -> (pushdown, variant); the plan holds the nodes, so the ids stay valid.
     _by_node: Mapping[int, tuple[Pushdown, int]] = field(default_factory=dict, repr=False)
 
     @staticmethod
@@ -86,8 +83,7 @@ class PushdownPlan:
         selector_ids : Iterable[int]
             Ids of all selectors in the solve.
         nodes : Iterable of (TimeSeriesExpression, Pushdown)
-            The accepted nodes of the selections and their pushdowns, among
-            *pushdowns*; a node occurring more than once is recorded once.
+            Accepted ``(node, pushdown)`` pairs; a repeated node is recorded once.
 
         Raises
         ------
@@ -156,9 +152,9 @@ class PushdownPlan:
         return list(groups.values())
 
     def variant_of(self, node: TimeSeriesExpression) -> tuple[Pushdown, int] | None:
-        """``(pushdown, variant)`` when the node object *node* is pushed down, else ``None``.
+        """``(pushdown, variant)`` if the node object *node* is pushed down, else ``None``.
 
-        By identity: a structurally equal but separate node is not pushed down.
+        Matched by identity, not structure.
         """
         return self._by_node.get(id(node))
 
