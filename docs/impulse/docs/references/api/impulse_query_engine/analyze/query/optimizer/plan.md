@@ -32,7 +32,7 @@ one per distinct :attr:`Pushdown.variant_key`.
 
 **Arguments**:
 
-- `rules` (`tuple of PushdownRule`): Rules used to recognize pushed-down nodes during evaluation.
+- `rules` (`tuple of PushdownRule`): The optimizer's rules.
 - `variant_ids` (`Mapping[tuple, int]`): Variant key to variant id.
 - `pushdowns_by_variant` (`Mapping[int, Pushdown]`): Variant id to a representative pushdown (rule and parameters).
 - `variants_by_selector` (`Mapping[int, tuple of int]`): Selector id to the variant ids derived from it.
@@ -42,22 +42,19 @@ one per distinct :attr:`Pushdown.variant_key`.
 #### build
 
 ```python
-def build(
-    rules: Iterable[PushdownRule],
-    pushdowns: Iterable[Pushdown],
-    selector_ids: Iterable[int],
-    nodes: Iterable[tuple[TimeSeriesExpression, Pushdown]] = ()
-) -> PushdownPlan
+def build(rules: Iterable[PushdownRule],
+          nodes: Iterable[tuple[TimeSeriesExpression, Pushdown]],
+          selector_ids: Iterable[int]) -> PushdownPlan
 ```
 
-Assign variant ids to *pushdowns*, in discovery order.
+Assign variant ids to the pushdowns of *nodes*, in discovery order.
 
 **Arguments**:
 
 - `rules` (`Iterable[PushdownRule]`): The optimizer's rules.
-- `pushdowns` (`Iterable[Pushdown]`): Accepted pushdowns; each one's selector is pushed down entirely.
+- `nodes` (`Iterable of (TimeSeriesExpression, Pushdown)`): Accepted ``(node, pushdown)`` pairs; each pushdown's selector is pushed
+down entirely.  A repeated node is recorded once.
 - `selector_ids` (`Iterable[int]`): Ids of all selectors in the solve.
-- `nodes` (`Iterable of (TimeSeriesExpression, Pushdown)`): Accepted ``(node, pushdown)`` pairs; a repeated node is recorded once.
 
 **Raises**:
 
@@ -104,19 +101,6 @@ def variant_of(node: TimeSeriesExpression) -> tuple[Pushdown, int] | None
 ``(pushdown, variant)`` if the node object *node* is pushed down, else ``None``.
 
 Matched by identity, not structure.
-
-
-#### lookup
-
-```python
-def lookup(node: TimeSeriesExpression,
-           classify: Classifier | None = None) -> tuple[Pushdown, int] | None
-```
-
-Return ``(pushdown, variant)`` when *node* is a pushed-down subtree.
-
-Pass a *classify* shared by the lookups of one evaluation so that every
-node is classified once.
 
 
 #### native\_targets

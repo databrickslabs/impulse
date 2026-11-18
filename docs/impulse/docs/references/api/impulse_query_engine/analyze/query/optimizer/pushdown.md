@@ -113,11 +113,11 @@ class PushdownRule(abc.ABC)
 
 Recognizes a subtree and computes it in Spark ahead of the pandas UDF.
 
-Planning and decoding run in Python: :meth:`match` recognizes a node from
-its operands' classification, :meth:`decode` turns one
-container/channel/variant slice of the derived rows back into the object the
-subtree evaluates to.  The result must equal evaluating the subtree in pandas
-on the same channel data.
+Planning and decoding run in Python: :meth:`match` recognizes a node on the
+driver from its operands' classification; :meth:`decode` builds, in the UDF,
+the object the subtree evaluates to from its variant's derived rows.  The
+result must equal evaluating the subtree in pandas on the same channel data.
+Only built-in rules can be decoded in the UDF (:func:`~.query_optimizer.builtin_rules`).
 
 The Spark side is a set of hooks returning columns, evaluated by the shared
 pushdown pipeline (:mod:`.pipeline`) for the samples of the rule's variants,

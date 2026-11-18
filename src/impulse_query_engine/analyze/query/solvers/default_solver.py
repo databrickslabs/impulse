@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +25,6 @@ from impulse_query_engine.analyze.query.optimizer import (
     VARIANTS_COL,
     PushdownContext,
     PushdownPlan,
-    PushdownRule,
     PushedNode,
     QueryOptimizer,
     apply_pushdowns,
@@ -55,7 +54,6 @@ class TimeSeriesCache(SeriesCache):
         container_tag_cols=None,
         container_metric_cols=None,
         pushed: Iterable[PushedNode] = (),
-        rules: Mapping[str, PushdownRule] | None = None,
     ):
         """
         Initialize the TimeSeriesCache.
@@ -90,8 +88,6 @@ class TimeSeriesCache(SeriesCache):
             Pushed-down nodes whose derived rows *pdf* carries, unpickled with the
             expressions built on this cache; :meth:`materialized` serves them by
             identity.
-        rules : Mapping[str, PushdownRule], optional
-            Rules by name that decode them; defaults to the built-in rules.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -107,7 +103,6 @@ class TimeSeriesCache(SeriesCache):
         self._container_metric_cols = list(container_metric_cols or [])
         # By id(node); the entries keep their nodes alive, so the ids stay unique.
         self._pushed = {id(entry.node): entry for entry in pushed}
-        self._rules = builtin_rules() if rules is None else rules
         has_variants = VARIANT_COL in pdf.columns
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
@@ -226,8 +221,9 @@ class TimeSeriesCache(SeriesCache):
         """Serve a pushed-down node from its derived rows.
 
         Returns ``None`` (evaluate normally) unless the node object *expression* is
-        pushed down.  A pushed-down node is always decoded, also without derived rows
-        in this container: its channel's raw rows are not shipped.
+        pushed down and each of its selectors' channels carries derived rows in this
+        container.  A channel also read by a selector that is not pushed down ships
+        its raw rows only, so the node is evaluated from those.
 
         Parameters
         ----------
@@ -242,15 +238,26 @@ class TimeSeriesCache(SeriesCache):
         Raises
         ------
         KeyError
-            If the node's rule is not among the cache's rules.
+            If the node's rule is not a built-in rule.
         """
         entry = self._pushed.get(id(expression))
-        if entry is None:
+        if entry is None or not all(self._has_rows(s, entry.variant) for s in entry.selectors):
             return None
-        rule = self._rules.get(entry.rule)
+        rule = builtin_rules().get(entry.rule)
         if rule is None:
             raise KeyError(f"no pushdown rule named {entry.rule!r} to decode {expression}")
         return rule.decode(entry, self)
+
+    def _has_rows(self, selector, variant: int) -> bool:
+        """Whether *selector*'s channel in this container has rows of *variant*.
+
+        Also ``True`` without a matching channel: the node's result is then empty either way.
+        """
+        candidates = self.resolve(selector)
+        if len(candidates) == 0:
+            return True
+        mid, cid = candidates[self._cid_col].iloc[0], candidates[self._ch_col].iloc[0]
+        return (mid, cid, variant) in self._ranges
 
     def to_sample_series(self, rows: pd.DataFrame, uses_alias: bool = False) -> SampleSeries:
         """Build a :class:`SampleSeries` from channel-data *rows* of one channel.

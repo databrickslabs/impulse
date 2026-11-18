@@ -104,7 +104,7 @@ class QueryOptimizer:
                 break
             candidates = kept
 
-        return PushdownPlan.build(self.rules, [p for _, p in candidates], total, nodes=candidates)
+        return PushdownPlan.build(self.rules, candidates, total)
 
 
 def _accepted(node: TimeSeriesExpression, pushdown: Pushdown, context: PushdownContext) -> bool:

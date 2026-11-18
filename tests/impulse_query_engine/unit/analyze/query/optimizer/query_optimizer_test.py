@@ -177,11 +177,12 @@ class TestOnlyOperationsArePushedDown:
         found, _ = discover(rpm.resample(1e6).apply(lambda s: s), Classifier([_MatchesAnyNode()]))
         assert [node.operation for node, _ in found] == ["resample"]
 
-    def test_lookup_ignores_other_node_types(self, rpm):
-        rule = _MatchesAnyNode()
-        plan = QueryOptimizer([rule]).optimize([rpm.resample(1e6)], _LONG)
-        assert plan.lookup(rpm.resample(1e6)) is not None
-        assert plan.lookup(HistogramDuration(rpm, bins=[0, 1000])) is None
+    def test_other_node_types_are_not_pushed(self, rpm):
+        resampled = rpm.resample(1e6)
+        histogram = HistogramDuration(resampled, bins=[0, 1000])
+        plan = QueryOptimizer([_MatchesAnyNode()]).optimize([histogram], _LONG)
+        assert plan.variant_of(resampled) is not None
+        assert plan.variant_of(histogram) is None
 
 
 class _OnPushedOperand(ResamplePushdownRule):
@@ -235,8 +236,8 @@ class TestBottomUpClassification:
         plan = _plan(expr, rules=[_OnPushedOperand(chained=True), ResamplePushdownRule()])
         assert _described(plan) == [_RESAMPLE]
         assert plan.pushed_selector_ids == {rpm.selector_id}
-        assert plan.lookup(expr) is None
-        assert plan.lookup(expr.args[0])[1] == 1
+        assert plan.variant_of(expr) is None
+        assert plan.variant_of(expr.args[0])[1] == 1
 
     def test_absorbing_rule_is_planned_as_one_variant(self, rpm):
         expr = rpm.resample(1e6).cumtrapz()
@@ -244,20 +245,20 @@ class TestBottomUpClassification:
         (pushdown,) = plan.pushdowns_by_variant.values()
         assert pushdown.rule.name == "on_pushed" and pushdown.source is None
         assert pushdown.consumed == (rpm,)
-        hit, variant = plan.lookup(expr)
+        hit, variant = plan.variant_of(expr)
         assert hit.variant_key == pushdown.variant_key and variant == 1
-        assert plan.lookup(expr.args[0]) is None
+        assert plan.variant_of(expr.args[0]) is None
 
     def test_unsupported_parent_falls_back_to_its_pushed_operand(self, rpm):
         expr = rpm.resample(1e6).cumtrapz()
         plan = _plan(expr, rules=[_OnPushedOperand(supported=False), ResamplePushdownRule()])
         assert _described(plan) == [_RESAMPLE]
-        assert plan.lookup(expr) is None
-        assert plan.lookup(expr.args[0])[1] == 1
+        assert plan.variant_of(expr) is None
+        assert plan.variant_of(expr.args[0])[1] == 1
 
     def test_first_matching_rule_decides(self, rpm):
-        # The UDF classifies without knowing what is supported, so an unsupported
-        # first rule must not hand the node to the next one.
+        # Support never changes which rule classifies a node: an unsupported first
+        # rule does not hand the node to the next one.
         expr = rpm.resample(1e6).cumtrapz()
         rules = [
             _OnPushedOperand("unsupported", supported=False),
@@ -266,8 +267,8 @@ class TestBottomUpClassification:
         ]
         plan = _plan(expr, rules=rules)
         assert _described(plan) == [_RESAMPLE]
-        assert plan.lookup(expr) is None
-        assert plan.lookup(expr.args[0])[1] == 1
+        assert plan.variant_of(expr) is None
+        assert plan.variant_of(expr.args[0])[1] == 1
 
     def test_shared_nodes_are_matched_once(self, rpm):
         matched = []
@@ -291,7 +292,7 @@ class TestBottomUpClassification:
         assert chained.variant_key != inner.variant_key
         assert chained.describe() == f"{_RESAMPLE} on {_RESAMPLE}"
         with pytest.raises(ValueError, match="has a source"):
-            PushdownPlan.build([inner.rule], [chained], [rpm.selector_id])
+            PushdownPlan.build([inner.rule], [(rpm.resample(1e6), chained)], [rpm.selector_id])
 
 
 class TestRuleNames:
@@ -307,9 +308,10 @@ class TestRuleNames:
 
     def test_plan_rejects_two_rules_sharing_a_name(self, rpm, spd):
         first, second = ResamplePushdownRule(), ResamplePushdownRule()
+        rpm_1s, spd_2s = rpm.resample(1e6), spd.resample(2e6)
         plan = PushdownPlan.build(
             (first, second),
-            [Classifier([first])(rpm.resample(1e6)), Classifier([second])(spd.resample(2e6))],
+            [(rpm_1s, Classifier([first])(rpm_1s)), (spd_2s, Classifier([second])(spd_2s))],
             [rpm.selector_id, spd.selector_id],
         )
         with pytest.raises(ValueError, match="two different pushdown rules"):
@@ -405,17 +407,15 @@ class TestResultTypeCheck:
         assert _plan(rpm.resample(1e6), rules=[_Exploding()]).is_empty
 
 
-class TestPlanInExecutor:
+class TestPushedNodesInExecutor:
     @pytest.mark.parametrize("dumps", [pickle.dumps, cloudpickle.dumps])
-    def test_plan_and_selections_survive_pickling(self, rpm, spd, dumps):
+    def test_pushed_nodes_and_selections_survive_pickling(self, rpm, spd, dumps):
         selections = [rpm.resample(1e6).cumtrapz(), spd.resample(1e6), spd.max()]
         plan = _plan(*selections)
-        plan2, selections2 = pickle.loads(dumps((plan, selections)))
+        pushed2, selections2 = pickle.loads(dumps((plan.pushed_nodes, selections)))
 
-        pushed = selections2[0].args[0]
-        pushdown, variant = plan2.lookup(pushed)
-        assert variant == 1
-        assert pushdown.selector.selector_id == rpm.selector_id
-        # spd is needed raw by spd.max(), so its resample is evaluated in pandas.
-        assert plan2.lookup(selections2[1]) is None
-        assert plan2.lookup(selections2[2]) is None
+        # spd is needed raw by spd.max(), so only rpm's resample is pushed down.
+        (entry,) = pushed2
+        assert entry.node is selections2[0].args[0] and entry.variant == 1
+        assert entry.selectors[0] is entry.node.args[0]
+        assert entry.selectors[0].selector_id == rpm.selector_id

@@ -15,7 +15,6 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 
 from .pushdown import RAW_VARIANT, Pushdown, PushdownRule
-from .traversal import Classifier
 
 
 @dataclass(frozen=True, eq=False)
@@ -43,7 +42,7 @@ class PushdownPlan:
     Parameters
     ----------
     rules : tuple of PushdownRule
-        Rules used to recognize pushed-down nodes during evaluation.
+        The optimizer's rules.
     variant_ids : Mapping[tuple, int]
         Variant key to variant id.
     pushdowns_by_variant : Mapping[int, Pushdown]
@@ -68,22 +67,20 @@ class PushdownPlan:
     @staticmethod
     def build(
         rules: Iterable[PushdownRule],
-        pushdowns: Iterable[Pushdown],
+        nodes: Iterable[tuple[TimeSeriesExpression, Pushdown]],
         selector_ids: Iterable[int],
-        nodes: Iterable[tuple[TimeSeriesExpression, Pushdown]] = (),
     ) -> PushdownPlan:
-        """Assign variant ids to *pushdowns*, in discovery order.
+        """Assign variant ids to the pushdowns of *nodes*, in discovery order.
 
         Parameters
         ----------
         rules : Iterable[PushdownRule]
             The optimizer's rules.
-        pushdowns : Iterable[Pushdown]
-            Accepted pushdowns; each one's selector is pushed down entirely.
+        nodes : Iterable of (TimeSeriesExpression, Pushdown)
+            Accepted ``(node, pushdown)`` pairs; each pushdown's selector is pushed
+            down entirely.  A repeated node is recorded once.
         selector_ids : Iterable[int]
             Ids of all selectors in the solve.
-        nodes : Iterable of (TimeSeriesExpression, Pushdown)
-            Accepted ``(node, pushdown)`` pairs; a repeated node is recorded once.
 
         Raises
         ------
@@ -94,21 +91,20 @@ class PushdownPlan:
         variant_ids: dict[tuple, int] = {}
         pushdowns_by_variant: dict[int, Pushdown] = {}
         variants_by_selector: dict[int, list[int]] = {}
-        for pushdown in pushdowns:
+        by_node: dict[int, tuple[Pushdown, int]] = {}
+        pushed_nodes: list[PushedNode] = []
+        for node, pushdown in nodes:
             if pushdown.source is not None:
                 raise ValueError(f"pushdown {pushdown.describe()} has a source")
             key = pushdown.variant_key
             if key not in variant_ids:
                 variant_ids[key] = len(variant_ids) + 1
                 pushdowns_by_variant[variant_ids[key]] = pushdown
+            variant = variant_ids[key]
             variants = variants_by_selector.setdefault(pushdown.selector.selector_id, [])
-            if variant_ids[key] not in variants:
-                variants.append(variant_ids[key])
-        by_node: dict[int, tuple[Pushdown, int]] = {}
-        pushed_nodes: list[PushedNode] = []
-        for node, pushdown in nodes:
+            if variant not in variants:
+                variants.append(variant)
             if id(node) not in by_node:
-                variant = variant_ids[pushdown.variant_key]
                 by_node[id(node)] = (pushdown, variant)
                 pushed_nodes.append(
                     PushedNode(node, variant, pushdown.rule.name, (pushdown.selector,))
@@ -157,24 +153,6 @@ class PushdownPlan:
         Matched by identity, not structure.
         """
         return self._by_node.get(id(node))
-
-    def lookup(
-        self, node: TimeSeriesExpression, classify: Classifier | None = None
-    ) -> tuple[Pushdown, int] | None:
-        """Return ``(pushdown, variant)`` when *node* is a pushed-down subtree.
-
-        Pass a *classify* shared by the lookups of one evaluation so that every
-        node is classified once.
-        """
-        if classify is None:
-            classify = Classifier(self.rules)
-        pushdown = classify(node)
-        if pushdown is None:
-            return None
-        variant = self.variant_ids.get(pushdown.variant_key)
-        if variant in self.variants_by_selector.get(pushdown.selector.selector_id, ()):
-            return pushdown, variant
-        return None
 
     def native_targets(
         self, selections: Iterable[Any]
