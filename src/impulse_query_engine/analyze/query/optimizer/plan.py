@@ -41,8 +41,6 @@ class PushdownPlan:
 
     Parameters
     ----------
-    rules : tuple of PushdownRule
-        The optimizer's rules.
     variant_ids : Mapping[tuple, int]
         Variant key to variant id.
     pushdowns_by_variant : Mapping[int, Pushdown]
@@ -55,7 +53,6 @@ class PushdownPlan:
         Each pushed-down node of the selections once; what the UDF receives.
     """
 
-    rules: tuple[PushdownRule, ...] = ()
     variant_ids: Mapping[tuple, int] = field(default_factory=dict)
     pushdowns_by_variant: Mapping[int, Pushdown] = field(default_factory=dict)
     variants_by_selector: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
@@ -66,7 +63,6 @@ class PushdownPlan:
 
     @staticmethod
     def build(
-        rules: Iterable[PushdownRule],
         nodes: Iterable[tuple[TimeSeriesExpression, Pushdown]],
         selector_ids: Iterable[int],
     ) -> PushdownPlan:
@@ -74,8 +70,6 @@ class PushdownPlan:
 
         Parameters
         ----------
-        rules : Iterable[PushdownRule]
-            The optimizer's rules.
         nodes : Iterable of (TimeSeriesExpression, Pushdown)
             Accepted ``(node, pushdown)`` pairs; each pushdown's selector is pushed
             down entirely.  A repeated node is recorded once.
@@ -110,7 +104,6 @@ class PushdownPlan:
                     PushedNode(node, variant, pushdown.rule.name, (pushdown.selector,))
                 )
         return PushdownPlan(
-            rules=tuple(rules),
             variant_ids=variant_ids,
             pushdowns_by_variant=pushdowns_by_variant,
             variants_by_selector={sid: tuple(v) for sid, v in variants_by_selector.items()},

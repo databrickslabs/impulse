@@ -73,7 +73,7 @@ class QueryOptimizer:
         """
         selections = list(selections)
         if not all(isinstance(s, TimeSeriesExpression) for s in selections):
-            return PushdownPlan(rules=self.rules)
+            return PushdownPlan()
 
         classify = Classifier(self.rules)
         accept = partial(_accepted, context=context)
@@ -104,7 +104,7 @@ class QueryOptimizer:
                 break
             candidates = kept
 
-        return PushdownPlan.build(self.rules, candidates, total)
+        return PushdownPlan.build(candidates, total)
 
 
 def _accepted(node: TimeSeriesExpression, pushdown: Pushdown, context: PushdownContext) -> bool:

@@ -72,9 +72,7 @@ def channel_rows(spark, series_by_key, time_type=T.LongType()) -> tuple[DataFram
 
 def plan_for(pushdowns: dict[int, Pushdown]) -> PushdownPlan:
     """A plan computing *pushdowns* as the given variants."""
-    rules = tuple(dict.fromkeys(p.rule for p in pushdowns.values()))
     return PushdownPlan(
-        rules=rules,
         variant_ids={p.variant_key: vid for vid, p in pushdowns.items()},
         pushdowns_by_variant=dict(pushdowns),
     )

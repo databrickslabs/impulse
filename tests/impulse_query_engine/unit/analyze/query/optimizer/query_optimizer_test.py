@@ -292,7 +292,7 @@ class TestBottomUpClassification:
         assert chained.variant_key != inner.variant_key
         assert chained.describe() == f"{_RESAMPLE} on {_RESAMPLE}"
         with pytest.raises(ValueError, match="has a source"):
-            PushdownPlan.build([inner.rule], [(rpm.resample(1e6), chained)], [rpm.selector_id])
+            PushdownPlan.build([(rpm.resample(1e6), chained)], [rpm.selector_id])
 
 
 class TestRuleNames:
@@ -310,7 +310,6 @@ class TestRuleNames:
         first, second = ResamplePushdownRule(), ResamplePushdownRule()
         rpm_1s, spd_2s = rpm.resample(1e6), spd.resample(2e6)
         plan = PushdownPlan.build(
-            (first, second),
             [(rpm_1s, Classifier([first])(rpm_1s)), (spd_2s, Classifier([second])(spd_2s))],
             [rpm.selector_id, spd.selector_id],
         )

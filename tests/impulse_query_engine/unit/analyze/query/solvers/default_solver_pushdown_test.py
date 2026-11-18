@@ -408,7 +408,7 @@ class TestTimeSeriesCacheVariants:
         self.monkeypatch.setattr(default_solver, "builtin_rules", lambda: {rule.name: rule})
         pushdown = Classifier([rule])(node)
         sid = pushdown.selector.selector_id
-        plan = PushdownPlan.build([rule], [(node, pushdown)], [sid])
+        plan = PushdownPlan.build([(node, pushdown)], [sid])
         pdf = pd.DataFrame(
             {
                 "container_id": [1] * 5,
