@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleX, Copy, ExternalLink, Play, Square } from "lucide-react";
+import { CheckCircle2, CircleX, Copy, ExternalLink, Play, ShieldCheck, Square } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
 import { reportHref, useAsync } from "../../hooks";
@@ -57,7 +57,7 @@ function badge(run: RunSummary): string {
   return run.result === "SUCCESS" ? "badge ok" : "badge bad";
 }
 
-function PreflightProblems({ preflight }: { preflight: Preflight }) {
+function PreflightProblems({ preflight, busy, onGrant }: { preflight: Preflight; busy?: string; onGrant: () => void }) {
   return (
     <div className="card-body stack preflight">
       {preflight.user.length > 0 && (
@@ -80,9 +80,7 @@ function PreflightProblems({ preflight }: { preflight: Preflight }) {
       {preflight.app.length > 0 && (
         <div>
           <h3>The app's service principal</h3>
-          <p className="sub">
-            Report jobs run as {preflight.app_principal.name}. A workspace or catalog admin grants it access once per catalog and schema:
-          </p>
+          <p className="sub">Report jobs run as {preflight.app_principal.name}, which needs access once per catalog and schema:</p>
           <ul className="todo">
             {preflight.app.map((p) => (
               <li key={`${p.privilege}:${p.object}`}>
@@ -92,10 +90,24 @@ function PreflightProblems({ preflight }: { preflight: Preflight }) {
             ))}
           </ul>
           {preflight.grants && (
-            <div className="grants">
-              <pre className="code">{preflight.grants}</pre>
-              <CopyButton text={preflight.grants} label="Copy SQL" />
-            </div>
+            <>
+              <div className="grants">
+                <pre className="code">{preflight.grants}</pre>
+                <CopyButton text={preflight.grants} label="Copy SQL" />
+              </div>
+              {preflight.user.length === 0 && (
+                <div className="row grant-row">
+                  <button className="btn primary" onClick={onGrant} disabled={!!busy}>
+                    {busy === "grant" ? <span className="spinner" /> : <ShieldCheck size={15} />}
+                    Grant and run
+                  </button>
+                  <span className="hint">
+                    Runs these statements as you, so it works only if you may grant access to these catalogs and schemas. Otherwise copy the
+                    SQL for someone who can.
+                  </span>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -108,7 +120,7 @@ function RunPanel({ onSuccess }: { onSuccess: () => void }) {
   const [history, setHistory] = useState<RunSummary[]>();
   const [current, setCurrent] = useState<RunSummary>();
   const [preflight, setPreflight] = useState<Preflight>();
-  const [busy, setBusy] = useState<"run" | "cancel">();
+  const [busy, setBusy] = useState<"run" | "cancel" | "grant">();
   const [error, setError] = useState<string>();
   const now = useNow(!!current?.active);
 
@@ -174,6 +186,20 @@ function RunPanel({ onSuccess }: { onSuccess: () => void }) {
     }
   };
 
+  const grantAndRun = async () => {
+    setBusy("grant");
+    setError(undefined);
+    try {
+      if (!(await flushNow())) throw new Error("The report could not be saved. Fix the save error first.");
+      await api.grant(spec.name);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(undefined);
+      return;
+    }
+    await start();
+  };
+
   const cancel = async () => {
     if (!current) return;
     setBusy("cancel");
@@ -213,7 +239,7 @@ function RunPanel({ onSuccess }: { onSuccess: () => void }) {
           <Banner>{error}</Banner>
         </div>
       )}
-      {preflight && !preflight.ok && <PreflightProblems preflight={preflight} />}
+      {preflight && !preflight.ok && <PreflightProblems preflight={preflight} busy={busy} onGrant={() => void grantAndRun()} />}
       {current && (
         <div className="card-body stack">
           <div className="row">

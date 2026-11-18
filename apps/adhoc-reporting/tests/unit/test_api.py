@@ -16,6 +16,7 @@ NAME_ROUTES = [
     ("DELETE", ""),
     ("POST", "/check"),
     ("POST", "/preflight"),
+    ("POST", "/grants"),
     ("POST", "/runs"),
     ("GET", "/runs"),
     ("GET", "/runs/1"),
