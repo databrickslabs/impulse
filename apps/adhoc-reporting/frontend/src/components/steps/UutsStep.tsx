@@ -1,5 +1,5 @@
 import { Box } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../api";
 import { reportHref, useAsync } from "../../hooks";
 import { useIssues, useReport } from "../../report";
@@ -17,6 +17,10 @@ export function UutsStep() {
   const selected = new Set(spec.uuts);
   const all = uuts.data?.uuts ?? [];
   const allSelected = all.length > 0 && all.every((v) => selected.has(v.id));
+  // Units selected when the step opens are listed first, so a long list shows the selection
+  // without scrolling. The order stays put while units are toggled, so rows never jump under the cursor.
+  const [pinned, setPinned] = useState(() => new Set(spec.uuts));
+  const rows = [...all.filter((v) => pinned.has(v.id)), ...all.filter((v) => !pinned.has(v.id))];
   const first = all.map((v) => v.first).filter(Boolean).sort()[0] ?? null;
   const last = all.map((v) => v.last).filter(Boolean).sort().reverse()[0] ?? null;
   const empty = !spec.window.start && !spec.window.stop;
@@ -27,7 +31,11 @@ export function UutsStep() {
   }, [empty, uuts.loading, first, last, update]);
 
   const toggle = (id: string) => update((s) => ({ ...s, uuts: s.uuts.includes(id) ? s.uuts.filter((v) => v !== id) : [...s.uuts, id] }));
-  const toggleAll = () => update((s) => ({ ...s, uuts: allSelected ? [] : all.map((v) => v.id) }));
+  const toggleAll = () => {
+    const ids = allSelected ? [] : all.map((v) => v.id);
+    setPinned(new Set(ids));
+    update((s) => ({ ...s, uuts: ids }));
+  };
   const setWindow = (key: keyof Window, value: string) => update((s) => ({ ...s, window: { ...s.window, [key]: value || null } }));
 
   return (
@@ -89,7 +97,7 @@ export function UutsStep() {
                     {uuts.loading && !uuts.data ? (
                       <SkeletonRows rows={4} columns={5} />
                     ) : (
-                      all.map((v) => (
+                      rows.map((v) => (
                         <tr key={v.id} className="clickable" onClick={() => toggle(v.id)}>
                           <td>
                             <input
