@@ -440,6 +440,39 @@ Supported payload containers: `##DT`, `##DZ` (zlib deflate; `zip_type` 0 = plain
 | **Absolute time precision** | float64 epoch seconds (~0.3 µs resolution at current epoch); HD nanosecond start time is not preserved bit-for-bit |
 | **Invalidation** | per-sample invalidation bits are applied when `CN_FLAG_INVALIDATION_PRESENT` is set; other CN/CG invalidation modes may differ from reference tools |
 
+## Package internals
+
+This section is for contributors working on `impulse_data_sources.mdf`.
+
+### Module layout
+
+Package path: `src/impulse_data_sources/mdf/`
+
+| module           | responsibility                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| `mdf4_reader.py` | parse MDF4 structure (HD/DG/CG/CN) → `ChannelInfo`; header datetime                       |
+| `mdf_blocks.py`  | low-level data-block I/O (`##DT`/`##DZ`/`##DL`/`##HL`, sub-blocks)                        |
+| `mdf_decode.py`  | raw-bytes → values/timestamps (data types, CC conversion, invalidation)                   |
+| `arrow_emit.py`  | build Arrow batches (per-group, stripe, master) + run-length encoding                     |
+| `udf_helpers.py` | re-export shim over the three modules above (stable import surface)                       |
+| `bin_packer.py`  | partition planning (`plan_partitions`, `plan_stripes_for_file`, `plan_master_partitions`) |
+| `datasources.py` | the three Spark data sources                                                              |
+| `schemas.py`     | shared Spark schemas (`SIGNALS_SCHEMA`, `METADATA_SCHEMA`)                                |
+
+### Dependencies
+
+- **Runtime:** `numpy`, `pyarrow` (`pyspark` is provided by the Databricks runtime).
+- **Tests:** `pytest`, `asammdf` (dev/test dependency only — synthesises small MDF4
+  files on the fly).
+
+### Acknowledgments
+
+The MDF data sources and low-level reader were implemented with reference to
+[asammdf](https://github.com/danielhrisca/asammdf) by
+[Daniel Hrisca](https://github.com/danielhrisca). `asammdf` is not a runtime
+dependency of this package; it is listed under test dependencies only, for
+synthesising small MDF4 fixtures.
+
 ## See also
 
 - [Ingestion guide](../data_model/ingestion.md) — landing data in the silver layer.
