@@ -139,6 +139,10 @@ DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False
 With **Option B**, pass `report.get_solver()` instead of constructing one, so the solver honors your
 report config.
 
+A custom solver (a `DefaultSolver` subclass) is passed the same way: `solver=MySolver(spark, config=MyConfig(...))`.
+No registration is needed for ad-hoc queries; `register_solver` only matters for selecting it by name in a
+report config (see `impulse-config`).
+
 ## What comes back
 
 The result DataFrame is `[container_id, <your aliases…>]`: **`container_id` is always the first column**

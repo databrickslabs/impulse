@@ -13,7 +13,6 @@ import pytest
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import Row
 
-import impulse_query_engine.measurement_db_registry as registry
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.aggregations.histogram import HistogramDuration
@@ -42,8 +41,7 @@ class AllowListDB(MeasurementDB):
 
 
 @pytest.fixture(autouse=True)
-def allow_list_db(monkeypatch):
-    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+def allow_list_db(isolated_registries):
     register_measurement_db("AllowListDB", AllowListConfig)(AllowListDB)
 
 

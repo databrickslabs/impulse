@@ -22,7 +22,7 @@ used and behaviour is unchanged.
 |---|---|
 | Column names, or narrow-EAV vs. wide layout | `DefaultSolver` + [`solver_config`](../config/configuration.md#solver-column-mappings-and-filters) — no code |
 | Different tables, unions, joins, grain changes, EAV unpivots, or a pre-reshape row filter | **A custom MeasurementDB** (this page) |
-| Query planning / execution the config cannot express | Implementation of a custom solver (see [Custom solvers](../data_model/ingestion.md#custom-solvers)) |
+| Query planning / execution the config cannot express | Implementation of a custom solver (see [Custom solver](custom_solver.md)) |
 
 ## Select it in the report config
 

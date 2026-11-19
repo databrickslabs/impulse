@@ -133,10 +133,12 @@ schemas and `impulse-config` for how `measurement_dimensions` picks the containe
 ## Adapting to an existing layout
 
 Reshaping into the silver shape at ingest is recommended. If the data already lives in Delta with
-different names and rewriting is impractical, there are two escape hatches. The rule of thumb:
+different names and rewriting is impractical, there are escape hatches. The rule of thumb:
 
 - **`SolverConfig` for naming differences** — same tables and relationships, different column names.
-- **Custom solver for structural differences** — no EAV tags, alias lookups, composite keys.
+- **Custom MeasurementDB for structural differences** — no EAV tags, alias lookups, composite keys:
+  reshape your tables when they're read.
+- **Custom solver for engine behaviour** — candidate selection, pruning, post-processing the solve output.
 - **ETL into the standard shape** for everything else.
 
 ### Column-name remapping with SolverConfig
@@ -163,10 +165,15 @@ The underlying tables must still follow the silver-layer relationships (EAV tag 
 per-`(container_id, channel_id)` channel rows). The full `SolverConfig` schema — per-table `filters`,
 `project_id` scoping, `channel_mapping.join_keys`, and unit conversion — is in `impulse-config`.
 
-### Custom solver
+### Custom MeasurementDB or custom solver
 
-For layouts that don't match the relationships at all, subclass `QuerySolver` (from
-`impulse_query_engine.analyze.query.solvers`) and register it in config. You take on the solver
-pipeline stages (`filter_container_tags`, `filter_container_metrics`, `filter_channel_tags`,
-`filter_channel_metrics`, `solve`). This is a large investment — first check whether a one-time ETL
-into the standard shape is cheaper.
+For layouts that don't match the relationships at all, register a custom MeasurementDB (subclass
+`MeasurementDB` and `MeasurementDBConfig`, decorate with `@register_measurement_db`) that reshapes your
+tables into the silver model when they're read, and select it with `query_engine.measurement_db`. Every
+reader then sees the same data, and the stock solver runs unchanged.
+
+For different engine behaviour on silver-shaped data, subclass `DefaultSolver`, decorate it with
+`@register_solver` (from `impulse_query_engine.analyze.query.solvers`), and select it with
+`query_engine.solver`; its own settings go on a `SolverConfig` subclass. Both are large investments —
+first check whether a one-time ETL into the standard shape is cheaper. Config details are in
+`impulse-config`.

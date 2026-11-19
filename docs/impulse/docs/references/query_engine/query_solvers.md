@@ -109,9 +109,10 @@ the columns each table is expected to carry.
 Solver tuning lives under the `query_engine` section of your report config:
 
 - [`query_engine.solver`](../../config/configuration.md#query_engine-optional)
-  — the solver to use. Defaults to `"DefaultSolver"`. The values
+  — the registered name of the solver to use. Defaults to `"DefaultSolver"`. The values
   `"DeltaSolver"` and `"KeyValueStoreSolver"` are **deprecated aliases**
-  retained for backward compatibility; both resolve to `DefaultSolver`.
+  retained for backward compatibility; both resolve to `DefaultSolver`. A custom solver is
+  selected by the name it registered; see [Custom solver](../../extensibility/custom_solver.md).
 - [`query_engine.data_type` and `raw_encoder`](../../config/configuration.md#query_engine-optional)
   — declare whether `channels` holds pre-encoded `[tstart, tend)` intervals
   (`"RLE"`, the default) or raw point samples (`"RAW"`). For raw data,

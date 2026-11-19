@@ -223,28 +223,30 @@ key names (`container_id`, `channel_id`) themselves are fixed
 constants. Their column *types* are not fixed, though — `container_id`
 in particular may be a `long`, `int`, or `string`; the engine adopts
 whatever type your tables use, as long as it is consistent across them.
-For different relationships or composite keys, see custom solvers below.
+For different relationships or composite keys, see the next section.
 
-### Custom solvers
+### Layouts `SolverConfig` can't express
 
 For physical layouts that do not match the silver-layer relationships at
 all — no EAV tag tables, alias lookup tables instead of `channel_tags`,
 computed-column joins, JSON-encoded values, multi-column composite keys
-that need pre-processing, etc. — you can implement a custom solver by
-subclassing
-[`QuerySolver`](../references/api/impulse_query_engine/analyze/query/solvers/query_solver.md)
-(or one of the existing solvers) and registering it in your report config.
+that need pre-processing, etc. — implement a
+[custom MeasurementDB](../extensibility/custom_measurement_db.md) that reshapes
+your tables into the silver model when they are read. Every reader (the solve,
+incremental detection, ad-hoc queries) then sees the same silver-shaped data,
+and the stock solver runs unchanged.
 
-This is significantly more invested than the `SolverConfig` path: you take
-on responsibility for the four solver pipeline stages
-(`filter_container_tags`, `filter_container_metrics`, `filter_channel_tags`,
-`filter_channel_metrics`) and the `solve` method. Some advanced deployments
-do this — e.g. when the customer's silver layer pre-dates Impulse and
-synthesises Impulse-shaped views via SQL CTEs at query time. If you find
-yourself heading down this path, it is usually worth first asking whether
-a one-time ETL job to produce the standard silver-layer shape would be
-cheaper.
+A [custom solver](../extensibility/custom_solver.md) is for the other kind of
+difference: when the engine should do something different with silver-shaped
+data, such as custom candidate selection, extra pruning, or post-processing the
+solve output. Both are registered under a name and selected in the report
+config (`query_engine.measurement_db` / `query_engine.solver`).
 
-The general rule: **`SolverConfig` for naming differences, custom solver
-for structural differences, ETL into the standard shape for everything
-else.**
+Either path is significantly more invested than `SolverConfig`: you take on
+responsibility for returning the shapes the engine expects. If you find
+yourself heading down this path, it is usually worth first asking whether a
+one-time ETL job to produce the standard silver-layer shape would be cheaper.
+
+The general rule: **`SolverConfig` for naming differences, a custom
+MeasurementDB for structural differences, a custom solver for engine
+behaviour, ETL into the standard shape for everything else.**
