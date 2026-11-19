@@ -535,6 +535,22 @@ class StatsAggregator(Aggregation):
         tags = tags.union(self.event_expression.required_tags()) if self.event_expression else tags
         return tags
 
+    def required_container_tags(self) -> set[str]:
+        tags = set()
+        for expr in self.input_expressions:
+            tags = tags.union(expr.required_container_tags())
+        if self.event_expression is not None:
+            tags = tags.union(self.event_expression.required_container_tags())
+        return tags
+
+    def required_container_metrics(self) -> set[str]:
+        metrics = set()
+        for expr in self.input_expressions:
+            metrics = metrics.union(expr.required_container_metrics())
+        if self.event_expression is not None:
+            metrics = metrics.union(self.event_expression.required_container_metrics())
+        return metrics
+
     def get_selector_expr(self):
         """
         Return the union of selector expressions for all input expressions and event expression.

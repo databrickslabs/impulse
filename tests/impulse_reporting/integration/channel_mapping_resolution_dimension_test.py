@@ -1,8 +1,8 @@
 """Integration test for the channel_mapping_resolution_dimension gold table.
 
 Exercises the end-to-end flow: a Report configured with
-``channel_mapping_table``, aggregations that use ``channel_with_alias``,
-``determine_report()`` and ``persist_results()`` writing the new
+``channel_mapping_table``, aggregations that use ``channel_with_alias``, and
+``run()`` writing the new
 ``channel_mapping_resolution_dimension`` Delta table to the gold schema.
 """
 
@@ -26,8 +26,7 @@ def test_alias_report_writes_channel_mapping_resolution_dimension(
         weights=channels["weights"],
     )
 
-    report.determine_report()
-    report.persist_results()
+    report.run()
 
     gold = spark.read.table("spark_catalog.gold.alias_int_channel_mapping_resolution_dimension")
 
@@ -106,8 +105,7 @@ def test_incremental_added_alias_resolves_over_all_containers(
         HistogramDuration(name="rpm_hist", base_expr=channels1["engine_speed"], bins=rpm_bins)
     )
     report1.add_page(page1)
-    report1.determine_report()
-    report1.persist_results()
+    report1.run()
 
     after_run1 = {(r.container_id, r.channel_alias) for r in spark.read.table(table).collect()}
     assert after_run1 == {
@@ -127,8 +125,7 @@ def test_incremental_added_alias_resolves_over_all_containers(
         HistogramDuration(name="speed_hist", base_expr=channels2["vehicle_speed"], bins=speed_bins)
     )
     report2.add_page(page2)
-    report2.determine_report()
-    report2.persist_results()
+    report2.run()
 
     gold = spark.read.table(table)
     after_run2 = {(r.container_id, r.channel_alias) for r in gold.collect()}

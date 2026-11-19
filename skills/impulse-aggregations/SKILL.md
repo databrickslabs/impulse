@@ -17,6 +17,9 @@ All signal inputs — `base_expr`, `x_expr`, `y_expr`, `weights_expr`, and each 
 `input_expressions` — must evaluate to a **`SampleSeries`** (see `impulse-tsal`). Passing anything else
 (e.g. an `Intervals` comparison) raises `ValueError` at construction.
 
+When an input contains a UDF that declares `container_tags` / `container_metrics`, those values are
+injected as usual — the requirement propagates through the aggregation (see `impulse-tsal`).
+
 ## Page
 
 A `Page` is a logical group of aggregations, numbered for ordering.

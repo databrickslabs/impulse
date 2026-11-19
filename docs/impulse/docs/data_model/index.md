@@ -62,6 +62,7 @@ The Gold layer uses a **star schema** with fact and dimension tables. All table 
 | `histogram2d_fact`     | One row per (x, y) bin per container     | 2D histogram bin values, duration-weighted.               |
 | `stats_aggregator_fact` | One row per statistic label per signal per event instance | Descriptive statistics (built-in min/max/mean/median and any custom statistics). |
 | `calculated_channel_fact` | One row per sample interval per container | Materialized derived signal (a *channel*, not a summary), in the silver `channels` shape. |
+| `calculated_channel_metrics` | One row per calculated channel per container | Optional per-channel metrics in the silver `channel_metrics` shape. Written only when `config.calculated_channels.emit_channel_metrics` is set. |
 
 ### Dimension tables
 

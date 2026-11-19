@@ -40,7 +40,7 @@ def _build_batched_report(spark: SparkSession) -> tuple[Report, dict[str, object
         ),
         query_engine=QueryEngine(
             solver=Solvers.KEY_VALUE_STORE_SOLVER,
-            batch_size=1,
+            max_channels_per_batch=1,
         ),
     )
 
@@ -139,11 +139,11 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
         instrumentation["cleanup_calls"] += 1
         return original_cleanup_temp_tables(self)
 
-    def _build_batches_wrapper(expressions, batch_size):
-        batches = original_build_batches(expressions, batch_size)
+    def _build_batches_wrapper(expressions, max_channels_per_batch):
+        batches = original_build_batches(expressions, max_channels_per_batch)
         instrumentation["build_batches"].append(
             {
-                "batch_size": batch_size,
+                "max_channels_per_batch": max_channels_per_batch,
                 "expression_count": len(expressions),
                 "batch_count": len(batches),
                 "batch_aliases": [
@@ -272,7 +272,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
         "SELECT 1 AS stale_id"
     )
 
-    report.determine_report()
+    report.run(persist_results=False)
 
     temp_tables = {
         row.tableName
@@ -287,7 +287,7 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
     assert temp_tables
 
     assert instrumentation["build_batches"]
-    assert instrumentation["build_batches"][0]["batch_size"] == 1
+    assert instrumentation["build_batches"][0]["max_channels_per_batch"] == 1
     assert instrumentation["build_batches"][0]["batch_count"] >= 2
 
     assert len(instrumentation["solve_calls"]) == 2
@@ -315,3 +315,90 @@ def test_batched_pipeline_orchestrates_real_report_flow(spark, monkeypatch):
     assert stats_df.count() > 0
     assert report.aggregation_metadata_dfs["HISTOGRAM"].count() == 1
     assert report.aggregation_metadata_dfs["STATS_AGGREGATOR"].count() == 1
+
+
+def _temp_tables(spark: SparkSession) -> set[str]:
+    return {
+        row.tableName
+        for row in spark.sql("SHOW TABLES IN spark_catalog.gold LIKE '__impulse_temp_*'").collect()
+    }
+
+
+def test_persist_retains_temp_tables_by_default(spark, cleanup_gold):
+    """Default behavior: the current run's temp tables survive persistence."""
+    report, _ = _build_batched_report(spark)
+
+    report._determine_report()
+    assert _temp_tables(spark)  # temp tables created during solving
+
+    report._persist_results()
+
+    # Gold facts written with real values, and temp tables still present.
+    assert (
+        report.aggregation_dfs["HISTOGRAM"]["changed"].filter(F.col("hist_value") > 0).count() > 0
+    )
+    assert _temp_tables(spark)
+
+
+def test_persist_cleans_temp_tables_when_param_true(spark, cleanup_gold):
+    """cleanup_temp_tables=True drops temp tables after a successful write."""
+    report, _ = _build_batched_report(spark)
+
+    report._determine_report()
+    assert _temp_tables(spark)
+
+    report._persist_results(cleanup_temp_tables=True)
+
+    # Assert on the persisted gold fact table (not the report's lazy DataFrames, which
+    # read from the now-dropped temp tables). Persistence completed before cleanup ran.
+    hist_fact = spark.read.table("spark_catalog.gold.evaluation_histogram_fact")
+    assert hist_fact.filter(F.col("hist_value") > 0).count() > 0
+    assert not _temp_tables(spark)
+
+
+def test_run_cleanup_param_overrides_config_flag(spark, cleanup_gold):
+    """Explicit param wins over config: config True but param False retains temp tables."""
+    config = ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver.container_metrics",
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri="spark_catalog.silver.channels",
+        ),
+        unity_sink=UnitySink(
+            catalog="spark_catalog",
+            schema="gold",
+            table_prefix="evaluation",
+            cleanup_temp_tables=True,
+        ),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER, max_channels_per_batch=1),
+    )
+    report, _ = _build_batched_report(spark)
+    report.config = config
+
+    report.run(cleanup_temp_tables=False)
+
+    assert _temp_tables(spark)
+
+
+def test_run_config_flag_cleans_temp_tables(spark, cleanup_gold):
+    """When param is None, the config flag drives cleanup."""
+    config = ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver.container_metrics",
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri="spark_catalog.silver.channels",
+        ),
+        unity_sink=UnitySink(
+            catalog="spark_catalog",
+            schema="gold",
+            table_prefix="evaluation",
+            cleanup_temp_tables=True,
+        ),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER, max_channels_per_batch=1),
+    )
+    report, _ = _build_batched_report(spark)
+    report.config = config
+
+    report.run()
+
+    assert not _temp_tables(spark)

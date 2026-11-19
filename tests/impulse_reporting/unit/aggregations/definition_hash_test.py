@@ -17,6 +17,7 @@ from impulse_reporting.aggregations.histogram2d import (
 )
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 
 
 class TestHistogramDefinitionHash:
@@ -353,6 +354,28 @@ class TestStatsAggregatorDefinitionHash:
         )
 
         assert stats_agg.determine_definition_hash() == expected
+
+    def test_time_window_channel_time_changes_hash(self):
+        """Statistics scoped to a TimeWindowEvent are computed per window, and the windows
+        lie in the report's channel time frame, so changing it must move the aggregation's
+        hash too (it does so through the event expression string)."""
+        event = TimeWindowEvent(name="windows", window_length=10_000)
+        stats_agg = StatsAggregator(
+            name="stats",
+            input_expressions=[TimeSeriesSelector(None)],
+            channel_names=["ch_a"],
+            statistics=["min", "max"],
+            event=event,
+        )
+        hist = HistogramDuration(
+            name="hist", base_expr=TimeSeriesSelector(None), bins=[0.0, 1.0], event=event
+        )
+        before = (stats_agg.determine_definition_hash(), hist.determine_definition_hash())
+
+        event.set_channel_time("ms", "container_start")
+
+        assert stats_agg.determine_definition_hash() != before[0]
+        assert hist.determine_definition_hash() != before[1]
 
     def test_renaming_channel_names_changes_hash(self):
         """channel_names is the fact-table merge key, so a rename must force recompute."""

@@ -16,8 +16,14 @@ evaluate to a `SampleSeries`**. This is the *persisted, labeled* form of the eph
 [virtual signals](../query_engine/tsal/defining_expressions.md#virtual-signals) you can build ad-hoc in a
 query.
 
+:::note
+If the wrapped expression contains a UDF that declares
+[container tags/metrics](../query_engine/tsal/defining_expressions.md#reading-container-level-metadata-inside-a-udf),
+those values are injected as usual — the requirement propagates through the calculated channel.
+:::
+
 Every calculated channel used in a report **must** be registered with the report via
-`add_calculated_channel()` before `determine_report()` is called.
+`add_calculated_channel()` before `run()` is called.
 
 ```python
 my_report.add_calculated_channel(my_channel)
@@ -65,7 +71,7 @@ speed_kmh = CalculatedChannel(
 ### How it works
 
 1. The `expr` is evaluated per measurement container by the solver, yielding a `SampleSeries` for each container.
-2. Calculated channels take their **own narrow solve path** (`QueryBuilder.solve_calculated_channels`), distinct from the wide batch solve used by events and aggregations. Multi-channel expressions (e.g. `rpm + speed`) are time-base synchronized automatically; emitted intervals are the intersection.
+2. The channels' narrow solve is **batched from the `Report`** (the same pattern events and aggregations use): the channels are packed into batches of at most `query_engine.max_channels_per_batch` distinct input channels (a calculated channel whose own inputs exceed the cap gets a batch of its own), each batch is solved via `QueryBuilder.solve_calculated_channels` and persisted as a temporary table (`__impulse_temp_{run_id}_{batch_idx}`), and the batches are unioned into the final `calculated_channel_fact`. Multi-channel expressions (e.g. `rpm + speed`) are time-base synchronized automatically; emitted intervals are the intersection.
 3. Each series is exploded into one row per sample interval: `container_id, channel_id, tstart, tend, value`. The `identity` is **not** on the fact — it lives on the dimension, joined via `channel_id`.
 4. The `channel_id` is a deterministic hash of the sorted `identity` — the same value appears in both the fact and dimension tables, so they join directly.
 5. The sample rows are written to the `calculated_channel_fact` table; the channel definition (name, description, expression, identity) is written to the `calculated_channel_dimension` table.
@@ -138,3 +144,32 @@ run-length-encoded shape as the silver `channels` table.
 Both tables carry the configurable `table_prefix` (e.g. `{prefix}_calculated_channel_fact`). See the
 [gold layer schema](../../data_model/gold_layer_event_normalized.md) for how they fit the star schema, and
 [incremental processing](./index.md#incremental-processing) for how definition changes are reprocessed.
+
+---
+
+## Optional channel metrics table
+
+Because `calculated_channel_fact` already matches the silver `channels` shape, a calculated channel needs
+only a companion `channel_metrics` table to serve as an Impulse silver source in its own right. Set
+[`config.calculated_channels.emit_channel_metrics`](../../config/configuration.md#calculated_channels-optional)
+to also write a `calculated_channel_metrics` table, shaped like the silver `channel_metrics` table.
+
+### calculated_channel_metrics
+
+One row per `(container_id, channel_id)`, derived directly from the fact rows. The schema is **dynamic**:
+fixed columns plus one column per configured KPI, one per identity key (the union of `identity` keys across
+the report's channels), and one per configured attribute key.
+
+| Column         | Type     | Description                                                                                     |
+|----------------|----------|-------------------------------------------------------------------------------------------------|
+| `container_id` | `int`    | Container identifier. Type is inherited from the silver source.                                 |
+| `channel_id`   | `long`   | Calculated-channel identifier (matches the fact and dimension).                                 |
+| *identity cols*| `str`    | One column per identity key (e.g. `channel_name`, `data_key`); `null` where a channel omits it. |
+| *attribute cols*| `str`   | One column per `attribute_columns` entry (e.g. `unit`); `null` where a channel omits it.        |
+| `value_type`   | `str`    | `"double"`.                                                                                      |
+| *kpi cols*     | `double` | One column per configured KPI, in order (default `duration`, `min`, `max`, `mean`).             |
+
+The KPIs are duration-weighted (matching the silver ingestion semantics): `duration` is the span
+`max(tend) - min(tstart)`, `min` / `max` ignore NaN values, and `mean` is the duration-weighted average.
+Select which KPIs to compute via `config.calculated_channels.kpis`; an identity key wins over an attribute
+key of the same name.

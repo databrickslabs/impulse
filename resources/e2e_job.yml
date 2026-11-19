@@ -1,0 +1,81 @@
+resources:
+  jobs:
+    e2e_tests:
+      name: "impulse e2e tests${var.suffix}"
+      timeout_seconds: 3600
+      max_concurrent_runs: 1
+
+      tasks:
+        - task_key: setup
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          notebook_task:
+            notebook_path: ../tests/e2e/setup_schema.py
+            base_parameters: &params
+              catalog: ${var.catalog}
+              schema: e2e_{{job.run_id}}
+              source_catalog: ${var.source_catalog}
+              source_schema: ${var.source_schema}
+              # Each test writes its tables with this prefix and reads expected/<prefix>/.
+              prefix: "{{task.name}}"
+              expected_dir: ${workspace.file_path}/tests/e2e/expected
+              actual_dir: ${workspace.root_path}/actual
+
+        # The tests run in parallel.
+        - task_key: rpm_histogram
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_rpm_histogram.py, base_parameters: *params}
+
+        - task_key: incremental
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_incremental.py, base_parameters: *params}
+
+        - task_key: pipeline
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_pipeline.py, base_parameters: *params}
+
+        - task_key: container_filter
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_container_filter.py, base_parameters: *params}
+
+        - task_key: incremental_updates
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_incremental_updates.py, base_parameters: *params}
+
+        - task_key: events
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/e2e_events.py, base_parameters: *params}
+
+        # Runs only when all tests passed. Otherwise it ends as "upstream failed", which fails
+        # the job run, and the schema is kept for debugging.
+        - task_key: teardown
+          environment_key: e2e_env
+          disable_auto_optimization: true
+          depends_on:
+            - {task_key: rpm_histogram}
+            - {task_key: incremental}
+            - {task_key: pipeline}
+            - {task_key: container_filter}
+            - {task_key: incremental_updates}
+            - {task_key: events}
+          notebook_task: {notebook_path: ../tests/e2e/teardown.py, base_parameters: *params}
+
+      environments:
+        - environment_key: e2e_env
+          spec:
+            # pyspark and delta come with the serverless environment.
+            environment_version: "5"
+            dependencies:
+              - ../dist/*.whl

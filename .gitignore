@@ -51,6 +51,7 @@ logs/
 # Local development settings
 .env
 .env.local
+scripts/local/
 
 # macOS specific
 .DS_Store
@@ -86,3 +87,6 @@ yarn-error.log*
 .claude/
 .isaac/
 CLAUDE.md
+
+# Local design docs
+/docs/design/

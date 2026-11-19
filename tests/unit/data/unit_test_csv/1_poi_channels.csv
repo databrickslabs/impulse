@@ -1,0 +1,7 @@
+container_id,channel_id,timestamp,value_double,value_string
+1,90,2,,P0301
+1,90,5,,P0420
+1,90,8,,P0301
+1,91,2,1.0,
+1,91,5,2.0,
+1,91,8,3.0,

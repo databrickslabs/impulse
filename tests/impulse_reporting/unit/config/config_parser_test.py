@@ -1,17 +1,25 @@
+import warnings
+
 import pytest
 from pydantic import ValidationError
 
+import impulse_query_engine.measurement_db_registry as registry
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db_registry import register_measurement_db
 from impulse_reporting.config.config_parser import (
+    CalculatedChannels,
     CastType,
     Comparator,
     ContainerFilters,
     DataType,
+    FullRecalculation,
     IncrementalConfig,
     ImpulseConfig,
     MetricFilter,
     RawEncoder,
     Solvers,
     TagFilter,
+    build_measurement_db_config,
     is_valid_table_name,
     is_valid_unity_entity_name,
 )
@@ -75,6 +83,37 @@ def test_impulse_config_from_dict():
     ]
 
 
+def test_impulse_config_full_recalculation_defaults_to_none():
+    """full_recalculation is optional and absent by default."""
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    assert config.full_recalculation is None
+
+
+def test_impulse_config_full_recalculation_parsed():
+    """full_recalculation parses into a FullRecalculation with per-kind name lists."""
+    config_json = impulse_config_JSON.copy()
+    config_json["full_recalculation"] = {
+        "aggregations": ["Temperature Histogram"],
+        "events": ["Overspeed"],
+        "calculated_channels": ["Power"],
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert isinstance(config.full_recalculation, FullRecalculation)
+    assert config.full_recalculation.aggregations == ["Temperature Histogram"]
+    assert config.full_recalculation.events == ["Overspeed"]
+    assert config.full_recalculation.calculated_channels == ["Power"]
+
+
+def test_impulse_config_full_recalculation_partial_kinds_default_empty():
+    """Kinds omitted from full_recalculation default to empty lists."""
+    config_json = impulse_config_JSON.copy()
+    config_json["full_recalculation"] = {"aggregations": ["A"]}
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.full_recalculation.aggregations == ["A"]
+    assert config.full_recalculation.events == []
+    assert config.full_recalculation.calculated_channels == []
+
+
 def test_impulse_config_data_format_defaults_to_rle():
     config_json = impulse_config_JSON.copy()
     config = ImpulseConfig.model_validate(config_json)
@@ -91,6 +130,18 @@ def test_impulse_config_data_format_raw():
     }
     config = ImpulseConfig.model_validate(config_json)
     assert config.query_engine.data_type == DataType.RAW
+
+
+def test_impulse_config_measurement_db_defaults():
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    assert config.query_engine.measurement_db == "MeasurementDB"
+    assert config.query_engine.measurement_db_config is None
+
+
+class _SessionDBConfig(MeasurementDBConfig):
+    def __init__(self, *, session_table: str, **base_kwargs):
+        super().__init__(**base_kwargs)
+        self.session_table = session_table
 
 
 def test_impulse_config_drop_in_plausible_data_defaults_to_false():
@@ -112,12 +163,214 @@ def test_impulse_config_drop_implausible_data_enabled():
     assert config.query_engine.drop_implausible_data is True
 
 
+def test_impulse_config_max_containers_per_batch_defaults_to_none():
+    """The container cap is off by default (no cap => current behavior)."""
+    config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
+    assert config.query_engine.max_containers_per_batch is None
+
+
+def test_impulse_config_max_containers_per_batch_parsed():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 50},
+        "incremental": {"enabled": True},
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_containers_per_batch == 50
+
+
+def test_impulse_config_max_containers_per_batch_rejects_non_positive():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 0},
+        "incremental": {"enabled": True},
+    }
+    with pytest.raises(ValidationError, match="max_containers_per_batch must be >= 1"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_impulse_config_cap_allowed_in_full_mode():
+    """A cap is valid without an incremental config: full mode chunks the solve by the cap."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 10},
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_containers_per_batch == 10
+    assert config.incremental is None
+
+
+def test_impulse_config_cap_allowed_with_incremental_disabled():
+    """A cap is valid with incremental.enabled=False (full mode)."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 10},
+        "incremental": {"enabled": False},
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_containers_per_batch == 10
+
+
+def test_impulse_config_max_channels_per_batch_defaults_to_500():
+    """The selector cap defaults to 500 when unset."""
+    config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
+    assert config.query_engine.max_channels_per_batch == 500
+
+
+def test_impulse_config_max_channels_per_batch_parsed():
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_channels_per_batch": 42},
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_channels_per_batch == 42
+
+
+def test_impulse_config_batch_size_deprecated_alias_maps_and_warns():
+    """The legacy ``batch_size`` alias still populates ``max_channels_per_batch`` but warns."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "batch_size": 42},
+    }
+    with pytest.warns(FutureWarning, match="batch_size is deprecated"):
+        config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.max_channels_per_batch == 42
+
+
+def test_impulse_config_batch_size_and_max_channels_both_set_errors():
+    """Setting both the alias and the new field is rejected."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "batch_size": 42,
+            "max_channels_per_batch": 100,
+        },
+    }
+    with pytest.raises(ValidationError, match="Set only one of"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_impulse_config_batch_size_alias_does_not_mutate_input():
+    """The alias shim leaves the caller's dict untouched, so it can be validated again."""
+    query_engine = {"solver": "KeyValueStoreSolver", "batch_size": 42}
+    config_json = {**impulse_config_JSON, "query_engine": query_engine}
+    for _ in range(2):
+        with pytest.warns(FutureWarning, match="batch_size is deprecated"):
+            config = ImpulseConfig.model_validate(config_json)
+        assert config.query_engine.max_channels_per_batch == 42
+    assert query_engine == {"solver": "KeyValueStoreSolver", "batch_size": 42}
+
+
+def test_impulse_config_batch_size_attribute_is_deprecated_alias():
+    """Reading/writing ``batch_size`` forwards to ``max_channels_per_batch`` and warns."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_channels_per_batch": 7},
+    }
+    query_engine = ImpulseConfig.model_validate(config_json).query_engine
+    with pytest.warns(FutureWarning, match="batch_size is deprecated"):
+        assert query_engine.batch_size == 7
+    with pytest.warns(FutureWarning, match="batch_size is deprecated") as record:
+        query_engine.batch_size = 9
+    # The setter warning is attributed to the caller, not to pydantic internals.
+    assert record[0].filename == __file__
+    assert query_engine.max_channels_per_batch == 9
+    assert "batch_size" not in query_engine.model_dump()
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_impulse_config_batch_size_setter_rejects_non_positive(value):
+    """The deprecated setter enforces the same ``>= 1`` rule as construction."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", "max_channels_per_batch": 7},
+    }
+    query_engine = ImpulseConfig.model_validate(config_json).query_engine
+    with (
+        pytest.warns(FutureWarning, match="batch_size is deprecated"),
+        pytest.raises(ValueError, match="max_channels_per_batch must be >= 1"),
+    ):
+        query_engine.batch_size = value
+    assert query_engine.max_channels_per_batch == 7
+
+
+@pytest.mark.parametrize(
+    "query_engine",
+    [
+        {"max_channels_per_batch": 0},
+        {"max_channels_per_batch": -1},
+        {"batch_size": 0},
+    ],
+)
+def test_impulse_config_max_channels_per_batch_rejects_non_positive(query_engine):
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {"solver": "KeyValueStoreSolver", **query_engine},
+    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        with pytest.raises(ValidationError, match="max_channels_per_batch must be >= 1"):
+            ImpulseConfig.model_validate(config_json)
+
+
+# ---------------------------------------------------------------------------
+# Source.poi_channels_uri — must survive parsing AND reach the MeasurementDB.
+# Regression: the field was missing from the Source model, so pydantic silently
+# dropped it and the whole reporting-layer POI path was inert (has_poi_channels
+# always False) even when the config supplied a poi_channels_uri.
+# ---------------------------------------------------------------------------
+def test_source_poi_channels_uri_parsed():
+    config_json = {
+        **impulse_config_JSON,
+        "source": {
+            **impulse_config_JSON["source"],
+            "poi_channels_uri": "impulse_demo.silver.poi_channels",
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.source.poi_channels_uri == "impulse_demo.silver.poi_channels"
+
+
+def test_source_poi_channels_uri_defaults_to_none():
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    assert config.source.poi_channels_uri is None
+
+
+def test_poi_channels_uri_reaches_measurement_db():
+    """End-to-end passthrough: a poi_channels_uri in the config makes the built
+    MeasurementDB POI-aware (this is what was silently broken)."""
+    from unittest.mock import create_autospec
+
+    from databricks.sdk import WorkspaceClient
+
+    from impulse_reporting.core.report import Report
+
+    with_poi = ImpulseConfig.model_validate(
+        {
+            **impulse_config_JSON,
+            "source": {
+                **impulse_config_JSON["source"],
+                "poi_channels_uri": "impulse_demo.silver.poi_channels",
+            },
+        }
+    )
+    db = Report.create_measurement_db(with_poi, create_autospec(WorkspaceClient))
+    assert db.has_poi_channels()
+    assert db.config.poi_channels_uri == "impulse_demo.silver.poi_channels"
+
+    # ...and a config without it stays POI-unaware.
+    without_poi = ImpulseConfig.model_validate(impulse_config_JSON)
+    db2 = Report.create_measurement_db(without_poi, create_autospec(WorkspaceClient))
+    assert not db2.has_poi_channels()
+
+
 def test_impulse_config_drop_implausible_data_rejects_rle():
     """drop_implausible_data=True with RLE data must raise ValidationError.
 
-    The implausible filter is only wired into the RAW -> RLE conversion path in
-    IntervalEncoder. Silently allowing this combination would let users think
-    the filter is running when it is not.
+    The implausible filter is only wired into the RAW -> interval conversion path
+    (RleEncoder / IntervalEncoder). Silently allowing this combination would let
+    users think the filter is running when it is not.
     """
     config_json = {
         **impulse_config_JSON,
@@ -129,6 +382,120 @@ def test_impulse_config_drop_implausible_data_rejects_rle():
     }
     with pytest.raises(ValidationError, match="requires data_type=RAW"):
         ImpulseConfig.model_validate(config_json)
+
+
+def test_channels_filter_on_is_plausible_rejected_in_raw():
+    """A channels.filters entry on is_plausible in RAW mode must raise.
+
+    The filter is applied before raw encoding, so it would bridge intervals across
+    dropped samples instead of splitting them; drop_implausible_data is the right tool.
+    """
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "solver_config": {
+                "channels": {"filters": {"is_plausible": "true"}},
+            },
+        },
+    }
+    with pytest.raises(ValidationError, match="before raw encoding"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_channels_filter_on_mapped_is_plausible_rejected_in_raw():
+    """The guard keys off the internal name, so it also catches a physical column
+    mapped to is_plausible (filter keys are always internal names)."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "solver_config": {
+                "channels": {
+                    "column_name_mapping": {"plaus_flag": "is_plausible"},
+                    "filters": {"is_plausible": "true"},
+                },
+            },
+        },
+    }
+    with pytest.raises(ValidationError, match="before raw encoding"):
+        ImpulseConfig.model_validate(config_json)
+
+
+def test_channels_filter_non_plausibility_warns_in_raw():
+    """A non-plausibility channels.filters entry in RAW mode is allowed but warns.
+
+    It may be legitimate whole-channel scoping, so it is not rejected, but it bridges
+    intervals across dropped samples, so the validator emits a reminder warning.
+    """
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RAW",
+            "solver_config": {
+                "channels": {"filters": {"source": "live"}},
+            },
+        },
+    }
+    with pytest.warns(UserWarning, match="bridge intervals"):
+        config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.solver_config.channels.filters == {"source": "live"}
+
+
+def test_channels_filter_non_plausibility_no_warning_in_rle():
+    """In RLE mode no encoder runs, so a scoping channels filter must not warn."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RLE",
+            "solver_config": {
+                "channels": {"filters": {"source": "live"}},
+            },
+        },
+    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.solver_config.channels.filters == {"source": "live"}
+
+
+def test_channels_filter_on_is_plausible_allowed_in_rle():
+    """In RLE mode no encoder runs, so filtering on is_plausible is legitimate scoping."""
+    config_json = {
+        **impulse_config_JSON,
+        "query_engine": {
+            "solver": "KeyValueStoreSolver",
+            "data_type": "RLE",
+            "solver_config": {
+                "channels": {"filters": {"is_plausible": "true"}},
+            },
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.solver_config.channels.filters == {"is_plausible": "true"}
+
+
+def test_impulse_config_cleanup_temp_tables_defaults_to_false():
+    config = ImpulseConfig.model_validate(impulse_config_JSON.copy())
+    assert config.unity_sink.cleanup_temp_tables is False
+
+
+def test_impulse_config_cleanup_temp_tables_enabled():
+    config_json = {
+        **impulse_config_JSON,
+        "unity_sink": {
+            "catalog": "test_catalog",
+            "schema": "test_schema",
+            "table_prefix": "test_prefix",
+            "cleanup_temp_tables": True,
+        },
+    }
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.unity_sink.cleanup_temp_tables is True
 
 
 def test_impulse_config_raw_encoder_interval():
@@ -955,3 +1322,190 @@ def test_impulse_config_source_rejects_invalid_channel_mapping_table():
     config_json["source"]["channel_mapping_table"] = "invalid_table_name"
     with pytest.raises(ValidationError):
         ImpulseConfig.model_validate(config_json)
+
+
+def test_calculated_channels_default_kpis():
+    """CalculatedChannels defaults to the four built-in KPIs."""
+    config = CalculatedChannels()
+    assert config.emit_channel_metrics is False
+    assert config.kpis == ["duration", "min", "max", "mean"]
+
+
+def test_calculated_channels_kpis_dedupe_preserves_order():
+    """Duplicate KPI names are removed, insertion order preserved."""
+    config = CalculatedChannels(kpis=["mean", "mean", "min"])
+    assert config.kpis == ["mean", "min"]
+
+
+def test_calculated_channels_unknown_kpi_rejected():
+    """An unknown KPI name is rejected at validation with a helpful message."""
+    with pytest.raises(ValidationError, match="Unknown calculated-channel KPI"):
+        CalculatedChannels(kpis=["bogus"])
+
+
+@pytest.fixture
+def session_db_registered(monkeypatch):
+    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+    register_measurement_db("SessionDB", _SessionDBConfig)(MeasurementDB)
+
+
+def _add_custom_measurement_db_to_report_config(name: str, extra: dict | None = None) -> dict:
+    query_engine = {"measurement_db": name, "measurement_db_config": extra}
+    return {**impulse_config_JSON, "query_engine": query_engine}
+
+
+def test_impulse_config_measurement_db_selector_parsed(session_db_registered):
+    config_json = _add_custom_measurement_db_to_report_config(
+        "SessionDB", {"session_table": "cat.raw.sessions"}
+    )
+    config = ImpulseConfig.model_validate(config_json)
+    assert config.query_engine.measurement_db == "SessionDB"
+    assert config.query_engine.measurement_db_config == {"session_table": "cat.raw.sessions"}
+
+
+@pytest.mark.parametrize(
+    ("custom_measurement_db_name", "extra", "error"),
+    [
+        ("NotRegistered", None, "Unknown measurement DB 'NotRegistered'"),
+        ("SessionDB", None, "missing 1 required keyword-only argument: 'session_table'"),
+        ("SessionDB", {"session_table": "t", "typo": 1}, "unexpected keyword argument 'typo'"),
+        ("SessionDB", {"session_table": "t", "channels_uri": "x"}, "multiple values"),
+    ],
+)
+def test_impulse_config_measurement_db_config_rejected_at_parse_time(
+    session_db_registered, custom_measurement_db_name, extra, error
+):
+    with pytest.raises(ValidationError, match=error):
+        ImpulseConfig.model_validate(
+            _add_custom_measurement_db_to_report_config(custom_measurement_db_name, extra)
+        )
+
+
+@pytest.mark.parametrize(
+    ("query_engine", "misspelled_key"),
+    [
+        # Selector typo: would otherwise silently fall back to the built-in MeasurementDB.
+        (
+            {"measurment_db": "SessionDB", "measurement_db_config": {"session_table": "t"}},
+            "measurment_db",
+        ),
+        ({"measurment_db": "SessionDB"}, "measurment_db"),
+        # Settings-key typo: would otherwise silently drop the custom DB's settings.
+        (
+            {"measurement_db": "SessionDB", "measurment_db_config": {"session_table": "t"}},
+            "measurment_db_config",
+        ),
+        # Any other query_engine key: would otherwise silently fall back to its default.
+        ({"data_typ": "RAW"}, "data_typ"),
+    ],
+)
+def test_impulse_config_misspelled_query_engine_key_rejected(
+    session_db_registered, query_engine, misspelled_key
+):
+    """``QueryEngine`` forbids unknown keys, so a typo fails at parse time and names the key."""
+    with pytest.raises(ValidationError) as exc_info:
+        ImpulseConfig.model_validate({**impulse_config_JSON, "query_engine": query_engine})
+
+    assert [(err["loc"], err["type"]) for err in exc_info.value.errors()] == [
+        (("query_engine", misspelled_key), "extra_forbidden")
+    ]
+
+
+# ---------------------------------------------------------------------------
+# build_measurement_db_config — the config_parser factory that resolves the
+# selected implementation and builds its config object, merging the ``source``
+# tables with the custom ``measurement_db_config`` kwargs. A custom DB subclass
+# relies on every one of those params reaching its config object. Parsing
+# itself calls this factory (see ``ImpulseConfig._validate_measurement_db``), so
+# these go through ``model_validate`` first and then inspect the built config.
+# ---------------------------------------------------------------------------
+class _AcmeDBConfig(MeasurementDBConfig):
+    """A representative custom config: one required extra table, two optional prefilter keys,
+    and an extra table declared for pinning. Richer than ``_SessionDBConfig`` so a test can
+    assert that *every* param a custom config uses is present on the built object."""
+
+    def __init__(
+        self,
+        *,
+        recording_session_table: str,  # required: a missing value is reported at parse time
+        signal_name=(),  # optional prefilter key
+        start_dt=None,  # optional prefilter key
+        **base_kwargs,  # source tables + table_locations, forwarded to the base
+    ):
+        super().__init__(**base_kwargs)
+        self.recording_session_table = recording_session_table
+        self.signal_name = list(signal_name)
+        self.start_dt = start_dt
+
+    def configured_table_uris(self) -> list[str]:
+        return super().configured_table_uris() + [self.recording_session_table]
+
+
+class _AcmeDB(MeasurementDB): ...
+
+
+@pytest.fixture
+def acme_db_registered(monkeypatch):
+    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+    register_measurement_db("AcmeDB", _AcmeDBConfig)(_AcmeDB)
+
+
+def test_build_measurement_db_config_defaults_to_builtin():
+    """No selector -> the factory resolves the built-in and builds a base config from source."""
+    config = ImpulseConfig.model_validate(impulse_config_JSON)
+    db_cls, db_config = build_measurement_db_config(dict(config.source), config.query_engine)
+
+    assert db_cls is MeasurementDB
+    assert type(db_config) is MeasurementDBConfig
+    assert db_config.container_metrics_table == "impulse_demo.silver.container_metric"
+    assert db_config.channel_metrics_table == "impulse_demo.silver.channel_metric"
+    assert db_config.channels_uri == "impulse_demo.silver.channel_data"
+    assert db_config.table_locations == "unity_catalog"
+
+
+def test_build_measurement_db_config_builds_custom_config_with_all_params(acme_db_registered):
+    """The factory resolves the registered class and builds its config with EVERY param present:
+    the custom ``measurement_db_config`` kwargs, the merged ``source`` tables, and
+    ``table_locations`` -- and declares the custom extra table for pinning."""
+    acme_config = {
+        "recording_session_table": "acme.raw.recording_session",
+        "signal_name": ["ENGINE_SPEED", "VEHICLE_SPEED"],
+        "start_dt": "2026-04-01",
+    }
+    config = ImpulseConfig.model_validate(
+        _add_custom_measurement_db_to_report_config("AcmeDB", acme_config)
+    )
+    db_cls, db_config = build_measurement_db_config(dict(config.source), config.query_engine)
+
+    # Resolves to the registered custom DB + config class, not the built-in.
+    assert db_cls is _AcmeDB
+    assert type(db_config) is _AcmeDBConfig
+
+    # Every custom param the config declares is present on the built object.
+    assert db_config.recording_session_table == "acme.raw.recording_session"
+    assert db_config.signal_name == ["ENGINE_SPEED", "VEHICLE_SPEED"]
+    assert db_config.start_dt == "2026-04-01"
+
+    # The source tables are merged in (base kwargs) and the location is forced to unity_catalog.
+    assert db_config.container_metrics_table == "impulse_demo.silver.container_metric"
+    assert db_config.channel_metrics_table == "impulse_demo.silver.channel_metric"
+    assert db_config.channels_uri == "impulse_demo.silver.channel_data"
+    assert db_config.table_locations == "unity_catalog"
+
+    # The custom extra table is declared alongside the source tables for Delta version pinning.
+    assert "acme.raw.recording_session" in db_config.configured_table_uris()
+
+
+def test_build_measurement_db_config_omits_optional_custom_params(acme_db_registered):
+    """Optional custom params are genuinely optional: the config builds with only the required one,
+    and the optional params fall back to their declared defaults."""
+    config = ImpulseConfig.model_validate(
+        _add_custom_measurement_db_to_report_config(
+            "AcmeDB", {"recording_session_table": "acme.raw.recording_session"}
+        )
+    )
+    _, db_config = build_measurement_db_config(dict(config.source), config.query_engine)
+
+    assert db_config.recording_session_table == "acme.raw.recording_session"
+    assert db_config.signal_name == []
+    assert db_config.start_dt is None

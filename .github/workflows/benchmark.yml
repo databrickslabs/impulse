@@ -1,0 +1,136 @@
+name: benchmark
+
+# Performance benchmark on Databricks (resources/benchmark_job.yml, benchmark_serverless_job.yml):
+# after every merge into main, and on demand on any branch or tag (Actions > benchmark > Run
+# workflow). A run takes hours, so there is no schedule, and merges that only change docs are
+# skipped.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "**/*.mdx"
+  workflow_dispatch:
+    inputs:
+      config_overrides:
+        description: 'JSON merged into the report config, e.g. {"query_engine": {"enable_pushdown": true}}'
+        default: "{}"
+      baseline_ref:
+        description: Git ref whose runs are the baseline
+        default: main
+
+permissions:
+  contents: read
+
+# One run per ref at a time, as runs of a ref share its bundle. GitHub keeps one pending run per
+# group, so a newer run of the same ref replaces a pending one; runs of other refs are their own
+# groups and run in parallel, each on its own fixed-size cluster.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: Benchmark on Databricks (job cluster)
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    environment: e2e
+    permissions:
+      # For JFrog OIDC.
+      id-token: write
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      DATABRICKS_AUTH_TYPE: oauth-m2m
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: false
+          version: "0.11.2"
+          checksum: "7ac2ca0449c8d68dae9b99e635cd3bc9b22a4cb1de64b7c43716398447d42981"
+
+      - name: Setup for JFrog
+        uses: ./.github/actions/jfrog-auth
+
+      - name: Install dependencies
+        run: make dev
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@8821c27b1fe57472264eeb6e50c1f31d69552f28 # v1.10.0
+
+      # Each ref deploys its own copy of the bundle (job and wheel), removed after the run.
+      - name: Name the ref's bundle
+        run: |
+          ref=$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'a-zA-Z0-9-' '-' | cut -c1-40)
+          echo "BUNDLE_VAR_suffix=-benchmark-$ref" >> "$GITHUB_ENV"
+
+      # Also builds the wheel.
+      - name: Deploy bundle
+        run: databricks bundle deploy -t e2e
+
+      # Both jobs run the same report in parallel: `benchmark` on the fixed-size job cluster,
+      # `benchmark_serverless` on serverless.
+      - name: Run benchmark jobs
+        env:
+          CONFIG_OVERRIDES: ${{ inputs.config_overrides || '{}' }}
+          BASELINE_REF: ${{ inputs.baseline_ref || 'main' }}
+        # Not `bundle run --params`: it splits values at commas, which the JSON overrides contain.
+        run: |
+          summary=$(databricks bundle summary -t e2e -o json)
+          run_ids=""
+          for job in benchmark benchmark_serverless; do
+            job_id=$(jq -r --arg job "$job" '.resources.jobs[$job].id' <<< "$summary")
+            request=$(jq -n \
+              --argjson job_id "$job_id" \
+              --arg git_sha "$GITHUB_SHA" \
+              --arg git_ref "$GITHUB_REF_NAME" \
+              --arg trigger "$GITHUB_EVENT_NAME" \
+              --arg config_overrides "$CONFIG_OVERRIDES" \
+              --arg baseline_ref "$BASELINE_REF" \
+              '{job_id: $job_id, job_parameters: ($ARGS.named | del(.job_id))}')
+            run_id=$(databricks jobs run-now --json "$request" --no-wait -o json | jq -r '.run_id')
+            echo "$job: run $run_id"
+            run_ids="$run_ids $run_id"
+          done
+          echo "RUN_IDS=$run_ids" >> "$GITHUB_ENV"
+          failed=0
+          for run_id in $run_ids; do
+            while true; do
+              state=$(databricks jobs get-run "$run_id" -o json | jq -r '.state.life_cycle_state')
+              case "$state" in TERMINATED|SKIPPED|INTERNAL_ERROR) break;; esac
+              sleep 60
+            done
+            result=$(databricks jobs get-run "$run_id" -o json | jq -r '.state.result_state')
+            echo "Run $run_id: $result"
+            test "$result" = SUCCESS || failed=1
+          done
+          exit $failed
+
+      # The comparison tables of this workflow's runs, also when they failed.
+      - name: Report results
+        if: always() && env.RUN_IDS != ''
+        run: |
+          for run_id in $RUN_IDS; do
+            task_run_id=$(databricks jobs get-run "$run_id" -o json \
+              | jq -r '.tasks[] | select(.task_key == "compare") | .run_id')
+            databricks jobs get-run-output "$task_run_id" -o json \
+              | jq -r '.notebook_output.result // "No comparison: see the job run."' \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      # A cancelled workflow leaves the job runs going; stop them too.
+      - name: Cancel benchmark job runs
+        if: cancelled() && env.RUN_IDS != ''
+        run: for run_id in $RUN_IDS; do databricks jobs cancel-run "$run_id" --no-wait; done
+
+      # The results stay in the results table.
+      - name: Remove the ref's bundle
+        if: always()
+        run: databricks bundle destroy -t e2e --auto-approve

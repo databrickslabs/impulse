@@ -16,6 +16,13 @@ UV_RUN := uv run --exact --all-extras --group test
 # single component's tests in parallel, e.g. `make test TEST_PATH=tests/impulse_query_engine`.
 TEST_PATH ?= tests/
 
+# Extra args passed to pytest, primarily xdist parallelism. Each worker starts its own
+# Spark JVM (see the worker-isolated `spark` fixture in tests/conftest.py), so `-n auto`
+# is capped to bound memory on many-core machines. `worksteal` lets idle workers pull
+# queued tests off busy ones, shortening the slow-test tail. Override with
+# `make test PYTEST_XARGS=-n0` to run serially in-process for debugging.
+PYTEST_XARGS ?= -n auto --maxprocesses=4 --dist worksteal
+
 clean:
 	rm -fr .venv htmlcov .pytest_cache .ruff_cache .coverage coverage.xml test-results.xml
 	find . -name '__pycache__' -print0 | xargs -0 rm -fr
@@ -32,7 +39,7 @@ fmt:
 	$(UV_RUN) ruff check src/ tests/ --fix
 
 test:
-	$(UV_RUN) pytest $(TEST_PATH) --cov=src --cov-branch --cov-report=xml
+	$(UV_RUN) pytest $(TEST_PATH) $(PYTEST_XARGS) --cov=src --cov-branch --cov-report=xml
 
 coverage:
 	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=html
@@ -44,15 +51,34 @@ mdf-coverage:
 	  --omit='src/impulse_data_sources/mdf/converter.py' \
 	  --fail-under=95 --precision=1
 
+# Run the end-to-end suite on Databricks. Needs the Databricks CLI and workspace auth.
+test-e2e:
+	databricks bundle deploy -t e2e
+	databricks bundle run e2e_tests -t e2e
+
+# Run the performance benchmark on Databricks (see tests/e2e/README.md). Same needs as test-e2e.
+benchmark:
+	databricks bundle deploy -t e2e
+	databricks bundle run benchmark -t e2e
+
+# The same benchmark on serverless.
+benchmark-serverless:
+	databricks bundle deploy -t e2e
+	databricks bundle run benchmark_serverless -t e2e
+
 build:
 	uv build --require-hashes --build-constraints=.build-constraints.txt
+
+update-api-docs:
+	cd docs/impulse && uv run pydoc-markdown
 
 lock-dependencies: UV_LOCKED := 0
 lock-dependencies:
 	uv lock
 	printf 'setuptools>=61.0\nwheel\n' | uv pip compile --generate-hashes --universal --no-header --quiet - > .build-constraints.txt
 	@perl -pi -e 's|registry = "https://[^"]*"|registry = "https://pypi.org/simple"|g' uv.lock
-	@printf 'Stripped registry references from uv.lock.\n'
+	@perl -pi -e 's|https://pypi-proxy\.dev\.databricks\.com/|https://files.pythonhosted.org/|g' uv.lock
+	@printf 'Stripped registry and proxy URLs from uv.lock.\n'
 
 # Mirror a fork PR onto a fork-test/pr-<N> branch in the main repo and open a test PR,
 # so CI (which is skipped for fork PRs) runs with JFrog/OIDC. Review the fork code first.
@@ -62,4 +88,4 @@ fork-sync:
 	./.github/scripts/fork-sync-pr.sh $(PR)
 
 .DEFAULT: all
-.PHONY: all clean dev lint fmt test coverage build lock-dependencies fork-sync
+.PHONY: all clean dev lint fmt test mdf-coverage test-e2e benchmark benchmark-serverless coverage build update-api-docs lock-dependencies fork-sync

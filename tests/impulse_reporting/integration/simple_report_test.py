@@ -152,7 +152,7 @@ def test_simple_report1(spark, setup_narrow_db):
     my_first_page.add_aggregation(hist5)
 
     # Determine content of all pages
-    my_report.determine_report()
+    my_report.run(persist_results=False)
     visual_dfs = my_report.aggregation_dfs
     assert visual_dfs["HISTOGRAM"]["changed"].filter(F.col("hist_value") > 0).count() > 0
     assert visual_dfs["HISTOGRAM2D"]["changed"].filter(F.col("hist_value") > 0).count() > 0
@@ -254,7 +254,7 @@ def test_basic_narrow_report_no_uuts(spark):
     my_first_page.add_aggregation(hist5)
 
     # Determine content of all pages
-    my_report.determine_report()
+    my_report.run(persist_results=False)
     agg_dfs = my_report.aggregation_dfs
     assert agg_dfs["HISTOGRAM"]["changed"].filter(F.col("hist_value") > 0).count() > 0
     assert agg_dfs["HISTOGRAM2D"]["changed"].filter(F.col("hist_value") > 0).count() > 0
@@ -345,7 +345,7 @@ def test_basic_narrow_report(spark):
     my_first_page.add_aggregation(hist5)
 
     # Determine content of all pages
-    my_report.determine_report()
+    my_report.run(persist_results=False)
     agg_dfs = my_report.aggregation_dfs
     assert agg_dfs["HISTOGRAM"]["changed"].filter(F.col("hist_value") > 0).count() > 0
     assert agg_dfs["HISTOGRAM2D"]["changed"].filter(F.col("hist_value") > 0).count() > 0
@@ -450,7 +450,7 @@ def test_report_with_events(spark):
     my_first_page.add_aggregation(hist5)
 
     # Determine content of all pages
-    my_report.determine_report()
+    my_report.run(persist_results=False)
     agg_dfs = my_report.aggregation_dfs
     agg_metadata_dfs = my_report.aggregation_metadata_dfs
     event_dfs = my_report.event_dfs
@@ -552,11 +552,8 @@ def test_persist_report(spark):
     )
     my_first_page.add_aggregation(hist5)
 
-    # Determine content of all pages
-    my_report.determine_report()
-
-    # Persist the report
-    my_report.persist_results()
+    # Determine and persist the report
+    my_report.run()
 
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_histogram_fact")
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_histogram2d_fact")
@@ -690,7 +687,7 @@ def test_persist_report_with_events(spark):
     my_first_page.add_aggregation(hist5)
 
     # Determine content of all pages
-    my_report.determine_report()
+    my_report._determine_report()
 
     agg_dfs = my_report.aggregation_dfs
     agg_metadata_dfs = my_report.aggregation_metadata_dfs
@@ -706,7 +703,7 @@ def test_persist_report_with_events(spark):
     assert event_dfs["BASIC_EVENT"]["changed"].count() > 0
     assert event_metadata_dfs["BASIC_EVENT"].count() > 0
 
-    my_report.persist_results()
+    my_report._persist_results()
 
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_event_dimension")
     assert spark.catalog.tableExists("spark_catalog.gold.evaluation_event_instance_fact")
@@ -819,7 +816,7 @@ def test_simple_report_key_value_store(spark, key_value_store_db):
     my_first_page.add_aggregation(hist2d)
 
     # --- Determine content of all pages ---
-    my_report.determine_report()
+    my_report.run(persist_results=False)
     visual_dfs = my_report.aggregation_dfs
     assert visual_dfs["HISTOGRAM"]["changed"].filter(F.col("hist_value") > 0).count() > 0
     assert visual_dfs["HISTOGRAM2D"]["changed"].filter(F.col("hist_value") > 0).count() > 0

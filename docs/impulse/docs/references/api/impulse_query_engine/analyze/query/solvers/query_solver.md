@@ -21,6 +21,33 @@ columns** needed for container dimensions and event bounds (e.g.
 not only ``container_id``.
 
 
+#### scoped\_container\_metrics
+
+```python
+def scoped_container_metrics(spark,
+                             query,
+                             pre_filtered_containers_df=None) -> DataFrame
+```
+
+Read ``container_metrics`` scoped to the solver config.
+
+Source is *pre_filtered_containers_df* when provided (the incremental
+container subset), otherwise the full ``container_metrics`` table.
+Applies the per-table ``column_name_mapping``, the top-level
+``project_id`` filter, and the per-table ``container_metrics.filters``.
+Query-level ``MetricExpression`` filters are **not** applied here —
+callers add those on top when needed.
+
+**Arguments**:
+
+- `spark` (`pyspark.sql.SparkSession`): Active Spark session used to read the table.
+- `query` (`QueryBuilder`): Query object (database + config).
+- `pre_filtered_containers_df` (`pyspark.sql.DataFrame`): Incremental subset to read instead of the full table.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: The scoped, column-mapped ``container_metrics`` frame.
+
 #### filter\_container\_tags
 
 ```python
@@ -165,6 +192,31 @@ aliasing (e.g. ``DefaultSolver``) must override this.
 **Returns**:
 
 `pyspark.sql.DataFrame`: Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
+
+#### attach\_container\_metadata
+
+```python
+def attach_container_metadata(query,
+                              channels_df,
+                              pre_filtered_containers_df=None) -> DataFrame
+```
+
+Attach requested container-level tags/metrics onto the channel-match frame.
+
+No-op by default; solvers that inject container metadata (e.g.
+``DefaultSolver``) override this to left-join the columns.  When
+*pre_filtered_containers_df* is given, the metadata read is scoped to
+those containers.
+
+**Arguments**:
+
+- `query` (`QueryBuilder`): Query object (selections + db info).
+- `channels_df` (`pyspark.sql.DataFrame`): Channel-match frame from the filter pipeline.
+- `pre_filtered_containers_df` (`pyspark.sql.DataFrame`): Incremental container subset to scope the metadata read to.
+
+**Returns**:
+
+`pyspark.sql.DataFrame`: *channels_df*, unchanged by default.
 
 #### filter\_candidates
 

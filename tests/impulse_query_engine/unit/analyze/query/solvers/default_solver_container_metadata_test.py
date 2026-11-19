@@ -1,0 +1,427 @@
+# pylint: disable=missing-function-docstring, redefined-outer-name
+"""End-to-end tests for container-level tags/metrics injected into solve UDFs.
+
+A ``TimeSeriesUDF`` declares the container tag keys / metric columns it needs;
+the engine reads exactly those columns and attaches them to the channel-match
+frame so they reach the per-container solve UDF, where they are injected as
+``container_tags`` / ``container_metrics`` keyword arguments.
+
+Covers both silver-layer shapes:
+- wide model (``basic_narrow_db``, no ``container_tags_table``) -> metrics work,
+  container tags are unsupported;
+- EAV model (``narrow_db``, has ``container_tags``) -> tags work; a missing
+  metric column raises.
+"""
+
+import pandas as pd
+import pyspark.sql.functions as F
+import pytest
+from pyspark.sql import SparkSession
+
+import impulse_query_engine.schema as S
+from impulse_query_engine.analyze.query.aggregations.stats_aggregator import StatsAggregator
+from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
+from impulse_query_engine.analyze.query.events import TimeWindowExpression
+from impulse_query_engine.analyze.query.solvers.default_solver import (
+    DefaultSolver,
+    TimeSeriesCache,
+)
+from impulse_query_engine.analyze.query.solvers.solver_config import (
+    ChannelMappingConfig,
+    SolverConfig,
+    TableConfig,
+)
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from tests.conftest import (
+    basic_narrow_db,
+    key_value_store_alias_with_channel_tags_db,
+    narrow_db,
+    spark,
+)
+
+
+def _alias_config() -> SolverConfig:
+    """SolverConfig the alias CSV fixtures expect (see default_solver_alias_test)."""
+    return SolverConfig(
+        project_id="SAMPLE_PROJECT",
+        container_metrics=TableConfig(column_name_mapping={"project": "project_id"}),
+        channel_mapping=ChannelMappingConfig(filters={"toolbox_id": "container_concept"}),
+    )
+
+
+def test_wide_model_injects_container_metric(spark: SparkSession, basic_narrow_db: MeasurementDB):
+    """A declared container metric reaches the UDF for each container."""
+
+    def grab_metric(ts, container_metrics):
+        value = container_metrics["num_channels"]
+        return float(value) if value is not None else -1.0
+
+    query = basic_narrow_db.query
+    result = query.select(
+        query.channel(channel_name="Engine RPM")
+        .apply(grab_metric, container_metrics=["num_channels"])
+        .alias("nc")
+    ).solve(spark, solver=DefaultSolver(spark))
+
+    rows = {row.container_id: row.nc for row in result.collect()}
+    assert rows, "expected at least one matched container"
+    # Every container in basic_narrow_csv has num_channels == 11.
+    assert all(value == 11.0 for value in rows.values()), rows
+
+
+def test_wide_model_container_tags_unsupported(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """Requesting container tags without a container_tags_table raises."""
+
+    def use_tag(ts, container_tags):
+        return 0.0
+
+    query = basic_narrow_db.query
+    prepared = query.select(
+        query.channel(channel_name="Engine RPM")
+        .apply(use_tag, container_tags=["brand"])
+        .alias("x")
+    )
+    with pytest.raises(ValueError, match="container_tags_table"):
+        prepared.solve(spark, solver=DefaultSolver(spark))
+
+
+def test_eav_model_injects_container_tag(spark: SparkSession, narrow_db: MeasurementDB):
+    """A declared container tag reaches the UDF (EAV container_tags table)."""
+
+    def tag_matches(ts, container_tags):
+        return 1.0 if container_tags["name"] == "test" else 0.0
+
+    query = narrow_db.query
+    result = query.select(
+        query.channel(seed="0").apply(tag_matches, container_tags=["name"]).alias("m")
+    ).solve(spark, solver=DefaultSolver(spark))
+
+    rows = {row.container_id: row.m for row in result.collect()}
+    assert rows, "expected at least one matched container"
+    # container 1 carries the tag name=test.
+    assert rows.get(1) == 1.0, rows
+
+
+def test_eav_model_injects_tag_and_metric_together(spark: SparkSession, narrow_db: MeasurementDB):
+    """A UDF requesting both a container tag and a metric gets both.
+
+    Exercises the outer-join branch in ``_build_container_metadata_df`` that
+    combines the EAV ``container_tags`` pivot with the ``container_metrics``
+    columns (narrow_db carries both the ``name`` tag and ``num_channels``).
+    """
+
+    def grab_both(ts, container_tags, container_metrics):
+        tag_ok = container_tags["name"] == "test"
+        metric = container_metrics["num_channels"]
+        return float(metric) if tag_ok and metric is not None else -1.0
+
+    query = narrow_db.query
+    result = query.select(
+        query.channel(seed="0")
+        .apply(grab_both, container_tags=["name"], container_metrics=["num_channels"])
+        .alias("both")
+    ).solve(spark, solver=DefaultSolver(spark))
+
+    rows = {row.container_id: row.both for row in result.collect()}
+    assert rows, "expected at least one matched container"
+    # container 1 carries name=test and num_channels=1 -> both arrived.
+    assert rows.get(1) == 1.0, rows
+
+
+def test_eav_model_missing_metric_raises(spark: SparkSession, narrow_db: MeasurementDB):
+    """Requesting a nonexistent container metric column raises a clear error."""
+
+    def use_metric(ts, container_metrics):
+        return 0.0
+
+    query = narrow_db.query
+    prepared = query.select(
+        query.channel(seed="0").apply(use_metric, container_metrics=["does_not_exist"]).alias("x")
+    )
+    with pytest.raises(ValueError, match="does_not_exist"):
+        prepared.solve(spark, solver=DefaultSolver(spark))
+
+
+def test_aliased_path_threads_container_metric(
+    spark: SparkSession, key_value_store_alias_with_channel_tags_db: MeasurementDB
+):
+    """A container metric threads through the aliased resolution + union path.
+
+    Uses a purely aliased selection so the metadata column must survive
+    ``filter_aliased_channel_metrics`` and ``resolve_channel_selections``
+    (union of the empty direct side with the aliased side + group-by).
+    """
+
+    def grab_metric(ts, container_metrics):
+        value = container_metrics["num_channels"]
+        return float(value) if value is not None else -1.0
+
+    solver = DefaultSolver(spark, config=_alias_config())
+    query = key_value_store_alias_with_channel_tags_db.query
+    result = query.select(
+        query.channel_with_alias(channel_alias="engine_speed")
+        .apply(grab_metric, container_metrics=["num_channels"])
+        .alias("nc")
+    ).solve(spark, solver=solver)
+
+    rows = {row.container_id: row.nc for row in result.collect()}
+    # The alias resolves a real channel in all three containers.
+    assert set(rows.keys()) == {1, 2, 3}, rows
+    # Every container in basic_narrow_csv has num_channels == 11.
+    assert all(value == 11.0 for value in rows.values()), rows
+
+
+def test_aggregation_propagates_container_metric(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """A metadata UDF wrapped in an aggregation propagates + is fed the metric.
+
+    The UDF maps the series to a constant equal to ``num_channels`` (== 11); the
+    surrounding histogram then bins that constant.  All mass must land in the
+    ``[10, 20]`` bin, proving the metric reached the UDF inside the aggregation.
+    """
+
+    def const_from_metric(ts, container_metrics):
+        factor = container_metrics["num_channels"]
+        return ts * 0 + (factor if factor is not None else 0)
+
+    query = basic_narrow_db.query
+    hist = (
+        query.channel(channel_name="Engine RPM")
+        .apply(const_from_metric, container_metrics=["num_channels"])
+        .histogram([0.0, 10.0, 20.0])
+        .alias("h")
+    )
+    result = query.select(hist).solve(spark, solver=DefaultSolver(spark))
+
+    rows = [row.h for row in result.collect()]
+    assert rows, "expected at least one matched container"
+    for hist_value in rows:
+        counts = hist_value["H"]  # duration per bin: [ [0,10), [10,20) ]
+        assert counts[0] == 0.0, counts  # nothing below 10
+        assert counts[1] > 0.0, counts  # constant 11 lands in [10, 20)
+
+
+def test_calculated_channel_threads_container_metric(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """A CalculatedChannel wrapping a metadata UDF gets the metric via the calc path.
+
+    The scaled channel multiplies each sample by ``num_channels`` (== 11); the raw
+    channel does not.  Proves the calculated-channels UDF cache is wired with the
+    container metadata (it previously was not).
+    """
+
+    def scale_by_metric(ts, container_metrics):
+        factor = container_metrics["num_channels"]
+        return ts if factor is None else ts * factor
+
+    query = basic_narrow_db.query
+    raw = CalculatedChannel(
+        query.channel(channel_name="Engine RPM"),
+        {"channel_name": "raw_rpm", "data_key": "CALC"},
+    )
+    scaled = CalculatedChannel(
+        query.channel(channel_name="Engine RPM").apply(
+            scale_by_metric, container_metrics=["num_channels"]
+        ),
+        {"channel_name": "scaled_rpm", "data_key": "CALC"},
+    )
+    result = query.select(raw, scaled).solve_calculated_channels(
+        spark, solver=DefaultSolver(spark)
+    )
+
+    totals = {
+        row.channel_id: row["sum(value)"]
+        for row in result.groupBy("channel_id").agg({"value": "sum"}).collect()
+    }
+    raw_total = totals.get(raw.channel_id)
+    scaled_total = totals.get(scaled.channel_id)
+    assert raw_total not in (None, 0), totals
+    # Every sample scaled by num_channels == 11.
+    assert scaled_total == pytest.approx(11.0 * raw_total), totals
+
+
+def test_pre_filtered_containers_scopes_metric_injection(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """The metric read for injection honors ``pre_filtered_containers_df``.
+
+    ``attach_container_metadata`` builds the metadata from
+    ``scoped_container_metrics(pre_filtered_containers_df)``, so a subset
+    restricted to a single container (a) processes only that container and
+    (b) still injects its metric value correctly.
+    """
+
+    def grab_metric(ts, container_metrics):
+        value = container_metrics["num_channels"]
+        return float(value) if value is not None else -1.0
+
+    query = basic_narrow_db.query
+    # Incremental subset: container 1 only.  Default config has no column mapping,
+    # so the physical container_metrics frame is a valid pre-filtered input.
+    subset = basic_narrow_db.container_metrics(spark).where("container_id = 1")
+    result = query.select(
+        query.channel(channel_name="Engine RPM")
+        .apply(grab_metric, container_metrics=["num_channels"])
+        .alias("nc")
+    ).solve(spark, solver=DefaultSolver(spark), pre_filtered_containers_df=subset)
+
+    rows = {row.container_id: row.nc for row in result.collect()}
+    assert set(rows.keys()) == {1}, rows  # only the pre-filtered subset is processed
+    assert rows[1] == 11.0, rows  # injected metric value is correct
+
+
+def test_pre_filtered_containers_scopes_tag_pivot(spark: SparkSession, narrow_db: MeasurementDB):
+    """The tag pivot for injection honors ``pre_filtered_containers_df``.
+
+    Clone narrow_db (container 1, name=test) and add a container 2 tag row.  A
+    metadata build scoped to container 1 pivots only that container — container
+    2's tag is scoped out before the pivot, so it is absent from the result.
+    """
+    tables = dict(narrow_db.config.debug_tables)
+    extra = spark.createDataFrame([(2, "name", "other")], schema=S.CONTAINER_TAGS)
+    tables["container_tags"] = tables["container_tags"].unionByName(extra)
+    db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=narrow_db.ws)
+
+    # Incremental subset: container 1 only (its container_metrics rows).
+    subset = db.container_metrics(spark).where("container_id = 1")
+    meta = DefaultSolver(spark)._build_container_metadata_df(
+        db.query, tag_keys=["name"], metric_cols=[], pre_filtered_containers_df=subset
+    )
+    rows = {row.container_id: row["name"] for row in meta.collect()}
+    assert rows == {1: "test"}, rows  # container 2 (name=other) is scoped out
+
+
+def test_cache_reads_container_meta_from_surviving_row_only():
+    """Container tags/metrics populated only on the ``selector_ids``-notna row suffice.
+
+    Mirrors ``_apply_grouped_map`` nulling the container-meta columns on all but
+    one row per (container_id, channel_id): the cache builds its metadata frame
+    from the ``selector_ids``-notna rows, so a value present only there is still
+    read back.  Pure-pandas, no Spark.
+    """
+    pdf = pd.DataFrame(
+        {
+            "container_id": [1, 1, 1, 1],
+            "channel_id": [10, 10, 11, 11],
+            "tstart": [0, 1, 0, 1],
+            "tend": [1, 2, 1, 2],
+            "value": [1.0, 2.0, 3.0, 4.0],
+            # selector_ids kept on one row per channel (rows 0 and 2), null elsewhere.
+            "selector_ids": [[0], None, [0], None],
+            # container-meta columns masked to the same surviving rows.
+            "brand": ["BMW", None, "BMW", None],
+            "num_channels": [11, None, 11, None],
+        }
+    )
+    col_map = {
+        "cid": "container_id",
+        "ch": "channel_id",
+        "ts": "tstart",
+        "te": "tend",
+        "val": "value",
+    }
+    cache = TimeSeriesCache(
+        pdf,
+        col_map=col_map,
+        container_tag_cols=["brand"],
+        container_metric_cols=["num_channels"],
+    )
+    assert cache.container_tags == {"brand": "BMW"}
+    assert cache.container_metrics["num_channels"] == 11
+
+
+def _timestamp_boundaries_db(basic_narrow_db: MeasurementDB) -> MeasurementDB:
+    """Clone of basic_narrow_db with start_ts / stop_ts (epoch ms) recast to TIMESTAMP."""
+    tables = dict(basic_narrow_db.config.debug_tables)
+    tables["container_metrics"] = (
+        tables["container_metrics"]
+        .withColumn("start_ts", F.timestamp_millis("start_ts"))
+        .withColumn("stop_ts", F.timestamp_millis("stop_ts"))
+    )
+    return MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+
+def _grab_start_ts(ts, container_metrics):
+    value = container_metrics["start_ts"]
+    if value is None:  # type-inference pass on the empty cache
+        return 0.0
+    # Like a customer UDF rebuilding absolute time: a pd.Timestamp (naive, in the session
+    # time zone, here UTC) becomes epoch microseconds (exact); anything else is flagged -1.
+    if not isinstance(value, pd.Timestamp):
+        return -1.0
+    return float((value - pd.Timestamp("1970-01-01")) // pd.Timedelta(microseconds=1))
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        SolverConfig(),
+        SolverConfig(channel_time_unit="ms"),
+        SolverConfig(channel_time_unit="ms", channel_time_origin="container_start"),
+    ],
+)
+def test_udf_gets_raw_timestamp_start_ts_regardless_of_channel_time(
+    spark: SparkSession, basic_narrow_db: MeasurementDB, config: SolverConfig
+):
+    """A UDF reading a TIMESTAMP start_ts always gets the absolute pd.Timestamp: the channel
+    time settings only shape TimeWindowEvent windows, never the raw container metrics."""
+    db = _timestamp_boundaries_db(basic_narrow_db)
+    query = db.query
+    previous_tz = spark.conf.get("spark.sql.session.timeZone")
+    spark.conf.set("spark.sql.session.timeZone", "UTC")
+    try:
+        result = query.select(
+            query.channel(channel_name="Engine RPM")
+            .apply(_grab_start_ts, container_metrics=["start_ts"])
+            .alias("start")
+        ).solve(spark, solver=DefaultSolver(spark, config=config))
+        rows = {row.container_id: row.start for row in result.collect()}
+    finally:
+        spark.conf.set("spark.sql.session.timeZone", previous_tz)
+
+    expected = {
+        r.container_id: float(r.us)
+        for r in db.container_metrics(spark)
+        .select("container_id", F.unix_micros("start_ts").alias("us"))
+        .collect()
+    }
+    assert rows and all(rows[cid] == expected[cid] for cid in rows), (rows, expected)
+
+
+def test_time_window_expression_and_udf_share_a_solve(
+    spark: SparkSession, basic_narrow_db: MeasurementDB
+):
+    """In one solve, a TimeWindowExpression tiles the container in the channel time frame
+    (here relative ms) while a UDF still reads the absolute TIMESTAMP start_ts."""
+    db = _timestamp_boundaries_db(basic_narrow_db)
+    query = db.query
+    rpm = query.channel(channel_name="Engine RPM")
+    windows = StatsAggregator(
+        input_expressions=[rpm],
+        event_expression=TimeWindowExpression(10_000),
+        statistics=["mean"],
+    ).alias("windows")
+    config = SolverConfig(channel_time_unit="ms", channel_time_origin="container_start")
+    result = query.select(
+        windows, rpm.apply(_grab_start_ts, container_metrics=["start_ts"]).alias("start")
+    ).solve(spark, solver=DefaultSolver(spark, config=config))
+    rows = {row.container_id: row for row in result.collect()}
+
+    durations = {
+        r.container_id: float(r.d)
+        for r in basic_narrow_db.container_metrics(spark)
+        .select("container_id", (F.col("stop_ts") - F.col("start_ts")).alias("d"))
+        .collect()
+    }
+    assert rows
+    for container_id, row in rows.items():
+        event_timestamps = row.windows.event_timestamps
+        # Relative windows: from 0 to the container's duration in ms, 10 s apart.
+        assert event_timestamps[0] == [0.0, 10_000.0]
+        assert event_timestamps[-1][1] == durations[container_id]
+        assert len(event_timestamps) == -(-durations[container_id] // 10_000)
+        assert row.start > 0  # absolute epoch microseconds, not -1 (non-timestamp)

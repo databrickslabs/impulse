@@ -1,0 +1,39 @@
+# Bundle that downloads the Renumics fleet telemetry dataset from Hugging Face and ingests it
+# into the Impulse silver tables read by the performance benchmark (see ../../README.md).
+bundle:
+  name: impulse-benchmark-data
+
+sync:
+  include:
+    - modules/**
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Catalog of the raw volume and the silver tables.
+    default: impulse_testing_catalog
+  schema:
+    description: Schema of the raw volume, the silver tables and the ingest status table.
+    default: impulse_renumics
+  raw_volume:
+    description: UC volume holding the raw Hugging Face download.
+    default: raw_data
+  source_path:
+    description: Dataset root containing fact_signal_data/ and dim_*/ (the HF repo's assets/ folder).
+    default: /Volumes/${var.catalog}/${var.schema}/${var.raw_volume}/synthetic-vehicle-fleet-telemetry/assets
+  max_containers_per_run:
+    description: >
+      Trips (containers) ingested per job run. One trip is ~0.5 GB of source Parquet
+      (~50M samples); 100 trips = the full 52 GB dataset.
+    default: "20"
+  channels_format:
+    description: channels storage format, RLE ([tstart, tend) intervals) or RAW (samples).
+    default: RLE
+
+targets:
+  # Workspace host and auth come from the environment.
+  data:
+    default: true
+    mode: development

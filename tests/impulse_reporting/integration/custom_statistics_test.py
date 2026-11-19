@@ -100,7 +100,7 @@ def test_custom_statistics_report(spark):
     )
     page.add_aggregation(stats)
 
-    my_report.determine_report()
+    my_report.run(persist_results=False)
 
     assert "STATS_AGGREGATOR" in my_report.aggregation_dfs
     stats_df = my_report.aggregation_dfs["STATS_AGGREGATOR"]["changed"]
@@ -198,7 +198,7 @@ def test_multi_output_custom_statistics_report(spark):
     )
     page.add_aggregation(stats)
 
-    my_report.determine_report()
+    my_report.run(persist_results=False)
 
     stats_df = my_report.aggregation_dfs["STATS_AGGREGATOR"]["changed"]
     rows = stats_df.collect()

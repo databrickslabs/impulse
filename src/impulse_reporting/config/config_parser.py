@@ -1,11 +1,17 @@
+import os
 import re
+import warnings
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Annotated
+from typing import Annotated, Any, Self
 
-from pydantic import AfterValidator, BaseModel, field_validator, model_validator
+import pydantic
+from pydantic import AfterValidator, BaseModel, field_validator, model_validator, ConfigDict
 
 from impulse_query_engine.analyze.query.solvers.solver_config import RawEncoder, SolverConfig
+from impulse_query_engine.measurement_db import AbstractMeasurementDB, MeasurementDBConfig
+from impulse_query_engine.measurement_db_registry import resolve_measurement_db
+from impulse_reporting.channels.calculated_channel_kpis import DEFAULT_KPIS, KPI_BUILDERS
 
 
 def is_valid_table_name(table_name: str) -> str:
@@ -127,6 +133,10 @@ class Source(BaseModel):
         Full Unity Catalog path to the channel metrics table.
     channels_uri : str
         Full Unity Catalog path to the channels data table.
+    poi_channels_uri : str, optional
+        Full Unity Catalog path to the Points-in-Time (POI) channel data table.
+        Required only when the report selects POI channels via ``poi_channel()``;
+        omit it for sample-only data models.
     channel_mapping_table : str, optional
         Full Unity Catalog path to the channel mapping table. Required when using
         ``channel_with_alias()`` for logical alias resolution.
@@ -147,6 +157,7 @@ class Source(BaseModel):
     container_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channel_metrics_table: Annotated[str, AfterValidator(is_valid_table_name)]
     channels_uri: Annotated[str, AfterValidator(is_valid_table_name)]
+    poi_channels_uri: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
     channel_mapping_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
     unit_conversion_table: Annotated[str, AfterValidator(is_valid_table_name)] | None = None
 
@@ -163,6 +174,11 @@ class UnitySink(BaseModel):
         Target schema name for output tables.
     table_prefix : str
         Prefix to use for generated output table names.
+    cleanup_temp_tables : bool
+        When ``True``, the intermediate ``__impulse_temp_*`` tables written to this
+        sink during batch solving are dropped after ``Report.run()`` persists
+        successfully. Defaults to ``False`` (temp tables are retained for inspection
+        and only cleared at the start of the next report run).
 
     Notes
     -----
@@ -175,6 +191,7 @@ class UnitySink(BaseModel):
         str,
         AfterValidator(lambda v: v if v == "" else is_valid_unity_entity_name(v)),
     ]
+    cleanup_temp_tables: bool = False
 
 
 class Comparator(str, Enum):
@@ -335,6 +352,13 @@ class ContainerFilters(BaseModel):
     metric_filters: list[list[MetricFilter]] = []
 
 
+_BATCH_SIZE_DEPRECATION_MSG = (
+    "query_engine.batch_size is deprecated; use max_channels_per_batch instead. "
+    "batch_size will be removed in a future release."
+)
+_PYDANTIC_DIR = os.path.dirname(pydantic.__file__)
+
+
 class QueryEngine(BaseModel):
     """
     Configuration for the query engine solver.
@@ -366,6 +390,11 @@ class QueryEngine(BaseModel):
 
         When omitted, all default column names are used and no
         project/toolbox filtering is applied.
+    measurement_db : str, default="MeasurementDB"
+        Registered name of the MeasurementDB implementation to use.
+    measurement_db_config : dict, optional
+        Keyword arguments for that implementation's config class,
+        merged with the ``source`` tables.
 
     Notes
     -----
@@ -381,12 +410,87 @@ class QueryEngine(BaseModel):
     - RAW channel data must contain 'container_id', 'channel_id', 'timestamp', 'value' columns
     """
 
+    # added to prevent misspelled args being silently accepted, which could have side effects
+    # (default measurement db silently used)
+    model_config = ConfigDict(extra="forbid")
+
     solver: Solvers = Solvers.DEFAULT_SOLVER
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
     raw_encoder: RawEncoder | None = None
     solver_config: SolverConfig | None = None
-    batch_size: int = 500
+    measurement_db: str = "MeasurementDB"
+    measurement_db_config: dict[str, Any] | None = None
+    max_channels_per_batch: int = 500
+    max_containers_per_batch: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_deprecated_batch_size(cls, data):
+        """Accept the deprecated ``batch_size`` alias for ``max_channels_per_batch``.
+
+        ``batch_size`` was renamed to ``max_channels_per_batch`` (it caps the number
+        of distinct ``TimeSeriesSelector`` selections per solve batch, not a row count).
+        The old name keeps working for now but warns; setting both is an error.
+        """
+        if not isinstance(data, dict):
+            return data
+        if "batch_size" in data:
+            if "max_channels_per_batch" in data:
+                raise ValueError(
+                    "Set only one of query_engine.max_channels_per_batch or the deprecated "
+                    "alias query_engine.batch_size, not both."
+                )
+            # FutureWarning, not DeprecationWarning: the latter is hidden by default when
+            # raised from library code, so notebook/job users would never see it.
+            warnings.warn(
+                _BATCH_SIZE_DEPRECATION_MSG,
+                FutureWarning,
+                # stacklevel=1 (the warn call itself): inside a pydantic model_validator the
+                # frames above are pydantic internals, so a higher level would mislead.
+                stacklevel=1,
+            )
+            # Copy so the caller's config dict is left untouched (it may be reused).
+            data = dict(data)
+            data["max_channels_per_batch"] = data.pop("batch_size")
+        return data
+
+    @property
+    def batch_size(self) -> int:
+        """Deprecated alias for :attr:`max_channels_per_batch`."""
+        warnings.warn(_BATCH_SIZE_DEPRECATION_MSG, FutureWarning, stacklevel=2)
+        return self.max_channels_per_batch
+
+    @batch_size.setter
+    def batch_size(self, value: int) -> None:
+        # Skip pydantic's __setattr__ frames so the warning points at the caller.
+        warnings.warn(
+            _BATCH_SIZE_DEPRECATION_MSG,
+            FutureWarning,
+            stacklevel=2,
+            skip_file_prefixes=(_PYDANTIC_DIR,),
+        )
+        # Assignment skips field validators (no validate_assignment), so check explicitly.
+        self.max_channels_per_batch = self._validate_max_channels_per_batch(value)
+
+    @field_validator("max_channels_per_batch", mode="after")
+    @classmethod
+    def _validate_max_channels_per_batch(cls, value: int) -> int:
+        """Max distinct ``TimeSeriesSelector`` selections (by ``selector_id``) per solve batch."""
+        if value < 1:
+            raise ValueError("max_channels_per_batch must be >= 1.")
+        return value
+
+    @field_validator("max_containers_per_batch", mode="after")
+    @classmethod
+    def _validate_max_containers_per_batch(cls, value: int | None) -> int | None:
+        """Max containers per solve chunk (memory bound); in incremental mode it also caps
+        the per-run drain batch. ``None`` disables chunking."""
+        if value is not None and value < 1:
+            raise ValueError(
+                "max_containers_per_batch must be >= 1 when set (None disables the cap)."
+            )
+        return value
 
     @model_validator(mode="after")
     def validate_drop_implausible_data_requires_raw(self):
@@ -398,8 +502,46 @@ class QueryEngine(BaseModel):
         if self.drop_implausible_data and self.data_type is not DataType.RAW:
             raise ValueError(
                 "drop_implausible_data=True requires data_type=RAW. "
-                "The implausible-data filter is only applied during the RAW -> RLE "
+                "The implausible-data filter is only applied during the RAW -> interval "
                 "conversion path; RLE input is passed through unchanged."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def reject_channels_filter_on_is_plausible_in_raw(self):
+        """Reject an is_plausible channels filter in RAW mode (delegates to SolverConfig).
+
+        The shared invariant lives on ``SolverConfig`` so direct query-engine use
+        (``DefaultSolver``) enforces the same rule; here we surface it at config-parse time.
+        """
+        if self.solver_config is not None:
+            self.solver_config.reject_implausible_channels_filter_in_raw(
+                is_raw=self.data_type is DataType.RAW
+            )
+        return self
+
+    @model_validator(mode="after")
+    def warn_channels_filters_bridge_in_raw(self):
+        """Warn (not reject) on any non-plausibility channels filter in RAW mode.
+
+        Such filters run before raw encoding and bridge intervals across dropped
+        samples. That is fine for whole-channel scoping but corrupts per-sample cleaning,
+        and the two cannot be told apart statically, so we warn. ``is_plausible`` is
+        hard-rejected above as the one unambiguously per-sample case.
+        """
+        if self.data_type is not DataType.RAW or self.solver_config is None:
+            return self
+        plausibility_col = self.solver_config.is_plausible_col
+        other = [c for c in self.solver_config.channels.filters if c != plausibility_col]
+        if other:
+            warnings.warn(
+                f"channels.filters {other} in RAW mode run before raw encoding and bridge "
+                "intervals across dropped samples. Use them only for whole-channel scoping, "
+                "not per-sample cleaning. To drop implausible points with correct interval "
+                "boundaries, use drop_implausible_data=True instead.",
+                # stacklevel=1 (the warn call itself): inside a pydantic model_validator the
+                # frames above are pydantic internals, so a higher level would mislead.
+                stacklevel=1,
             )
         return self
 
@@ -420,7 +562,9 @@ class IncrementalConfig(BaseModel):
     enabled : bool, default=False
         Whether incremental processing is enabled.
     silver_last_modified_column : str, default="timestamp"
-        Column name in the silver layer used for freshness comparison.
+        Column name in the silver layer used for freshness comparison. This is
+        the name after ``column_name_mapping`` is applied (the physical name
+        unless you remap that column).
     gold_last_modified_column : str, default="last_modified"
         Column name in the gold layer used for freshness comparison.
     Notes
@@ -434,6 +578,108 @@ class IncrementalConfig(BaseModel):
     drop_implausible_data: bool = False
     silver_last_modified_column: str = "timestamp"
     gold_last_modified_column: str = "_created_at"
+
+
+class CalculatedChannels(BaseModel):
+    """
+    Configuration for calculated-channel outputs.
+
+    Attributes
+    ----------
+    emit_channel_metrics : bool, default=False
+        When True, also emit a ``calculated_channel_metrics`` gold table (silver
+        ``channel_metrics`` shape) alongside the calculated-channel fact table, so
+        the fact + metrics pair can serve as an Impulse silver source.
+    attribute_columns : list of str, default=[]
+        Calculated-channel attribute keys to surface as columns on the metrics
+        table (e.g. ``["unit"]``). Empty (the default) → no attribute columns.
+        Identity keys are always surfaced dynamically and win over an
+        attribute key of the same name.
+    kpis : list of str, default=["duration", "min", "max", "mean"]
+        KPIs computed on the metrics table, one column per name. Each must be a
+        registered KPI (see ``calculated_channel_kpis.KPI_BUILDERS``); an unknown
+        name is rejected at validation. Duplicates are removed (order preserved).
+    """
+
+    emit_channel_metrics: bool = False
+    attribute_columns: list[str] = []
+    kpis: list[str] = list(DEFAULT_KPIS)
+
+    @field_validator("attribute_columns", mode="after")
+    @classmethod
+    def _normalize_attribute_columns(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for name in value:
+            is_valid_unity_entity_name(name)
+            if name not in seen:
+                seen.add(name)
+                normalized.append(name)
+        return normalized
+
+    @field_validator("kpis", mode="after")
+    @classmethod
+    def _normalize_kpis(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for name in value:
+            if name not in KPI_BUILDERS:
+                valid = ", ".join(sorted(KPI_BUILDERS))
+                raise ValueError(f"Unknown calculated-channel KPI: {name}. Valid KPIs: {valid}.")
+            if name not in seen:
+                seen.add(name)
+                normalized.append(name)
+        return normalized
+
+
+class FullRecalculation(BaseModel):
+    """
+    Scoped full-recalculation request, by entity name.
+
+    Lists aggregations / events / calculated channels — identified by their
+    human-readable ``name`` — that should be fully recalculated on the next run,
+    regardless of whether their definition hash changed.
+
+    Only meaningful in incremental mode: listed entities recompute over **all**
+    containers and fully replace their gold rows (the same treatment a
+    definition-hash change already receives), while every other entity stays
+    incremental. In full mode this is a no-op, since everything recomputes over all
+    containers anyway.
+
+    Names that do not match any registered entity are rejected at the start of
+    ``Report.run`` (fail fast on typos / stale names).
+
+    Attributes
+    ----------
+    aggregations : list of str, default=[]
+        Names of aggregations to fully recalculate.
+    events : list of str, default=[]
+        Names of events to fully recalculate.
+    calculated_channels : list of str, default=[]
+        Names of calculated channels to fully recalculate.
+    """
+
+    aggregations: list[str] = []
+    events: list[str] = []
+    calculated_channels: list[str] = []
+
+
+def build_measurement_db_config(
+    source_dict: dict[str, Any], query_engine: QueryEngine
+) -> tuple[type[AbstractMeasurementDB], MeasurementDBConfig]:
+    """Resolve the selected MeasurementDB implementation and build its config class from
+    ``measurement_db_config`` merged with the ``source`` tables in *source_dict*.
+
+    Raises ``KeyError`` for an unregistered ``measurement_db`` and ``TypeError`` for a missing,
+    unknown or duplicated config key.
+    """
+    registration = resolve_measurement_db(query_engine.measurement_db)
+    db_config = registration.config_cls(
+        **source_dict,
+        **(query_engine.measurement_db_config or {}),
+        table_locations="unity_catalog",
+    )
+    return registration.db_cls, db_config
 
 
 class ImpulseConfig(BaseModel):
@@ -452,6 +698,13 @@ class ImpulseConfig(BaseModel):
          Optional query engine configuration. Defaults to Solvers.DEFAULT_SOLVER.
      incremental : IncrementalConfig, optional
          Optional incremental processing configuration. Defaults to IncrementalConfig().
+     calculated_channels : CalculatedChannels, optional
+         Optional calculated-channel output configuration (e.g. opting in to the
+         ``calculated_channel_metrics`` table). Defaults to CalculatedChannels().
+     full_recalculation : FullRecalculation, optional
+         Optional scoped full-recalculation request naming aggregations / events /
+         calculated channels to fully recompute on the next incremental run
+         regardless of definition-hash changes. Defaults to None (no override).
      measurement_dimensions : list of str, optional
          Column names to surface from ``container_metrics`` into the
          gold-layer ``measurement_dimension`` table. Names are matched
@@ -526,6 +779,8 @@ class ImpulseConfig(BaseModel):
     container_filters: ContainerFilters | None = None
     query_engine: QueryEngine = QueryEngine(solver=Solvers.DEFAULT_SOLVER)
     incremental: IncrementalConfig | None = None
+    calculated_channels: CalculatedChannels = CalculatedChannels()
+    full_recalculation: FullRecalculation | None = None
 
     measurement_dimensions: list[str] = list(DEFAULT_MEASUREMENT_DIMENSIONS)
 
@@ -540,3 +795,14 @@ class ImpulseConfig(BaseModel):
                 seen.add(name)
                 normalized.append(name)
         return normalized
+
+    @model_validator(mode="after")
+    def _validate_measurement_db(self) -> Self:
+        """Build the selected MeasurementDB implementation's config class once, so an unregistered
+        ``measurement_db`` or a missing, unknown or duplicated key fails when the config is parsed.
+        """
+        try:
+            build_measurement_db_config(dict(self.source), self.query_engine)
+        except (KeyError, TypeError) as exc:
+            raise ValueError(f"query_engine.measurement_db: {exc.args[0]}") from exc
+        return self

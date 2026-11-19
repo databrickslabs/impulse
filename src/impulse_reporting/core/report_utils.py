@@ -6,6 +6,7 @@ and reduce its size.
 
 from __future__ import annotations
 
+import math
 import uuid
 from functools import reduce
 from typing import TYPE_CHECKING
@@ -23,27 +24,34 @@ if TYPE_CHECKING:
     )
     from impulse_query_engine.analyze.query.query_builder import QueryBuilder
     from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+    from impulse_reporting.config.config_parser import ImpulseConfig
     from impulse_reporting.incremental.definition_hash_comparator import (
         DefinitionHashComparator,
     )
-    from impulse_reporting.persist.report_storage import Sink, WriterFactory
+    from impulse_reporting.persist.report_storage import (
+        ReportEntityTransformer,
+        Sink,
+        WriterFactory,
+    )
 
 
 def build_batches(
     expressions: list[TimeSeriesExpression],
-    batch_size: int,
+    max_channels_per_batch: int,
 ) -> list[list[TimeSeriesExpression]]:
     """Selector-aware best-fit-decreasing bin packing.
 
-    Groups expressions that share ``TimeSeriesSelector`` instances to
+    Groups expressions that share selectors (same ``selector_id``) to
     maximise data locality and minimise cross-batch selector duplication.
 
     Parameters
     ----------
     expressions : list[TimeSeriesExpression]
         Expressions to partition into batches.
-    batch_size : int
-        Maximum number of unique ``TimeSeriesSelector`` instances per batch.
+    max_channels_per_batch : int
+        Maximum number of distinct selectors per batch, deduplicated by the
+        content-based ``selector_id`` (selectors built from the same tags count
+        once). A single expression that alone exceeds the cap gets its own batch.
 
     Returns
     -------
@@ -66,7 +74,7 @@ def build_batches(
     all_selector_ids: set[int] = set()
     for s in selector_ids.values():
         all_selector_ids |= s
-    if len(all_selector_ids) <= batch_size:
+    if len(all_selector_ids) <= max_channels_per_batch:
         return [list(expressions)]
 
     # --- Phase 3: Best-Fit Decreasing (BFD) bin-packing.
@@ -74,9 +82,9 @@ def build_batches(
     # Sort expressions by the number of selectors they use (heaviest first).
     # Then for each expression find the existing batch where it causes the
     # smallest growth of the selector set (= highest overlap) without
-    # exceeding batch_size.  If no batch can accommodate it, open a new one.
+    # exceeding max_channels_per_batch.  If no batch can accommodate it, open a new one.
     #
-    # Why BFD?  Expressions that share the same TimeSeriesSelector objects
+    # Why BFD?  Expressions that share the same selectors (same selector_id)
     # (e.g. same channel/signal) are naturally packed together, maximising
     # data locality during the Spark solve step and minimising the number
     # of redundant selector reads across batches.
@@ -93,7 +101,7 @@ def build_batches(
         # Find the batch with the most selector overlap that still fits
         for bi in range(len(final_batches)):
             combined = batch_selector_ids[bi] | expr_sels
-            if len(combined) <= batch_size:
+            if len(combined) <= max_channels_per_batch:
                 overlap = len(batch_selector_ids[bi] & expr_sels)
                 if overlap > best_overlap:
                     best_overlap = overlap
@@ -118,6 +126,7 @@ def split_by_hash_change(
     spark: SparkSession,
     hash_comparator: DefinitionHashComparator,
     kind: str = "event",
+    force_recalc_names: set[str] | None = None,
 ) -> tuple[dict[str, list], dict[str, list], dict[str, list[int]]]:
     """Split items into changed/unchanged using definition-hash comparison.
 
@@ -136,6 +145,11 @@ def split_by_hash_change(
     kind : str
         One of ``"event"``, ``"aggregation"``, or ``"channel"`` — selects which
         comparator method to use.
+    force_recalc_names : set[str] | None
+        Names (``item.get_name()``) of items to force into the "changed" bucket
+        regardless of their definition hash. Used for scoped full recalculation:
+        a forced item recomputes over all containers and fully replaces its gold
+        rows, exactly as a hash change would. ``None``/empty is a no-op.
 
     Returns
     -------
@@ -150,6 +164,8 @@ def split_by_hash_change(
     if kind not in comparators:
         raise ValueError(f"Unsupported kind '{kind}'; expected one of {sorted(comparators)}.")
     compare = comparators[kind]
+
+    forced_names = force_recalc_names or set()
 
     changed_by_type: dict[str, list] = {}
     unchanged_by_type: dict[str, list] = {}
@@ -168,6 +184,16 @@ def split_by_hash_change(
         dim_table = sink.config.get_output_uri_dimension_table(type_enum[type_name])
         changed, unchanged = compare(items, dim_table)
 
+        # Scoped full recalc: promote hash-unchanged items whose name is in scope
+        # into the changed bucket so they recompute over all containers.
+        if forced_names and unchanged:
+            forced, still_unchanged = [], []
+            for item in unchanged:
+                (forced if item.get_name() in forced_names else still_unchanged).append(item)
+            if forced:
+                changed = changed + forced
+                unchanged = still_unchanged
+
         if changed:
             changed_by_type[type_name] = changed
             changed_ids[type_name] = [item.get_id() for item in changed]
@@ -175,6 +201,78 @@ def split_by_hash_change(
             unchanged_by_type[type_name] = unchanged
 
     return changed_by_type, unchanged_by_type, changed_ids
+
+
+def full_recalc_names(config: ImpulseConfig, kind: str) -> set[str]:
+    """Names configured for scoped full recalculation for *kind*.
+
+    Parameters
+    ----------
+    config : ImpulseConfig
+        The report config; its optional ``full_recalculation`` field holds the
+        per-kind name lists.
+    kind : str
+        The ``FullRecalculation`` field to read — one of ``"events"``,
+        ``"aggregations"``, or ``"calculated_channels"``.
+
+    Returns
+    -------
+    set[str]
+        The configured names, or an empty set when no ``full_recalculation``
+        config is present.
+    """
+    cfg = config.full_recalculation
+    if cfg is None:
+        return set()
+    return set(getattr(cfg, kind))
+
+
+def validate_full_recalculation_scope(
+    config: ImpulseConfig,
+    registered_entities: dict[str, list],
+) -> None:
+    """Reject full-recalculation names that match no registered entity.
+
+    Fails fast so typos or stale names surface immediately rather than silently
+    recomputing nothing. A no-op when no ``full_recalculation`` config is present.
+
+    Kind-agnostic: the caller owns the set of kinds and their entity lists, so the
+    valid kinds live in one place (the call site) rather than being hardcoded here.
+
+    Parameters
+    ----------
+    config : ImpulseConfig
+        The report config carrying the optional ``full_recalculation`` scope.
+    registered_entities : dict[str, list]
+        ``{kind: [entities]}`` registered on the report; each entity must expose
+        ``get_name()``. The keys are the kinds validated and must be
+        ``FullRecalculation`` field names (``"events"``, ``"aggregations"``,
+        ``"calculated_channels"``), so :func:`full_recalc_names` can read them.
+
+    Raises
+    ------
+    ValueError
+        If any configured name does not match a registered entity of its kind.
+    """
+    if config.full_recalculation is None:
+        return
+
+    problems: list[str] = []
+    for kind, entities in registered_entities.items():
+        requested = full_recalc_names(config, kind)
+        registered = {entity.get_name() for entity in entities}
+        unknown = sorted(requested - registered)
+        if unknown:
+            valid = ", ".join(sorted(registered)) or "(none registered)"
+            problems.append(
+                f"{kind}: {unknown} not registered on the report. Valid names: {valid}."
+            )
+
+    if problems:
+        raise ValueError(
+            "full_recalculation names must match registered entities:\n"
+            + "\n".join(f"  - {msg}" for msg in problems)
+        )
 
 
 def collect_solvable_expressions(
@@ -218,12 +316,12 @@ def dispatch_events(
     query: QueryBuilder,
     solver: QuerySolver,
     pre_filtered_containers_df: DataFrame | None,
-    container_event_cls: type,
+    boundary_event_cls: type,
 ) -> dict:
     """Dispatch ``determine_events`` calls per type.
 
-    Solvable event types receive ``solved_df``; ``ContainerEvent`` receives
-    ``query``/``solver``.
+    Solvable event types receive ``solved_df``; container-boundary events
+    (``ContainerEvent``, ``TimeWindowEvent``) receive ``query``/``solver``.
 
     Parameters
     ----------
@@ -234,8 +332,9 @@ def dispatch_events(
     query : QueryBuilder
     solver : QuerySolver
     pre_filtered_containers_df : DataFrame | None
-    container_event_cls : type
-        The ``ContainerEvent`` class.
+    boundary_event_cls : type
+        Base class of the container-boundary events (``ContainerBoundaryEvent``);
+        subclasses are resolved via the filter pipeline instead of ``solved_df``.
 
     Returns
     -------
@@ -249,8 +348,8 @@ def dispatch_events(
             continue
         cls = type_enum[type_name].value
 
-        if issubclass(cls, container_event_cls):
-            # ContainerEvent uses filter pipeline, not solved_df
+        if issubclass(cls, boundary_event_cls):
+            # Container-boundary events use the filter pipeline, not solved_df
             event_dfs[type_name] = cls.determine_events(
                 spark,
                 events,
@@ -308,25 +407,23 @@ def dispatch_calculated_channels(
     spark: SparkSession,
     channels_by_type: dict[str, list],
     type_enum,
-    query: QueryBuilder,
-    solver: QuerySolver,
-    pre_filtered_containers_df: DataFrame | None,
+    solved_df: DataFrame | None,
 ) -> dict:
     """Dispatch ``determine_calculated_channels`` calls per type.
 
-    Unlike events/aggregations, calculated channels never ride the wide
-    ``solved_df`` — each type drives its own narrow solve via
-    ``query.solve_calculated_channels`` (the ``ContainerEvent`` pattern), so this
-    always passes ``spark``/``query``/``solver``/``pre_filtered_containers_df``.
+    Mirrors :func:`dispatch_aggregations`: the batched narrow solve happens in the
+    ``Report`` (see ``Report._solve_calculated_channels_batched``), producing a
+    single ``solved_df`` of narrow calculated-channel rows; each type then shapes
+    its slice of that already-solved DataFrame.
 
     Parameters
     ----------
     spark : SparkSession
     channels_by_type : dict[str, list]
     type_enum : ChannelType enum
-    query : QueryBuilder
-    solver : QuerySolver
-    pre_filtered_containers_df : DataFrame | None
+    solved_df : DataFrame | None
+        The batched narrow solve output (``container_id, channel_id, tstart, tend,
+        value, identity``); ``None`` when there were no channels to solve.
 
     Returns
     -------
@@ -340,14 +437,131 @@ def dispatch_calculated_channels(
             continue
         cls = type_enum[type_name].value
         channel_dfs[type_name] = cls.determine_calculated_channels(
-            spark,
-            channels,
-            query=query,
-            solver=solver,
-            pre_filtered_containers_df=pre_filtered_containers_df,
+            spark, channels, solved_df=solved_df
         )
 
     return channel_dfs
+
+
+def dispatch_calculated_channel_metrics(
+    spark: SparkSession,
+    channels_by_type: dict[str, list],
+    fact_dfs_by_type: dict[str, DataFrame | None],
+    type_enum,
+    *,
+    attribute_columns: list[str],
+    kpis: list[str],
+) -> dict:
+    """Dispatch ``determine_channel_metrics`` calls per type.
+
+    Post-processing counterpart to :func:`dispatch_calculated_channels`: instead
+    of solving, it derives the silver-shaped ``channel_metrics`` DataFrame from the
+    already-solved fact df for each type (``fact_dfs_by_type`` as returned by
+    :func:`dispatch_calculated_channels`).
+
+    Pass the **full** per-type channel list (not a changed/unchanged split): the
+    metrics aggregation is fact-driven (a left join from the fact-derived
+    aggregate), so channels absent from ``fact_df`` are dropped, while the identity
+    columns are the union across all channels — keeping the changed and unchanged
+    metrics dfs on an identical schema for the downstream ``unionByName`` MERGE.
+
+    Parameters
+    ----------
+    spark : SparkSession
+    channels_by_type : dict[str, list]
+        Full per-type channel list.
+    fact_dfs_by_type : dict[str, DataFrame | None]
+        Per-type calculated-channel fact df for this bucket (changed or unchanged).
+    type_enum : ChannelType enum
+    attribute_columns : list[str]
+        Attribute keys to surface as columns.
+    kpis : list[str]
+        KPI names to compute.
+
+    Returns
+    -------
+    dict
+        ``metrics_dfs`` keyed by type name (only types with a fact df).
+    """
+    metrics_dfs: dict = {}
+
+    for type_name, channels in channels_by_type.items():
+        if not channels:
+            continue
+        fact_df = fact_dfs_by_type.get(type_name)
+        if fact_df is None:
+            continue
+        cls = type_enum[type_name].value
+        metrics_dfs[type_name] = cls.determine_channel_metrics(
+            spark,
+            channels,
+            fact_df,
+            attribute_columns=attribute_columns,
+            kpis=kpis,
+        )
+
+    return metrics_dfs
+
+
+def _materialize_temp(df: DataFrame, run_id: str, idx, has_sink: bool, catalog, schema) -> str:
+    """Persist an intermediate ``df`` as a ``__impulse_temp_*`` Delta table (or temp view).
+
+    Returns the name to ``spark.table(...)`` it back with. Delta when a sink is
+    configured, a Spark temp view otherwise; the shared ``__impulse_temp_`` prefix means
+    :func:`cleanup_temp_tables` covers both.
+    """
+    name = f"__impulse_temp_{run_id}_{idx}"
+    if has_sink:
+        fq_name = f"`{catalog}`.`{schema}`.`{name}`"
+        df.write.format("delta").mode("overwrite").saveAsTable(fq_name)
+        return fq_name
+    df.createOrReplaceTempView(name)
+    return name
+
+
+def _container_chunks(effective_df, max_n, cid_col):
+    """Yield ``effective_df`` partitioned into chunks of ~``max_n`` containers.
+
+    Buckets containers by ``pmod(hash(container_id), num_chunks)`` (with ``num_chunks``
+    sized so each bucket holds ~``max_n``) and yields ``effective_df`` filtered per bucket.
+    Only a ``count`` reaches the driver, never the id list, so a multi-million-container
+    full or changed-definition solve stays driver-bounded. Buckets are disjoint and cover
+    every container, so the union is the full population; the deterministic hash keeps
+    membership reproducible and works for any ``container_id`` type. Chunk sizes are
+    approximate — the cap is a per-solve memory heuristic, not an exact bound.
+    """
+    num_containers = effective_df.select(cid_col).distinct().count()
+    if num_containers == 0:
+        return
+    num_chunks = math.ceil(num_containers / max_n)
+    if num_chunks == 1:
+        yield effective_df
+        return
+    bucket = F.pmod(F.hash(F.col(cid_col)), F.lit(num_chunks))
+    for i in range(num_chunks):
+        yield effective_df.where(bucket == i)
+
+
+def _combine_container_chunks(
+    spark: SparkSession,
+    parts: list[DataFrame],
+    has_sink: bool,
+    catalog: str,
+    schema: str,
+) -> DataFrame:
+    """Combine per-chunk solve results (disjoint containers, so a row append).
+
+    With a sink, append each chunk into one ``__impulse_temp_*`` Delta table and read it
+    back once, avoiding a deep ``unionByName`` tree and materializing one chunk at a time.
+    Without a sink, ``unionByName`` the chunks directly
+    """
+    if not has_sink:
+        return reduce(lambda a, b: a.unionByName(b), parts)
+    run_id = uuid.uuid4().hex[:8]
+    fq_name = f"`{catalog}`.`{schema}`.`__impulse_temp_{run_id}_chunks`"
+    for idx, part in enumerate(parts):
+        part.write.format("delta").mode("overwrite" if idx == 0 else "append").saveAsTable(fq_name)
+    return spark.table(fq_name)
 
 
 def solve_expressions_batched(
@@ -355,20 +569,21 @@ def solve_expressions_batched(
     expressions: list[TimeSeriesExpression],
     query: QueryBuilder,
     solver: QuerySolver,
-    batch_size: int,
+    max_channels_per_batch: int,
     *,
     has_sink: bool = False,
     catalog: str = None,
     schema: str = None,
     pre_filtered_containers_df: DataFrame = None,
+    max_containers_per_batch: int = None,
 ) -> DataFrame | None:
-    """Solve all expressions in configurable batches and return a joined wide DataFrame.
+    """Solve ``expressions`` in selector batches; return a wide DataFrame joined on ``container_id``.
 
-    Each batch is solved independently via ``query.select(*batch_exprs).solve(...)``.
-    When a sink is configured the intermediate result is persisted as a temporary
-    Delta table (``__impulse_temp_<run_id>_<batch_idx>``); otherwise a Spark temp view
-    is used.  After all batches are solved the per-batch DataFrames are joined on
-    ``container_id`` with a full outer join.
+    Each batch is solved via ``query.select(*batch).solve(...)``, materialized to a temp Delta
+    table/view, then combined with a full-outer join. When both ``max_containers_per_batch`` and
+    ``pre_filtered_containers_df`` are given, that set is chunked into ~that many containers per
+    solve and the chunks are row-appended (disjoint containers), bounding memory with a result
+    identical to an unchunked solve. With no cap or no pre-filter, a single pass runs.
 
     Parameters
     ----------
@@ -380,8 +595,9 @@ def solve_expressions_batched(
         Query builder instance.
     solver : QuerySolver
         Query solver instance.
-    batch_size : int
-        Maximum number of unique selectors per batch (passed to ``build_batches``).
+    max_channels_per_batch : int
+        Maximum number of distinct selectors (by ``selector_id``) per batch (passed to
+        ``build_batches``).
     has_sink : bool
         Whether a Unity Catalog sink is configured.
     catalog : str, optional
@@ -390,6 +606,8 @@ def solve_expressions_batched(
         Unity Catalog schema name (required when *has_sink* is ``True``).
     pre_filtered_containers_df : DataFrame, optional
         Pre-filtered containers for incremental processing.
+    max_containers_per_batch : int, optional
+        Max containers per solve chunk; ``None`` disables container chunking.
 
     Returns
     -------
@@ -400,36 +618,154 @@ def solve_expressions_batched(
     if not expressions:
         return None
 
-    run_id = uuid.uuid4().hex[:8]
-    batches = build_batches(expressions, batch_size)
+    cid_col = solver.config.container_id_col
 
-    batch_names: list[str] = []
-    for batch_idx, batch_exprs in enumerate(batches):
-        batch_query = query.select(*batch_exprs)
-        batch_df = batch_query.solve(
-            spark=spark,
-            solver=solver,
-            pre_filtered_containers_df=pre_filtered_containers_df,
+    def _solve_selector_batches(pre_filter: DataFrame | None) -> DataFrame:
+        run_id = uuid.uuid4().hex[:8]
+        batch_names = [
+            _materialize_temp(
+                query.select(*batch_exprs).solve(
+                    spark=spark, solver=solver, pre_filtered_containers_df=pre_filter
+                ),
+                run_id,
+                batch_idx,
+                has_sink,
+                catalog,
+                schema,
+            )
+            for batch_idx, batch_exprs in enumerate(
+                build_batches(expressions, max_channels_per_batch)
+            )
+        ]
+        dfs = [spark.table(name) for name in batch_names]
+        result = dfs[0]
+        for df in dfs[1:]:
+            result = result.join(df, on=cid_col, how="full_outer")
+        return result
+
+    # Chunking only applies to an explicit, detection-derived container set (which carries
+    # the internal ``container_id``). With no cap, or with no pre-filter (e.g. a genuine
+    # full solve, or sinkless mode where detection yields nothing), solve unchunked.
+    if max_containers_per_batch is None or pre_filtered_containers_df is None:
+        return _solve_selector_batches(pre_filtered_containers_df)
+
+    parts = [
+        _solve_selector_batches(chunk)
+        for chunk in _container_chunks(
+            pre_filtered_containers_df, max_containers_per_batch, cid_col
         )
+    ]
+    # No chunks => empty container set; fall back to a single solve so the result matches
+    # the non-chunked path (an empty-rows DataFrame, not None).
+    if not parts:
+        return _solve_selector_batches(pre_filtered_containers_df)
+    # One chunk (e.g. incremental unchanged path, population <= cap): return it directly,
+    # no extra Delta round-trip.
+    if len(parts) == 1:
+        return parts[0]
+    return _combine_container_chunks(spark, parts, has_sink, catalog, schema)
 
-        if has_sink:
-            table_name = f"__impulse_temp_{run_id}_{batch_idx}"
-            fq_name = f"`{catalog}`.`{schema}`.`{table_name}`"
-            batch_df.write.format("delta").mode("overwrite").saveAsTable(fq_name)
-            batch_names.append(fq_name)
-        else:
-            view_name = f"__impulse_temp_{run_id}_{batch_idx}"
-            batch_df.createOrReplaceTempView(view_name)
-            batch_names.append(view_name)
+
+def solve_calculated_channels_batched(
+    spark: SparkSession,
+    qe_channels: list,
+    query: QueryBuilder,
+    solver: QuerySolver,
+    max_channels_per_batch: int,
+    *,
+    has_sink: bool = False,
+    catalog: str = None,
+    schema: str = None,
+    pre_filtered_containers_df: DataFrame = None,
+    max_containers_per_batch: int = None,
+) -> DataFrame | None:
+    """Solve calculated channels in selector batches; return the ``unionByName``-appended rows.
+
+    Narrow, row-append counterpart to :func:`solve_expressions_batched`: each batch is solved via
+    ``query.select(*batch).solve_calculated_channels(...)``, materialized to a temp Delta
+    table/view, then combined with ``unionByName`` (many rows per container). When both
+    ``max_containers_per_batch`` and ``pre_filtered_containers_df`` are given, that set is chunked
+    into ~that many containers per solve and the chunks are appended too, with a result identical
+    to an unchunked solve. With no cap or no pre-filter, a single pass runs.
+
+    Parameters
+    ----------
+    spark : SparkSession
+        Active Spark session.
+    qe_channels : list
+        Query-engine ``CalculatedChannel`` objects (each a ``TimeSeriesExpression``
+        exposing ``get_selectors()``), i.e. ``[c.expression for c in channels]``.
+    query : QueryBuilder
+        Query builder instance.
+    solver : QuerySolver
+        Query solver implementing ``solve_calculated_channels``.
+    max_channels_per_batch : int
+        Maximum number of distinct selectors (by ``selector_id``) per batch (passed to
+        ``build_batches``).
+    has_sink : bool
+        Whether a Unity Catalog sink is configured.
+    catalog : str, optional
+        Unity Catalog catalog name (required when *has_sink* is ``True``).
+    schema : str, optional
+        Unity Catalog schema name (required when *has_sink* is ``True``).
+    pre_filtered_containers_df : DataFrame, optional
+        Pre-filtered containers for incremental processing.
+    max_containers_per_batch : int, optional
+        Max containers per solve chunk; ``None`` disables container chunking.
+
+    Returns
+    -------
+    DataFrame | None
+        The unioned narrow DataFrame (``container_id, channel_id, tstart, tend,
+        value, identity``), or ``None`` if *qe_channels* is empty.
+    """
+    if not qe_channels:
+        return None
 
     cid_col = solver.config.container_id_col
-    dfs = [spark.table(name) for name in batch_names]
 
-    result = dfs[0]
-    for i in range(1, len(dfs)):
-        result = result.join(dfs[i], on=cid_col, how="full_outer")
+    def _solve_selector_batches(pre_filter: DataFrame | None) -> DataFrame:
+        run_id = uuid.uuid4().hex[:8]
+        batch_names = [
+            _materialize_temp(
+                query.select(*batch_channels).solve_calculated_channels(spark, solver, pre_filter),
+                run_id,
+                batch_idx,
+                has_sink,
+                catalog,
+                schema,
+            )
+            for batch_idx, batch_channels in enumerate(
+                build_batches(qe_channels, max_channels_per_batch)
+            )
+        ]
+        dfs = [spark.table(name) for name in batch_names]
+        result = dfs[0]
+        for df in dfs[1:]:
+            result = result.unionByName(df)
+        return result
 
-    return result
+    # Chunking only applies to an explicit, detection-derived container set (which carries
+    # the internal ``container_id``). With no cap, or with no pre-filter (e.g. a genuine
+    # full solve, or sinkless mode where detection yields nothing), solve unchunked.
+    if max_containers_per_batch is None or pre_filtered_containers_df is None:
+        return _solve_selector_batches(pre_filtered_containers_df)
+
+    parts = [
+        _solve_selector_batches(chunk)
+        for chunk in _container_chunks(
+            pre_filtered_containers_df, max_containers_per_batch, cid_col
+        )
+    ]
+    # No chunks => empty container set; fall back to a single solve so the result matches
+    # the non-chunked path (an empty-rows DataFrame, not None).
+    if not parts:
+        return _solve_selector_batches(pre_filtered_containers_df)
+    # One chunk (e.g. incremental unchanged path, population <= cap): return it directly,
+    # no extra Delta round-trip.
+    if len(parts) == 1:
+        return parts[0]
+    return _combine_container_chunks(spark, parts, has_sink, catalog, schema)
 
 
 def cleanup_temp_tables(spark: SparkSession, catalog: str, schema: str) -> None:
@@ -559,6 +895,43 @@ def _fact_dfs_for_table(dfs) -> list[DataFrame]:
     return [dfs] if dfs is not None else []
 
 
+def group_dfs_by_table(
+    dfs_by_type: dict,
+    table_name_getter: Callable[[str], str],
+) -> dict[str, list[DataFrame]]:
+    """Group per-type DataFrames by output table name.
+
+    Shared shaping step for the "write one table per output" persistence paths:
+    flattens each per-type value (a ``{"changed", "unchanged"}`` dict or a bare
+    DataFrame, via :func:`_fact_dfs_for_table`) and buckets the DataFrames by the
+    table name that ``table_name_getter`` returns for the type (so types sharing a
+    table land together). Types that contribute no DataFrame are skipped, so every
+    returned list is non-empty. Callers union each list themselves (e.g. via
+    ``ReportEntityTransformer.concat_dataframes`` / the entity writer).
+
+    Parameters
+    ----------
+    dfs_by_type : dict
+        ``{type_name: value}`` where value is a structured
+        ``{"changed", "unchanged"}`` dict or a bare DataFrame.
+    table_name_getter : Callable[[str], str]
+        Maps a type name to its output table name (e.g.
+        ``lambda t: ChannelType[t].get_metrics_table_name()``).
+
+    Returns
+    -------
+    dict[str, list[DataFrame]]
+        ``{table_name: [dfs]}`` for each table with at least one DataFrame.
+    """
+    dfs_by_table: dict[str, list[DataFrame]] = {}
+    for type_name, dfs in dfs_by_type.items():
+        table_dfs = _fact_dfs_for_table(dfs)
+        if not table_dfs:
+            continue
+        dfs_by_table.setdefault(table_name_getter(type_name), []).extend(table_dfs)
+    return dfs_by_table
+
+
 def persist_facts_full(dfs_by_type: dict, type_enum, writer_factory: WriterFactory) -> None:
     """Full-overwrite persist of fact DataFrames, grouped by output table.
 
@@ -575,14 +948,11 @@ def persist_facts_full(dfs_by_type: dict, type_enum, writer_factory: WriterFacto
     writer_factory : WriterFactory
         Factory producing the entity writer.
     """
-    dfs_by_table: dict[str, list[DataFrame]] = {}
-    for type_name, dfs in dfs_by_type.items():
-        table_name = type_enum[type_name].get_fact_table_name()
-        dfs_by_table.setdefault(table_name, []).extend(_fact_dfs_for_table(dfs))
+    dfs_by_table = group_dfs_by_table(
+        dfs_by_type, lambda type_name: type_enum[type_name].get_fact_table_name()
+    )
 
     for table_name, dfs_list in dfs_by_table.items():
-        if not dfs_list:
-            continue
         entity_type = type_enum.get_any_for_fact_table(table_name)
         writer = writer_factory.create_writer(entity_type)
         schema, uri = writer.extract_fact_schema_and_output_uri(entity_type)
@@ -765,3 +1135,71 @@ def persist_dimensions_incremental(
         writer = factory.create_writer(entity_type)
         schema, uri = writer.extract_metadata_schema_and_output_uri(entity_type)
         sink.upsert(transform_fn(metadata_df, schema), uri, merge_keys)
+
+
+def persist_channel_metrics(
+    metrics_dfs_by_type: dict,
+    type_enum,
+    sink: Sink,
+    transformer: ReportEntityTransformer,
+    *,
+    incremental: bool,
+    updated_container_ids: list | None = None,
+) -> None:
+    """Persist the optional calculated-channel metrics table(s).
+
+    Unlike the fact/dimension writers, the metrics schema is **dynamic**
+    (identity/attribute/KPI columns vary per report), so this bypasses the
+    fixed-schema ``DefaultReportEntityWriter`` and writes the already-shaped
+    DataFrame directly (mirroring the ``container_dimension`` special-case). The
+    per-type dfs are grouped by output table via :func:`group_dfs_by_table` and
+    unioned with the same ``concat_dataframes`` the entity writer uses.
+
+    Full mode overwrites; incremental mode upserts on ``(container_id,
+    channel_id)`` and prunes stale rows from updated containers via
+    ``merge_incremental``.
+
+    Parameters
+    ----------
+    metrics_dfs_by_type : dict
+        ``{type_name: value}`` where value is a structured
+        ``{"changed", "unchanged"}`` dict or a bare DataFrame.
+    type_enum : Enum
+        The channel type-enum (resolves the metrics table name/uri).
+    sink : Sink
+        Target sink exposing ``store`` / ``merge_incremental``.
+    transformer : ReportEntityTransformer
+        Supplies ``concat_dataframes`` (union) and ``add_meta_information``.
+    incremental : bool
+        Whether to merge (True) or overwrite (False).
+    updated_container_ids : list, optional
+        Ids of updated containers, scoping the incremental delete-by-source.
+    """
+    if not metrics_dfs_by_type:
+        return
+
+    updated_container_ids = updated_container_ids or []
+
+    dfs_by_table = group_dfs_by_table(
+        metrics_dfs_by_type, lambda type_name: type_enum[type_name].get_metrics_table_name()
+    )
+
+    for table_name, dfs_list in dfs_by_table.items():
+        entity_type = type_enum.get_any_for_metrics_table(table_name)
+        # Resolve the metrics URI directly (no fixed-schema writer).
+        uri = sink.config.get_output_uri_channel_metrics_table(entity_type)
+        df_enriched = transformer.concat_dataframes(dfs_list).transform(
+            transformer.add_meta_information
+        )
+        if incremental:
+            delete_conditions = []
+            if updated_container_ids:
+                delete_conditions.append(F.col("target.container_id").isin(updated_container_ids))
+            sink.merge_incremental(
+                df_enriched,
+                uri,
+                ["container_id", "channel_id"],
+                delete_conditions=delete_conditions,
+            )
+        else:
+            sink.store(df_enriched, uri)

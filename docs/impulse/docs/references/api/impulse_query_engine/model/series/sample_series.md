@@ -26,6 +26,15 @@ Initialize the SampleSeries object.
 - `tends` (`Sized`): Array-like of interval end times.
 - `values` (`Sized`): Array-like of sample values.
 
+#### value\_type
+
+```python
+def value_type() -> SeriesValueType
+```
+
+A SampleSeries carries numeric values.
+
+
 #### dtype
 
 ```python

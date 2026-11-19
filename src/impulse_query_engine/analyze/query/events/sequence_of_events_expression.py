@@ -98,6 +98,18 @@ class SequenceOfEventsExpression(TimeSeriesExpression):
             tags = tags.union(expr.required_tags())
         return tags
 
+    def required_container_tags(self) -> set[str]:
+        tags: set[str] = set()
+        for expr in self.expressions:
+            tags = tags.union(expr.required_container_tags())
+        return tags
+
+    def required_container_metrics(self) -> set[str]:
+        metrics: set[str] = set()
+        for expr in self.expressions:
+            metrics = metrics.union(expr.required_container_metrics())
+        return metrics
+
     def get_selectors(self) -> list[TimeSeriesSelector]:
         result: list[TimeSeriesSelector] = []
         for expr in self.expressions:

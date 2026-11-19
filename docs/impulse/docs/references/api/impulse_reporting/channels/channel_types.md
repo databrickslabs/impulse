@@ -67,6 +67,28 @@ Get the dimension table name for the channel type.
 
 `str`: The name of the dimension table associated with this channel type.
 
+#### get\_metrics\_table\_name
+
+```python
+def get_metrics_table_name() -> str
+```
+
+Get the (optional) channel-metrics table name for the channel type.
+
+This table mirrors the silver-layer ``channel_metrics`` table so the
+calculated-channel fact + metrics pair can serve as an Impulse silver
+source.  Unlike the fact/dimension tables it has **no** fixed schema
+constant: identity/attribute columns are derived dynamically per report
+(see :meth:`CalculatedChannel.determine_channel_metrics`).
+
+**Raises**:
+
+- `ValueError`: If the channel type is not supported.
+
+**Returns**:
+
+`str`: The name of the channel-metrics table associated with this channel type.
+
 #### get\_dimension\_schema
 
 ```python
@@ -94,6 +116,26 @@ Return the first ChannelType whose fact table name matches.
 **Arguments**:
 
 - `table_name` (`str`): Fact table name to look up.
+
+**Raises**:
+
+- `ValueError`: If no ChannelType matches the given table name.
+
+**Returns**:
+
+`ChannelType`: 
+
+#### get\_any\_for\_metrics\_table
+
+```python
+def get_any_for_metrics_table(cls, table_name: str) -> "ChannelType"
+```
+
+Return the first ChannelType whose metrics table name matches.
+
+**Arguments**:
+
+- `table_name` (`str`): Metrics table name to look up.
 
 **Raises**:
 

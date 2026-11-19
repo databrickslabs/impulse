@@ -119,6 +119,39 @@ Create a time series selector for the given channel tags.
 
 `TimeSeriesSelector`: Time series selector object.
 
+#### poi\_channel
+
+```python
+def poi_channel(dtype: SeriesValueType = SeriesValueType.DOUBLE,
+                **kwargs) -> TimeSeriesSelector
+```
+
+Create a Points-in-Time (POI) channel selector.
+
+Parallel to :meth:`channel` — it builds the **same** ``TimeSeriesSelector``
+from a tag/column match on ``**kwargs`` (e.g.
+``poi_channel(channel_name="DTC")``), differing only in that it is stamped
+``series_type=POINTS_IN_TIME`` (so it solves to a
+:class:`~impulse_query_engine.model.series.points_in_time_series.PointsInTimeSeries`
+— a value valid only *at* each timestamp — rather than a ``SampleSeries``)
+and carries the declared value ``dtype``.
+
+Channel *identification* (tag/column match, ``get_selector_expr``,
+``required_tags``, ``selector_id``) is identical to :meth:`channel`; only
+the built object and its result dtype differ.
+
+**Arguments**:
+
+- `dtype` (`SeriesValueType or str`): The POI channel's value data type: ``DOUBLE`` (default, numeric) or
+``STRING`` (e.g. DTC codes — only sampling and equality apply). Accepts
+either the enum or its string value (``"double"`` / ``"string"``). This
+declared type drives plan-time result typing and string-op gating.
+- `**kwargs` (`dict`): Channel tag-value pairs, matched exactly like :meth:`channel`'s.
+
+**Returns**:
+
+`TimeSeriesSelector`: A selector stamped ``series_type=POINTS_IN_TIME`` with the given value type.
+
 #### select
 
 ```python

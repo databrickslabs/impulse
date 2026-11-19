@@ -10,10 +10,15 @@ from pyspark.sql import DataFrame
 
 from impulse_reporting.core.report import Report
 from impulse_reporting.core.report_utils import (
+    _combine_container_chunks,
+    _container_chunks,
     build_batches,
     build_metadata_dfs,
+    dispatch_calculated_channel_metrics,
     dispatch_events,
+    group_dfs_by_table,
     group_selectables_by_type,
+    persist_channel_metrics,
     merge_changed_unchanged,
     persist_dimensions_full,
     persist_dimensions_incremental,
@@ -28,7 +33,7 @@ class TestBuildBatches:
 
     def test_empty_expressions(self):
         """Empty input returns empty output."""
-        assert build_batches([], batch_size=10) == []
+        assert build_batches([], max_channels_per_batch=10) == []
 
     def test_single_expression_fits(self):
         """Single expression always fits in one batch."""
@@ -36,12 +41,12 @@ class TestBuildBatches:
         sel = MagicMock()
         expr.get_selectors.return_value = [sel]
 
-        result = build_batches([expr], batch_size=1)
+        result = build_batches([expr], max_channels_per_batch=1)
         assert len(result) == 1
         assert result[0] == [expr]
 
     def test_all_fit_single_batch(self):
-        """All expressions fit in one batch when total selectors <= batch_size."""
+        """All expressions fit in one batch when total selectors <= max_channels_per_batch."""
         sel_a = MagicMock()
         sel_b = MagicMock()
 
@@ -51,7 +56,7 @@ class TestBuildBatches:
         expr2 = MagicMock()
         expr2.get_selectors.return_value = [sel_b]
 
-        result = build_batches([expr1, expr2], batch_size=2)
+        result = build_batches([expr1, expr2], max_channels_per_batch=2)
         assert len(result) == 1
         assert set(result[0]) == {expr1, expr2}
 
@@ -65,13 +70,14 @@ class TestBuildBatches:
         expr2 = MagicMock()
         expr2.get_selectors.return_value = [shared_sel]
 
-        result = build_batches([expr1, expr2], batch_size=1)
+        result = build_batches([expr1, expr2], max_channels_per_batch=1)
         # Both share the same selector, so they fit in one batch
         assert len(result) == 1
         assert set(result[0]) == {expr1, expr2}
 
     def test_split_into_multiple_batches(self):
-        """Expressions with distinct selectors are split when they exceed batch_size."""
+        """Expressions with distinct selectors are split when they exceed
+        max_channels_per_batch."""
         sel_a = MagicMock()
         sel_b = MagicMock()
         sel_c = MagicMock()
@@ -85,8 +91,8 @@ class TestBuildBatches:
         expr3 = MagicMock()
         expr3.get_selectors.return_value = [sel_c]
 
-        result = build_batches([expr1, expr2, expr3], batch_size=1)
-        # Each has a unique selector, batch_size=1 → 3 batches
+        result = build_batches([expr1, expr2, expr3], max_channels_per_batch=1)
+        # Each has a unique selector, max_channels_per_batch=1 → 3 batches
         assert len(result) == 3
 
     def test_overlap_preference(self):
@@ -103,11 +109,11 @@ class TestBuildBatches:
         expr3 = MagicMock()
         expr3.get_selectors.return_value = [sel_b]
 
-        result = build_batches([expr1, expr2, expr3], batch_size=2)
-        # All share selectors through expr1, and batch_size=2 can hold {sel_a, sel_b}
+        result = build_batches([expr1, expr2, expr3], max_channels_per_batch=2)
+        # All share selectors through expr1, and max_channels_per_batch=2 can hold {sel_a, sel_b}
         assert len(result) == 1
 
-    def test_batch_size_respected(self):
+    def test_max_channels_per_batch_respected(self):
         """No batch exceeds the selector limit."""
         selectors = [MagicMock() for _ in range(10)]
         expressions = []
@@ -116,8 +122,8 @@ class TestBuildBatches:
             expr.get_selectors.return_value = [sel]
             expressions.append(expr)
 
-        result = build_batches(expressions, batch_size=3)
-        # 10 unique selectors, batch_size=3 → at least 4 batches
+        result = build_batches(expressions, max_channels_per_batch=3)
+        # 10 unique selectors, max_channels_per_batch=3 → at least 4 batches
         assert len(result) >= 4
         # Each batch has at most 3 unique selectors
         for batch in result:
@@ -128,13 +134,14 @@ class TestBuildBatches:
             assert len(unique_sels) <= 3
 
     def test_oversized_single_expression_gets_own_batch(self):
-        """An expression with more selectors than batch_size still gets its own batch."""
-        # 5 selectors but batch_size=3
+        """An expression with more selectors than max_channels_per_batch still gets
+        its own batch."""
+        # 5 selectors but max_channels_per_batch=3
         selectors = [MagicMock() for _ in range(5)]
         expr = MagicMock()
         expr.get_selectors.return_value = selectors
 
-        result = build_batches([expr], batch_size=3)
+        result = build_batches([expr], max_channels_per_batch=3)
         assert len(result) == 1
         assert result[0] == [expr]
 
@@ -146,7 +153,7 @@ class TestBuildBatches:
         ExprC uses {S1,S2,S3,S4}           (4 selectors)
         ExprD uses {S6,S7,S8,S9}           (4 selectors)
         ExprE uses {S20}                   (1 selector)
-        batch_size=7 → Batch1={B,D,E}, Batch2={A,C}
+        max_channels_per_batch=7 → Batch1={B,D,E}, Batch2={A,C}
         """
         s = [MagicMock() for _ in range(21)]  # s[1]..s[10], s[20]
 
@@ -165,7 +172,7 @@ class TestBuildBatches:
         exprE = MagicMock()
         exprE.get_selectors.return_value = [s[20]]
 
-        result = build_batches([exprA, exprB, exprC, exprD, exprE], batch_size=7)
+        result = build_batches([exprA, exprB, exprC, exprD, exprE], max_channels_per_batch=7)
 
         assert len(result) == 2
 
@@ -180,7 +187,7 @@ class TestBuildBatches:
         expr = MagicMock()
         expr.get_selectors.return_value = []
 
-        result = build_batches([expr], batch_size=5)
+        result = build_batches([expr], max_channels_per_batch=5)
         assert len(result) == 1
         assert result[0] == [expr]
 
@@ -364,6 +371,81 @@ class TestSplitByHashChange:
                 kind="bogus",
             )
 
+    def test_force_recalc_promotes_unchanged_item_to_changed(self):
+        """A hash-unchanged item named in force_recalc_names moves to changed."""
+        forced, kept = MagicMock(), MagicMock()
+        forced.get_id.return_value = 7
+        forced.get_name.return_value = "Force Me"
+        kept.get_id.return_value = 8
+        kept.get_name.return_value = "Leave Me"
+
+        mock_sink = MagicMock()
+        mock_sink.config.get_output_uri_dimension_table.return_value = "catalog.gold.dim"
+
+        mock_comparator = MagicMock()
+        # Both start out unchanged by hash.
+        mock_comparator.group_aggregations_by_hash_change.return_value = ([], [forced, kept])
+
+        changed, unchanged, changed_ids = split_by_hash_change(
+            items_by_type={"HISTOGRAM": [forced, kept]},
+            type_enum=MagicMock(),
+            sink=mock_sink,
+            spark=MagicMock(),
+            hash_comparator=mock_comparator,
+            kind="aggregation",
+            force_recalc_names={"Force Me"},
+        )
+
+        assert changed == {"HISTOGRAM": [forced]}
+        assert unchanged == {"HISTOGRAM": [kept]}
+        assert changed_ids == {"HISTOGRAM": [7]}
+
+    def test_force_recalc_name_not_present_is_noop(self):
+        """A forced name matching no unchanged item leaves the split untouched."""
+        item = MagicMock()
+        item.get_id.return_value = 5
+        item.get_name.return_value = "Real Name"
+
+        mock_sink = MagicMock()
+        mock_sink.config.get_output_uri_dimension_table.return_value = "catalog.gold.dim"
+
+        mock_comparator = MagicMock()
+        mock_comparator.group_events_by_hash_change.return_value = ([], [item])
+
+        changed, unchanged, changed_ids = split_by_hash_change(
+            items_by_type={"BASIC_EVENT": [item]},
+            type_enum=MagicMock(),
+            sink=mock_sink,
+            spark=MagicMock(),
+            hash_comparator=mock_comparator,
+            kind="event",
+            force_recalc_names={"Some Typo"},
+        )
+
+        assert changed == {}
+        assert unchanged == {"BASIC_EVENT": [item]}
+        assert changed_ids == {}
+
+    def test_force_recalc_ignored_in_sinkless_mode(self):
+        """Sinkless mode already treats everything as changed; the param is a no-op."""
+        item = MagicMock()
+        item.get_id.return_value = 1
+        item.get_name.return_value = "Anything"
+
+        changed, unchanged, changed_ids = split_by_hash_change(
+            items_by_type={"BASIC_EVENT": [item]},
+            type_enum=MagicMock(),
+            sink=None,
+            spark=MagicMock(),
+            hash_comparator=MagicMock(),
+            kind="event",
+            force_recalc_names={"Anything"},
+        )
+
+        assert changed == {"BASIC_EVENT": [item]}
+        assert unchanged == {}
+        assert changed_ids == {"BASIC_EVENT": [1]}
+
 
 # ============================================================================
 # Tests: dispatch_events
@@ -413,7 +495,7 @@ class TestDispatchEvents:
             query=MagicMock(),
             solver=MagicMock(),
             pre_filtered_containers_df=None,
-            container_event_cls=object,
+            boundary_event_cls=object,
         )
         assert event_dfs == {}
 
@@ -450,7 +532,7 @@ class TestDispatchEvents:
             query=MagicMock(),
             solver=MagicMock(),
             pre_filtered_containers_df=MagicMock(spec=DataFrame),
-            container_event_cls=FakeContainerBase,
+            boundary_event_cls=FakeContainerBase,
         )
 
         assert received_kwargs == {"solved_df": mock_solved}
@@ -491,7 +573,7 @@ class TestDispatchEvents:
             query=mock_query,
             solver=mock_solver,
             pre_filtered_containers_df=mock_pre_filtered,
-            container_event_cls=FakeContainerBase,
+            boundary_event_cls=FakeContainerBase,
         )
 
         assert received_kwargs["query"] is mock_query
@@ -512,13 +594,13 @@ class TestDispatchEvents:
             query=MagicMock(),
             solver=MagicMock(),
             pre_filtered_containers_df=None,
-            container_event_cls=object,
+            boundary_event_cls=object,
         )
 
         assert "BASIC_EVENT" not in event_dfs
 
     def test_metadata_not_computed_in_dispatch(self):
-        """dispatch_events does not compute metadata (done separately in determine_report)."""
+        """dispatch_events does not compute metadata (done separately in _determine_report)."""
 
         class FakeContainerBase:
             pass
@@ -551,10 +633,169 @@ class TestDispatchEvents:
             query=MagicMock(),
             solver=MagicMock(),
             pre_filtered_containers_df=None,
-            container_event_cls=FakeContainerBase,
+            boundary_event_cls=FakeContainerBase,
         )
 
         assert len(meta_calls) == 0
+
+
+class TestDispatchCalculatedChannelMetrics:
+    """Tests for dispatch_calculated_channel_metrics helper (routing only)."""
+
+    def _make_enum(self, cls):
+        mock_type_enum = MagicMock()
+        mock_type_enum.__getitem__.return_value.value = cls
+        return mock_type_enum
+
+    def test_empty_channels_by_type_returns_empty(self):
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={},
+            fact_dfs_by_type={},
+            type_enum=MagicMock(),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+        assert metrics == {}
+
+    def test_routes_fact_df_channels_and_config(self):
+        """Each type's fact df + channel list + config are forwarded verbatim."""
+        mock_result = MagicMock(spec=DataFrame)
+        mock_fact = MagicMock(spec=DataFrame)
+        channel = MagicMock()
+        received = {}
+
+        class FakeCls:
+            @classmethod
+            def determine_channel_metrics(cls, spark, channels, fact_df, **kwargs):
+                received["channels"] = channels
+                received["fact_df"] = fact_df
+                received["kwargs"] = kwargs
+                return mock_result
+
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": [channel]},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": mock_fact},
+            type_enum=self._make_enum(FakeCls),
+            attribute_columns=["unit"],
+            kpis=["duration", "mean"],
+        )
+
+        assert metrics["CALCULATED_CHANNEL"] is mock_result
+        assert received["channels"] == [channel]
+        assert received["fact_df"] is mock_fact
+        assert received["kwargs"] == {"attribute_columns": ["unit"], "kpis": ["duration", "mean"]}
+
+    def test_type_without_fact_df_is_skipped(self):
+        """A type present in channels but with no fact df (None) yields no entry."""
+        calls = []
+
+        class FakeCls:
+            @classmethod
+            def determine_channel_metrics(cls, spark, channels, fact_df, **kwargs):
+                calls.append(fact_df)
+                return MagicMock(spec=DataFrame)
+
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": [MagicMock()]},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": None},
+            type_enum=self._make_enum(FakeCls),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+
+        assert metrics == {}
+        assert calls == []  # determine_channel_metrics never invoked
+
+    def test_empty_channel_list_for_type_is_skipped(self):
+        metrics = dispatch_calculated_channel_metrics(
+            spark=MagicMock(),
+            channels_by_type={"CALCULATED_CHANNEL": []},
+            fact_dfs_by_type={"CALCULATED_CHANNEL": MagicMock(spec=DataFrame)},
+            type_enum=MagicMock(),
+            attribute_columns=[],
+            kpis=["mean"],
+        )
+        assert metrics == {}
+
+
+class TestGroupDfsByTable:
+    """Tests for the group-per-output-table shaping helper (returns lists)."""
+
+    def test_empty_returns_empty(self):
+        assert group_dfs_by_table({}, lambda _t: "tbl") == {}
+
+    def test_bare_df_grouped_into_list(self):
+        df = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table({"A": df}, lambda _t: "tbl_a")
+        assert out == {"tbl_a": [df]}
+
+    def test_changed_unchanged_dict_flattened_changed_then_unchanged(self):
+        changed = MagicMock(spec=DataFrame)
+        unchanged = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table(
+            {"A": {"changed": changed, "unchanged": unchanged}}, lambda _t: "tbl_a"
+        )
+        # Order is changed then unchanged (per _fact_dfs_for_table).
+        assert out == {"tbl_a": [changed, unchanged]}
+
+    def test_types_sharing_a_table_are_combined(self):
+        df_a = MagicMock(spec=DataFrame)
+        df_b = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table({"A": df_a, "B": df_b}, lambda _t: "shared")
+        assert out == {"shared": [df_a, df_b]}
+
+    def test_none_and_empty_values_skipped(self):
+        df = MagicMock(spec=DataFrame)
+        out = group_dfs_by_table(
+            {"A": None, "B": {"changed": None, "unchanged": None}, "C": df},
+            lambda t: t,
+        )
+        assert out == {"C": [df]}
+
+
+# ============================================================================
+# Tests: _container_chunks / _combine_container_chunks
+# ============================================================================
+class TestContainerChunks:
+    """Tests for hash-bucketed container chunking (driver-bounded, approximate sizes)."""
+
+    def test_empty_population_yields_no_chunks(self, spark):
+        """Zero containers => no chunks (caller then falls back to a single solve)."""
+        df = spark.createDataFrame([], "container_id long, v long")
+        assert list(_container_chunks(df, 2, "container_id")) == []
+
+    def test_population_within_cap_yields_the_frame_unchunked(self, spark):
+        """<= cap containers => one chunk, the frame itself (no filter added)."""
+        df = spark.createDataFrame([(1, 10), (2, 20)], "container_id long, v long")
+        chunks = list(_container_chunks(df, 5, "container_id"))
+        assert len(chunks) == 1
+        assert chunks[0] is df
+
+    def test_population_over_cap_partitions_disjointly_and_covers_all(self, spark):
+        """> cap containers => ceil(n/cap) buckets that are disjoint and cover everyone."""
+        rows = [(i, i * 10) for i in range(1, 6)]  # 5 containers, cap 2 => 3 chunks
+        df = spark.createDataFrame(rows, "container_id long, v long")
+        chunks = list(_container_chunks(df, 2, "container_id"))
+        assert len(chunks) == 3
+        per_chunk = [{r["container_id"] for r in c.collect()} for c in chunks]
+        assert set().union(*per_chunk) == {1, 2, 3, 4, 5}  # covers all
+        assert sum(len(s) for s in per_chunk) == 5  # disjoint (no id in two chunks)
+
+
+class TestCombineContainerChunks:
+    """Tests for combining per-chunk solve results."""
+
+    def test_sinkless_unions_parts_by_name(self, spark):
+        """Without a sink, chunks are ``unionByName``-appended directly into one frame."""
+        a = spark.createDataFrame([(1, 10)], "container_id long, v long")
+        b = spark.createDataFrame([(2, 20), (3, 30)], "container_id long, v long")
+        result = _combine_container_chunks(
+            spark, [a, b], has_sink=False, catalog=None, schema=None
+        )
+        assert {r["container_id"] for r in result.collect()} == {1, 2, 3}
 
 
 # ============================================================================
@@ -581,6 +822,16 @@ _SINKLESS_CONFIG = {
         "channels_uri": "spark_catalog.silver.channels",
     },
     "query_engine": {"solver": "KeyValueStoreSolver"},
+}
+
+# Sinkless, but with a container cap so the batched solves take the chunked path.
+_CHUNKED_SINKLESS_CONFIG = {
+    "source": {
+        "container_metrics_table": "spark_catalog.silver.container_metrics",
+        "channel_metrics_table": "spark_catalog.silver.channel_metrics",
+        "channels_uri": "spark_catalog.silver.channels",
+    },
+    "query_engine": {"solver": "KeyValueStoreSolver", "max_containers_per_batch": 2},
 }
 
 
@@ -737,6 +988,214 @@ class TestSolveExpressionsBatched:
 
         report.query.select.assert_called_once_with(expr)
         report.query.select.return_value.solve.assert_called_once()
+
+    def test_capped_empty_chunks_falls_back_to_single_solve(self, spark):
+        """Cap set but the chunker yields nothing (empty set) => one solve over the frame."""
+        report = _build_report_for_solve(spark, _CHUNKED_SINKLESS_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = mock_table_df
+
+        expr = MagicMock()
+        expr.get_selectors.return_value = [MagicMock()]
+        pre_filtered = MagicMock(spec=DataFrame)
+
+        with patch("impulse_reporting.core.report_utils._container_chunks", return_value=iter([])):
+            result = report._solve_expressions_batched(
+                [expr], pre_filtered_containers_df=pre_filtered
+            )
+
+        assert result is mock_table_df
+
+
+class TestSolveCalculatedChannelsBatched:
+    """Tests for Report._solve_calculated_channels_batched() (narrow / append)."""
+
+    def test_empty_channels_returns_none(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+        assert report._solve_calculated_channels_batched([]) is None
+
+    def test_single_batch_sinkless_creates_temp_view(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        result = report._solve_calculated_channels_batched([ch])
+
+        mock_batch_df.createOrReplaceTempView.assert_called_once()
+        view_name = mock_batch_df.createOrReplaceTempView.call_args[0][0]
+        assert view_name.startswith("__impulse_temp_")
+        report.spark.table.assert_called_once_with(view_name)
+        assert result is mock_table_df
+
+    def test_single_batch_with_sink_writes_delta_table(self, spark):
+        report = _build_report_for_solve(spark, _SINK_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        result = report._solve_calculated_channels_batched([ch])
+
+        write_chain = mock_batch_df.write.format.return_value.mode.return_value
+        write_chain.saveAsTable.assert_called_once()
+        fq_name = write_chain.saveAsTable.call_args[0][0]
+        assert "__impulse_temp_" in fq_name
+        assert "spark_catalog" in fq_name
+        assert "gold" in fq_name
+        report.spark.table.assert_called_once_with(fq_name)
+        assert result is mock_table_df
+
+    def test_multiple_batches_combined_with_union_by_name(self, spark):
+        """Narrow batches are row-appended with unionByName, NOT joined."""
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_df1 = MagicMock(spec=DataFrame)
+        mock_df2 = MagicMock(spec=DataFrame)
+        mock_unioned = MagicMock(spec=DataFrame)
+        mock_df1.unionByName.return_value = mock_unioned
+
+        table_returns = [mock_df1, mock_df2]
+        call_idx = [0]
+
+        def fake_table(name):
+            df = table_returns[call_idx[0]]
+            call_idx[0] += 1
+            return df
+
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = MagicMock(
+            spec=DataFrame
+        )
+        report.spark = MagicMock()
+        report.spark.table.side_effect = fake_table
+
+        ch1, ch2 = MagicMock(), MagicMock()
+        ch1.get_selectors.return_value = [MagicMock()]
+        ch2.get_selectors.return_value = [MagicMock()]
+
+        with patch(
+            "impulse_reporting.core.report_utils.build_batches", return_value=[[ch1], [ch2]]
+        ):
+            result = report._solve_calculated_channels_batched([ch1, ch2])
+
+        mock_df1.unionByName.assert_called_once_with(mock_df2)
+        mock_df1.join.assert_not_called()
+        assert result is mock_unioned
+
+    def test_query_select_called_with_batch_channels(self, spark):
+        report = _build_report_for_solve(spark, _SINKLESS_CONFIG)
+
+        mock_batch_df = MagicMock(spec=DataFrame)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = mock_batch_df
+        report.spark = MagicMock()
+        report.spark.table.return_value = MagicMock(spec=DataFrame)
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+
+        report._solve_calculated_channels_batched([ch])
+
+        report.query.select.assert_called_once_with(ch)
+        report.query.select.return_value.solve_calculated_channels.assert_called_once()
+
+    def _capped_report(self, spark):
+        report = _build_report_for_solve(spark, _CHUNKED_SINKLESS_CONFIG)
+        report.query = MagicMock()
+        report.query.select.return_value.solve_calculated_channels.return_value = MagicMock(
+            spec=DataFrame
+        )
+        report.spark = MagicMock()
+        return report
+
+    def test_capped_multiple_chunks_combined_via_helper(self, spark):
+        """>1 chunk => each chunk solved, then combined via _combine_container_chunks."""
+        report = self._capped_report(spark)
+        report.spark.table.return_value = MagicMock(spec=DataFrame)
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+        pre_filtered = MagicMock(spec=DataFrame)
+        chunk_a, chunk_b = MagicMock(spec=DataFrame), MagicMock(spec=DataFrame)
+        combined = MagicMock(spec=DataFrame)
+
+        with (
+            patch(
+                "impulse_reporting.core.report_utils._container_chunks",
+                return_value=[chunk_a, chunk_b],
+            ),
+            patch(
+                "impulse_reporting.core.report_utils._combine_container_chunks",
+                return_value=combined,
+            ) as mock_combine,
+        ):
+            result = report._solve_calculated_channels_batched(
+                [ch], pre_filtered_containers_df=pre_filtered
+            )
+
+        assert result is combined
+        mock_combine.assert_called_once()
+        assert len(mock_combine.call_args[0][1]) == 2  # one solved part per chunk
+
+    def test_capped_single_chunk_returned_directly(self, spark):
+        """Exactly one chunk => that chunk's solve is returned, no combine round-trip."""
+        report = self._capped_report(spark)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+        pre_filtered = MagicMock(spec=DataFrame)
+
+        with (
+            patch(
+                "impulse_reporting.core.report_utils._container_chunks",
+                return_value=[MagicMock(spec=DataFrame)],
+            ),
+            patch("impulse_reporting.core.report_utils._combine_container_chunks") as mock_combine,
+        ):
+            result = report._solve_calculated_channels_batched(
+                [ch], pre_filtered_containers_df=pre_filtered
+            )
+
+        assert result is mock_table_df
+        mock_combine.assert_not_called()
+
+    def test_capped_empty_chunks_falls_back_to_single_solve(self, spark):
+        """Cap set but no chunks (empty set) => single solve over the frame."""
+        report = self._capped_report(spark)
+        mock_table_df = MagicMock(spec=DataFrame)
+        report.spark.table.return_value = mock_table_df
+
+        ch = MagicMock()
+        ch.get_selectors.return_value = [MagicMock()]
+        pre_filtered = MagicMock(spec=DataFrame)
+
+        with patch("impulse_reporting.core.report_utils._container_chunks", return_value=iter([])):
+            result = report._solve_calculated_channels_batched(
+                [ch], pre_filtered_containers_df=pre_filtered
+            )
+
+        assert result is mock_table_df
 
 
 # ============================================================================
@@ -1208,3 +1667,68 @@ class TestPersistDimensionsIncremental:
             )
 
         sink.upsert.assert_called_once_with(foo_meta, "uri", ["channel_id"])
+
+
+class TestPersistChannelMetrics:
+    """Tests for the persist_channel_metrics free function (mock-based)."""
+
+    def _mocks(self):
+        combined = MagicMock(spec=DataFrame)
+        combined.transform.return_value = combined  # add_meta_information passthrough
+        transformer = MagicMock()
+        transformer.concat_dataframes.return_value = combined
+        type_enum = MagicMock()
+        type_enum.__getitem__.return_value.get_metrics_table_name.return_value = "metrics"
+        type_enum.get_any_for_metrics_table.return_value = "entity"
+        sink = MagicMock()
+        sink.config.get_output_uri_channel_metrics_table.return_value = "cat.sch.metrics"
+        return combined, transformer, type_enum, sink
+
+    def test_empty_is_noop(self):
+        sink = MagicMock()
+        persist_channel_metrics({}, MagicMock(), sink, MagicMock(), incremental=False)
+        sink.store.assert_not_called()
+        sink.merge_incremental.assert_not_called()
+
+    def test_full_mode_overwrites(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df}, type_enum, sink, transformer, incremental=False
+        )
+
+        sink.store.assert_called_once_with(combined, "cat.sch.metrics")
+        sink.merge_incremental.assert_not_called()
+
+    def test_incremental_merges_with_keys_and_delete_scope(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df},
+            type_enum,
+            sink,
+            transformer,
+            incremental=True,
+            updated_container_ids=[1, 2],
+        )
+
+        sink.store.assert_not_called()
+        args, kwargs = sink.merge_incremental.call_args
+        assert args[0] is combined
+        assert args[1] == "cat.sch.metrics"
+        assert args[2] == ["container_id", "channel_id"]
+        # updated containers → one delete-by-source predicate.
+        assert len(kwargs["delete_conditions"]) == 1
+
+    def test_incremental_without_updated_containers_has_no_delete_scope(self):
+        combined, transformer, type_enum, sink = self._mocks()
+        df = MagicMock(spec=DataFrame)
+
+        persist_channel_metrics(
+            {"CALCULATED_CHANNEL": df}, type_enum, sink, transformer, incremental=True
+        )
+
+        _args, kwargs = sink.merge_incremental.call_args
+        assert kwargs["delete_conditions"] == []

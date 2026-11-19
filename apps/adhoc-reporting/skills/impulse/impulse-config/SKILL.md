@@ -1,0 +1,253 @@
+---
+name: impulse-config
+description: >
+  Write the Impulse report configuration (`ImpulseConfig`) — the JSON/dict that points Impulse at its
+  silver input tables, the gold output location, and tunes the solver. Use when the user asks to
+  "configure an Impulse report", set the source/sink tables, filter which containers are processed,
+  choose RLE vs RAW, turn on incremental processing, run without writing (sinkless), remap column
+  names, or scope by project. Covers source, unity_sink, container_filters, query_engine, solver_config,
+  custom measurement DBs, incremental, full_recalculation, measurement_dimensions, and calculated_channels,
+  all validated by Pydantic.
+---
+
+# Impulse — configuration
+
+`ImpulseConfig` configures a report: silver input, gold output, container filters, the solver,
+incremental processing, and which container columns land in gold. It is a JSON file or an equivalent
+Python `dict`, validated by Pydantic. Pass it to `Report` as `config=<dict>` or `config_path=<json path>`
+(see `impulse-reporting`).
+
+## Full example
+
+```python
+config = {
+    "source": {
+        "container_metrics_table": "my_catalog.silver.container_metrics",
+        "channel_metrics_table": "my_catalog.silver.channel_metrics",
+        "channels_uri": "my_catalog.silver.channels",
+        "poi_channels_uri": "my_catalog.silver.poi_channels",         # optional
+        "container_tags_table": "my_catalog.silver.container_tags",   # optional
+        "channel_tags_table": "my_catalog.silver.channel_tags",       # optional
+    },
+    "unity_sink": {"catalog": "my_catalog", "schema": "gold", "table_prefix": "my_report"},
+    "query_engine": {"solver": "DefaultSolver", "data_type": "RLE"},
+    "container_filters": {
+        "tag_filters": [
+            [{"tag_name": "uut_id", "comparator": "==", "value": "ABC123", "cast_type": "string"}]
+        ],
+        "metric_filters": [
+            [{"column_name": "start_dt", "comparator": ">=",
+              "value": "2025-04-27T05:20:54.000Z", "value_type": "timestamp"}]
+        ],
+    },
+    "incremental": {"enabled": True},
+    "full_recalculation": {"aggregations": ["rpm_hist_p1"]},  # optional
+    "measurement_dimensions": ["container_id", "vehicle_key", "start_ts", "stop_ts"],
+    "calculated_channels": {"emit_channel_metrics": True, "attribute_columns": ["unit"]},  # optional
+}
+```
+
+## source (required)
+
+Maps the silver-layer input tables. Values are full Unity Catalog paths (`catalog.schema.table`). See
+`impulse-data-model` for the shape of each table.
+
+| Field                     | Required | Description                                                         |
+|---------------------------|----------|---------------------------------------------------------------------|
+| `container_metrics_table` | Yes      | Container metadata (timestamps, duration).                          |
+| `channel_metrics_table`   | Yes      | Per-channel statistics; channel-selection columns in the wide model. |
+| `channels_uri`            | Yes      | Time-series sample data.                                            |
+| `poi_channels_uri`        | No       | Points-in-Time (POI) channel data. Required only when selecting POI channels via `poi_channel()`; omit for sample-only models. |
+| `container_tags_table`    | No       | Container EAV tags. Required to use `tag_filters`.                   |
+| `channel_tags_table`      | No       | Channel EAV tags. Required to select channels by tag.               |
+| `channel_mapping_table`   | No       | Logical→physical alias table. Required for `channel_with_alias()`.  |
+| `unit_conversion_table`   | No       | Per-unit conversion factors (used with `channel_mapping_table`).    |
+
+## unity_sink (optional — omit for sinkless mode)
+
+Where gold tables are written. Output tables are named `{table_prefix}_{entity}`.
+
+| Field                 | Required | Description        |
+|-----------------------|----------|--------------------|
+| `catalog`             | Yes      | Target catalog.    |
+| `schema`              | Yes      | Target schema.     |
+| `table_prefix`        | Yes      | Prefix for tables. |
+| `cleanup_temp_tables` | No       | Drop the batch-solving `__impulse_temp_*` tables from the schema after `run()` persists successfully. Defaults to `false`. Overridable per call via `run(cleanup_temp_tables=...)`. |
+
+**Sinkless mode:** omit `unity_sink` entirely. `run()` still computes everything and exposes it on
+the report object, but writes nothing. Use it for ad-hoc analysis,
+ML feature extraction, notebooks, and tests. (See `impulse-analyze` and `impulse-ml`.)
+
+## container_filters (optional)
+
+Restricts which containers are processed. Both families are **disjunctive normal form** — the outer
+list is OR-combined, each inner list is AND-combined.
+
+- `tag_filters` — applied on `container_tags_table` (EAV). Requires that table.
+- `metric_filters` — applied on `container_metrics_table` (columns).
+
+**TagFilter** fields: `tag_name` (str), `comparator` (one of `== != > >= < <=`), `value`, and optional
+`cast_type` (`string` default, `int`, `double`, `timestamp`).
+
+**MetricFilter** fields: `column_name` (**internal** name, after any `column_name_mapping`),
+`comparator`, `value`, and optional `value_type` (`string`, `int`, `double`, `timestamp`).
+
+## query_engine (optional)
+
+Omit entirely for `DefaultSolver` + `data_type="RLE"`.
+
+| Field                   | Default            | Description                                                                                       |
+|-------------------------|--------------------|---------------------------------------------------------------------------------------------------|
+| `solver`                | `"DefaultSolver"`  | The solver. `"DeltaSolver"` / `"KeyValueStoreSolver"` are **deprecated aliases** for `DefaultSolver`. |
+| `data_type`             | `"RLE"`            | `"RLE"` for interval-encoded `[tstart, tend)` samples; `"RAW"` for `(timestamp, value)` samples.  |
+| `raw_encoder`           | `null` (→ `"RLE"`) | How RAW point data becomes intervals. `"RLE"` collapses equal-valued runs (default); `"INTERVAL"` keeps every sample, only deriving `tend` + dropping exact duplicates. Only used when `data_type="RAW"`. |
+| `drop_implausible_data` | `false`            | Drop `channels` rows where `is_plausible = false`. **Requires `data_type="RAW"`** (RLE raises).   |
+| `max_channels_per_batch` | `500`             | Max distinct channels (`channel(...)` / `poi_channel(...)` selections) read per solve batch. Applies to events, aggregations, and calculated channels (counts their *input* channels). `batch_size` is a **deprecated alias** (warns; removed in a future release). |
+| `solver_config`         | `null`             | Per-table column mappings, per-table filters, and project scoping (below).                        |
+| `measurement_db`        | `"MeasurementDB"`  | Registered name of the MeasurementDB (the read seam). The default reads the silver tables directly; a custom one reshapes a different source schema at read time. See [Custom measurement DB](#custom-measurement-db). |
+| `measurement_db_config` | `null`             | Keyword args for the selected MeasurementDB's config class, merged with `source` (e.g. extra tables, prefilter keys). |
+
+## solver_config (optional) — adapt to an existing layout
+
+The engine references columns by fixed **internal names** (`container_id`, `channel_id`, `tstart`,
+`tend`, `value`, `key`, …). When your physical column names differ, declare the mapping so the solver
+renames each table at read time. Each silver table has a section with:
+
+- `column_name_mapping` (`{physical: internal}`) — applied once, when the table is read.
+- `filters` (`{internal: literal}`) — equality filters applied **after** renaming (e.g. project scoping).
+
+With `data_type="RAW"`, the `channels` table additionally uses the internal names `timestamp` (the
+per-sample timestamp) and — only when `drop_implausible_data` is on — `is_plausible`. Remap them the
+same way, e.g. `"channels": {"column_name_mapping": {"ts_raw": "timestamp"}}`.
+
+**`channels.filters` in RAW mode** run before raw encoding, so they bridge intervals across dropped
+samples. Use them only for whole-channel scoping, not per-sample cleaning: an `is_plausible` filter is
+rejected (use `drop_implausible_data`), any other channels filter warns.
+
+Top-level `project_id` (str, optional) applies an equality filter on the `project_id` column of every
+table that has one (`container_tags`, `container_metrics`, `channel_mapping`). Omit if not needed.
+
+Top-level `channel_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional) and `channel_time_origin`
+(`"epoch"` default | `"container_start"`) describe the time frame of the `channels` timestamps
+(`tstart`/`tend`, or `timestamp` with `data_type="RAW"`): absolute epoch numbers, or time relative
+to the container's start (`container_metrics.start_ts`). Only `TimeWindowEvent` uses them, to compute its windows in that
+frame from `container_metrics.start_ts`/`stop_ts` (origin `"container_start"`: from `0` to
+`stop_ts - start_ts`). `channel_time_unit` is required when those are `TIMESTAMP` columns. If they
+are numeric but in another unit than the channels (e.g. epoch ms boundaries, µs samples), also set
+`container_time_unit` (e.g. `"ms"`; requires `channel_time_unit`, not allowed for `TIMESTAMP`).
+Nothing is converted in place: the channel timestamps, and the `container_metrics.start_ts` /
+`stop_ts` seen by `ContainerEvent`, `measurement_dimension` and UDFs (a `pd.Timestamp`), keep their
+original values.
+
+```python
+"query_engine": {
+    "solver": "DefaultSolver",
+    "solver_config": {
+        "project_id": "my_project",
+        "container_tags": {
+            "column_name_mapping": {"entity_id": "container_id"},
+            "filters": {"parent_id": "my_parent_id"}
+        },
+        "container_metrics": {
+            "column_name_mapping": {"measurement_start": "start_ts", "measurement_end": "stop_ts"}
+        },
+        "channel_mapping": {"filters": {"toolbox_id": "my_toolbox"}}
+    }
+}
+```
+
+Sections you don't customize can be omitted (defaults: empty mapping, no filters). Sections apply per
+table: `container_tags`, `container_metrics`, `channel_tags`, `channel_metrics`, `channel_mapping`,
+`channels`, `unit_conversion`.
+
+**Alias-resolution join keys.** When resolving `channel_with_alias()`, the solver joins
+`channel_mapping` to `channel_metrics` on `(source_channel, channel_name)` + `(data_key, data_key)` by
+default. Override arity/columns with `channel_mapping.join_keys` — each pair references **internal**
+names (as the solver sees them after `column_name_mapping`):
+
+```python
+"channel_mapping": {
+    "join_keys": [{"mapping_col": "source_channel", "metrics_col": "channel_name"}]
+}
+```
+
+The contract is "kwarg name == column name as the solver sees it": if a join key or missing rename
+leaves a column under a non-default name, pass that same name as the `query.channel(...)` kwarg.
+
+**Unit conversion.** Set `source.unit_conversion_table` and add `source_unit` / `target_unit` columns
+to `channel_mapping` so aliased selectors auto-convert during `solve()`. Constants in expressions over
+an aliased selector must then be in the target unit. Direct `channel(...)` selectors are never
+converted — conversion is a property of the alias.
+
+## Custom measurement DB
+
+`solver_config` only renames and filters columns. When the raw tables need *reshaping* to reach the
+silver model (unions, joins, a grain change, an EAV unpivot), register a custom MeasurementDB and select
+it by name — the stock solver then runs unchanged:
+
+```python
+"query_engine": {
+    "measurement_db": "MyMeasurementDB",
+    "measurement_db_config": {"session_table": "catalog.raw.sessions"},
+}
+```
+
+- `measurement_db` is a **registered name**; the package that registers it must be imported before the
+  config is parsed. Validation runs at load time — an unregistered name, a missing required argument, an
+  unknown key, or a key already present in `source` all raise.
+- `measurement_db_config` holds that implementation's own constructor kwargs, merged with `source`.
+- Implementing one (subclass `MeasurementDB` + `MeasurementDBConfig`, decorate with
+  `@register_measurement_db`, and declare any extra tables in `configured_table_uris()` so they are
+  pinned per run) is covered in the Impulse docs' *Custom measurement DB* section.
+
+## incremental (optional)
+
+Reuses prior results for unchanged definitions and reprocesses only new/updated containers. See
+`impulse-reporting` for mode resolution and what counts as a definition change.
+
+| Field                         | Default         | Description                                     |
+|-------------------------------|-----------------|-------------------------------------------------|
+| `enabled`                     | `false`         | Turn incremental processing on.                 |
+| `silver_last_modified_column` | `"timestamp"`   | Silver column used to detect container updates; name after `column_name_mapping` (physical name unless remapped). |
+| `gold_last_modified_column`   | `"_created_at"` | Gold column used to detect prior-run freshness. |
+
+## full_recalculation (optional)
+
+Forces a full recalculation of specific entities on an **incremental** run: the listed aggregations,
+events, and/or calculated channels recompute over **all** matching containers and have their gold rows
+fully replaced, even when their `definition_hash` is unchanged (the same treatment a definition change
+already receives, applied on demand). Use it to backfill after fixing a persistence bug or correcting
+upstream data, without a full-mode rerun of everything. In full mode it is a no-op — everything already
+recomputes. Entities are named by their human-readable `name`; a name matching no registered entity
+fails the run fast with a `ValueError`, so typos surface immediately.
+
+| Field                 | Default | Description                                    |
+|-----------------------|---------|------------------------------------------------|
+| `aggregations`        | `[]`    | Names of aggregations to fully recompute.      |
+| `events`              | `[]`    | Names of events to fully recompute.            |
+| `calculated_channels` | `[]`    | Names of calculated channels to fully recompute. |
+
+## measurement_dimensions (optional)
+
+List of `container_metrics` columns (post-mapping **internal** names) to surface into the gold
+`measurement_dimension` table. Each name passes through verbatim as the gold column name.
+
+Default: `["container_id", "start_ts", "stop_ts"]`. Keep `container_id` — it is the incremental upsert
+key and the join key to fact tables. Any column present in your post-mapping `container_metrics`
+DataFrame is valid; a missing one fails the run fast with a `ValueError` naming it.
+
+## calculated_channels (optional)
+
+Controls the optional `calculated_channel_metrics` table. Off by default; when on, it is written alongside
+`calculated_channel_fact` / `calculated_channel_dimension` in the silver `channel_metrics` shape, so the
+fact + metrics pair can serve as an Impulse silver source. See `impulse-channels`.
+
+| Field                  | Default                              | Description                                                                 |
+|------------------------|--------------------------------------|-----------------------------------------------------------------------------|
+| `emit_channel_metrics` | `false`                              | Turn on the `calculated_channel_metrics` table.                             |
+| `attribute_columns`    | `[]`                                 | Calculated-channel `attributes` keys to surface as columns (e.g. `["unit"]`). |
+| `kpis`                 | `["duration", "min", "max", "mean"]` | KPIs computed per `(container_id, channel_id)`, one column each.            |
+
+Each metrics row is one `(container_id, channel_id)` pair with the selected `kpis` (duration-weighted) plus
+dynamic identity columns (union of `identity` keys) and the configured `attribute_columns`; identity wins
+over an attribute of the same name. An unknown KPI name is rejected at config validation.

@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as f
-import zlib
-from pyspark.sql import DataFrame, Row, SparkSession
+from pyspark.sql import DataFrame, SparkSession
 
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
-from impulse_reporting.events.event import Event
-from impulse_reporting.persist.dimension_schema import EVENT_DIMENSION_SCHEMA
+from impulse_reporting.events.container_boundary_event import ContainerBoundaryEvent
 from impulse_reporting.persist.fact_schema import EVENT_INSTANCE_FACT_SCHEMA
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
@@ -23,7 +20,7 @@ if TYPE_CHECKING:
     )
 
 
-class ContainerEvent(Event):
+class ContainerEvent(ContainerBoundaryEvent):
     """Event that treats the full measurement container as a single event instance.
 
     Unlike ``BasicEvent``, no time-series expression is needed — the event
@@ -46,24 +43,11 @@ class ContainerEvent(Event):
         """
         super().__init__(name)
         self.description = desc
-        normalized_attributes: dict[str, str] = {}
-        if attributes is not None:
-            normalized_attributes = {str(k): str(v) for k, v in attributes.items()}
-        self.attributes = normalized_attributes
+        self.attributes = self._normalize_attributes(attributes)
 
     # ------------------------------------------------------------------
     # Instance methods
     # ------------------------------------------------------------------
-
-    def get_id(self) -> int:
-        """Return a unique identifier derived from the event name.
-
-        Returns
-        -------
-        int
-            Positive 32-bit integer identifier.
-        """
-        return zlib.crc32(self.name.encode()) & 0x7FFFFFFF
 
     def get_expression(self) -> TimeSeriesExpression | None:
         """ContainerEvent has no time-series expression.
@@ -97,37 +81,7 @@ class ContainerEvent(Event):
         int
             Hash value representing the computation definition.
         """
-        hash_input = self.name
-        hash_bytes = hashlib.sha256(hash_input.encode()).digest()
-        return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
-
-    def as_dict(self) -> dict:
-        """Return a dictionary representation of the event.
-
-        Returns
-        -------
-        dict
-        """
-        return {
-            "event_id": self.get_id(),
-            "report_id": self.report_id,
-            "event_type": self.get_event_type_str(),
-            "event_name": self.name,
-            "event_description": self.description,
-            "required_channels": None,
-            "event_expression": self.get_expression_str(),
-            "definition_hash": self.determine_definition_hash(),
-            "attributes": self.attributes,
-        }
-
-    def as_spark_row(self) -> Row:
-        """Return a Spark ``Row`` representation.
-
-        Returns
-        -------
-        Row
-        """
-        return Row(**self.as_dict())
+        return self._sha256_long(self.name)
 
     # ------------------------------------------------------------------
     # Class methods
@@ -170,9 +124,8 @@ class ContainerEvent(Event):
             Spark DataFrame matching ``EVENT_INSTANCE_FACT_SCHEMA``.
         """
         # Resolve containers via solver filter pipeline
-        container_tags_df = solver.filter_container_tags(spark, query)
-        container_metrics_df = solver.filter_container_metrics(
-            spark, query, container_tags_df, pre_filtered_containers_df
+        container_metrics_df = cls.resolve_container_metrics(
+            spark, query, solver, pre_filtered_containers_df
         )
 
         # Rename silver columns to gold event fact column names and cast
@@ -206,22 +159,3 @@ class ContainerEvent(Event):
 
         # Select only the columns defined in the fact schema
         return df.select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
-
-    @classmethod
-    def determine_metadata_df(cls, spark: SparkSession, events: list[ContainerEvent]) -> DataFrame:
-        """Create a Spark DataFrame containing event metadata.
-
-        Parameters
-        ----------
-        spark : SparkSession
-            Active Spark session.
-        events : list of ContainerEvent
-            List of ContainerEvent objects.
-
-        Returns
-        -------
-        DataFrame
-            Spark DataFrame matching ``EVENT_DIMENSION_SCHEMA``.
-        """
-        rows = [event.as_spark_row() for event in events]
-        return spark.createDataFrame(rows, schema=EVENT_DIMENSION_SCHEMA)

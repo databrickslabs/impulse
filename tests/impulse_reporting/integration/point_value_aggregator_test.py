@@ -70,13 +70,13 @@ def test_persist_point_value_aggregator(spark):
     )
     page.add_aggregation(pva)
 
-    my_report.determine_report()
+    my_report._determine_report()
 
     assert "POINT_VALUE_AGGREGATOR" in my_report.aggregation_dfs
     assert my_report.aggregation_dfs["POINT_VALUE_AGGREGATOR"]["changed"].count() > 0
     assert my_report.aggregation_metadata_dfs["POINT_VALUE_AGGREGATOR"].count() == 1
 
-    my_report.persist_results()
+    my_report._persist_results()
 
     fact = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_fact")
     dim = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_dimension")
@@ -158,8 +158,7 @@ def test_stats_and_point_value_share_fact_table_without_clobber(spark):
     page.add_aggregation(stats)
     page.add_aggregation(pva)
 
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
 
     fact = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_fact")
     dim = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_dimension")
@@ -245,8 +244,7 @@ def test_incremental_stats_and_point_value_shared_fact_changed_defs(spark):
         config=dict(_incremental_config(is_enabled=False)),
     )
     stats_1, pva_1 = _add_stats_and_pva(report_1, statistics=["min", "max"], pva_scale=1.0)
-    report_1.determine_report()
-    report_1.persist_results()
+    report_1.run()
 
     fact_run1 = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_fact")
     assert fact_run1.where(F.col("visual_id") == stats_1.get_id()).count() > 0
@@ -265,8 +263,7 @@ def test_incremental_stats_and_point_value_shared_fact_changed_defs(spark):
     assert stats_2.get_id() == stats_1.get_id()
     assert pva_2.get_id() == pva_1.get_id()
 
-    report_2.determine_report()
-    report_2.persist_results()
+    report_2.run()
 
     fact_run2 = spark.read.table("spark_catalog.gold.evaluation_stats_aggregator_fact")
     stats_rows = fact_run2.where(F.col("visual_id") == stats_2.get_id())

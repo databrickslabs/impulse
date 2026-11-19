@@ -59,6 +59,7 @@ Maps the silver-layer input tables.
 | `container_metrics_table` | `str` | Yes      | Full Unity Catalog path. Container metadata (timestamps, duration). |
 | `channel_metrics_table`   | `str` | Yes      | Full Unity Catalog path. Channel-level statistics.        |
 | `channels_uri`            | `str` | Yes      | Full Unity Catalog path. Time-series sample data.         |
+| `poi_channels_uri`        | `str` | No       | Full Unity Catalog path to the Points-in-Time (POI) channel data table. Required only when selecting POI channels via `poi_channel()`; omit for sample-only data models. |
 | `container_tags_table`    | `str` | No       | Full Unity Catalog path. Container EAV tags.              |
 | `channel_tags_table`      | `str` | No       | Full Unity Catalog path. Channel EAV tags.                |
 | `channel_mapping_table`   | `str` | No       | Full Unity Catalog path. Logical-to-physical channel alias table. Required when using `QueryBuilder.channel_with_alias()`. In reporting mode the resolved alias-to-physical-channel mapping is materialized to the gold-layer [`channel_mapping_resolution_dimension`](../data_model/gold_layer_event_normalized.md#dimension-tables). |
@@ -76,9 +77,10 @@ Defines where gold-layer tables are written.
 
 | Field          | Type  | Required | Description                           |
 |----------------|-------|----------|---------------------------------------|
-| `catalog`      | `str` | Yes      | Target catalog name.                  |
-| `schema`       | `str` | Yes      | Target schema name.                   |
-| `table_prefix` | `str` | Yes      | Prefix for all generated table names. |
+| `catalog`             | `str`  | Yes      | Target catalog name.                  |
+| `schema`              | `str`  | Yes      | Target schema name.                   |
+| `table_prefix`        | `str`  | Yes      | Prefix for all generated table names. |
+| `cleanup_temp_tables` | `bool` | No       | Drop the batch-solving `__impulse_temp_*` tables from this schema after `run()` persists successfully. Defaults to `false`. Overridable per call via `run(cleanup_temp_tables=...)`. |
 
 Output tables are named `{table_prefix}_{entity}` (e.g.
 `my_report_histogram_fact`).
@@ -86,9 +88,9 @@ Output tables are named `{table_prefix}_{entity}` (e.g.
 ### Sinkless reports
 
 `unity_sink` is optional. When omitted, the report runs in **sinkless
-mode**: `determine_report()` still computes events, aggregations, and
-container dimensions and exposes them on the report object, but
-`persist_results()` becomes a no-op. Useful for ad-hoc analysis,
+mode**: `run()` still computes events, aggregations, and container
+dimensions and exposes them on the report object, but writes nothing.
+Useful for ad-hoc analysis,
 notebooks, and tests where writing to Unity Catalog is not desired.
 
 ---
@@ -137,13 +139,20 @@ Two independent filter families:
 | `data_type`             | `str`          | `"RLE"`                  | `"RLE"` (intervals `[tstart, tend)`) or `"RAW"` (raw timestamps; converted to intervals at query time by the configured `raw_encoder`). |
 | `raw_encoder`           | `str`          | `null` (resolves to `"RLE"` when `data_type = "RAW"`) | How RAW point data is converted to intervals. `"RLE"` (the default) run-length encodes on the fly to reduce memory consumption: consecutive samples with the same value collapse into a single `[tstart, tend)` interval per run. `"INTERVAL"` keeps every original sample, only deriving `tend` from the next sample's timestamp and dropping exact duplicate points — use it when downstream analysis needs all original timestamps. Only takes effect with `data_type = "RAW"`; ignored for `"RLE"` input. See [How Impulse interprets intervals](../data_model/silver_layer_schema.md#raw-format) for validity semantics and what counts as a duplicate point. |
 | `drop_implausible_data` | `bool`         | `false`                  | When `true`, drops `channels` rows where `is_plausible = false`. Requires `data_type = "RAW"`; combining with `"RLE"` raises a validation error. |
-| `batch_size`            | `int`          | `500`                    | Maximum number of selectors solved per batch.                                                                               |
+| `max_channels_per_batch` | `int`         | `500`                    | Caps how many distinct channels are read in one solve batch, to bound per-solve memory. Counts channel selections (each distinct `channel(...)` / `poi_channel(...)` in your expressions). Applies to events, aggregations, and calculated channels; for calculated channels it counts the *input* channels they read, not the number of calculated channels. The cap is a packing target, not a hard limit: an expression that on its own reads more channels than the cap still runs, in a batch of its own. Must be `>= 1`. The old name `batch_size` is a **deprecated alias** (still accepted, warns, removed in a future release); setting both raises a validation error. |
+| `max_containers_per_batch` | `int`       | `null`                   | Caps how many containers are solved at once, to bound per-solve memory. `null` disables the cap; when set it must be `>= 1`. On an **incremental** run, `Report.run()` commits at most this many upserted containers per iteration and loops until the population is drained (see [incremental](#incremental-optional)). On a **full** run, and when a changed definition recomputes over all containers, the population is split into chunks of about this size and solved chunk by chunk. Chunk sizes are approximate (the cap is a memory heuristic, not an exact bound). |
 | `solver_config`         | `SolverConfig` | `null`                   | Per-table column mappings, per-table equality filters, and project scoping. Set `project_id` to scope reads by project — it is applied to `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured), so it works in both narrow EAV and wide-only data models. Omit it when you don't need project scoping. See [Solver column mappings and filters](#solver-column-mappings-and-filters). |
+| `measurement_db`        | `str`          | `"MeasurementDB"`        | Registered name of the MeasurementDB implementation to use. The default is the built-in reader; a custom implementation can reshape a different source schema at read time. See [Custom measurement DB](../extensibility/custom_measurement_db.md). |
+| `measurement_db_config` | `dict`         | `null`                   | Keyword arguments for that implementation's config class, merged with the `source` tables (e.g. extra source tables, prefilter keys). |
 
 If `query_engine` is omitted, the default is `DefaultSolver` with
 `data_type = "RLE"`.
 
----
+Unknown keys under `query_engine` are rejected when the config is loaded: a misspelled key such as
+`"measurment_db"` fails with `Extra inputs are not permitted` instead of being silently ignored.
+
+For a source schema that needs reshaping beyond column renames, select your own read seam — see
+[Custom measurement DB](../extensibility/custom_measurement_db.md).
 
 ## Solver column mappings and filters
 
@@ -158,7 +167,8 @@ in `solver_config` so the solver renames each table's columns at read time.
   the internal names.
 - `filters` (`dict[str, str]`): equality filters applied **after** renaming. Keys are internal column
   names; values are literals to match. Useful for project/toolbox scoping where a single value should
-  always be enforced.
+  always be enforced. Values are strings but are coerced to the target column's type, so a boolean
+  column takes `"true"` / `"false"` (an unparseable value errors at read time under ANSI mode).
 
 Top-level fields on `SolverConfig`:
 
@@ -166,6 +176,36 @@ Top-level fields on `SolverConfig`:
   the `project_id` column (after column-name mapping) of every table it reads that carries one —
   `container_tags` (if configured), `container_metrics`, and `channel_mapping` (if configured).
   Omit it if you don't need project-level scoping; the solver does not require it.
+- `channel_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional) and `channel_time_origin`
+  (`"epoch"` (default) | `"container_start"`): the time frame of the channel timestamps
+  (`tstart`/`tend`, or `timestamp` when `data_type = "RAW"`). `"epoch"` means absolute epoch
+  numbers; `"container_start"` means time relative to the container's start
+  (`container_metrics.start_ts`, e.g. seconds since the recording started). Channel timestamps are never converted; they must already be
+  numbers in that frame.
+
+- `container_time_unit` (`"s"` | `"ms"` | `"us"` | `"ns"`, optional): the unit of **numeric**
+  `container_metrics.start_ts`/`stop_ts`, when it differs from the channels' unit. For example,
+  boundaries in epoch ms and channel samples in epoch µs need `container_time_unit = "ms"` and
+  `channel_time_unit = "us"`. Requires `channel_time_unit`; not allowed for `TIMESTAMP`
+  boundaries, which carry their own unit. Unset means the numeric boundaries are already in the
+  channels' unit.
+
+  These settings are only used by `TimeWindowEvent`, whose windows must lie in the channel time
+  frame. It derives its window bounds from `container_metrics.start_ts`/`stop_ts`:
+  - origin `"epoch"`: `TIMESTAMP` boundaries as epoch numbers in `channel_time_unit`; numeric
+    boundaries converted from `container_time_unit` to `channel_time_unit` (as they are when
+    `container_time_unit` is unset);
+  - origin `"container_start"`: `0` to `stop_ts - start_ts`, converted the same way.
+
+  `channel_time_unit` is required when the boundaries are `TIMESTAMP` columns; a report with a
+  `TimeWindowEvent` fails with a clear error until it is set. `TIMESTAMP_NTZ` and `DATE` boundaries
+  are not supported. Everything else sees the original `container_metrics.start_ts`/`stop_ts`:
+  `ContainerEvent`, `measurement_dimension`, container filters, and UDFs that request them via
+  `apply(..., container_metrics=[...])` (a `TIMESTAMP` arrives there as a `pd.Timestamp`).
+
+  The channel time frame is part of the definition hash of every `TimeWindowEvent` and of the
+  aggregations scoped to it, so changing it recomputes them over all containers in incremental
+  mode instead of mixing time frames in the gold tables.
 
 Per-table sections (each a `TableConfig`):
 
@@ -176,7 +216,7 @@ Per-table sections (each a `TableConfig`):
 | `channel_tags`     | when `channel_tags_table` is configured    | Tag key/value column renames                                      |
 | `channel_metrics`  | always                                     | Custom channel_id column, custom value/timestamp columns          |
 | `channel_mapping`  | when `channel_mapping_table` is configured | Alias-table column renames; `priority` column; optional `join_keys` for non-default alias-resolution composite keys |
-| `channels`         | always                                     | RLE column renames (`tstart`/`tend`/`value`)                      |
+| `channels`         | always                                     | RLE column renames (`tstart`/`tend`/`value`); `filters` supported (applied at read time, before non-solve columns are dropped) |
 | `unit_conversion`  | when `unit_conversion_table` is configured | Unit-conversion table column renames (`unit`, `group_id`, `conversion_factor`) |
 
 Internal column names that mappings can target:
@@ -186,7 +226,9 @@ Internal column names that mappings can target:
 | `container_id`  | Container identifier                                     |
 | `channel_id`    | Channel identifier                                       |
 | `tstart`, `tend`| Sample interval start/end on the `channels` table (RLE)  |
-| `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` to derive event-fact start/end |
+| `timestamp`     | Raw sample timestamp on the `channels` table (RAW mode; encoded into `tstart`/`tend`) |
+| `is_plausible`  | Boolean plausibility flag on the `channels` table (RAW mode); consumed by `drop_implausible_data` |
+| `start_ts`, `stop_ts` | Measurement start/stop epoch timestamps on the `container_metrics` table — referenced by `ContainerEvent` and `TimeWindowEvent` to derive event-fact start/end. May be `TIMESTAMP` (see `channel_time_unit`) |
 | `value`         | Sample value (or attribute value on the EAV tag table)   |
 | `key`           | Attribute key on the EAV `container_tags` table          |
 | `priority`      | Tie-breaker column on the `channel_mapping` table        |
@@ -203,10 +245,36 @@ Internal column names that mappings can target:
 
 :::note Feature support
 
-`DefaultSolver` consumes every section of `solver_config`: per-table
-`column_name_mapping`, per-table `filters`, top-level `project_id`, and the
-`channel_mapping` / `unit_conversion` sections. Sections for tables you do
-not configure (e.g. `channel_tags`, `channel_mapping`) are simply unused.
+`DefaultSolver` consumes every section's `column_name_mapping`, plus the
+top-level `project_id` and the `channel_mapping` / `unit_conversion` sections.
+Per-table `filters` are applied for `container_tags`, `container_metrics`,
+`channel_mapping`, and `channels`. Filters on `channel_tags`, `channel_metrics`,
+and `poi_channels` are accepted for forward compatibility but **not yet applied**.
+Sections for tables you do not configure (e.g. `channel_tags`, `channel_mapping`)
+are simply unused.
+
+:::
+
+:::caution Channels filters in RAW mode
+
+`channels.filters` are applied **before** raw encoding. A filter that removes
+samples from the middle of a channel therefore *bridges* the surrounding interval
+(the last good value is held across the gap) rather than splitting it.
+
+**Intended scope:** use `channels.filters` in RAW mode **only for whole-channel
+scoping** (a value constant across all of a channel's samples, e.g. a single
+`source`/stream or project scoping), never for per-sample cleaning (value ranges,
+quality flags, NaN drops). Per-sample cleaning leaves interior gaps that get bridged,
+distorting the signal. To drop implausible samples with correct boundaries, use
+`drop_implausible_data`.
+
+When `data_type = RAW`, the validator **rejects** a `channels.filters` entry on
+`is_plausible` (unambiguously per-sample) and **warns** on any other entry, since it
+cannot tell scoping from cleaning statically.
+
+In RLE mode there is no such restriction: the `channels` table is already encoded, so
+a filter simply drops the matching `[tstart, tend)` interval rows without bridging, and
+may target any column.
 
 :::
 
@@ -232,7 +300,8 @@ not configure (e.g. `channel_tags`, `channel_mapping`) are simply unused.
             "filters": {"toolbox_id": "my_toolbox"}
         },
         "channels": {
-            "column_name_mapping": {}
+            "column_name_mapping": {},
+            "filters": {"source": "live"}
         }
     }
 }
@@ -347,8 +416,87 @@ mode-resolution rules and what counts as a definition change.
 | Field                         | Type   | Default         | Description                                                            |
 |-------------------------------|--------|-----------------|------------------------------------------------------------------------|
 | `enabled`                     | `bool` | `false`         | Turns incremental processing on.                                       |
-| `silver_last_modified_column` | `str`  | `"timestamp"`   | Silver-side column used to detect container updates.                   |
+| `silver_last_modified_column` | `str`  | `"timestamp"`   | Silver column used to detect container updates. Name after `column_name_mapping` is applied (the physical name unless you remap that column). |
 | `gold_last_modified_column`   | `str`  | `"_created_at"` | Gold-side column used to detect prior-run freshness.                   |
+
+:::note Draining a capped incremental run
+When [`query_engine.max_containers_per_batch`](#query_engine-optional) is set, a single
+`Report.run()` commits at most that many upserted containers per iteration and loops until the
+population is drained, so no one solve holds the whole population in memory. If a batch is detected
+again unchanged after being persisted (no forward progress, e.g. a misconfigured
+`gold_last_modified_column`), `run()` logs a warning and stops with partial completion rather than
+looping forever.
+:::
+
+---
+
+## full_recalculation (optional)
+
+Forces a full recalculation of specific entities on an **incremental** run: the listed
+aggregations, events, and/or calculated channels recompute over **all** matching containers and
+have their gold rows fully replaced, regardless of whether their `definition_hash` changed. This is
+the same treatment a definition change already receives, applied on demand — useful to backfill
+after fixing a persistence bug or correcting upstream data, without rerunning everything in full
+mode. In full mode it is a no-op, since every entity already recomputes over all containers.
+
+Entities are identified by their human-readable `name`. A name that matches no registered entity
+fails the run fast with a `ValueError`, so typos surface immediately rather than silently doing
+nothing.
+
+| Field                 | Type        | Default | Description                                      |
+|-----------------------|-------------|---------|--------------------------------------------------|
+| `aggregations`        | `list[str]` | `[]`    | Names of aggregations to fully recompute.        |
+| `events`              | `list[str]` | `[]`    | Names of events to fully recompute.              |
+| `calculated_channels` | `list[str]` | `[]`    | Names of calculated channels to fully recompute. |
+
+```json
+{
+  "full_recalculation": {
+    "aggregations": ["rpm_hist_p1"],
+    "events": ["overspeed"],
+    "calculated_channels": ["power_kw"]
+  }
+}
+```
+
+:::note Incremental only
+`full_recalculation` only has an effect when the run is incremental. A first run, or any full run,
+already recomputes every entity over all containers, so the scope is ignored.
+:::
+
+---
+
+## calculated_channels (optional)
+
+Controls the optional `calculated_channel_metrics` output. By default a report
+writes calculated channels to `calculated_channel_fact` (the derived signal) and
+`calculated_channel_dimension` (the definitions). Setting `emit_channel_metrics`
+adds a third table, `calculated_channel_metrics`, shaped like the silver
+`channel_metrics` table so the fact + metrics pair can serve as an Impulse silver
+source. See the [Channels reference](../references/report/channel.md) for the
+output schema.
+
+| Field                 | Type        | Default                              | Description                                                                                       |
+|-----------------------|-------------|--------------------------------------|---------------------------------------------------------------------------------------------------|
+| `emit_channel_metrics`| `bool`      | `false`                              | Turns on the `calculated_channel_metrics` table.                                                  |
+| `attribute_columns`   | `list[str]` | `[]`                                 | Calculated-channel `attributes` keys to surface as columns on the metrics table (e.g. `["unit"]`). |
+| `kpis`                | `list[str]` | `["duration", "min", "max", "mean"]` | KPIs computed per `(container_id, channel_id)`, one column each. Must be registered KPI names.     |
+
+When enabled, each row of `calculated_channel_metrics` is one
+`(container_id, channel_id)` pair, carrying the selected `kpis` plus dynamic
+identity columns (the union of `identity` keys across the report's channels) and
+the configured `attribute_columns`. A channel that omits an identity or attribute
+key gets `null` for that column; an identity key wins over an attribute key of the
+same name.
+
+The available `kpis` are `duration`, `min`, `max`, and `mean` (all
+duration-weighted, matching the silver ingestion semantics). An unknown KPI name is
+rejected at config validation with a `ValueError` naming the valid KPIs.
+
+:::note Off by default
+When `emit_channel_metrics` is `false` (the default), no metrics table is written
+and `attribute_columns` / `kpis` have no effect.
+:::
 
 ---
 

@@ -4,6 +4,9 @@ This module contains unit tests for the StatsAggregator class from impulse_repor
 Tests follow the same pattern as histogram_test.py.
 """
 
+import math
+
+import pyspark.sql.functions as f
 import pyspark.sql.types as T
 import pytest
 
@@ -13,9 +16,12 @@ from impulse_query_engine.analyze.query.aggregations.custom_statistic import (
     PerChannelStatistic,
 )
 from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 from impulse_reporting.events.basic_event import BasicEvent
+from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
+from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
 
 
@@ -462,6 +468,180 @@ def test_determine_aggregations_multiple_stats(spark, basic_narrow_db):
 
     assert "Engine RPM" in channel_names_list
     assert "Vehicle Speed" in channel_names_list
+
+
+def test_determine_aggregations_container_event_instance_id(spark, basic_narrow_db):
+    """Container-event stats rows must use crc32(container_id) as event_instance_id.
+
+    This is the value ``ContainerEvent.determine_events`` writes to
+    ``event_instance_fact`` (see ``generate_event_instance_id_column``'s
+    ``ContainerEvent`` branch), so the two gold tables stay consistent. Basic-event
+    stats in the same frame must keep the timestamp-based id instead.
+    """
+    eng_rpm = basic_narrow_db.query.channel(channel_name="Engine RPM")
+
+    container_event = ContainerEvent(name="full_container")
+    basic_event = BasicEvent(name="rpm_event", expr=eng_rpm > 500)
+
+    container_stats = StatsAggregator(
+        name="container_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max", "mean"],
+        event=container_event,
+    )
+    basic_stats = StatsAggregator(
+        name="basic_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max", "mean"],
+        event=basic_event,
+    )
+
+    solver = DefaultSolver(spark)
+    solved_df = basic_narrow_db.query.select(
+        container_stats.get_expression(), basic_stats.get_expression()
+    ).solve(spark, solver)
+    df = StatsAggregator.determine_aggregations(
+        spark=spark,
+        aggregations=[container_stats, basic_stats],
+        solved_df=solved_df,
+    ).withColumn("expected_container_id", f.xxhash64(f.col("container_id").cast("string")))
+
+    # Every container-event row uses xxhash64(container_id) — matching event_instance_fact.
+    container_rows = df.filter(f.col("visual_id") == container_stats.get_id()).collect()
+    assert len(container_rows) > 0
+    for row in container_rows:
+        assert row.event_instance_id == row.expected_container_id, (
+            f"container_id={row.container_id}: event_instance_id="
+            f"{row.event_instance_id} != xxhash64(container_id)={row.expected_container_id}"
+        )
+
+    # ... and exactly one distinct event_instance_id per container (no fragmentation).
+    per_container = (
+        df.filter(f.col("visual_id") == container_stats.get_id())
+        .groupBy("container_id")
+        .agg(f.countDistinct("event_instance_id").alias("n"))
+        .collect()
+    )
+    for row in per_container:
+        assert row.n == 1, f"container {row.container_id} fragmented into {row.n} ids"
+
+    # Basic-event rows must NOT collapse to crc32(container_id); they use the
+    # timestamp-based hash (container_id::event_name::start_ts::end_ts).
+    basic_rows = df.filter(f.col("visual_id") == basic_stats.get_id()).collect()
+    assert len(basic_rows) > 0
+    assert all(row.event_instance_id != row.expected_container_id for row in basic_rows)
+
+
+def _aligned_boundaries_db(basic_narrow_db: MeasurementDB) -> MeasurementDB:
+    """Clone of basic_narrow_db whose container_metrics start_ts / stop_ts span each
+    container's channel samples (µs), so time windows actually overlap the data. In the
+    original, the boundaries (2025, epoch ms) and the samples (2017, epoch µs) never meet."""
+    tables = dict(basic_narrow_db.config.debug_tables)
+    bounds = (
+        tables["channels"]
+        .groupBy("container_id")
+        .agg(f.min("tstart").alias("start_ts"), f.max("tend").alias("stop_ts"))
+    )
+    tables["container_metrics"] = (
+        tables["container_metrics"].drop("start_ts", "stop_ts").join(bounds, "container_id")
+    )
+    return MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=basic_narrow_db.ws)
+
+
+def test_determine_aggregations_time_window_event_instance_id(spark, basic_narrow_db):
+    """Time-window stats rows carry the timestamp-based id that
+    ``TimeWindowEvent.determine_events`` writes to ``event_instance_fact`` (one id per window,
+    all of them materialized) and the statistics of their own window. Basic-event stats in the
+    same frame keep their own ids."""
+    db = _aligned_boundaries_db(basic_narrow_db)
+    window_length = 600_000_000  # 10 min in µs
+    eng_rpm = db.query.channel(channel_name="Engine RPM")
+
+    window_event = TimeWindowEvent(name="ten_min", window_length=window_length)
+    basic_event = BasicEvent(name="rpm_event", expr=eng_rpm > 500)
+    window_stats = StatsAggregator(
+        name="window_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max"],
+        event=window_event,
+    )
+    basic_stats = StatsAggregator(
+        name="basic_stats",
+        input_expressions=[eng_rpm],
+        channel_names=["Engine RPM"],
+        statistics=["min", "max"],
+        event=basic_event,
+    )
+
+    solver = DefaultSolver(spark)
+    solved_df = db.query.select(window_stats.get_expression(), basic_stats.get_expression()).solve(
+        spark, solver
+    )
+    df = StatsAggregator.determine_aggregations(
+        spark=spark, aggregations=[window_stats, basic_stats], solved_df=solved_df
+    )
+    windows = TimeWindowEvent.determine_events(
+        spark, [window_event], query=db.query, solver=solver
+    )
+
+    window_rows = windows.collect()
+    window_ids = {r.event_instance_id for r in window_rows}
+    window_count = {
+        cid: sum(1 for r in window_rows if r.container_id == cid)
+        for cid in {r.container_id for r in window_rows}
+    }
+    stats_rows = df.filter(f.col("visual_id") == window_stats.get_id()).collect()
+    assert stats_rows
+    assert {r.event_instance_id for r in stats_rows} <= window_ids
+    # Every window of every solved container gets its own id.
+    for cid, n in window_count.items():
+        assert len({r.event_instance_id for r in stats_rows if r.container_id == cid}) == n
+
+    # Real values. The RPM channel only covers each container's first minute, so only the
+    # first window holds samples: its min / max are those of the RPM samples, all other
+    # windows carry no value.
+    rpm_ids = (
+        db.channel_metrics(spark)
+        .filter(f.col("channel_name") == "Engine RPM")
+        .select("container_id", "channel_id")
+    )
+    rpm = {
+        r.container_id: r
+        for r in db.channels(spark)
+        .join(rpm_ids, ["container_id", "channel_id"])
+        .groupBy("container_id")
+        .agg(
+            f.min(f.col("value").cast("double")).alias("min"),
+            f.max(f.col("value").cast("double")).alias("max"),
+            f.max("tend").alias("last_tend"),
+        )
+        .collect()
+    }
+    first_window = {}
+    for r in window_rows:
+        if r.container_id not in first_window or r.start_ts < first_window[r.container_id][0]:
+            first_window[r.container_id] = (r.start_ts, r.event_instance_id)
+    for cid, (start, first_id) in first_window.items():
+        assert rpm[cid].last_tend - start < window_length, "fixture: RPM beyond window 0"
+        values = {
+            r.aggregation_label: r.statistic_value
+            for r in stats_rows
+            if r.event_instance_id == first_id
+        }
+        assert values == {"min": rpm[cid].min, "max": rpm[cid].max}, (cid, values)
+    later = [
+        r for r in stats_rows if r.event_instance_id not in {i for _, i in first_window.values()}
+    ]
+    # No samples: the statistic is null (or NaN).
+    assert later
+    assert all(r.statistic_value is None or math.isnan(r.statistic_value) for r in later)
+
+    basic_rows = df.filter(f.col("visual_id") == basic_stats.get_id()).collect()
+    assert len(basic_rows) > 0
+    assert not {r.event_instance_id for r in basic_rows} & window_ids
 
 
 def test_determine_metadata_df(spark, basic_narrow_db):

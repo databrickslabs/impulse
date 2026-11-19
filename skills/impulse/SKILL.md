@@ -129,9 +129,16 @@ page.add_aggregation(HistogramDuration(
 ))
 report.add_page(page)
 
-report.determine_report()   # compute
-report.persist_results()    # write the gold star schema
+report.run()   # compute and write the gold star schema
 ```
+
+## Prefer native functionality
+
+Build solutions from Impulse's native building blocks (TSAL operators and methods, event types,
+aggregation classes, calculated channels) and fall back to a user-defined function only for logic
+they cannot express. Native operations handle edge cases such as empty inputs, gaps and unaligned
+channels, and future Impulse versions may also optimize their execution, while logic inside a UDF
+stays opaque to the engine. See **`impulse-tsal`** → User-defined functions.
 
 ## Where to go next
 

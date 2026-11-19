@@ -1,2 +1,4 @@
 container_id,channel_id,key,value
 1,1,seed,0
+1,90,channel_name,DTC
+1,91,channel_name,DTC_count

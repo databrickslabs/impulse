@@ -505,6 +505,7 @@ class TestDefaultSolverEndToEndWideOnly:
             "te": "tend",
             "val": "value",
             "conv": "conversion_factor",
+            "value_string": "value_string",
         }
 
     def test_config_properties_return_internal_names(self, spark: SparkSession):

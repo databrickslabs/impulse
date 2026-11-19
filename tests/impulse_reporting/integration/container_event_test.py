@@ -74,7 +74,7 @@ def test_container_event_in_report(spark, basic_narrow_db):
     my_report.add_event(container_evt)
 
     # Determine report content
-    my_report.determine_report()
+    my_report.run(persist_results=False)
 
     # Access event DataFrames
     event_dfs = my_report.event_dfs
@@ -185,21 +185,23 @@ def test_container_event_with_basic_event(spark, basic_narrow_db):
     my_report.add_event(basic_evt)
 
     # Determine report content
-    my_report.determine_report()
-    my_report.persist_results()
+    my_report.run()
     event_dfs = my_report.event_dfs
 
     # Both event types should exist
     assert "CONTAINER_EVENT" in event_dfs
     assert "BASIC_EVENT" in event_dfs
 
-    # BasicEvent instances: should have non-negative event_instance_id (CRC32 hashes)
+    # BasicEvent instances use the per-instance timestamp-based xxHash64, so each
+    # instance carries a distinct id (which may be negative, unlike a
+    # ContainerEvent's single per-container id).
     basic_rows = event_dfs["BASIC_EVENT"]["changed"].collect()
     assert len(basic_rows) > 0, "Should have at least one basic event instance"
-    for row in basic_rows:
-        assert (
-            row.event_instance_id >= 0
-        ), f"BasicEvent should have non-negative event_instance_id, got {row.event_instance_id}"
+    basic_ids = [row.event_instance_id for row in basic_rows]
+    assert all(
+        i is not None for i in basic_ids
+    ), "BasicEvent instances must have an event_instance_id"
+    assert len(set(basic_ids)) == len(basic_ids), "BasicEvent instance ids must be distinct"
 
     # Event metadata: should have 2 event definitions
     event_metadata_dfs = my_report.event_metadata_dfs
@@ -327,7 +329,7 @@ def test_container_event_with_remapped_silver_timestamps(spark, basic_narrow_db)
             config=dict(impulse_config),
         )
         my_report.add_event(ContainerEvent(name="full_measurement"))
-        my_report.determine_report()
+        my_report.run(persist_results=False)
 
         event_rows = my_report.event_dfs["CONTAINER_EVENT"]["changed"].collect()
         assert len(event_rows) == 3

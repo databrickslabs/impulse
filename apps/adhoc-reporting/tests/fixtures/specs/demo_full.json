@@ -1,0 +1,68 @@
+{
+  "name": "demo_full",
+  "description": "Every supported feature on the upstream demo silver data",
+  "source": {"catalog": "main", "schema": "impulse_demo"},
+  "sink": {"catalog": "main", "schema": "impulse_demo", "table_prefix": "demo_full"},
+  "uuts": ["Seat_Leon"],
+  "window": {"start": null, "stop": null},
+  "signals": [
+    {"kind": "channel", "name": "eng_rpm", "channel": {"channel_name": "Engine RPM"}, "unit": "RPM"},
+    {"kind": "channel", "name": "veh_spd", "channel": {"channel_name": "Vehicle Speed Sensor"}, "unit": "km/h"},
+    {"kind": "channel", "name": "amb_temp", "channel": {"channel_name": "Ambient Air Temperature"}, "unit": "C"},
+    {"kind": "channel", "name": "intake_temp", "channel": {"channel_name": "Intake Air Temperature"}, "unit": "C"},
+    {"kind": "expression", "name": "avg_temp", "expr": "(amb_temp + intake_temp) / 2", "unit": "C"},
+    {"kind": "expression", "name": "distance_km", "expr": "veh_spd.resample(1e6).cumtrapz() / 3600 / 1e6", "unit": "km"}
+  ],
+  "events": [
+    {"kind": "condition", "name": "rpm_band", "expr": "(eng_rpm > 2000) & (eng_rpm < 5000)", "desc": "Engine RPM between 2000 and 5000"},
+    {"kind": "condition", "name": "every_10km", "expr": "(distance_km % 10).intervals_between_falling_edges()", "desc": "Each 10 km driven"},
+    {"kind": "points", "name": "milestones", "expr": "(distance_km % 10).falling_edges()", "desc": "Each 10 km milestone"}
+  ],
+  "aggregations": [
+    {
+      "kind": "histogram",
+      "name": "rpm_hist",
+      "signal": "eng_rpm",
+      "bins": [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000],
+      "event": "rpm_band",
+      "values_unit": "us",
+      "desc": "Engine RPM within the RPM band"
+    },
+    {
+      "kind": "histogram",
+      "name": "speed_by_distance",
+      "signal": "veh_spd",
+      "bins": [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200],
+      "weight": "distance",
+      "distance": "distance_km",
+      "values_unit": "km"
+    },
+    {
+      "kind": "histogram_2d",
+      "name": "rpm_vs_speed",
+      "x": "eng_rpm",
+      "y": "veh_spd",
+      "x_bins": [0, 1000, 2000, 3000, 4000, 5000],
+      "y_bins": [0, 40, 80, 120, 160, 200]
+    },
+    {
+      "kind": "statistics",
+      "name": "recording_stats",
+      "signals": ["eng_rpm", "veh_spd", "avg_temp"],
+      "statistics": ["min", "max", "mean", "median", "start", "end"]
+    },
+    {
+      "kind": "statistics",
+      "name": "distance_stats",
+      "signals": ["eng_rpm", "veh_spd"],
+      "statistics": ["mean", "max"],
+      "event": "every_10km"
+    },
+    {
+      "kind": "point_values",
+      "name": "values_at_milestones",
+      "signals": ["veh_spd", "eng_rpm"],
+      "event": "milestones"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+resources:
+  jobs:
+    Renumics_HF_Download:
+      name: Renumics_Fleet_Telemetry_HF_Download
+      max_concurrent_runs: 1
+      environments:
+        - environment_key: download_env
+          spec:
+            environment_version: "4"
+      tasks:
+        - task_key: download
+          environment_key: download_env
+          timeout_seconds: 14400
+          notebook_task:
+            notebook_path: ../notebooks/download/download_hf_dataset.py
+            source: WORKSPACE
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: volume
+          default: ${var.raw_volume}
+        - name: hf_repo
+          default: renumics/synthetic-vehicle-fleet-telemetry
+        - name: revision
+          default: 017ec8f02e0753d8b092cf9229e1372d92a7b635

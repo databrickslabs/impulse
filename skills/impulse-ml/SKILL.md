@@ -39,7 +39,7 @@ config = {
         "container_tags_table": "my_catalog.silver.container_tags",
         "channel_tags_table": "my_catalog.silver.channel_tags",
     },
-    # no unity_sink -> sinkless: determine_report() computes, persist is a no-op
+    # no unity_sink -> sinkless: run() computes, nothing is written
     "query_engine": {"solver": "DefaultSolver", "data_type": "RLE"},
     "measurement_dimensions": ["container_id", "vehicle_key", "start_ts", "stop_ts"],
 }
@@ -65,12 +65,12 @@ page.add_aggregation(StatsAggregator(
     desc="Per-recording statistics",
 ))
 
-report.determine_report()   # computes in parallel across containers; no gold write needed
+report.run(persist_results=False)   # computes in parallel across containers; no gold write
 ```
 
 ## 2. Read the computed statistics
 
-After `determine_report()`, the results live on the report under `aggregation_dfs`, keyed by
+After `run(persist_results=False)`, the results live on the report under `aggregation_dfs`, keyed by
 aggregation type. `StatsAggregator` results are under `"STATS_AGGREGATOR"`, returned as a bundle keyed
 by whether the rows were freshly computed (`"changed"`) or reused from a prior incremental run
 (`"unchanged"`). In a fresh sinkless run take `"changed"`:
@@ -133,4 +133,4 @@ ends once the feature matrix is built.
 - **`StatsAggregator` inputs must be `SampleSeries`** (channels or arithmetic over them), not
   comparisons.
 - To materialize the same statistics to gold instead of reading them inline (e.g. for a shared feature
-  store), add a `unity_sink` and call `persist_results()` — that is `impulse-reporting`.
+  store), add a `unity_sink` and call `run()` — that is `impulse-reporting`.

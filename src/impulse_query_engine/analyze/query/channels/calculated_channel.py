@@ -124,3 +124,9 @@ class CalculatedChannel(TimeSeriesExpression):
 
     def required_tags(self) -> set[str]:
         return self.expr.required_tags()
+
+    def required_container_tags(self) -> set[str]:
+        return self.expr.required_container_tags()
+
+    def required_container_metrics(self) -> set[str]:
+        return self.expr.required_container_metrics()
