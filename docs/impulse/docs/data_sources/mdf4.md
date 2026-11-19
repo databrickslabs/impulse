@@ -6,9 +6,8 @@ title: MDF4 (ASAM)
 # MDF4 (ASAM) data source
 
 Read ASAM **MDF4** measurement files (`.mf4`) as Spark DataFrames, or convert them
-straight to Delta Lake tables. The reader parses MDF4 binary blocks **directly** —
-`asammdf` is *not* a runtime dependency — so decoding parallelises across Spark
-workers, each reading only the bytes for its partition.
+straight to Delta Lake tables. The reader parses MDF4 binary blocks directly so
+decoding parallelises across Spark workers, each reading only the bytes for its partition.
 
 Every output row is identified by `file_uri`, the source file path.
 
@@ -469,9 +468,7 @@ Package path: `src/impulse_data_sources/mdf/`
 
 The MDF data sources and low-level reader were implemented with reference to
 [asammdf](https://github.com/danielhrisca/asammdf) by
-[Daniel Hrisca](https://github.com/danielhrisca). `asammdf` is not a runtime
-dependency of this package; it is listed under test dependencies only, for
-synthesising small MDF4 fixtures.
+[Daniel Hrisca](https://github.com/danielhrisca).
 
 ## See also
 
