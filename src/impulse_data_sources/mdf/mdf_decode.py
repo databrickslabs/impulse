@@ -182,12 +182,19 @@ def apply_cc_conversion(values, cc_type, cc_params):
         inds = np.clip(inds, 0, n - 1)
         inds2 = np.clip(inds - 1, 0, n - 1)
         cond = np.abs(values - raw_tab[inds]) >= np.abs(values - raw_tab[inds2])
-        return np.where(cond, phys_tab[inds2], phys_tab[inds])
+        result = np.where(cond, phys_tab[inds2], phys_tab[inds]).astype(np.float64)
+        # searchsorted places NaN after every entry; keep NaN (invalid / missing)
+        # instead of fabricating the last table value.
+        result[np.isnan(values)] = np.nan
+        return result
     if cc_type == CC_RANGE_TO_VALUE:
         n = (len(cc_params) - 1) // 3
         default = cc_params[3 * n] if len(cc_params) > 3 * n else np.nan
+        nan_mask = np.isnan(values)
         if n <= 0:
-            return np.full_like(values, default)
+            result = np.full_like(values, default, dtype=np.float64)
+            result[nan_mask] = np.nan
+            return result
         # Vectorized: build sorted lower-bound edges and use searchsorted
         lowers = np.array([cc_params[i * 3] for i in range(n)])
         uppers = np.array([cc_params[i * 3 + 1] for i in range(n)])
@@ -199,7 +206,9 @@ def apply_cc_conversion(values, cc_type, cc_params):
             (values >= lowers[indices]) & (values < uppers[indices]),
             phys_vals[indices],
             default,
-        )
+        ).astype(np.float64)
+        # NaN fails every range comparison and would otherwise get the default.
+        result[nan_mask] = np.nan
         return result
     return values
 
@@ -424,7 +433,15 @@ def extract_signal(raw_data, record_size, ch_spec):
         sig_raw = extract_column_strided(usable, record_size, s_byte_offset, s_bytes, actual)
         values = convert_values(sig_raw, s_data_type, s_bit_count, s_bit_offset, actual)
 
-    # Apply invalidation — pass buf to avoid redundant np.frombuffer
+    # Apply CC conversion if present. Runs before invalidation so that
+    # invalidated samples stay NaN regardless of the conversion type.
+    cc_type = ch_spec.get("cc_type", -1)
+    cc_params = ch_spec.get("cc_params")
+    if cc_type > 0 and cc_params:
+        values = apply_cc_conversion(values, cc_type, cc_params)
+
+    # Apply invalidation last — pass buf to avoid redundant np.frombuffer.
+    # It only reads invalidation bits from buf, never the values.
     cn_flags = ch_spec.get("cn_flags", 0)
     invalidation_bytes_nr = ch_spec.get("invalidation_bytes", 0)
     if invalidation_bytes_nr > 0 and (
@@ -437,12 +454,6 @@ def extract_signal(raw_data, record_size, ch_spec):
             "data_bytes": ch_spec.get("data_bytes", 0),
         }
         values = apply_invalidation(buf, record_size, actual, values, signal_info)
-
-    # Apply CC conversion if present
-    cc_type = ch_spec.get("cc_type", -1)
-    cc_params = ch_spec.get("cc_params")
-    if cc_type > 0 and cc_params:
-        values = apply_cc_conversion(values, cc_type, cc_params)
 
     return values
 

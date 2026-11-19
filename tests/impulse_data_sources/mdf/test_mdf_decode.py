@@ -8,7 +8,10 @@ import pytest
 from impulse_data_sources.mdf.mdf_decode import (
     CN_FLAG_ALL_INVALID,
     CN_FLAG_INVALIDATION_PRESENT,
+    CC_LINEAR,
     CC_RANGE_TO_VALUE,
+    CC_RATIONAL,
+    CC_TAB_INTERP,
     CC_TAB_NOINTERP,
     FLOAT_BE,
     FLOAT_LE,
@@ -186,6 +189,22 @@ class TestApplyCcConversionExtended:
         out = apply_cc_conversion(raw.copy(), CC_RANGE_TO_VALUE, (99.0,))
         assert out[0] == 99.0
 
+    @pytest.mark.parametrize(
+        "cc_type,cc_params,expected_valid",
+        [
+            (CC_LINEAR, (1.0, 2.0), 3.0),
+            (CC_RATIONAL, (0.0, 1.0, 0.0, 0.0, 0.0, 1.0), 1.0),
+            (CC_TAB_INTERP, (1.0, 20.0, 2.0, 30.0), 20.0),
+            (CC_TAB_NOINTERP, (1.0, 20.0, 2.0, 30.0), 20.0),  # NaN used to become 30
+            (CC_RANGE_TO_VALUE, (0.0, 5.0, 7.0, -1.0), 7.0),  # NaN used to become -1
+            (CC_RANGE_TO_VALUE, (-1.0,), -1.0),  # no ranges, default only
+        ],
+    )
+    def test_nan_preserved(self, cc_type, cc_params, expected_valid):
+        out = apply_cc_conversion(np.array([np.nan, 1.0]), cc_type, cc_params)
+        assert np.isnan(out[0])
+        assert out[1] == pytest.approx(expected_valid)
+
 
 class TestFilterUnsortedRecords:
     def test_unknown_record_id_stops(self):
@@ -240,6 +259,37 @@ class TestExtractSignal:
         vals = extract_signal(bytes(raw), record_size, ch)
         assert np.isnan(vals[0])
         assert vals[1] == pytest.approx(14.0)
+
+    @pytest.mark.parametrize(
+        "cc_type,cc_params,expected_valid",
+        [
+            (CC_TAB_NOINTERP, (1.0, 20.0, 2.0, 30.0), 30.0),
+            (CC_RANGE_TO_VALUE, (0.0, 1.5, 7.0, 1.5, 5.0, 8.0, -1.0), 8.0),
+        ],
+    )
+    def test_invalidation_survives_table_conversion(self, cc_type, cc_params, expected_valid):
+        # Two records: 8-byte float value + 1 invalidation byte. Record 0 is invalid.
+        record_size = 9
+        raw = bytearray(2 * record_size)
+        struct.pack_into("<d", raw, 0, 1.0)
+        struct.pack_into("<d", raw, record_size, 2.0)
+        raw[8] = 0x01
+        ch = {
+            "channel_type": 0,
+            "data_type": FLOAT_LE,
+            "bit_count": 64,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "cn_flags": CN_FLAG_INVALIDATION_PRESENT,
+            "invalidation_bit_pos": 0,
+            "invalidation_bytes": 1,
+            "data_bytes": 8,
+            "cc_type": cc_type,
+            "cc_params": cc_params,
+        }
+        vals = extract_signal(bytes(raw), record_size, ch)
+        assert np.isnan(vals[0])
+        assert vals[1] == pytest.approx(expected_valid)
 
     def test_packed_record_with_bit_offsets(self):
         # One 4-byte record per sample holding three bit-packed LE signals:
