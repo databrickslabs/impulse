@@ -65,9 +65,9 @@ class TestConvertValues:
     @pytest.mark.parametrize(
         "data_type,bit_count,col,expected",
         [
-            (UINT_BE, 24, [[0, 0, 1], [0, 1, 0]], [256.0, 65536.0]),
-            (UINT_BE, 48, [[0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 1, 0]], [65536.0, 16777216.0]),
-            (SINT_BE, 24, [[0xFF, 0xFF, 0xFF], [0, 1, 0]], [-256.0, 65536.0]),
+            (UINT_BE, 24, [[0, 0, 1], [0, 1, 0]], [1.0, 256.0]),
+            (UINT_BE, 48, [[0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 1, 0]], [1.0, 256.0]),
+            (SINT_BE, 24, [[0xFF, 0xFF, 0xFF], [0, 1, 0]], [-1.0, 256.0]),
         ],
     )
     def test_padded_big_endian_widths(self, data_type, bit_count, col, expected):
@@ -85,6 +85,41 @@ class TestConvertValues:
         col = np.array([[0xF0, 0x00], [0xFF, 0x0F]], dtype=np.uint8)
         out = convert_values(col, UINT_LE, 12, 4, 2)
         np.testing.assert_allclose(out, [15.0, 255.0])
+
+    @staticmethod
+    def _pack(value, bit_count, bit_offset, big_endian, signed=False):
+        """Encode one value at bit_offset into its byte span (asammdf semantics)."""
+        n_bytes = (bit_offset + bit_count + 7) // 8
+        if signed and value < 0:
+            value += 1 << bit_count
+        word = value << bit_offset
+        return list(word.to_bytes(n_bytes, "big" if big_endian else "little"))
+
+    @pytest.mark.parametrize(
+        "data_type,bit_count,bit_offset,values",
+        [
+            (UINT_LE, 8, 4, [200, 1, 255]),  # review example: 200 must not decode to 12
+            (UINT_LE, 12, 6, [4095, 1234, 0]),  # span 18 bits -> 3 bytes
+            (UINT_LE, 20, 7, [(1 << 20) - 1, 54321]),  # span 27 bits -> 4 bytes
+            (UINT_LE, 33, 3, [(1 << 33) - 1, 123456789]),  # span 36 bits -> 5 bytes
+            (SINT_LE, 8, 3, [-100, 127, -128]),
+            (SINT_LE, 12, 5, [-2048, 2047, -1]),
+            (UINT_BE, 8, 4, [200, 1, 255]),
+            (UINT_BE, 12, 6, [4095, 1234, 0]),
+            (SINT_BE, 12, 5, [-2048, 2047, -1]),
+            (UINT_LE, 64, 4, [(1 << 63) + 12345, 7]),  # 9-byte span
+            (UINT_LE, 62, 3, [(1 << 62) - 1, 99]),  # 9-byte span
+            (UINT_BE, 60, 7, [(1 << 60) - 1, 42]),  # 9-byte span, big-endian
+            (SINT_LE, 64, 2, [-5, 1 << 40]),  # 9-byte span, signed 64-bit
+        ],
+    )
+    def test_bit_offset_spanning_extra_byte(self, data_type, bit_count, bit_offset, values):
+        big_endian = data_type in (UINT_BE, SINT_BE)
+        signed = data_type in (SINT_LE, SINT_BE)
+        rows = [self._pack(v, bit_count, bit_offset, big_endian, signed) for v in values]
+        col = np.array(rows, dtype=np.uint8)
+        out = convert_values(col, data_type, bit_count, bit_offset, len(values))
+        np.testing.assert_array_equal(out, np.array(values, dtype=np.float64))
 
 
 class TestApplyInvalidation:
@@ -187,12 +222,52 @@ class TestExtractSignal:
         assert np.isnan(vals[0])
         assert vals[1] == pytest.approx(14.0)
 
+    def test_packed_record_with_bit_offsets(self):
+        # One 4-byte record per sample holding three bit-packed LE signals:
+        #   a: 8 bits at byte 0, bit 4  (crosses into byte 1)
+        #   b: 6 bits at byte 1, bit 4  (crosses into byte 2)
+        #   c: 10 bits at byte 2, bit 2 (bits 18..27 of the record)
+        record_size = 4
+        samples = [(200, 45, 1000), (17, 63, 1), (255, 0, 1023)]
+        raw = b"".join(
+            ((a << 4) | (b << 12) | (c << 18)).to_bytes(record_size, "little")
+            for a, b, c in samples
+        )
+        specs = {
+            "a": (0, 4, 8),
+            "b": (1, 4, 6),
+            "c": (2, 2, 10),
+        }
+        for idx, (byte_offset, bit_offset, bit_count) in enumerate(specs.values()):
+            ch = {
+                "channel_type": 0,
+                "data_type": UINT_LE,
+                "bit_count": bit_count,
+                "byte_offset": byte_offset,
+                "bit_offset": bit_offset,
+            }
+            vals = extract_signal(raw, record_size, ch)
+            np.testing.assert_array_equal(vals, [float(s[idx]) for s in samples])
+
+    def test_field_past_record_end_returns_zeros(self):
+        record_size = 2
+        raw = bytes([0xFF, 0xFF]) * 3
+        ch = {
+            "channel_type": 0,
+            "data_type": UINT_LE,
+            "bit_count": 16,
+            "byte_offset": 0,
+            "bit_offset": 4,  # span 20 bits -> 3 bytes > record_size
+        }
+        vals = extract_signal(raw, record_size, ch)
+        np.testing.assert_array_equal(vals, [0.0, 0.0, 0.0])
+
 
 class TestExtractTimestamps:
     def test_non_fast_path_with_cc(self):
-        record_size = 8
+        record_size = 9
         n = 3
-        raw = b"".join(struct.pack("<d", float(i)) for i in range(n))
+        raw = b"".join(b"\x00" + struct.pack("<d", float(i)) for i in range(n))
         master = {
             "channel_type": 2,
             "byte_offset": 1,  # unaligned -> slow path
@@ -203,4 +278,19 @@ class TestExtractTimestamps:
             "cc_params": (0.0, 10.0),
         }
         ts = extract_timestamps(raw, record_size, master)
-        assert len(ts) == n
+        np.testing.assert_allclose(ts, [0.0, 10.0, 20.0])
+
+    def test_uint_master_with_bit_offset(self):
+        # 16-bit LE counter master at bit_offset 4 spans 3 bytes.
+        record_size = 3
+        ticks = [0, 1000, 65535]
+        raw = b"".join((t << 4).to_bytes(record_size, "little") for t in ticks)
+        master = {
+            "channel_type": 2,
+            "byte_offset": 0,
+            "bit_offset": 4,
+            "bit_count": 16,
+            "data_type": UINT_LE,
+        }
+        ts = extract_timestamps(raw, record_size, master)
+        np.testing.assert_array_equal(ts, [0.0, 1000.0, 65535.0])

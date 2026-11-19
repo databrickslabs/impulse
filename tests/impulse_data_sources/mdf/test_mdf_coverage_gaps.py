@@ -797,7 +797,7 @@ class TestMdfDecodeMoreCoverage:
         np.testing.assert_allclose(convert_values(colf, FLOAT_BE, 32, 0, 1), [2.0])
         col = np.array([[0x12, 0x34, 0x56, 0x00]], dtype=np.uint8)
         out = convert_values(col, UINT_BE, 24, 0, 1)
-        assert out[0] == pytest.approx(3429888.0)
+        assert out[0] == pytest.approx(float(0x123456))
 
 
 class TestMdfBlocksMoreCoverage:

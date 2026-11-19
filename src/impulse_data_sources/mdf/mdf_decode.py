@@ -30,9 +30,50 @@ CN_FLAG_ALL_INVALID = 1
 CN_FLAG_INVALIDATION_PRESENT = 1 << 1
 
 
+def _load_uint_column(raw_bytes, is_be, n_bytes, bit_offset, sample_count):
+    """Load ``n_bytes`` per row as an unsigned integer and shift out ``bit_offset``.
+
+    ``n_bytes`` is the byte span of the field, ``(bit_offset + bit_count + 7) // 8``
+    (1..9 bytes, since MDF4 bit offsets are 0..7). Big-endian rows are read as a
+    big-endian integer over the whole span, matching asammdf's semantics.
+    Returns a ``uint64`` array; the caller masks to ``bit_count`` bits.
+    """
+    cols = raw_bytes[:, :n_bytes]
+    if n_bytes > 8:
+        # Only reachable for bit_count > 56 with a non-zero bit offset.
+        le = cols[:, ::-1] if is_be else cols
+        le = np.ascontiguousarray(le)
+        lo = le[:, :8].copy().view(np.uint64).reshape(sample_count)
+        hi = le[:, 8].astype(np.uint64)
+        if bit_offset == 0:
+            return lo
+        return (lo >> np.uint64(bit_offset)) | (hi << np.uint64(64 - bit_offset))
+
+    container = 1 if n_bytes == 1 else 2 if n_bytes == 2 else 4 if n_bytes <= 4 else 8
+    dtype = {1: np.uint8, 2: np.uint16, 4: np.uint32, 8: np.uint64}[container]
+    if n_bytes == container and not is_be and cols.flags.c_contiguous:
+        vals = cols.view(dtype).reshape(sample_count).astype(np.uint64)
+    else:
+        padded = np.zeros((sample_count, container), dtype=np.uint8)
+        if is_be:
+            # Right-align so the big-endian value keeps its magnitude, then
+            # reverse to little-endian byte order.
+            padded[:, container - n_bytes :] = cols
+            padded = padded[:, ::-1].copy()
+        else:
+            padded[:, :n_bytes] = cols
+        vals = padded.view(dtype).reshape(sample_count).astype(np.uint64)
+    if bit_offset > 0:
+        vals = vals >> np.uint64(bit_offset)
+    return vals
+
+
 def convert_values(raw_bytes, data_type, bit_count, bit_offset, sample_count):
-    """Convert raw channel bytes to float64 array based on MDF4 data type."""
-    value_bytes = (bit_count + 7) // 8
+    """Convert raw channel bytes to float64 array based on MDF4 data type.
+
+    ``raw_bytes`` must hold at least ``(bit_offset + bit_count + 7) // 8`` bytes
+    per row (the field's byte span).
+    """
     if data_type == FLOAT_LE:
         if bit_count == 64:
             return raw_bytes.view(np.float64).reshape(sample_count).copy()
@@ -47,76 +88,16 @@ def convert_values(raw_bytes, data_type, bit_count, bit_offset, sample_count):
                 raw_bytes[:, ::-1].copy().view(np.float32).reshape(sample_count).astype(np.float64)
             )
         return np.zeros(sample_count, dtype=np.float64)
-    elif data_type in (UINT_LE, UINT_BE):
-        is_be = data_type == UINT_BE
-        if bit_count <= 8:
-            vals = raw_bytes[:, 0].astype(np.uint64)
-        elif bit_count <= 16:
-            if value_bytes == 2 and not is_be:
-                vals = raw_bytes.view(np.uint16).reshape(sample_count).astype(np.uint64)
-            else:
-                padded = np.zeros((sample_count, 2), dtype=np.uint8)
-                padded[:, :value_bytes] = raw_bytes[:, :value_bytes]
-                if is_be:
-                    padded = padded[:, ::-1].copy()
-                vals = padded.view(np.uint16).reshape(sample_count).astype(np.uint64)
-        elif bit_count <= 32:
-            if value_bytes == 4 and not is_be:
-                vals = raw_bytes.view(np.uint32).reshape(sample_count).astype(np.uint64)
-            else:
-                padded = np.zeros((sample_count, 4), dtype=np.uint8)
-                padded[:, :value_bytes] = raw_bytes[:, :value_bytes]
-                if is_be:
-                    padded = padded[:, ::-1].copy()
-                vals = padded.view(np.uint32).reshape(sample_count).astype(np.uint64)
-        else:
-            if value_bytes == 8 and not is_be:
-                vals = raw_bytes.view(np.uint64).reshape(sample_count)
-            else:
-                padded = np.zeros((sample_count, 8), dtype=np.uint8)
-                padded[:, :value_bytes] = raw_bytes[:, :value_bytes]
-                if is_be:
-                    padded = padded[:, ::-1].copy()
-                vals = padded.view(np.uint64).reshape(sample_count)
-        if bit_offset > 0:
-            vals = vals >> bit_offset
+    elif data_type in (UINT_LE, UINT_BE, SINT_LE, SINT_BE):
+        is_be = data_type in (UINT_BE, SINT_BE)
+        n_bytes = (bit_offset + bit_count + 7) // 8
+        vals = _load_uint_column(raw_bytes, is_be, n_bytes, bit_offset, sample_count)
         if bit_count < 64:
-            vals = vals & ((1 << bit_count) - 1)
-        return vals.astype(np.float64)
-    elif data_type in (SINT_LE, SINT_BE):
-        is_be = data_type == SINT_BE
-        if bit_count <= 8:
-            vals = raw_bytes[:, 0].astype(np.uint64)
-        elif bit_count <= 16:
-            if value_bytes == 2 and not is_be:
-                vals = raw_bytes.view(np.uint16).reshape(sample_count).astype(np.uint64)
-            else:
-                padded = np.zeros((sample_count, 2), dtype=np.uint8)
-                padded[:, :value_bytes] = raw_bytes[:, :value_bytes]
-                if is_be:
-                    padded = padded[:, ::-1].copy()
-                vals = padded.view(np.uint16).reshape(sample_count).astype(np.uint64)
-        elif bit_count <= 32:
-            if value_bytes == 4 and not is_be:
-                vals = raw_bytes.view(np.uint32).reshape(sample_count).astype(np.uint64)
-            else:
-                padded = np.zeros((sample_count, 4), dtype=np.uint8)
-                padded[:, :value_bytes] = raw_bytes[:, :value_bytes]
-                if is_be:
-                    padded = padded[:, ::-1].copy()
-                vals = padded.view(np.uint32).reshape(sample_count).astype(np.uint64)
-        else:
-            if value_bytes == 8 and not is_be:
-                vals = raw_bytes.view(np.uint64).reshape(sample_count)
-            else:
-                padded = np.zeros((sample_count, 8), dtype=np.uint8)
-                padded[:, :value_bytes] = raw_bytes[:, :value_bytes]
-                if is_be:
-                    padded = padded[:, ::-1].copy()
-                vals = padded.view(np.uint64).reshape(sample_count)
-        if bit_offset > 0:
-            vals = vals >> bit_offset
-        vals = vals & ((1 << bit_count) - 1)
+            vals = vals & np.uint64((1 << bit_count) - 1)
+        if data_type in (UINT_LE, UINT_BE):
+            return vals.astype(np.float64)
+        if bit_count == 64:
+            return vals.view(np.int64).astype(np.float64)
         sign_bit = np.uint64(1 << (bit_count - 1))
         vals = np.where(
             vals & sign_bit, vals.astype(np.int64) - (1 << bit_count), vals.astype(np.int64)
@@ -344,7 +325,13 @@ def extract_signal(raw_data, record_size, ch_spec):
     s_bit_count = ch_spec["bit_count"]
     s_byte_offset = ch_spec["byte_offset"]
     s_bit_offset = ch_spec["bit_offset"]
-    s_bytes = (s_bit_count + 7) // 8
+    # Byte span of the field: bits [bit_offset, bit_offset + bit_count) may
+    # cross into an extra byte, so the offset must be included.
+    s_bytes = (s_bit_offset + s_bit_count + 7) // 8
+    if s_byte_offset + s_bytes > record_size:
+        # Malformed CN: the field would read past the record (and possibly the
+        # buffer, since extract_column_strided does not bounds-check).
+        return np.zeros(actual, dtype=np.float64)
 
     buf = np.frombuffer(usable, dtype=np.uint8)
 
@@ -478,7 +465,10 @@ def extract_timestamps(raw_data, record_size, master_info, index_offset=0):
         m_byte_offset = master_info["byte_offset"]
         m_bit_offset = master_info["bit_offset"]
         m_data_type = master_info["data_type"]
-        m_bytes = (m_bit_count + 7) // 8
+        m_bytes = (m_bit_offset + m_bit_count + 7) // 8
+        if m_byte_offset + m_bytes > record_size:
+            # Malformed master CN: would read past the record / buffer.
+            return np.zeros(actual, dtype=np.float64)
 
         buf = np.frombuffer(usable, dtype=np.uint8)
 
