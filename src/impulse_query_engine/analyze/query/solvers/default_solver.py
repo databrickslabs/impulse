@@ -249,13 +249,10 @@ class TimeSeriesCache(SeriesCache):
         return rule.decode(entry, self)
 
     def _has_rows(self, selector, variant: int) -> bool:
-        """Whether *selector*'s channel in this container has rows of *variant*.
-
-        Also ``True`` without a matching channel: the node's result is then empty either way.
-        """
+        """Whether *selector*'s channel in this container has rows of *variant*."""
         candidates = self.resolve(selector)
         if len(candidates) == 0:
-            return True
+            return False
         mid, cid = candidates[self._cid_col].iloc[0], candidates[self._ch_col].iloc[0]
         return (mid, cid, variant) in self._ranges
 

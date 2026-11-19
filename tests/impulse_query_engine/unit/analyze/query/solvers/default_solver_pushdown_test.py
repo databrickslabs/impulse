@@ -403,7 +403,9 @@ class TestTimeSeriesCacheVariants:
     def _monkeypatch(self, monkeypatch):
         self.monkeypatch = monkeypatch
 
-    def _cache(self, rule, node, derived_rows: bool = True) -> TimeSeriesCache:
+    def _cache(
+        self, rule, node, derived_rows: bool = True, matched: bool = True
+    ) -> TimeSeriesCache:
         # The cache decodes with the built-in rules; let *rule* be the built-in one.
         self.monkeypatch.setattr(default_solver, "builtin_rules", lambda: {rule.name: rule})
         pushdown = Classifier([rule])(node)
@@ -426,6 +428,9 @@ class TestTimeSeriesCacheVariants:
             pdf = pdf.iloc[2:].reset_index(drop=True)
             pdf.at[0, "selector_ids"] = [sid]
             pdf[VARIANT_COL] = RAW_VARIANT
+        if not matched:
+            # Channel 5 belongs to another selector: the node's selector matches nothing.
+            pdf.at[0, "selector_ids"] = [sid + 1]
         col_map = {
             "cid": "container_id",
             "ch": "channel_id",
@@ -468,6 +473,13 @@ class TestTimeSeriesCacheVariants:
         assert len(result) == 2
         nptest.assert_array_equal(result.tstarts, from_raw.tstarts)
         nptest.assert_array_equal(result.values, from_raw.values)
+
+    def test_node_without_a_matching_channel_is_evaluated_normally(self):
+        node = _rpm().resample(10)
+        cache = self._cache(ResamplePushdownRule(), node, matched=False)
+        assert cache.materialized(node) is None
+        result = node.build(cache)
+        assert isinstance(result, SampleSeries) and len(result) == 0
 
     def test_unknown_rule_name_raises(self):
         node = _rpm().resample(10)
