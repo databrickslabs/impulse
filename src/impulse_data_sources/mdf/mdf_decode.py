@@ -96,13 +96,13 @@ def convert_values(raw_bytes, data_type, bit_count, bit_offset, sample_count):
             vals = vals & np.uint64((1 << bit_count) - 1)
         if data_type in (UINT_LE, UINT_BE):
             return vals.astype(np.float64)
-        if bit_count == 64:
-            return vals.view(np.int64).astype(np.float64)
-        sign_bit = np.uint64(1 << (bit_count - 1))
-        vals = np.where(
-            vals & sign_bit, vals.astype(np.int64) - (1 << bit_count), vals.astype(np.int64)
-        )
-        return vals.astype(np.float64)
+        # Sign-extend in fixed 64-bit space: move the field's sign bit to bit 63,
+        # reinterpret as int64, then arithmetic-shift back. Avoids Python ints
+        # >= 2**63 (which overflow under NumPy 2 for bit_count == 63) and works
+        # for every bit_count in 1..64 (shift is 0 for 64).
+        shift = np.uint64(64 - bit_count)
+        signed = (vals << shift).view(np.int64) >> np.int64(64 - bit_count)
+        return signed.astype(np.float64)
     else:
         return np.zeros(sample_count, dtype=np.float64)
 

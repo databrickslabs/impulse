@@ -95,6 +95,25 @@ class TestConvertValues:
         word = value << bit_offset
         return list(word.to_bytes(n_bytes, "big" if big_endian else "little"))
 
+    @pytest.mark.parametrize("data_type", [SINT_LE, SINT_BE])
+    @pytest.mark.parametrize(
+        "bit_count,bit_offset,values",
+        [
+            (64, 0, [-(1 << 63), -1, (1 << 63) - 1, 0]),  # review case 0x8000...
+            (64, 4, [-(1 << 63), -1, (1 << 63) - 1]),  # 9-byte span
+            (63, 0, [-(1 << 62), -1, (1 << 62) - 1]),  # overflowed under NumPy 2
+            (63, 5, [-(1 << 62), -1, (1 << 62) - 1]),
+            (24, 0, [-(1 << 23), -1, (1 << 23) - 1]),
+            (1, 0, [-1, 0]),
+        ],
+    )
+    def test_signed_extremes(self, data_type, bit_count, bit_offset, values):
+        big_endian = data_type == SINT_BE
+        rows = [self._pack(v, bit_count, bit_offset, big_endian, signed=True) for v in values]
+        col = np.array(rows, dtype=np.uint8)
+        out = convert_values(col, data_type, bit_count, bit_offset, len(values))
+        np.testing.assert_array_equal(out, np.array(values, dtype=np.float64))
+
     @pytest.mark.parametrize(
         "data_type,bit_count,bit_offset,values",
         [
