@@ -60,12 +60,17 @@ def _emit_prepared_signal_group(
         return
     t0 = _now()
     if master_info is not None:
-        timestamps = extract_timestamps(
-            raw_data,
-            record_size,
-            master_info,
-            index_offset=index_offset,
-        )
+        try:
+            timestamps = extract_timestamps(
+                raw_data,
+                record_size,
+                master_info,
+                index_offset=index_offset,
+            )
+        except ValueError as e:
+            # Malformed master layout: no trustworthy time base, skip the group.
+            log.warning("master decode failed block=%d, skipping group: %s", data_block_addr, e)
+            return
     else:
         timestamps = np.arange(index_offset, index_offset + actual, dtype=np.float64)
     if time_offset:
@@ -500,12 +505,20 @@ def convert_spec_to_arrow_batches(
                         continue
                     t0 = _now()
                     if master_info is not None:
-                        timestamps = extract_timestamps(
-                            raw_chunk,
-                            record_size,
-                            master_info,
-                            index_offset=rec0,
-                        )
+                        try:
+                            timestamps = extract_timestamps(
+                                raw_chunk,
+                                record_size,
+                                master_info,
+                                index_offset=rec0,
+                            )
+                        except ValueError as e:
+                            log.warning(
+                                "master decode failed block=%d, skipping group: %s",
+                                data_block_addr,
+                                e,
+                            )
+                            break
                     else:
                         timestamps = np.arange(rec0, rec0 + actual, dtype=np.float64)
                     if time_offset:
@@ -554,12 +567,20 @@ def convert_spec_to_arrow_batches(
                         continue
                     t0 = _now()
                     if master_info is not None:
-                        timestamps = extract_timestamps(
-                            raw_data,
-                            record_size,
-                            master_info,
-                            index_offset=start_rec,
-                        )
+                        try:
+                            timestamps = extract_timestamps(
+                                raw_data,
+                                record_size,
+                                master_info,
+                                index_offset=start_rec,
+                            )
+                        except ValueError as e:
+                            log.warning(
+                                "master decode failed block=%d, skipping group: %s",
+                                data_block_addr,
+                                e,
+                            )
+                            continue
                     else:
                         timestamps = np.arange(start_rec, start_rec + actual, dtype=np.float64)
                     if time_offset:
@@ -736,7 +757,11 @@ def convert_master_spec_to_arrow_batches(spec, prof=None, time_dtype="float64"):
                 cg_record_sizes=mspec.get("cg_record_sizes"),
             ):
                 t0 = _now()
-                ts = extract_timestamps(raw, rs, minfo, index_offset=start)
+                try:
+                    ts = extract_timestamps(raw, rs, minfo, index_offset=start)
+                except ValueError as e:
+                    log.warning("master decode failed gidx=%s, skipping group: %s", gid, e)
+                    break
                 if time_offset:
                     ts = ts + time_offset
                 prof["decode"] += _now() - t0
@@ -851,9 +876,13 @@ def convert_stripe_spec_to_arrow_batches(
                 continue
             t0 = _now()
             if master_info is not None:
-                ts = extract_timestamps(
-                    raw, record_size, master_info, index_offset=sb["rec_start"]
-                )
+                try:
+                    ts = extract_timestamps(
+                        raw, record_size, master_info, index_offset=sb["rec_start"]
+                    )
+                except ValueError as e:
+                    log.warning("master decode failed gidx=%s, skipping group: %s", gidx, e)
+                    break
             else:
                 ts = np.arange(sb["rec_start"], sb["rec_start"] + actual, dtype=np.float64)
             if time_offset:

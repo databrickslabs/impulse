@@ -161,7 +161,7 @@ Impulse ships an [MDF4 data source](../data_sources/mdf4.md) that reads raw
 `.mf4` files directly into Spark DataFrames — parsing MDF4 binary blocks
 across workers. It exposes the `mdf_signals`,
 `mdf_metadata`, and `mdf_masters` formats. The MDF4 page includes a
-[worked example that lands one file into the five silver tables](../data_sources/mdf4.md#writing-to-the-impulse-silver-layer)
+[worked example that lands one file into the silver tables](../data_sources/mdf4.md#writing-to-the-impulse-silver-layer)
 (assign one `container_id` per file, read RLE signals with `absolute_time`,
 and derive the metadata tables). Honor MDF4's per-sample invalidation bits —
 the `is_plausible` column on `channels` is the natural place to record them.

@@ -1237,6 +1237,53 @@ class TestArrowEmitMoreCoverage:
             == []
         )
 
+    def test_emit_prepared_signal_group_skips_malformed_master(self, caplog):
+        import logging
+        import time
+
+        log = logging.getLogger("impulse_data_sources.mdf.convert")
+        ch = {
+            "channel_id": 1,
+            "channel_type": 0,
+            "data_type": FLOAT_LE,
+            "bit_count": 64,
+            "byte_offset": 8,
+            "bit_offset": 0,
+        }
+        master_ok = {
+            "channel_type": 2,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "bit_count": 64,
+            "data_type": FLOAT_LE,
+        }
+        master_bad = {**master_ok, "byte_offset": 12}  # 12 + 8 > record_size 16
+        raw = struct.pack("<4d", 0.0, 1.0, 0.5, 2.0)  # 2 records: (t, v)
+
+        def run(master):
+            return list(
+                _emit_prepared_signal_group(
+                    raw,
+                    [ch],
+                    16,
+                    master,
+                    0.0,
+                    lambda t, v, c: [(t, v, c)],
+                    {"decode": 0},
+                    log,
+                    0,
+                    time.perf_counter_ns,
+                )
+            )
+
+        with caplog.at_level(logging.WARNING, logger=log.name):
+            assert run(master_bad) == []  # group skipped, no fabricated timestamps
+        assert "master decode failed" in caplog.text
+        good = run(master_ok)  # a well-formed group is still emitted
+        assert len(good) == 1
+        np.testing.assert_allclose(good[0][0], [0.0, 0.5])
+        np.testing.assert_allclose(good[0][1], [1.0, 2.0])
+
     def test_convert_spec_dt_streaming_on_sample(self):
         d, files = sample_mdf_dir()
         if not files:

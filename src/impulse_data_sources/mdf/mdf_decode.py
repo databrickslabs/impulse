@@ -29,6 +29,41 @@ CC_RANGE_TO_VALUE = 6
 CN_FLAG_ALL_INVALID = 1
 CN_FLAG_INVALIDATION_PRESENT = 1 << 1
 
+_INT_TYPES = (UINT_LE, UINT_BE, SINT_LE, SINT_BE)
+
+
+def _field_bytes(data_type, bit_count, bit_offset):
+    """Bytes per row a field occupies.
+
+    Integers may be bit-packed, so their span includes ``bit_offset``. Floats
+    (and unsupported types) must be byte-aligned per MDF4; their ``bit_offset``
+    is ignored, as the decoder always did.
+    """
+    if data_type in _INT_TYPES:
+        return (bit_offset + bit_count + 7) // 8
+    return (bit_count + 7) // 8
+
+
+def _field_layout(spec, record_size, what):
+    """Validate a CN's record layout and return ``(byte_offset, n_bytes)``.
+
+    Raises ``ValueError`` for layouts that cannot be decoded safely: a
+    ``bit_offset`` outside the MDF4 range 0..7, or a field that does not fit
+    inside the record. Callers in the Spark reader log and skip on ValueError.
+    """
+    byte_offset = spec["byte_offset"]
+    bit_offset = spec["bit_offset"]
+    bit_count = spec["bit_count"]
+    if not 0 <= bit_offset <= 7:
+        raise ValueError(f"{what}: bit_offset {bit_offset} outside MDF4 range 0..7")
+    n_bytes = _field_bytes(spec["data_type"], bit_count, bit_offset)
+    if byte_offset < 0 or byte_offset + n_bytes > record_size:
+        raise ValueError(
+            f"{what}: field bytes [{byte_offset}, {byte_offset + n_bytes}) "
+            f"exceed record_size {record_size}"
+        )
+    return byte_offset, n_bytes
+
 
 def _load_uint_column(raw_bytes, is_be, n_bytes, bit_offset, sample_count):
     """Load ``n_bytes`` per row as an unsigned integer and shift out ``bit_offset``.
@@ -72,8 +107,15 @@ def convert_values(raw_bytes, data_type, bit_count, bit_offset, sample_count):
     """Convert raw channel bytes to float64 array based on MDF4 data type.
 
     ``raw_bytes`` must hold at least ``(bit_offset + bit_count + 7) // 8`` bytes
-    per row (the field's byte span).
+    per row for integer types (the field's byte span), or ``bit_count // 8``
+    bytes for floats.
     """
+    needed = _field_bytes(data_type, bit_count, bit_offset)
+    if data_type in _INT_TYPES + (FLOAT_LE, FLOAT_BE) and raw_bytes.shape[1] < needed:
+        raise ValueError(
+            f"convert_values needs >= {needed} bytes per row for data_type={data_type}, "
+            f"bit_offset={bit_offset}, bit_count={bit_count}; got {raw_bytes.shape[1]}"
+        )
     if data_type == FLOAT_LE:
         if bit_count == 64:
             return raw_bytes.view(np.float64).reshape(sample_count).copy()
@@ -108,8 +150,23 @@ def convert_values(raw_bytes, data_type, bit_count, bit_offset, sample_count):
 
 
 def extract_column_strided(raw_data, record_size, byte_offset, value_bytes, sample_count):
-    """Extract column bytes using strided access (avoids full 2D reshape)."""
-    buf = np.frombuffer(raw_data, dtype=np.uint8)
+    """Extract column bytes using strided access (avoids full 2D reshape).
+
+    ``as_strided`` does not bounds-check, so the column must lie inside each
+    record; otherwise this raises ``ValueError`` instead of reading past the
+    buffer.
+    """
+    if byte_offset < 0 or byte_offset + value_bytes > record_size:
+        raise ValueError(
+            f"column bytes [{byte_offset}, {byte_offset + value_bytes}) "
+            f"exceed record_size {record_size}"
+        )
+    buf = raw_data if isinstance(raw_data, np.ndarray) else np.frombuffer(raw_data, dtype=np.uint8)
+    if len(buf) < sample_count * record_size:
+        raise ValueError(
+            f"buffer of {len(buf)} bytes is too small for {sample_count} records "
+            f"of {record_size} bytes"
+        )
     return np.lib.stride_tricks.as_strided(
         buf[byte_offset:],
         shape=(sample_count, value_bytes),
@@ -136,13 +193,8 @@ def apply_invalidation(buf, record_size, actual_samples, values, signal_info):
     byte_pos = inv_bit_pos // 8
     bit_pos = inv_bit_pos % 8
     inval_col = data_bytes_nr + byte_pos
-    if not isinstance(buf, np.ndarray):
-        buf = np.frombuffer(buf, dtype=np.uint8)
-    inval_bytes = np.lib.stride_tricks.as_strided(
-        buf[inval_col:],
-        shape=(actual_samples,),
-        strides=(record_size,),
-    ).copy()
+    # Checked strided read: an invalidation bit outside the record raises.
+    inval_bytes = extract_column_strided(buf, record_size, inval_col, 1, actual_samples)[:, 0]
     invalid_mask = (inval_bytes & (1 << bit_pos)).astype(bool)
     values[invalid_mask] = np.nan
     return values
@@ -334,13 +386,9 @@ def extract_signal(raw_data, record_size, ch_spec):
     s_bit_count = ch_spec["bit_count"]
     s_byte_offset = ch_spec["byte_offset"]
     s_bit_offset = ch_spec["bit_offset"]
-    # Byte span of the field: bits [bit_offset, bit_offset + bit_count) may
-    # cross into an extra byte, so the offset must be included.
-    s_bytes = (s_bit_offset + s_bit_count + 7) // 8
-    if s_byte_offset + s_bytes > record_size:
-        # Malformed CN: the field would read past the record (and possibly the
-        # buffer, since extract_column_strided does not bounds-check).
-        return np.zeros(actual, dtype=np.float64)
+    # Validates the layout (raises ValueError if malformed) and returns the
+    # field's byte span, which for bit-packed integers includes bit_offset.
+    _, s_bytes = _field_layout(ch_spec, record_size, f"channel {ch_spec.get('channel_id')}")
 
     buf = np.frombuffer(usable, dtype=np.uint8)
 
@@ -476,10 +524,9 @@ def extract_timestamps(raw_data, record_size, master_info, index_offset=0):
         m_byte_offset = master_info["byte_offset"]
         m_bit_offset = master_info["bit_offset"]
         m_data_type = master_info["data_type"]
-        m_bytes = (m_bit_offset + m_bit_count + 7) // 8
-        if m_byte_offset + m_bytes > record_size:
-            # Malformed master CN: would read past the record / buffer.
-            return np.zeros(actual, dtype=np.float64)
+        # Raises ValueError for a malformed master layout; the Spark reader
+        # logs and skips the whole group rather than emitting fake timestamps.
+        _, m_bytes = _field_layout(master_info, record_size, "master channel")
 
         buf = np.frombuffer(usable, dtype=np.uint8)
 

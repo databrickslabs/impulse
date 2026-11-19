@@ -22,6 +22,7 @@ from impulse_data_sources.mdf.mdf_decode import (
     apply_cc_conversion,
     apply_invalidation,
     convert_values,
+    extract_column_strided,
     extract_signal,
     extract_timestamps,
     filter_unsorted_records,
@@ -142,6 +143,22 @@ class TestConvertValues:
         col = np.array(rows, dtype=np.uint8)
         out = convert_values(col, data_type, bit_count, bit_offset, len(values))
         np.testing.assert_array_equal(out, np.array(values, dtype=np.float64))
+
+    def test_too_narrow_column_raises(self):
+        # UINT_LE 16-bit at bit_offset 4 spans 3 bytes; the old width (2) is rejected.
+        col = np.zeros((2, 2), dtype=np.uint8)
+        with pytest.raises(ValueError, match="needs >= 3 bytes per row"):
+            convert_values(col, UINT_LE, 16, 4, 2)
+
+    def test_extract_column_strided_bounds(self):
+        raw = bytes(range(12))  # 3 records of 4 bytes
+        np.testing.assert_array_equal(
+            extract_column_strided(raw, 4, 2, 2, 3), [[2, 3], [6, 7], [10, 11]]
+        )
+        with pytest.raises(ValueError, match="exceed record_size 4"):
+            extract_column_strided(raw, 4, 3, 2, 3)
+        with pytest.raises(ValueError, match="too small"):
+            extract_column_strided(raw, 4, 0, 2, 4)
 
 
 class TestApplyInvalidation:
@@ -318,7 +335,7 @@ class TestExtractSignal:
             vals = extract_signal(raw, record_size, ch)
             np.testing.assert_array_equal(vals, [float(s[idx]) for s in samples])
 
-    def test_field_past_record_end_returns_zeros(self):
+    def test_field_past_record_end_raises(self):
         record_size = 2
         raw = bytes([0xFF, 0xFF]) * 3
         ch = {
@@ -328,8 +345,56 @@ class TestExtractSignal:
             "byte_offset": 0,
             "bit_offset": 4,  # span 20 bits -> 3 bytes > record_size
         }
-        vals = extract_signal(raw, record_size, ch)
-        np.testing.assert_array_equal(vals, [0.0, 0.0, 0.0])
+        with pytest.raises(ValueError, match="exceed record_size 2"):
+            extract_signal(raw, record_size, ch)
+
+    @pytest.mark.parametrize("bit_count,fmt", [(64, "<d"), (32, "<f")])
+    def test_float_with_bit_offset_decodes(self, bit_count, fmt):
+        # Regression: floats must not get the integer bit-packed span. A
+        # non-zero bit_offset on a float is ignored (MDF4 floats are byte-aligned).
+        width = bit_count // 8
+        record_size = 1 + width
+        vals_in = [1.5, -2.25]
+        raw = b"".join(b"\x00" + struct.pack(fmt, v) for v in vals_in)
+        ch = {
+            "channel_type": 0,
+            "data_type": FLOAT_LE,
+            "bit_count": bit_count,
+            "byte_offset": 1,
+            "bit_offset": 1,
+        }
+        np.testing.assert_allclose(extract_signal(raw, record_size, ch), vals_in)
+
+    @pytest.mark.parametrize("bit_offset", [8, 12, -1])
+    def test_bit_offset_outside_mdf4_range_raises(self, bit_offset):
+        ch = {
+            "channel_type": 0,
+            "data_type": UINT_LE,
+            "bit_count": 64,
+            "byte_offset": 0,
+            "bit_offset": bit_offset,
+        }
+        with pytest.raises(ValueError, match="outside MDF4 range 0..7"):
+            extract_signal(b"\xff" * 20, 10, ch)
+
+    def test_invalidation_bit_outside_record_raises(self):
+        # invalidation_bit_pos 64 -> byte 8 after data_bytes 8 = column 16,
+        # beyond record_size 9: must raise, not read past the buffer.
+        record_size = 9
+        raw = bytearray(2 * record_size)
+        ch = {
+            "channel_type": 0,
+            "data_type": FLOAT_LE,
+            "bit_count": 64,
+            "byte_offset": 0,
+            "bit_offset": 0,
+            "cn_flags": CN_FLAG_INVALIDATION_PRESENT,
+            "invalidation_bit_pos": 64,
+            "invalidation_bytes": 1,
+            "data_bytes": 8,
+        }
+        with pytest.raises(ValueError, match="exceed record_size 9"):
+            extract_signal(bytes(raw), record_size, ch)
 
 
 class TestExtractTimestamps:
@@ -348,6 +413,17 @@ class TestExtractTimestamps:
         }
         ts = extract_timestamps(raw, record_size, master)
         np.testing.assert_allclose(ts, [0.0, 10.0, 20.0])
+
+    def test_malformed_master_raises(self):
+        master = {
+            "channel_type": 2,
+            "byte_offset": 4,
+            "bit_offset": 0,
+            "bit_count": 64,
+            "data_type": FLOAT_LE,
+        }
+        with pytest.raises(ValueError, match="master channel"):
+            extract_timestamps(b"\x00" * 16, 8, master)
 
     def test_uint_master_with_bit_offset(self):
         # 16-bit LE counter master at bit_offset 4 spans 3 bytes.

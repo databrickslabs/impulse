@@ -37,11 +37,6 @@ from impulse_data_sources.mdf import register_mdf_datasources
 register_mdf_datasources(spark, WorkspaceClient())
 ```
 
-`register_mdf_datasources` is the recommended entry point: it verifies the workspace
-client, tags API calls with `databricks-impulse` product info, and emits a
-lightweight telemetry beacon each time Spark plans partitions for a read. If you
-register the data-source classes manually instead, reads still work but no telemetry
-is sent.
 
 ## Selecting files
 
@@ -221,7 +216,8 @@ expanded = (
 
 ## Writing to the Impulse silver layer
 
-Impulse's query engine reads a silver layer of five Delta tables (see
+Impulse's query engine reads a silver layer of three required Delta tables
+(`container_metrics`, `channel_metrics`, `channels`) plus optional tag tables (see
 [Data Model](../data_model/index.md) and the
 [Ingestion guide](../data_model/ingestion.md)). To land MDF4 data there, assign one
 `container_id` per `.mf4` file and keep all time columns in **seconds since epoch**
@@ -283,11 +279,10 @@ container_tags = spark.createDataFrame(
     schema=impulse_schema.CONTAINER_TAGS,
 )
 
-channel_tags = metadata.select(
+channel_names = metadata.select(
     "container_id",
     F.col("channel_id").cast("int"),
-    F.lit("channel_name").alias("key"),
-    F.col("channel_name").alias("value"),
+    "channel_name",
 )
 
 channel_metrics = (
@@ -301,9 +296,11 @@ channel_metrics = (
         F.max("tend").cast("float").alias("end_s"),
     )
     .withColumn("value_type", F.lit("numerical"))
+    .join(channel_names, on=["container_id", "channel_id"], how="left")
     .select(
         "container_id",
         F.col("channel_id").cast("int"),
+        "channel_name",  # channel-selection column: query.channel(channel_name=...)
         "value_type",
         "sample_count",
         F.lit(None).cast("float").alias("nan_ratio"),
@@ -326,12 +323,41 @@ channel_metrics = (
 for name, df in [
     ("container_tags", container_tags),
     ("container_metrics", container_metrics),
-    ("channel_tags", channel_tags),
     ("channel_metrics", channel_metrics),
     ("channels", channels),
 ]:
     df.write.format("delta").mode("append").saveAsTable(f"{CATALOG}.{SCHEMA}.{name}")
 ```
+
+:::tip `channel_tags` is optional
+
+Because `channel_metrics` carries `channel_name` as a column, `DefaultSolver` can
+select channels directly from it (`query.channel(channel_name="Engine_RPM")`) — leave
+`source.channel_tags_table` unset and no `channel_tags` table is needed. See
+[How `DefaultSolver` adapts](../references/query_engine/query_solvers.md#how-defaultsolver-adapts).
+
+Add more selection attributes the same way, as extra columns on `channel_metrics` —
+for example `unit` from `mdf_metadata`, or `device_name` / `bus_name` when your
+pipeline has them. `mdf_metadata` does not expose device or bus names yet, because
+source information (`##SI`) blocks are not parsed (see
+[Known limitations](#feature-gaps-backlog)).
+
+If you prefer the narrow EAV layout (for example, many sparse or per-project tags),
+write an optional `channel_tags` table instead and set `source.channel_tags_table`:
+
+```python
+channel_tags = metadata.select(
+    "container_id",
+    F.col("channel_id").cast("int"),
+    F.lit("channel_name").alias("key"),
+    F.col("channel_name").alias("value"),
+)
+channel_tags.write.format("delta").mode("append").saveAsTable(
+    f"{CATALOG}.{SCHEMA}.channel_tags"
+)
+```
+
+:::
 
 Point a `MeasurementDB` at these tables and run reports with `DefaultSolver` — see
 the [Ingestion guide](../data_model/ingestion.md).
