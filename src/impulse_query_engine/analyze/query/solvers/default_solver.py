@@ -33,6 +33,7 @@ from impulse_query_engine.analyze.query.optimizer import (
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
+from .native_calculated_channels import attach_identity, native_calculated_channel_rows
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
 from .solver_config import RawEncoder, SolverConfig
@@ -1669,12 +1670,6 @@ class DefaultSolver(QuerySolver):
             copy=False,
         )
 
-    @staticmethod
-    def _identity_map_expr(identity: dict[str, str]) -> "F.Column":
-        """Build a ``map<string,string>`` literal column from an identity dict."""
-        kv_literals = [F.lit(str(x)) for k, v in identity.items() for x in (k, v)]
-        return F.create_map(*kv_literals)
-
     def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
         """
         Solve calculated channels by grouping channels and exploding each result.
@@ -1715,8 +1710,8 @@ class DefaultSolver(QuerySolver):
 
         if targets is not None:
             logger.info("Calculated channels solved natively in Spark, without the pandas UDF")
-            native = self._native_calculated_channel_rows(joined_df, q, targets)
-            return self._attach_identity(native, selections)
+            native = native_calculated_channel_rows(joined_df, q.schema, targets, self.config)
+            return attach_identity(native, selections, self.config.channel_id_col)
 
         container_tag_cols, container_metric_cols = self._container_meta_cols(query)
 
@@ -1741,25 +1736,7 @@ class DefaultSolver(QuerySolver):
             container_meta_cols=[*container_tag_cols, *container_metric_cols],
         )
 
-        return self._attach_identity(res, selections)
-
-    def _attach_identity(self, rows: DataFrame, selections) -> DataFrame:
-        """Add the ``identity`` map of each calculated channel to its rows.
-
-        Identity is constant per channel_id, so it is attached via a
-        channel_id-keyed CASE instead of being shipped with every row.
-        """
-        channel_id_col = self.config.channel_id_col
-        identity_expr = None
-        for cc in selections:
-            branch = F.col(channel_id_col) == F.lit(cc.channel_id)
-            id_map = self._identity_map_expr(cc.identity)
-            identity_expr = (
-                F.when(branch, id_map)
-                if identity_expr is None
-                else identity_expr.when(branch, id_map)
-            )
-        return rows.withColumn("identity", identity_expr)
+        return attach_identity(res, selections, self.config.channel_id_col)
 
     def _validate_calculated_channel_id_type(self, query) -> None:
         """Raise unless the ``channels`` table's ``channel_id`` can hold calculated-channel ids.
@@ -1777,105 +1754,3 @@ class DefaultSolver(QuerySolver):
                 "Calculated channels need an integer or long channel_id column, got "
                 f"{dtype.simpleString()}."
             )
-
-    def _native_calculated_channel_rows(
-        self,
-        joined_df: DataFrame,
-        channels_q: DataFrame,
-        targets: dict[int, dict[int, list[tuple[int, bool]]]],
-    ) -> DataFrame:
-        """Calculated-channel rows taken directly from the pushed-down rows.
-
-        *targets* (:meth:`PushdownPlan.native_targets`) maps each variant and
-        selector to the calculated channels built from them.  Every derived row
-        is emitted once per such channel, so the result equals the pandas
-        evaluation: values get the conversion factor for aliased selectors, and
-        the round-trip through float64 and Arrow is mirrored (integral times via
-        double, NaN as null).
-
-        Returns
-        -------
-        pyspark.sql.DataFrame
-            ``[container_id, channel_id, tstart, tend, value]`` as typed by
-            :meth:`_build_calculated_channels_udf_schema`.
-        """
-        cfg = self.config
-        cid, ch = cfg.container_id_col, cfg.channel_id_col
-        ts, te, val, conv = cfg.tstart_col, cfg.tend_col, cfg.value_col, cfg.conversion_factor_col
-        target_type = T.ArrayType(
-            T.StructType(
-                [
-                    T.StructField("_cc_channel_id", T.LongType()),
-                    T.StructField("_cc_uses_alias", T.BooleanType()),
-                ]
-            )
-        )
-        by_variant = F.create_map(
-            *[
-                item
-                for variant, by_selector in sorted(targets.items())
-                for item in (
-                    F.lit(variant),
-                    F.create_map(
-                        *[
-                            entry
-                            for selector_id, channels in sorted(by_selector.items())
-                            for entry in (
-                                F.lit(selector_id).cast("long"),
-                                F.array(
-                                    *[
-                                        F.struct(
-                                            F.lit(channel_id).cast("long").alias("_cc_channel_id"),
-                                            F.lit(uses_alias).alias("_cc_uses_alias"),
-                                        )
-                                        for channel_id, uses_alias in channels
-                                    ]
-                                ),
-                            )
-                        ]
-                    ),
-                )
-            ]
-        )
-        by_selector = F.try_element_at(by_variant, F.col(VARIANT_COL))
-        no_targets = F.array().cast(target_type)
-        channel_targets = F.flatten(
-            F.transform(
-                PushdownPlan.channel_selector_ids("selector_ids"),
-                lambda sid: F.coalesce(F.try_element_at(by_selector, sid), no_targets),
-            )
-        )
-        has_conversion = conv in joined_df.columns
-        # joined_df holds no raw rows here; any other row without targets is
-        # dropped by inline.
-        rows = joined_df.select(
-            cid,
-            ts,
-            te,
-            val,
-            *([conv] if has_conversion else []),
-            F.inline(channel_targets),
-        )
-
-        value = F.col(val).cast("double")
-        if has_conversion:
-            factor = F.col(conv)
-            # Like TimeSeriesCache.to_sample_series: a null or NaN factor leaves values as they are.
-            applies = F.col("_cc_uses_alias") & factor.isNotNull() & ~F.isnan(factor)
-            value = F.when(applies, value * factor).otherwise(value)
-
-        def as_udf_output(col: Column, dtype: T.DataType) -> Column:
-            # The UDF emits float64 arrays; Arrow casts them back and masks NaN as null.
-            col = col.cast("double")
-            if isinstance(dtype, T.IntegralType):
-                return col.cast(dtype)
-            return F.when(F.isnan(col), F.lit(None)).otherwise(col).cast(dtype)
-
-        schema = channels_q.schema
-        return rows.select(
-            cid,
-            F.col("_cc_channel_id").cast(schema[ch].dataType).alias(ch),
-            as_udf_output(F.col(ts), schema[ts].dataType).alias(ts),
-            as_udf_output(F.col(te), schema[te].dataType).alias(te),
-            as_udf_output(value, T.DoubleType()).alias(val),
-        )
