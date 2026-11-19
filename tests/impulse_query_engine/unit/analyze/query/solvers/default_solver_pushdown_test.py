@@ -176,23 +176,38 @@ def _derived_rows(pdf: pd.DataFrame, col: str) -> int:
 
 class TestIdenticalResults:
     def test_channel_also_read_by_a_selector_that_is_not_pushed(
-        self, spark: SparkSession, key_value_store_db
+        self, spark: SparkSession, key_value_store_unit_conversion_db, udf_rows
     ):
-        # Two selectors match Engine RPM; only the first is pushed down, so the channel
-        # ships its raw rows only and the resample falls back to them.
+        # A direct and an aliased selector resolve to the same channel, so its rows carry
+        # both selector ids. Only the direct one is pushed down: the channel ships its raw
+        # rows only, and the pushed resample falls back to them.
         def selections(q):
             return [
-                q.channel(channel_name="Engine RPM").resample(RATE).alias("rpm"),
-                q.channel(channel_name="Engine RPM", unit="RPM").max().alias("rpm_max"),
+                q.channel(channel_name="Vehicle Speed Sensor").resample(RATE).alias("speed"),
+                q.channel_with_alias(channel_alias="vehicle_speed").max().alias("speed_max"),
             ]
 
-        resampled, maximum = selections(key_value_store_db.query)
+        resampled, maximum = selections(key_value_store_unit_conversion_db.query)
         plan = QueryOptimizer().optimize([resampled, maximum], _LONG_TIMES)
         assert plan.variant_of(resampled) is not None
         assert plan.raw_selector_ids == {maximum.get_selectors()[0].selector_id}
-        off, on = _solve_both(spark, key_value_store_db, selections, config=_kvs_config())
+
+        off, on = _solve_both(
+            spark,
+            key_value_store_unit_conversion_db,
+            selections,
+            config=_unit_conversion_config(),
+        )
+        _, rows_on = udf_rows
+        assert {variant for _, variant in rows_on} == {RAW_VARIANT}
         _assert_same(on, off)
-        assert all(len(s) > 1 for s in on["rpm"])
+        # Container 3 has no "Vehicle Speed Sensor"; there the alias resolves to another
+        # channel. In the others the resample is served from the raw rows.
+        resampled_in = {
+            c for c, s in zip(on["container_id"], on["speed"], strict=True) if len(s) > 1
+        }
+        assert resampled_in == {1, 2}
+        assert on["speed_max"].notna().all()
 
     def test_resample_only(self, spark: SparkSession, key_value_store_db, udf_rows):
         off, on = _solve_both(
