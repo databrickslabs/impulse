@@ -217,9 +217,9 @@ class PushdownRule(abc.ABC):
     def decode(self, pushed: PushedNode, cache: TimeSeriesCache) -> Any:
         """Build a pushed-down node's result in the UDF from its variant's derived rows.
 
-        ``selector.build(cache, variant=pushed.variant)`` loads them like raw rows.  A
-        container without derived rows must give the empty result: the raw rows of a
-        pushed-down channel are not shipped.
+        ``selector.build(cache, variant=pushed.variant)`` loads them like raw rows.  Only
+        called when each selector's channel has derived rows in the container; otherwise
+        the node is evaluated normally.
         """
 
     @abc.abstractmethod
