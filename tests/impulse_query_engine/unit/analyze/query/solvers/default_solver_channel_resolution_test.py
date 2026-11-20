@@ -281,3 +281,30 @@ class TestAliasedSelectors:
         )
         solver = DefaultSolver(spark, config=_alias_config())
         assert _resolved(spark, solver, q, both) == {cid: [expected] for cid in (1, 2, 3)}
+
+    def test_selectors_matching_the_same_alias_both_resolve(self, spark, key_value_store_alias_db):
+        # Both selectors match the engine_speed alias (channel 5); the second one
+        # also matches vehicle_speed (channel 7), which it does not resolve to.
+        q = key_value_store_alias_db.query
+        engine_speed = q.channel_with_alias(channel_alias="engine_speed")
+        speeds = TimeSeriesSelector(
+            (TagSelector("channel_alias") == "engine_speed")
+            | (TagSelector("channel_alias") == "vehicle_speed"),
+            uses_alias=True,
+        )
+        solver = DefaultSolver(spark, config=_alias_config())
+        _assert_both_resolve(spark, solver, q, engine_speed, speeds, {1: [5], 2: [5], 3: [5]})
+
+        containers = solver.filter_container_metrics(
+            spark, q, solver.filter_container_tags(spark, q)
+        )
+        aliases = solver.filter_aliased_channel_metrics(
+            spark, key_value_store_alias_db, containers, [engine_speed, speeds]
+        ).collect()
+        assert sorted(
+            (r["container_id"], r["channel_id"], r["channel_alias"], sorted(r["selector_ids"]))
+            for r in aliases
+        ) == [
+            (cid, 5, "engine_speed", sorted([engine_speed.selector_id, speeds.selector_id]))
+            for cid in (1, 2, 3)
+        ]

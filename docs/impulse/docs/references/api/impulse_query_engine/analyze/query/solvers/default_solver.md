@@ -209,6 +209,11 @@ columns, then applies the top-level ``project_id`` filter and any
 per-table ``channel_mapping.filters``, and finally joins with
 channel_metrics to resolve aliases.
 
+Every aliased selector resolves independently to at most one channel
+per container: the best ``alias_priority``, then the lowest
+``channel_id`` (string ids compare as text), then the alias name.
+Channels with a null ``channel_id`` are ignored.
+
 When the database is configured with a ``unit_conversion_table`` and
 the ``channel_mapping`` table carries ``source_unit`` / ``target_unit``
 columns, this method also propagates the effective unit pair on each
@@ -230,8 +235,9 @@ there is no analogous column on ``channel_metrics``.
 
 `pyspark.sql.DataFrame`: DataFrame with
 ``(container_id, channel_id, <metrics-side join keys>,
-channel_alias, alias_priority, selector_ids)`` where
-``selector_ids`` is an array column.  The metrics-side join key
+channel_alias, alias_priority, selector_ids)``, one row per
+resolved alias, where ``selector_ids`` lists the selectors resolved
+to it.  The metrics-side join key
 columns come from ``effective_alias_join_keys`` (default:
 ``channel_name``, ``data_key``) and are deduplicated in case the
 same physical column appears on both sides of a join-key tuple.
@@ -246,9 +252,6 @@ def resolve_channel_selections(spark, channel_metrics_df,
 ```
 
 Union direct and aliased channel metrics, combining selector_ids.
-
-Each aliased selector first resolves to at most one channel per
-container: the best ``alias_priority``, then the lowest ``channel_id``.
 
 When the aliased side carries ``source_unit`` / ``target_unit``
 columns (added by :meth:`filter_aliased_channel_metrics` when a

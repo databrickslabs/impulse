@@ -167,7 +167,8 @@ class ChannelMappingResolutionDimension:
             DataFrame with columns
             ``(container_id, channel_id, <metrics-side join keys>,
             channel_alias, alias_priority[, source_unit, target_unit])``,
-            or ``None`` if the report has no aliased selectors.
+            one row per alias an aliased selector resolved to, or ``None``
+            if the report has no aliased selectors.
         """
         if not aliased_selectors:
             return None

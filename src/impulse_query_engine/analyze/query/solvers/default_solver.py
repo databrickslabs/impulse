@@ -723,6 +723,11 @@ class DefaultSolver(QuerySolver):
         per-table ``channel_mapping.filters``, and finally joins with
         channel_metrics to resolve aliases.
 
+        Every aliased selector resolves independently to at most one channel
+        per container: the best ``alias_priority``, then the lowest
+        ``channel_id`` (string ids compare as text), then the alias name.
+        Channels with a null ``channel_id`` are ignored.
+
         When the database is configured with a ``unit_conversion_table`` and
         the ``channel_mapping`` table carries ``source_unit`` / ``target_unit``
         columns, this method also propagates the effective unit pair on each
@@ -749,8 +754,9 @@ class DefaultSolver(QuerySolver):
         pyspark.sql.DataFrame
             DataFrame with
             ``(container_id, channel_id, <metrics-side join keys>,
-            channel_alias, alias_priority, selector_ids)`` where
-            ``selector_ids`` is an array column.  The metrics-side join key
+            channel_alias, alias_priority, selector_ids)``, one row per
+            resolved alias, where ``selector_ids`` lists the selectors resolved
+            to it.  The metrics-side join key
             columns come from ``effective_alias_join_keys`` (default:
             ``channel_name``, ``data_key``) and are deduplicated in case the
             same physical column appears on both sides of a join-key tuple.
@@ -842,13 +848,6 @@ class DefaultSolver(QuerySolver):
                 resolved = resolved.withColumn(source_unit_col, F.col("_map_source_unit"))
             resolved = resolved.withColumn(target_unit_col, F.col("_map_target_unit"))
 
-        # Ties in priority (e.g. no priorities configured) go to the lowest channel_id.
-        dedup_window = Window.partitionBy(container_id_col, channel_alias_col).orderBy(
-            F.col(alias_priority_col).asc_nulls_last(), F.col(channel_id_col).asc()
-        )
-        resolved = resolved.withColumn("_rank", F.row_number().over(dedup_window))
-        resolved = resolved.where(F.col("_rank") == 1).drop("_rank")
-
         resolved = resolved.withColumn("selector_ids", self._build_selector_ids_expr(selectors))
         join_key_metrics_cols = list(dict.fromkeys(metrics_col for _, metrics_col in join_keys))
         out_cols = [
@@ -861,14 +860,21 @@ class DefaultSolver(QuerySolver):
         ]
         if has_unit_cols:
             out_cols.extend([source_unit_col, target_unit_col])
-        return resolved.select(*out_cols)
+        return self._one_channel_per_selector(
+            resolved.select(*out_cols),
+            [
+                F.col(alias_priority_col).asc_nulls_last(),
+                F.col(channel_id_col).asc(),
+                F.col(channel_alias_col).asc(),
+            ],
+        )
 
     def _one_channel_per_selector(self, matches: DataFrame, order_by: list[Column]) -> DataFrame:
-        """Keep one matched channel per container and selector.
+        """Keep one matched row per container and selector.
 
         Each selector of a row's ``selector_ids`` keeps, per container, the row
         ranked first by *order_by*; the rows' other selectors are resolved
-        independently.
+        independently.  Rows kept for several selectors are returned once.
 
         Parameters
         ----------
@@ -882,17 +888,19 @@ class DefaultSolver(QuerySolver):
         Returns
         -------
         pyspark.sql.DataFrame
-            The columns of *matches*, one row per container and selector, with
-            ``selector_ids`` holding that one selector.
+            The kept rows of *matches*, with ``selector_ids`` holding the
+            selectors that kept them.
         """
         selector_id = "_selector_id"
+        row_cols = [c for c in matches.columns if c != "selector_ids"]
         rank = Window.partitionBy(self.config.container_id_col, selector_id).orderBy(*order_by)
         return (
             matches.withColumn(selector_id, F.explode("selector_ids"))
             .withColumn("_rank", F.row_number().over(rank))
             .where(F.col("_rank") == 1)
-            .withColumn("selector_ids", F.array(F.col(selector_id)))
-            .drop(selector_id, "_rank")
+            .groupBy(*row_cols)
+            .agg(F.collect_list(selector_id).alias("selector_ids"))
+            .select(*matches.columns)
         )
 
     def resolve_channel_selections(
@@ -900,9 +908,6 @@ class DefaultSolver(QuerySolver):
     ) -> DataFrame:
         """
         Union direct and aliased channel metrics, combining selector_ids.
-
-        Each aliased selector first resolves to at most one channel per
-        container: the best ``alias_priority``, then the lowest ``channel_id``.
 
         When the aliased side carries ``source_unit`` / ``target_unit``
         columns (added by :meth:`filter_aliased_channel_metrics` when a
@@ -960,17 +965,7 @@ class DefaultSolver(QuerySolver):
         ]
         if has_unit_cols:
             aliased_solve_cols.extend([source_unit_col, target_unit_col])
-        # An aliased selector matching several aliases of a container resolves to
-        # one channel, like a direct selector: best alias priority, then lowest
-        # channel_id (the alias name breaks the remaining ties).
-        aliased_for_union = self._one_channel_per_selector(
-            aliased_channel_metrics_df,
-            [
-                F.col(self.config.alias_priority_col).asc_nulls_last(),
-                F.col(self.config.channel_id_col).asc(),
-                F.col(self.config.channel_alias_col).asc(),
-            ],
-        ).select(*aliased_solve_cols)
+        aliased_for_union = aliased_channel_metrics_df.select(*aliased_solve_cols)
 
         merged = channel_metrics_df.unionByName(
             aliased_for_union, allowMissingColumns=has_unit_cols
