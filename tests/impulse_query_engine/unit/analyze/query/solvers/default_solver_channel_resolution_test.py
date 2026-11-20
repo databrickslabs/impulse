@@ -113,6 +113,12 @@ def _with_channel(channel_metrics, container_id, channel_id, **columns):
     return channel_metrics.unionByName(row.select(*channel_metrics.columns))
 
 
+def _basic_db(basic_narrow_db, ws, **tables) -> MeasurementDB:
+    """``basic_narrow_db`` with some of its tables replaced."""
+    debug_tables = {**basic_narrow_db.config.debug_tables, **tables}
+    return MeasurementDB(MeasurementDBConfig.for_debug(debug_tables), ws=ws)
+
+
 class TestDirectSelectors:
     def test_wide_mode_keeps_the_lowest_channel_id(self, spark, basic_narrow_db):
         q = basic_narrow_db.query
@@ -159,6 +165,50 @@ class TestDirectSelectors:
         solver = DefaultSolver(spark, config=_alias_config())
         _assert_both_resolve(spark, solver, q, rpm, rpm_or_speed, {1: [5], 2: [5]})
 
+    def test_null_channel_id_is_never_resolved(
+        self, spark, basic_narrow_db, mock_workspace_client
+    ):
+        metrics = basic_narrow_db.config.debug_tables["channel_metrics"]
+        metrics = _with_channel(metrics, 1, None)
+        metrics = _with_channel(metrics, 1, None, channel_name="Ghost")
+        db = _basic_db(basic_narrow_db, mock_workspace_client, channel_metrics=metrics)
+        q = db.query
+        rpm = q.channel(channel_name="Engine RPM")
+        solver = DefaultSolver(spark)
+        assert _resolved(spark, solver, q, rpm) == {1: [5], 2: [5], 3: [5]}
+        assert _resolved(spark, solver, q, q.channel(channel_name="Ghost")) == {}
+
+        result = q.select(rpm.max().alias("rpm_max")).solve(spark, solver=solver)
+        actual = {r["container_id"]: r["rpm_max"] for r in result.collect()}
+        assert actual[1] == pytest.approx(_channel_max(1, 5))
+
+    def test_string_channel_ids_compare_as_text(
+        self, spark, basic_narrow_db, mock_workspace_client
+    ):
+        # Channel 9 becomes "10", which sorts before "6" as text.
+        def as_text(df):
+            ch = F.col("channel_id")
+            return df.withColumn(
+                "channel_id", F.when(ch == 9, F.lit("10")).otherwise(ch.cast("string"))
+            )
+
+        tables = basic_narrow_db.config.debug_tables
+        db = _basic_db(
+            basic_narrow_db,
+            mock_workspace_client,
+            channel_metrics=as_text(tables["channel_metrics"]),
+            channels=as_text(tables["channels"]),
+        )
+        q = db.query
+        celsius = q.channel(unit="C")
+        solver = DefaultSolver(spark)
+        assert _resolved(spark, solver, q, celsius) == {1: ["10"], 2: ["10"], 3: ["2"]}
+
+        result = q.select(celsius.max().alias("t_max")).solve(spark, solver=solver)
+        actual = {r["container_id"]: r["t_max"] for r in result.collect()}
+        for cid in (1, 2):
+            assert actual[cid] == pytest.approx(_channel_max(cid, 9))
+
     def test_eav_mode_keeps_the_lowest_channel_id(
         self, spark, setup_key_value_store_alias_db, mock_workspace_client
     ):
@@ -187,7 +237,7 @@ class TestDirectSelectors:
 
 
 class TestAliasedSelectors:
-    @pytest.mark.parametrize(("extra_channel", "expected"), [(2, 2), (8, 5)])
+    @pytest.mark.parametrize(("extra_channel", "expected"), [(2, 2), (8, 5), (None, 5)])
     def test_priority_tie_keeps_lowest_channel_id(
         self, spark, setup_key_value_store_alias_db, mock_workspace_client, extra_channel, expected
     ):

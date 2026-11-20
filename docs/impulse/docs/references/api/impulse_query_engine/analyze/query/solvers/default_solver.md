@@ -178,7 +178,8 @@ columns, the result is restricted to the candidate containers, and
 
 In both modes every selector resolves independently to at most one
 channel per container: when several channels of a container match, the
-lowest ``channel_id`` is kept.  A channel's ``selector_ids`` lists every
+lowest ``channel_id`` is kept (string ids compare as text).  Rows with a
+null ``channel_id`` are ignored.  A channel's ``selector_ids`` lists every
 selector resolved to it.
 
 **Arguments**:

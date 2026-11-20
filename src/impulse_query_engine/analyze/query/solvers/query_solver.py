@@ -242,8 +242,8 @@ class QuerySolver(ABC):
         Parameters
         ----------
         matches : pyspark.sql.DataFrame
-            Channel matches with ``container_id``, ``channel_id`` and a
-            ``selector_ids`` array, plus any other columns.
+            Channel matches with ``container_id``, a non-null ``channel_id`` and
+            a ``selector_ids`` array, plus any other columns.
         order_by : list of pyspark.sql.Column
             Ranking of a selector's candidate rows within a container; must make
             the pick deterministic.

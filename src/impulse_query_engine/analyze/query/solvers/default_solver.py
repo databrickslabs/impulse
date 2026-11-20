@@ -648,7 +648,8 @@ class DefaultSolver(QuerySolver):
 
         In both modes every selector resolves independently to at most one
         channel per container: when several channels of a container match, the
-        lowest ``channel_id`` is kept.  A channel's ``selector_ids`` lists every
+        lowest ``channel_id`` is kept (string ids compare as text).  Rows with a
+        null ``channel_id`` are ignored.  A channel's ``selector_ids`` lists every
         selector resolved to it.
 
         Parameters
@@ -700,12 +701,15 @@ class DefaultSolver(QuerySolver):
                 .withColumn("selector_ids", self._build_selector_ids_expr(selectors))
             )
 
-        resolved = self._one_channel_per_selector(
-            matches.select(container_id_col, channel_id_col, "selector_ids"),
-            [F.col(channel_id_col).asc()],
+        selector_id = "_selector_id"
+        per_selector = (
+            matches.where(F.col(channel_id_col).isNotNull())
+            .select(container_id_col, channel_id_col, F.explode("selector_ids").alias(selector_id))
+            .groupBy(container_id_col, selector_id)
+            .agg(F.min(channel_id_col).alias(channel_id_col))
         )
-        return resolved.groupBy(container_id_col, channel_id_col).agg(
-            F.flatten(F.collect_list("selector_ids")).alias("selector_ids")
+        return per_selector.groupBy(container_id_col, channel_id_col).agg(
+            F.collect_list(selector_id).alias("selector_ids")
         )
 
     def filter_aliased_channel_metrics(
@@ -777,7 +781,7 @@ class DefaultSolver(QuerySolver):
         channel_metrics = db.channel_metrics(spark)
         channel_metrics = self._apply_column_mapping(
             channel_metrics, self.config.channel_metrics.column_name_mapping
-        )
+        ).where(F.col(channel_id_col).isNotNull())
         channel_metrics = channel_metrics.join(
             F.broadcast(container_df.select(container_id_col)),
             on=[container_id_col],
