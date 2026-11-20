@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pyspark.sql import DataFrame, Window
+from pyspark.sql import DataFrame
 from pyspark.sql.column import Column
 
 if TYPE_CHECKING:
@@ -231,38 +231,6 @@ class QuerySolver(ABC):
             for selector in selectors
         ]
         return F.filter(F.array(*ids), lambda sid: sid.isNotNull())
-
-    def _one_channel_per_selector(self, matches: DataFrame, order_by: list[Column]) -> DataFrame:
-        """Keep one matched channel per container and selector.
-
-        Each selector of a row's ``selector_ids`` keeps, per container, the row
-        ranked first by *order_by*; the rows' other selectors are resolved
-        independently.
-
-        Parameters
-        ----------
-        matches : pyspark.sql.DataFrame
-            Channel matches with ``container_id``, a non-null ``channel_id`` and
-            a ``selector_ids`` array, plus any other columns.
-        order_by : list of pyspark.sql.Column
-            Ranking of a selector's candidate rows within a container; must make
-            the pick deterministic.
-
-        Returns
-        -------
-        pyspark.sql.DataFrame
-            The columns of *matches*, one row per container and selector, with
-            ``selector_ids`` holding that one selector.
-        """
-        selector_id = "_selector_id"
-        rank = Window.partitionBy(self.config.container_id_col, selector_id).orderBy(*order_by)
-        return (
-            matches.withColumn(selector_id, F.explode("selector_ids"))
-            .withColumn("_rank", F.row_number().over(rank))
-            .where(F.col("_rank") == 1)
-            .withColumn("selector_ids", F.array(F.col(selector_id)))
-            .drop(selector_id, "_rank")
-        )
 
     @abc.abstractmethod
     def filter_container_tags(self, spark, query) -> DataFrame:
