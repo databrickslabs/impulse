@@ -137,8 +137,9 @@ table, or pass through when no such table is configured.
 When a ``channel_tags_table`` is configured on the database, the narrow
 key/value rows are pivoted to wide format (one column per required tag
 key), matched against the selectors, and each surviving
-``(container_id, channel_id)`` row is assigned its ``selector_id`` so
-that stage 4 only has to drop channels lacking metric entries.
+``(container_id, channel_id)`` row is assigned the ids of every selector
+it matches (``selector_ids``).  Stage 4 drops channels lacking metric
+entries and resolves each selector to one channel per container.
 
 When no ``channel_tags_table`` is configured, the channel-selection
 attributes (e.g. ``channel_name``) live as columns on
@@ -154,7 +155,7 @@ happens in :meth:`filter_channel_metrics`.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: ``(container_id, channel_id, selector_id)`` in EAV mode, or the
+`pyspark.sql.DataFrame`: ``(container_id, channel_id, selector_ids)`` in EAV mode, or the
 input container DataFrame unchanged in wide mode.
 
 #### filter\_channel\_metrics
@@ -166,27 +167,32 @@ def filter_channel_metrics(spark, db, channel_df, selectors) -> DataFrame
 Stage 4: produce ``(container_id, channel_id, selector_ids)``.
 
 In EAV mode (``channel_tags_table`` configured) *channel_df* already
-carries a ``selector_id`` from :meth:`filter_channel_tags`; this stage
-inner-joins ``channel_metrics`` on ``(container_id, channel_id)`` to
-drop channels without metric entries, then wraps ``selector_id`` into
-the ``selector_ids`` array.
+carries the matching ``selector_ids`` from :meth:`filter_channel_tags`;
+this stage inner-joins ``channel_metrics`` on ``(container_id,
+channel_id)`` to drop channels without metric entries.
 
 In wide mode (no ``channel_tags_table``) *channel_df* is the container
 frame; the selectors are applied directly to ``channel_metrics``
 columns, the result is restricted to the candidate containers, and
 ``selector_ids`` is computed from the matching selectors.
 
+In both modes every selector resolves independently to at most one
+channel per container: when several channels of a container match, the
+lowest ``channel_id`` is kept.  A channel's ``selector_ids`` lists every
+selector resolved to it.
+
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
 - `db` (`MeasurementDB`): Measurement database for table access.
-- `channel_df` (`pyspark.sql.DataFrame`): In EAV mode, the ``(container_id, channel_id, selector_id)`` frame
+- `channel_df` (`pyspark.sql.DataFrame`): In EAV mode, the ``(container_id, channel_id, selector_ids)`` frame
 from :meth:`filter_channel_tags`; in wide mode, the container frame.
 - `selectors` (`list[TimeSeriesSelector]`): Non-aliased (direct) selectors.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: DataFrame with ``(container_id, channel_id, selector_ids)``.
+`pyspark.sql.DataFrame`: DataFrame with ``(container_id, channel_id, selector_ids)``, one
+row per channel.
 
 #### filter\_aliased\_channel\_metrics
 
@@ -239,6 +245,9 @@ def resolve_channel_selections(spark, channel_metrics_df,
 ```
 
 Union direct and aliased channel metrics, combining selector_ids.
+
+Each aliased selector first resolves to at most one channel per
+container: the best ``alias_priority``, then the lowest ``channel_id``.
 
 When the aliased side carries ``source_unit`` / ``target_unit``
 columns (added by :meth:`filter_aliased_channel_metrics` when a

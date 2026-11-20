@@ -32,9 +32,12 @@ table is configured — see [Query Solvers](../query_solvers.md#how-defaultsolve
 :::
 
 :::note When a selection matches several channels
-A selection should identify at most one channel per container. If several channels of a container
-match its tags (e.g. the same `channel_name` under two `data_key`s), one of them is used, and which
-one is unspecified; add tags such as `data_key` to select a specific channel.
+A selection resolves to at most one channel per container. If several channels of a container
+match its tags (e.g. the same `channel_name` under two `data_key`s), the one with the lowest
+`channel_id` is used; add tags such as `data_key` to select a specific channel. Each selection
+resolves on its own, so two selections that match the same channel both read it. Earlier versions
+picked an arbitrary match, so recompute incremental reports in full if their selections were
+ambiguous.
 :::
 
 ### Points-in-Time (POI) channels
@@ -102,7 +105,8 @@ channel-identifying columns (by default `channel_name` and `data_key`). See
 :::
 
 If several mapping entries of an alias resolve in a container, the one with the lowest `priority`
-wins; without priorities, or on ties, the lowest `channel_id` is used.
+wins; without priorities, or on ties, the lowest `channel_id` is used. The same holds for an aliased
+selection that matches several aliases: it resolves to one channel per container.
 
 When the `channel_mapping` table carries `source_unit` and `target_unit` columns and the report config sets
 `source.unit_conversion_table`, values returned from `channel_with_alias()` are automatically converted from source
