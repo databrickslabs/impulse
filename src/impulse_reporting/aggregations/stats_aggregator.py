@@ -435,11 +435,11 @@ class StatsAggregator(Aggregation):
 
         def _(df: DataFrame) -> DataFrame:
             # Aggregation name -> event name, looked up through one constant map.
-            name_to_event_name = {}
-            for agg in aggregations:
-                event = agg.get_event() if agg else None
-                if event is not None and event.get_name() is not None:
-                    name_to_event_name[agg.get_name()] = event.get_name()
+            name_to_event_name = {
+                agg.get_name(): agg.get_event().get_name()
+                for agg in aggregations
+                if agg and agg.get_event()
+            }
 
             event_name_column = constant_map_lookup(name_to_event_name, "stats_name", StringType())
             return df.withColumn("event_name", event_name_column)
@@ -615,7 +615,7 @@ class StatsAggregator(Aggregation):
             for agg in aggregations:
                 if agg is None:
                     continue
-                name_to_channel_names.setdefault(agg.get_name(), list(agg.channel_names))
+                name_to_channel_names.setdefault(agg.get_name(), agg.channel_names)
 
             channel_names = constant_map_lookup(
                 name_to_channel_names, "stats_name", ArrayType(StringType())

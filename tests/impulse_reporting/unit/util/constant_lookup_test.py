@@ -35,10 +35,11 @@ def test_string_array_and_nested_map_values(spark):
     assert [r["nested_v"] for r in rows] == ["ax", None, None]
 
 
-def test_empty_mapping_is_typed_null(spark):
-    rows = _lookup(spark, ["a"], {}, T.IntegerType())
+@pytest.mark.parametrize("mapping", [{}, {None: 1}], ids=["empty", "only_none_key"])
+def test_empty_mapping_is_typed_null(spark, mapping):
+    rows = _lookup(spark, ["a", "null"], mapping, T.IntegerType())
     assert rows.schema["v"].dataType == T.IntegerType()
-    assert rows.collect()[0]["v"] is None
+    assert [r["v"] for r in rows.collect()] == [None, None]
 
 
 def test_special_character_keys_and_values(spark):
@@ -62,12 +63,6 @@ def test_none_key_is_skipped(spark):
     """A ``None`` key must not become the JSON key ``"null"`` and match that string."""
     rows = _lookup(spark, ["null", "a"], {None: 1, "a": 2}, T.IntegerType())
     assert [r["v"] for r in rows.collect()] == [None, 2]
-
-
-def test_only_none_key_is_typed_null(spark):
-    rows = _lookup(spark, ["null"], {None: 1}, T.IntegerType())
-    assert rows.schema["v"].dataType == T.IntegerType()
-    assert rows.collect()[0]["v"] is None
 
 
 @pytest.mark.parametrize("bad_value", [2**31, "7"])

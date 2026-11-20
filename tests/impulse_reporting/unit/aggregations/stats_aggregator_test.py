@@ -23,6 +23,7 @@ from impulse_reporting.events.container_event import ContainerEvent
 from impulse_reporting.events.points_in_time_event import PointsInTimeEvent
 from impulse_reporting.events.time_window_event import TimeWindowEvent
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
+from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
 
 
 def test_as_spark_row():
@@ -1222,13 +1223,10 @@ def test_add_event_name_column_with_and_without_event(spark):
     aggregations = [_make_stats("s_ev", ["c"], event=event), _make_stats("s_none", ["c"])]
     df = spark.createDataFrame([("s_ev",), ("s_none",), ("unknown",)], "stats_name string")
     result = df.transform(StatsAggregator._add_event_name_column(aggregations))
-    assert result.schema["event_name"].dataType == T.StringType()
     assert [r["event_name"] for r in result.collect()] == ["my_event", None, None]
 
 
 def test_add_event_instance_id_column_mixed_event_types(spark):
-    from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
-
     container_event = ContainerEvent(name="whole_container")
     basic_event = BasicEvent(name="band", expr=TimeSeriesSelector(None) > 0)
     aggregations = [

@@ -260,8 +260,7 @@ class Aggregation(ABC):
         -------
         pyspark.sql.Column
             A Spark SQL Column expression mapping names to IDs, or None if no match is found.
-            The mapping is a single constant map lookup (see ``constant_map_lookup``), so
-            its cost does not grow with the number of aggregations. If several
+            Built as one constant map lookup (see ``constant_map_lookup``). If several
             aggregations share a name, the first one's ID is used.
         """
         name_to_id: dict[str, int] = {}

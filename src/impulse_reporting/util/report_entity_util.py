@@ -31,14 +31,9 @@ class ReportEntityUtil:
         -------
         pyspark.sql.Column
             A Spark SQL Column expression mapping names to IDs, or None if no match is found.
-            The mapping is a single constant map lookup (see ``constant_map_lookup``), so
-            its cost does not grow with the number of elements.
+            Built as one constant map lookup (see ``constant_map_lookup``).
         """
-        name_to_id = {
-            name: event_id
-            for name, event_id in ReportEntityUtil._get_name_to_id_mapping(elements).items()
-            if event_id is not None
-        }
+        name_to_id = ReportEntityUtil._get_name_to_id_mapping(elements)
         return constant_map_lookup(name_to_id, element_name, IntegerType())
 
     @staticmethod

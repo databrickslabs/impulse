@@ -17,17 +17,14 @@ def constant_map_lookup(
     """
     Look up ``key`` in a constant ``{str: value}`` mapping.
 
-    The mapping is serialised to JSON once and parsed with ``from_json`` from a
-    string literal, which the optimizer constant-folds into a single map literal.
-    Building the column therefore costs a fixed number of driver calls however
-    many entries the mapping has, and the plan holds one compact expression
-    instead of one branch per entry. Per row, Spark scans the map's keys
-    linearly, so the lookup cost still grows with the mapping size.
+    The mapping is parsed with ``from_json`` from one JSON string literal, which
+    the optimizer constant-folds into a map literal. Building the column costs a
+    fixed number of driver calls regardless of the mapping size (``create_map``
+    would need one call per key and value). Per row, Spark scans the map's keys
+    linearly.
 
-    The JSON is parsed in ``FAILFAST`` mode: a value that does not match
-    ``value_type`` (e.g. an integer outside the ``IntegerType`` range) raises an
-    error when the plan is optimized, rather than silently turning the whole map
-    into NULL.
+    Parsing uses ``FAILFAST``: a value that does not match ``value_type`` raises
+    when the plan is optimized instead of silently turning the whole map NULL.
 
     Parameters
     ----------
