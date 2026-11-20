@@ -137,8 +137,9 @@ table, or pass through when no such table is configured.
 When a ``channel_tags_table`` is configured on the database, the narrow
 key/value rows are pivoted to wide format (one column per required tag
 key), matched against the selectors, and each surviving
-``(container_id, channel_id)`` row is assigned its ``selector_id`` so
-that stage 4 only has to drop channels lacking metric entries.
+``(container_id, channel_id)`` row is assigned the ids of every selector
+it matches (``selector_ids``).  Stage 4 drops channels lacking metric
+entries and resolves each selector to one channel per container.
 
 When no ``channel_tags_table`` is configured, the channel-selection
 attributes (e.g. ``channel_name``) live as columns on
@@ -154,7 +155,7 @@ happens in :meth:`filter_channel_metrics`.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: ``(container_id, channel_id, selector_id)`` in EAV mode, or the
+`pyspark.sql.DataFrame`: ``(container_id, channel_id, selector_ids)`` in EAV mode, or the
 input container DataFrame unchanged in wide mode.
 
 #### filter\_channel\_metrics
@@ -166,27 +167,33 @@ def filter_channel_metrics(spark, db, channel_df, selectors) -> DataFrame
 Stage 4: produce ``(container_id, channel_id, selector_ids)``.
 
 In EAV mode (``channel_tags_table`` configured) *channel_df* already
-carries a ``selector_id`` from :meth:`filter_channel_tags`; this stage
-inner-joins ``channel_metrics`` on ``(container_id, channel_id)`` to
-drop channels without metric entries, then wraps ``selector_id`` into
-the ``selector_ids`` array.
+carries the matching ``selector_ids`` from :meth:`filter_channel_tags`;
+this stage inner-joins ``channel_metrics`` on ``(container_id,
+channel_id)`` to drop channels without metric entries.
 
 In wide mode (no ``channel_tags_table``) *channel_df* is the container
 frame; the selectors are applied directly to ``channel_metrics``
 columns, the result is restricted to the candidate containers, and
 ``selector_ids`` is computed from the matching selectors.
 
+In both modes every selector resolves independently to at most one
+channel per container: when several channels of a container match, the
+lowest ``channel_id`` is kept (string ids compare as text).  Rows with a
+null ``channel_id`` are ignored.  A channel's ``selector_ids`` lists every
+selector resolved to it.
+
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
 - `db` (`MeasurementDB`): Measurement database for table access.
-- `channel_df` (`pyspark.sql.DataFrame`): In EAV mode, the ``(container_id, channel_id, selector_id)`` frame
+- `channel_df` (`pyspark.sql.DataFrame`): In EAV mode, the ``(container_id, channel_id, selector_ids)`` frame
 from :meth:`filter_channel_tags`; in wide mode, the container frame.
 - `selectors` (`list[TimeSeriesSelector]`): Non-aliased (direct) selectors.
 
 **Returns**:
 
-`pyspark.sql.DataFrame`: DataFrame with ``(container_id, channel_id, selector_ids)``.
+`pyspark.sql.DataFrame`: DataFrame with ``(container_id, channel_id, selector_ids)``, one
+row per channel.
 
 #### filter\_aliased\_channel\_metrics
 
@@ -201,6 +208,11 @@ Applies the per-table ``column_name_mapping`` to rename physical
 columns, then applies the top-level ``project_id`` filter and any
 per-table ``channel_mapping.filters``, and finally joins with
 channel_metrics to resolve aliases.
+
+Every aliased selector resolves independently to at most one channel
+per container: the best ``alias_priority``, then the lowest
+``channel_id`` (string ids compare as text), then the alias name.
+Channels with a null ``channel_id`` are ignored.
 
 When the database is configured with a ``unit_conversion_table`` and
 the ``channel_mapping`` table carries ``source_unit`` / ``target_unit``
@@ -223,8 +235,9 @@ there is no analogous column on ``channel_metrics``.
 
 `pyspark.sql.DataFrame`: DataFrame with
 ``(container_id, channel_id, <metrics-side join keys>,
-channel_alias, alias_priority, selector_ids)`` where
-``selector_ids`` is an array column.  The metrics-side join key
+channel_alias, alias_priority, selector_ids)``, one row per
+resolved alias, where ``selector_ids`` lists the selectors resolved
+to it.  The metrics-side join key
 columns come from ``effective_alias_join_keys`` (default:
 ``channel_name``, ``data_key``) and are deduplicated in case the
 same physical column appears on both sides of a join-key tuple.

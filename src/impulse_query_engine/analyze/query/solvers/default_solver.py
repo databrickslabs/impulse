@@ -574,8 +574,9 @@ class DefaultSolver(QuerySolver):
         When a ``channel_tags_table`` is configured on the database, the narrow
         key/value rows are pivoted to wide format (one column per required tag
         key), matched against the selectors, and each surviving
-        ``(container_id, channel_id)`` row is assigned its ``selector_id`` so
-        that stage 4 only has to drop channels lacking metric entries.
+        ``(container_id, channel_id)`` row is assigned the ids of every selector
+        it matches (``selector_ids``).  Stage 4 drops channels lacking metric
+        entries and resolves each selector to one channel per container.
 
         When no ``channel_tags_table`` is configured, the channel-selection
         attributes (e.g. ``channel_name``) live as columns on
@@ -596,7 +597,7 @@ class DefaultSolver(QuerySolver):
         Returns
         -------
         pyspark.sql.DataFrame
-            ``(container_id, channel_id, selector_id)`` in EAV mode, or the
+            ``(container_id, channel_id, selector_ids)`` in EAV mode, or the
             input container DataFrame unchanged in wide mode.
         """
         if db.config.channel_tags_table is None:
@@ -628,23 +629,28 @@ class DefaultSolver(QuerySolver):
             .agg(F.first(F.col(tag_value_col)))
             .where(expr)
         )
-        tags = tags.withColumn("selector_id", self._build_selector_id_expr(selectors))
-        return tags.select(container_id_col, channel_id_col, "selector_id")
+        tags = tags.withColumn("selector_ids", self._build_selector_ids_expr(selectors))
+        return tags.select(container_id_col, channel_id_col, "selector_ids")
 
     def filter_channel_metrics(self, spark, db, channel_df, selectors) -> DataFrame:
         """
         Stage 4: produce ``(container_id, channel_id, selector_ids)``.
 
         In EAV mode (``channel_tags_table`` configured) *channel_df* already
-        carries a ``selector_id`` from :meth:`filter_channel_tags`; this stage
-        inner-joins ``channel_metrics`` on ``(container_id, channel_id)`` to
-        drop channels without metric entries, then wraps ``selector_id`` into
-        the ``selector_ids`` array.
+        carries the matching ``selector_ids`` from :meth:`filter_channel_tags`;
+        this stage inner-joins ``channel_metrics`` on ``(container_id,
+        channel_id)`` to drop channels without metric entries.
 
         In wide mode (no ``channel_tags_table``) *channel_df* is the container
         frame; the selectors are applied directly to ``channel_metrics``
         columns, the result is restricted to the candidate containers, and
         ``selector_ids`` is computed from the matching selectors.
+
+        In both modes every selector resolves independently to at most one
+        channel per container: when several channels of a container match, the
+        lowest ``channel_id`` is kept (string ids compare as text).  Rows with a
+        null ``channel_id`` are ignored.  A channel's ``selector_ids`` lists every
+        selector resolved to it.
 
         Parameters
         ----------
@@ -653,7 +659,7 @@ class DefaultSolver(QuerySolver):
         db : MeasurementDB
             Measurement database for table access.
         channel_df : pyspark.sql.DataFrame
-            In EAV mode, the ``(container_id, channel_id, selector_id)`` frame
+            In EAV mode, the ``(container_id, channel_id, selector_ids)`` frame
             from :meth:`filter_channel_tags`; in wide mode, the container frame.
         selectors : list[TimeSeriesSelector]
             Non-aliased (direct) selectors.
@@ -661,7 +667,8 @@ class DefaultSolver(QuerySolver):
         Returns
         -------
         pyspark.sql.DataFrame
-            DataFrame with ``(container_id, channel_id, selector_ids)``.
+            DataFrame with ``(container_id, channel_id, selector_ids)``, one
+            row per channel.
         """
         container_id_col = self.config.container_id_col
         channel_id_col = self.config.channel_id_col
@@ -675,29 +682,35 @@ class DefaultSolver(QuerySolver):
         )
 
         if db.config.channel_tags_table is not None:
-            # EAV mode: channel_df = (container_id, channel_id, selector_id).
+            # EAV mode: channel_df = (container_id, channel_id, selector_ids).
             # Inner-join channel_metrics to drop channels without metric entries.
-            metrics = channel_metrics_df.select(container_id_col, channel_id_col).join(
+            matches = channel_metrics_df.select(container_id_col, channel_id_col).join(
                 F.broadcast(channel_df),
                 on=[container_id_col, channel_id_col],
                 how="inner",
             )
-            metrics = metrics.withColumn("selector_ids", F.array(F.col("selector_id"))).drop(
-                "selector_id"
+        else:
+            # Wide mode: selectors apply directly to channel_metrics columns.
+            matches = (
+                channel_metrics_df.where(self._build_expr(selectors))
+                .join(
+                    F.broadcast(channel_df.select(container_id_col)),
+                    on=[container_id_col],
+                    how="inner",
+                )
+                .withColumn("selector_ids", self._build_selector_ids_expr(selectors))
             )
-            return metrics.select(container_id_col, channel_id_col, "selector_ids")
 
-        # Wide mode: selectors apply directly to channel_metrics columns.
-        channel_metrics_df = channel_metrics_df.where(self._build_expr(selectors))
-        result = channel_metrics_df.join(
-            F.broadcast(channel_df.select(container_id_col)),
-            on=[container_id_col],
-            how="inner",
+        selector_id = "_selector_id"
+        per_selector = (
+            matches.where(F.col(channel_id_col).isNotNull())
+            .select(container_id_col, channel_id_col, F.explode("selector_ids").alias(selector_id))
+            .groupBy(container_id_col, selector_id)
+            .agg(F.min(channel_id_col).alias(channel_id_col))
         )
-        result = result.withColumn(
-            "selector_ids", F.array(self._build_selector_id_expr(selectors))
+        return per_selector.groupBy(container_id_col, channel_id_col).agg(
+            F.collect_list(selector_id).alias("selector_ids")
         )
-        return result.select(container_id_col, channel_id_col, "selector_ids")
 
     def filter_aliased_channel_metrics(
         self, spark, db: MeasurementDB, container_df, selectors
@@ -709,6 +722,11 @@ class DefaultSolver(QuerySolver):
         columns, then applies the top-level ``project_id`` filter and any
         per-table ``channel_mapping.filters``, and finally joins with
         channel_metrics to resolve aliases.
+
+        Every aliased selector resolves independently to at most one channel
+        per container: the best ``alias_priority``, then the lowest
+        ``channel_id`` (string ids compare as text), then the alias name.
+        Channels with a null ``channel_id`` are ignored.
 
         When the database is configured with a ``unit_conversion_table`` and
         the ``channel_mapping`` table carries ``source_unit`` / ``target_unit``
@@ -736,8 +754,9 @@ class DefaultSolver(QuerySolver):
         pyspark.sql.DataFrame
             DataFrame with
             ``(container_id, channel_id, <metrics-side join keys>,
-            channel_alias, alias_priority, selector_ids)`` where
-            ``selector_ids`` is an array column.  The metrics-side join key
+            channel_alias, alias_priority, selector_ids)``, one row per
+            resolved alias, where ``selector_ids`` lists the selectors resolved
+            to it.  The metrics-side join key
             columns come from ``effective_alias_join_keys`` (default:
             ``channel_name``, ``data_key``) and are deduplicated in case the
             same physical column appears on both sides of a join-key tuple.
@@ -768,7 +787,7 @@ class DefaultSolver(QuerySolver):
         channel_metrics = db.channel_metrics(spark)
         channel_metrics = self._apply_column_mapping(
             channel_metrics, self.config.channel_metrics.column_name_mapping
-        )
+        ).where(F.col(channel_id_col).isNotNull())
         channel_metrics = channel_metrics.join(
             F.broadcast(container_df.select(container_id_col)),
             on=[container_id_col],
@@ -829,16 +848,7 @@ class DefaultSolver(QuerySolver):
                 resolved = resolved.withColumn(source_unit_col, F.col("_map_source_unit"))
             resolved = resolved.withColumn(target_unit_col, F.col("_map_target_unit"))
 
-        # Ties in priority (e.g. no priorities configured) go to the lowest channel_id.
-        dedup_window = Window.partitionBy(container_id_col, channel_alias_col).orderBy(
-            F.col(alias_priority_col).asc_nulls_last(), F.col(channel_id_col).asc()
-        )
-        resolved = resolved.withColumn("_rank", F.row_number().over(dedup_window))
-        resolved = resolved.where(F.col("_rank") == 1).drop("_rank")
-
-        resolved = resolved.withColumn(
-            "selector_ids", F.array(self._build_selector_id_expr(selectors))
-        )
+        resolved = resolved.withColumn("selector_ids", self._build_selector_ids_expr(selectors))
         join_key_metrics_cols = list(dict.fromkeys(metrics_col for _, metrics_col in join_keys))
         out_cols = [
             container_id_col,
@@ -850,7 +860,48 @@ class DefaultSolver(QuerySolver):
         ]
         if has_unit_cols:
             out_cols.extend([source_unit_col, target_unit_col])
-        return resolved.select(*out_cols)
+        return self._one_channel_per_selector(
+            resolved.select(*out_cols),
+            [
+                F.col(alias_priority_col).asc_nulls_last(),
+                F.col(channel_id_col).asc(),
+                F.col(channel_alias_col).asc(),
+            ],
+        )
+
+    def _one_channel_per_selector(self, matches: DataFrame, order_by: list[Column]) -> DataFrame:
+        """Keep one matched row per container and selector.
+
+        Each selector of a row's ``selector_ids`` keeps, per container, the row
+        ranked first by *order_by*; the rows' other selectors are resolved
+        independently.  Rows kept for several selectors are returned once.
+
+        Parameters
+        ----------
+        matches : pyspark.sql.DataFrame
+            Channel matches with ``container_id``, a non-null ``channel_id`` and
+            a ``selector_ids`` array, plus any other columns.
+        order_by : list of pyspark.sql.Column
+            Ranking of a selector's candidate rows within a container; must make
+            the pick deterministic.
+
+        Returns
+        -------
+        pyspark.sql.DataFrame
+            The kept rows of *matches*, with ``selector_ids`` holding the
+            selectors that kept them.
+        """
+        selector_id = "_selector_id"
+        row_cols = [c for c in matches.columns if c != "selector_ids"]
+        rank = Window.partitionBy(self.config.container_id_col, selector_id).orderBy(*order_by)
+        return (
+            matches.withColumn(selector_id, F.explode("selector_ids"))
+            .withColumn("_rank", F.row_number().over(rank))
+            .where(F.col("_rank") == 1)
+            .groupBy(*row_cols)
+            .agg(F.collect_list(selector_id).alias("selector_ids"))
+            .select(*matches.columns)
+        )
 
     def resolve_channel_selections(
         self, spark, channel_metrics_df, aliased_channel_metrics_df

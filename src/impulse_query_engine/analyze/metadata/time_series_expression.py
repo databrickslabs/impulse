@@ -873,7 +873,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             if self._series_type is SeriesType.POINTS_IN_TIME:
                 return PointsInTimeSeries.empty(value_type=self._value_type)
             return SampleSeries.empty()
-        # TODO: select candidate
+        # The selector resolves to at most one channel per container.
         mid = candidates.container_id.iloc[0]
         cid = candidates.channel_id.iloc[0]
         # The selector is the source of truth for the series type: pass it to the

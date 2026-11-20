@@ -305,6 +305,30 @@ class TestNativeCalculatedChannels:
         assert len(rows[rows.container_id == 3]) == 1
         assert _nan_and_null_counts(native)[1] > 0
 
+    def test_ambiguous_selector_reads_one_channel(self, spark, key_value_store_db, udf_calls):
+        # unit="C" matches the ambient and intake temperatures of every container and
+        # resolves to the lower channel_id, the ambient temperature, which the second
+        # selector also reads.
+        def channels(q):
+            return [
+                CalculatedChannel(q.channel(unit="C").resample(RATE), {"channel_name": "c"}),
+                CalculatedChannel(
+                    q.channel(channel_name="Ambient Air Temperature").resample(RATE),
+                    {"channel_name": "ambient"},
+                ),
+            ]
+
+        rows, _ = _solve_both(spark, key_value_store_db, channels, udf_calls, config=_kvs_config())
+        assert udf_calls == [1, 0]
+        by_channel = [
+            part.drop(columns=["channel_id", "identity"]).reset_index(drop=True)
+            for _, part in rows.groupby("channel_id")
+        ]
+        assert len(by_channel) == 2
+        assert set(by_channel[0]["container_id"]) == {1, 2, 3}
+        assert by_channel[0]["value"].notna().any()
+        pd.testing.assert_frame_equal(by_channel[0], by_channel[1], check_exact=True)
+
 
 @pytest.mark.parametrize("channel_id_type", ["short", "string"])
 @pytest.mark.parametrize("enable_pushdown", [False, True])

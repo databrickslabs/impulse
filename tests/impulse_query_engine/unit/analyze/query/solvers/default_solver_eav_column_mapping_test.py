@@ -356,7 +356,7 @@ class TestDefaultSolverChannelTagsMapping:
         container_df = solver.filter_container_metrics(spark, query, tags_df)
         selectors = TimeSeriesExpression.collect_selectors(query.selections, uses_alias=False)
         result = solver.filter_channel_tags(spark, db_custom_channel_tags, container_df, selectors)
-        assert {"container_id", "channel_id", "selector_id"}.issubset(set(result.columns))
+        assert {"container_id", "channel_id", "selector_ids"}.issubset(set(result.columns))
         # Three channels named "Engine RPM" across containers 1, 2, 3
         pairs = {(row.container_id, row.channel_id) for row in result.collect()}
         assert pairs == {(1, 1), (2, 1), (3, 1)}

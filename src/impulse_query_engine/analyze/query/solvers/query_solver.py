@@ -206,38 +206,31 @@ class QuerySolver(ABC):
                         self.config.channel_id_col,
                         ref.schema[self.config.channel_id_col].dataType,
                     ),
-                    T.StructField("selector_ids", T.ArrayType(T.IntegerType())),
+                    T.StructField("selector_ids", T.ArrayType(T.LongType())),
                 ]
             ),
         )
 
-    def _build_selector_id_expr(self, filters) -> Column:
-        """Build a Spark ``Column`` that maps rows to their ``selector_id``.
-
-        Produces a chained ``F.when`` expression: for each selector in
-        *filters*, if the row satisfies the selector's tag expression the
-        column evaluates to that selector's ``selector_id``.
+    @staticmethod
+    def _build_selector_ids_expr(selectors) -> Column:
+        """Build a Spark ``Column`` with the ids of every selector a row matches.
 
         Parameters
         ----------
-        filters : Iterable[TimeSeriesSelector]
-            Selectors whose ``get_selector_expr()`` and ``selector_id`` are
-            used to build the ``WHEN … THEN …`` chain.
+        selectors : Iterable[TimeSeriesSelector]
+            Selectors whose ``get_selector_expr()`` and ``selector_id`` are used.
 
         Returns
         -------
         pyspark.sql.Column
-            A column expression suitable for ``df.withColumn("selector_id", …)``.
+            ``array<long>`` of the ``selector_id`` of each selector in *selectors*
+            whose expression holds for the row, in the order of *selectors*.
         """
-        selector_expr = None
-        for selection in filters:
-            if selector_expr is None:
-                selector_expr = F.when(selection.get_selector_expr(), F.lit(selection.selector_id))
-            else:
-                selector_expr = selector_expr.when(
-                    selection.get_selector_expr(), F.lit(selection.selector_id)
-                )
-        return selector_expr
+        ids = [
+            F.when(selector.get_selector_expr(), F.lit(selector.selector_id).cast("long"))
+            for selector in selectors
+        ]
+        return F.filter(F.array(*ids), lambda sid: sid.isNotNull())
 
     @abc.abstractmethod
     def filter_container_tags(self, spark, query) -> DataFrame:

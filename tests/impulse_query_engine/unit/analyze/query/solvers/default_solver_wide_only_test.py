@@ -442,13 +442,10 @@ class TestDefaultSolverEndToEndWideOnly:
         metrics = basic_narrow_db.config.debug_tables["channel_metrics"].toPandas()
         channels = basic_narrow_db.config.debug_tables["channels"].toPandas()
         vss = metrics[metrics["channel_name"] == "Vehicle Speed Sensor"]
-        # Only containers with exactly one matching channel: for several
-        # candidates the engine's pick is arrival-order-dependent.
-        counts = vss.groupby("container_id").size()
-        unambiguous = set(counts[counts == 1].index)
-        assert unambiguous, "fixture must contain at least one unambiguous container"
+        # Of several matching channels, the lowest channel_id is solved.
+        vss = vss.sort_values("channel_id").drop_duplicates("container_id")
         expected = {}
-        for _, row in vss[vss["container_id"].isin(unambiguous)].iterrows():
+        for _, row in vss.iterrows():
             s = channels[
                 (channels["container_id"] == row["container_id"])
                 & (channels["channel_id"] == row["channel_id"])
