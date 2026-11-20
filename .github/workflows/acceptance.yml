@@ -71,6 +71,8 @@ jobs:
             path: tests/impulse_query_engine
           - component: reporting
             path: tests/impulse_reporting
+          - component: data_sources
+            path: tests/impulse_data_sources
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
