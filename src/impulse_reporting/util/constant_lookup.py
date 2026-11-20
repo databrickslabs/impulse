@@ -18,15 +18,24 @@ def constant_map_lookup(
     Look up ``key`` in a constant ``{str: value}`` mapping.
 
     The mapping is serialised to JSON once and parsed with ``from_json`` from a
-    string literal. The optimizer constant-folds that into a single map literal,
-    so the column costs a fixed number of driver calls no matter how many entries
-    the mapping has, and each row does one map lookup.
+    string literal, which the optimizer constant-folds into a single map literal.
+    Building the column therefore costs a fixed number of driver calls however
+    many entries the mapping has, and the plan holds one compact expression
+    instead of one branch per entry. Per row, Spark scans the map's keys
+    linearly, so the lookup cost still grows with the mapping size.
+
+    The JSON is parsed in ``FAILFAST`` mode: a value that does not match
+    ``value_type`` (e.g. an integer outside the ``IntegerType`` range) raises an
+    error when the plan is optimized, rather than silently turning the whole map
+    into NULL.
 
     Parameters
     ----------
     mapping : Mapping of str to Any
         The constant mapping. Values must be JSON-serialisable (str, int, bool,
         None, lists, or nested dicts with string keys) and match ``value_type``.
+        Entries whose key is ``None`` are skipped, since a NULL key never matches;
+        other non-string keys are matched by their JSON string form.
     key : pyspark.sql.Column or str
         The column (or column name) holding the lookup key.
     value_type : pyspark.sql.types.DataType
@@ -38,10 +47,12 @@ def constant_map_lookup(
         The value for ``key``, or NULL when ``key`` is not in the mapping (or the
         mapping is empty).
     """
-    if not mapping:
+    entries = {k: v for k, v in mapping.items() if k is not None}
+    if not entries:
         return f.lit(None).cast(value_type)
     key_col = f.col(key) if isinstance(key, str) else key
     map_type = MapType(StringType(), value_type)
+    lookup_map = f.from_json(f.lit(json.dumps(entries)), map_type, {"mode": "FAILFAST"})
     # ``[...]`` (GetMapValue) returns NULL for a missing key; ``element_at`` would
     # raise under ANSI mode.
-    return f.from_json(f.lit(json.dumps(dict(mapping))), map_type)[key_col]
+    return lookup_map[key_col]

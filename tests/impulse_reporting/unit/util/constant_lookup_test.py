@@ -1,6 +1,7 @@
 """Unit tests for ``constant_map_lookup``."""
 
 import pyspark.sql.types as T
+import pytest
 
 from impulse_reporting.util.constant_lookup import constant_map_lookup
 
@@ -55,3 +56,23 @@ def test_lookup_is_constant_folded(spark):
     assert "from_json" not in plan
     assert "jsontostructs" not in plan
     assert df.collect()[0]["v"] == 7
+
+
+def test_none_key_is_skipped(spark):
+    """A ``None`` key must not become the JSON key ``"null"`` and match that string."""
+    rows = _lookup(spark, ["null", "a"], {None: 1, "a": 2}, T.IntegerType())
+    assert [r["v"] for r in rows.collect()] == [None, 2]
+
+
+def test_only_none_key_is_typed_null(spark):
+    rows = _lookup(spark, ["null"], {None: 1}, T.IntegerType())
+    assert rows.schema["v"].dataType == T.IntegerType()
+    assert rows.collect()[0]["v"] is None
+
+
+@pytest.mark.parametrize("bad_value", [2**31, "7"])
+def test_value_type_mismatch_fails_instead_of_nulling_the_map(spark, bad_value):
+    """A value that does not fit ``value_type`` must raise, not silently null every row."""
+    df = _lookup(spark, ["a", "b"], {"a": 1, "b": bad_value}, T.IntegerType())
+    with pytest.raises(Exception, match="(?i)malformed|failfast"):
+        df.collect()

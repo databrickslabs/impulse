@@ -9,7 +9,7 @@ from collections.abc import Callable
 import pyspark.sql.functions as f
 import zlib
 from pyspark.sql import DataFrame, Row, SparkSession
-from pyspark.sql.types import ArrayType, BooleanType, MapType, StringType
+from pyspark.sql.types import ArrayType, MapType, StringType
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
@@ -437,8 +437,9 @@ class StatsAggregator(Aggregation):
             # Aggregation name -> event name, looked up through one constant map.
             name_to_event_name = {}
             for agg in aggregations:
-                if agg and agg.get_event() and agg.get_event().get_name() is not None:
-                    name_to_event_name[agg.get_name()] = agg.get_event().get_name()
+                event = agg.get_event() if agg else None
+                if event is not None and event.get_name() is not None:
+                    name_to_event_name[agg.get_name()] = event.get_name()
 
             event_name_column = constant_map_lookup(name_to_event_name, "stats_name", StringType())
             return df.withColumn("event_name", event_name_column)
@@ -648,19 +649,18 @@ class StatsAggregator(Aggregation):
         from impulse_reporting.events.container_event import ContainerEvent
 
         def _(df: DataFrame) -> DataFrame:
-            is_container_event = {
-                agg.get_name(): True
+            container_event_stats_names = [
+                agg.get_name()
                 for agg in aggregations
                 if agg and isinstance(agg.get_event(), ContainerEvent)
-            }
+            ]
 
             timestamp_based_id = generate_event_instance_id_column()
-            if is_container_event:
+            if container_event_stats_names:
+                # ``isin`` (not a constant map lookup): the optimizer turns larger
+                # lists into a hash-set probe, which is cheaper per row.
                 event_instance_id_column = f.when(
-                    f.coalesce(
-                        constant_map_lookup(is_container_event, "stats_name", BooleanType()),
-                        f.lit(False),
-                    ),
+                    f.col("stats_name").isin(container_event_stats_names),
                     generate_event_instance_id_column(event_type=ContainerEvent),
                 ).otherwise(timestamp_based_id)
             else:
