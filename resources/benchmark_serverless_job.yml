@@ -52,7 +52,8 @@ resources:
               environment_version: ${var.bench_serverless_environment_version}
 
         # full, incremental_noop, incremental_delta. Each run task has its own environment. No
-        # `run_wide` (COMPUTE_SCENARIOS in benchmark_report.py).
+        # `run_wide` (COMPUTE_SCENARIOS in benchmark_report.py). The run tasks run one after
+        # another: in parallel they share the serverless capacity, which skews their wall times.
         - task_key: run
           environment_key: bench_env
           disable_auto_optimization: true
@@ -62,14 +63,14 @@ resources:
         - task_key: run_udfs
           environment_key: bench_env_udfs
           disable_auto_optimization: true
-          depends_on: [{task_key: setup}]
+          depends_on: [{task_key: run}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
         # full_pushdown: `full` with Spark pushdown.
         - task_key: run_pushdown
           environment_key: bench_env_pushdown
           disable_auto_optimization: true
-          depends_on: [{task_key: setup}]
+          depends_on: [{task_key: run_udfs}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
         - task_key: compare
