@@ -24,6 +24,12 @@ loaders:
       - impulse_query_engine.analyze.query.solvers.default_solver
       - impulse_query_engine.analyze.query.solvers.solver_config
       - impulse_query_engine.analyze.query.solvers.query_solver
+      - impulse_query_engine.analyze.query.optimizer.pushdown
+      - impulse_query_engine.analyze.query.optimizer.context
+      - impulse_query_engine.analyze.query.optimizer.pipeline
+      - impulse_query_engine.analyze.query.optimizer.plan
+      - impulse_query_engine.analyze.query.optimizer.query_optimizer
+      - impulse_query_engine.analyze.query.optimizer.resample_rule
       - impulse_query_engine.model.series.sample_series
       - impulse_query_engine.model.series.intervals
       - impulse_query_engine.model.series.points_in_time

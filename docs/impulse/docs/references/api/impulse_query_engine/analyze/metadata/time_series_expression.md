@@ -90,7 +90,8 @@ returned as-is; only a :class:`SampleSeries` (binary) blob is decoded.
 #### build
 
 ```python
-def build(cache: SeriesCache) -> SampleSeries | PointsInTimeSeries
+def build(cache: SeriesCache,
+          variant: int | None = None) -> SampleSeries | PointsInTimeSeries
 ```
 
 Instantiate the selected series from cache data.
@@ -352,6 +353,10 @@ def build(cache: SeriesCache)
 ```
 
 Build the time series from cache.
+
+A result the cache already holds for this node (see
+:meth:`SeriesCache.materialized`) is returned as-is, without building the
+operands.
 
 **Arguments**:
 

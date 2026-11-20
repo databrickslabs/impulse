@@ -211,6 +211,24 @@ project/toolbox filtering is applied.
 - `measurement_db` (`str, default="MeasurementDB"`): Registered name of the MeasurementDB implementation to use.
 - `measurement_db_config` (`dict`): Keyword arguments for that implementation's config class,
 merged with the ``source`` tables.
+- `enable_pushdown` (`bool, default=False`): Compute supported expression subtrees (currently
+``channel.resample(rate)`` on a physical channel) natively in Spark
+before the pandas UDF, so fewer rows are shipped to it.  A channel is
+only pushed down when every use of it in a solve batch is.  Meant for
+downsampling.
+- `pushdown_chunk_rows` (`int, default=500000`): Average number of rows per chunk of a pushed-down channel (a sample
+counts once per pushed-down expression reading it).  A chunk is processed
+as one group: larger chunks need more memory per group.  Must be
+``>= 1``; only used with ``enable_pushdown``.
+
+#### batch\_size
+
+```python
+def batch_size() -> int
+```
+
+Deprecated alias for :attr:`max_channels_per_batch`.
+
 
 #### validate\_drop\_implausible\_data\_requires\_raw
 

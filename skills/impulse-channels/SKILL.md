@@ -102,6 +102,16 @@ tables share the `__impulse_temp_*` prefix, so they are cleaned up like the aggr
 (`unity_sink.cleanup_temp_tables`). This is internal orchestration; the `add_calculated_channel` API is
 unchanged.
 
+## Calculated channels in Spark only (pushdown)
+
+With Spark pushdown on (`query_engine.enable_pushdown`, or `DefaultSolver(spark, enable_pushdown=True)`;
+see `impulse-config`), when every calculated channel of a `solve_calculated_channels` call (in a
+`Report`: of a batch) is a pushed-down expression as a whole, e.g.
+`CalculatedChannel(veh_spd.resample(1e6), {...})`, its rows are produced entirely in Spark and no
+pandas UDF runs. If any calculated channel of the call needs the pandas evaluation, all of them are
+evaluated in the UDF as usual; their pushed-down parts still run in Spark. Either way the rows are
+identical.
+
 ## Output schema
 
 **calculated_channel_dimension** (one row per channel per report) — key columns: `channel_id`,

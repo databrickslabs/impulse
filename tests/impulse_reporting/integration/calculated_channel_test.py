@@ -9,6 +9,7 @@ re-run behavior (idempotent unchanged upsert; changed-definition replace).
 
 from unittest.mock import create_autospec
 
+import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 import pytest
@@ -614,3 +615,51 @@ def test_channel_metrics_custom_kpis(spark):
     assert "max" in metrics.columns
     assert "mean" not in metrics.columns
     assert "duration" not in metrics.columns
+
+
+def test_resampled_channel_facts_are_identical_with_pushdown(spark, monkeypatch):
+    """A resample-only calculated channel is solved in Spark without the pandas UDF;
+    its gold facts equal the ones written without pushdown."""
+    from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+
+    udf_runs = []
+    original = DefaultSolver._apply_grouped_map
+
+    def _counting(self, *args, **kwargs):
+        udf_runs[-1] += 1
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(DefaultSolver, "_apply_grouped_map", _counting)
+    facts = []
+    for enable_pushdown in (False, True):
+        udf_runs.append(0)
+        config = _config()
+        config.query_engine = QueryEngine(enable_pushdown=enable_pushdown)
+        report = Report(
+            name="calc_channel_report",
+            spark=spark,
+            workspace_client=create_autospec(WorkspaceClient),
+            config=dict(config),
+        )
+        q = report.get_db().query
+        report.add_calculated_channel(
+            CalculatedChannel(
+                name="speed_10s",
+                expr=q.channel(channel_name="Vehicle Speed Sensor").resample(1e7),
+                identity={"channel_name": "speed_10s", "data_key": "CALC"},
+            )
+        )
+        report.determine_report()
+        report.persist_results()
+        facts.append(
+            spark.read.table(_FACT)
+            .drop("_created_at")
+            .toPandas()
+            .sort_values(["container_id", "channel_id", "tstart"])
+            .reset_index(drop=True)
+        )
+    off, on = facts
+    assert udf_runs == [1, 0]
+    assert len(off) > 0
+    assert off["value"].gt(0).any()
+    pd.testing.assert_frame_equal(on, off, check_exact=True)

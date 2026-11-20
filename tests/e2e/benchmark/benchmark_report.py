@@ -1,7 +1,7 @@
 """The benchmark reports on the Renumics fleet telemetry (100 trips, epoch-µs timestamps).
 
-- `build_report` (`full`, `incremental_noop`, `incremental_delta`): a mix of the report features,
-  ~50 channels per trip in one solve.
+- `build_report` (`full`, `incremental_noop`, `incremental_delta`, `full_pushdown`): a mix of the
+  report features, ~50 channels per trip in one solve. `full_pushdown` runs it with Spark pushdown.
 - `build_wide_report` (`wide_report`): 100 channels, many events and histograms, a chain of
   calculated channels.
 - `build_udf_report` (`python_udfs`): Python extensions (`benchmark_udfs.py`).
@@ -41,8 +41,21 @@ TASKS = {
     "run": ("", ["full", "incremental_noop", "incremental_delta"]),
     "run_wide": ("_wide", ["wide_report"]),
     "run_udfs": ("_udfs", ["python_udfs"]),
+    "run_pushdown": ("_pushdown", ["full_pushdown"]),
 }
 SCENARIOS = [scenario for _, scenarios in TASKS.values() for scenario in scenarios]
+
+# Report config of a scenario, by compute, merged per section after the compute's overrides and
+# before the run's (`report_config`); `None` removes a setting. With pushdown, most of the
+# resampled signals reach the pandas UDF at 1 Hz, so serverless workers fit a trip's ~50
+# channels in one solve: `full_pushdown` drops the compute's cap of 10 for Impulse's default.
+_PUSHDOWN = {"enable_pushdown": True}
+SCENARIO_CONFIG = {
+    "cluster": {"full_pushdown": {"query_engine": _PUSHDOWN}},
+    "serverless": {
+        "full_pushdown": {"query_engine": {**_PUSHDOWN, "max_channels_per_batch": None}}
+    },
+}
 
 # Scenarios per compute. Serverless skips `wide_report`: its workers run out of memory.
 COMPUTE_SCENARIOS = {

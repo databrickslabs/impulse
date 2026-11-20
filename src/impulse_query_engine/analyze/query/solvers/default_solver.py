@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -8,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pyspark.sql import DataFrame, Window
+from pyspark.sql import Column, DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
@@ -17,9 +18,22 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     SeriesValueType,
     TimeSeriesExpression,
 )
+from impulse_query_engine.analyze.query.optimizer import (
+    CHUNK_ROWS,
+    RAW_VARIANT,
+    VARIANT_COL,
+    VARIANTS_COL,
+    PushdownContext,
+    PushdownPlan,
+    PushedNode,
+    QueryOptimizer,
+    apply_pushdowns,
+    builtin_rules,
+)
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
+from .native_calculated_channels import attach_identity, native_calculated_channel_rows
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
 from .solver_config import RawEncoder, SolverConfig
@@ -30,6 +44,8 @@ from .utils.window_bounds import with_window_bounds
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
 
+logger = logging.getLogger(__name__)
+
 
 class TimeSeriesCache(SeriesCache):
     def __init__(
@@ -38,6 +54,7 @@ class TimeSeriesCache(SeriesCache):
         col_map: dict[str, str],
         container_tag_cols=None,
         container_metric_cols=None,
+        pushed: Iterable[PushedNode] = (),
     ):
         """
         Initialize the TimeSeriesCache.
@@ -53,7 +70,9 @@ class TimeSeriesCache(SeriesCache):
             the caller's frame is reordered by ``(cid, ch, ts)`` and its
             index reset.  The sort makes each channel's rows contiguous,
             which the constructor exploits to build a ``(cid, ch)`` →
-            ``(start, stop)`` range index for :meth:`load_blob`.
+            ``(start, stop)`` range index for :meth:`load_blob`.  When *pdf*
+            carries the pushdown variant column, rows are additionally keyed
+            by variant (raw data is variant ``0``).
         col_map : dict[str, str]
             Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
             ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
@@ -66,6 +85,10 @@ class TimeSeriesCache(SeriesCache):
         container_metric_cols : list of str, optional
             Columns on *pdf* holding container-level metric values, exposed
             via :attr:`container_metrics`.  These are constant per container.
+        pushed : Iterable of PushedNode, optional
+            Pushed-down nodes whose derived rows *pdf* carries, unpickled with the
+            expressions built on this cache; :meth:`materialized` serves them by
+            identity.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -79,28 +102,33 @@ class TimeSeriesCache(SeriesCache):
         self._value_string_col = col_map.get("value_string")
         self._container_tag_cols = list(container_tag_cols or [])
         self._container_metric_cols = list(container_metric_cols or [])
+        # By id(node); the entries keep their nodes alive, so the ids stay unique.
+        self._pushed = {id(entry.node): entry for entry in pushed}
+        has_variants = VARIANT_COL in pdf.columns
 
         # *pdf* holds channel data for a whole container, so avoid creating unnecessary copies of the data.
         meta_cols = [
-            c for c in pdf.columns if c not in (self._ts_col, self._te_col, self._val_col)
+            c
+            for c in pdf.columns
+            if c not in (self._ts_col, self._te_col, self._val_col, VARIANT_COL)
         ]
         meta_source = pdf
         if "selector_ids" in pdf.columns:
             meta_source = pdf.loc[pdf["selector_ids"].notna()]
         first_rows = ~meta_source.duplicated(subset=[self._cid_col, self._ch_col])
         self.mdf = meta_source.loc[first_rows, meta_cols].reset_index(drop=True)
-        pdf.sort_values(
-            [self._cid_col, self._ch_col, self._ts_col], inplace=True, ignore_index=True
-        )
+        group_cols = [self._cid_col, self._ch_col] + ([VARIANT_COL] if has_variants else [])
+        pdf.sort_values([*group_cols, self._ts_col], inplace=True, ignore_index=True)
         self.pdf = pdf
 
-        # Each (cid, ch) group is a contiguous block after the sort, so its
+        # Each (cid, ch, variant) group is a contiguous block after the sort, so its
         # row positions collapse to a (start, stop) range
         self._ranges = {
-            key: (int(positions[0]), int(positions[-1]) + 1)
-            for key, positions in pdf.groupby(
-                [self._cid_col, self._ch_col], sort=False
-            ).indices.items()
+            (key if has_variants else (*key, RAW_VARIANT)): (
+                int(positions[0]),
+                int(positions[-1]) + 1,
+            )
+            for key, positions in pdf.groupby(group_cols, sort=False).indices.items()
         }
 
     def resolve(self, selection):
@@ -132,6 +160,7 @@ class TimeSeriesCache(SeriesCache):
         uses_alias: bool = False,
         series_type=None,
         value_type=SeriesValueType.DOUBLE,
+        variant: int = RAW_VARIANT,
     ):
         """
         Load a time series blob from the DataFrame.
@@ -165,13 +194,14 @@ class TimeSeriesCache(SeriesCache):
         value_type : SeriesValueType, optional
             For a POI selector, its declared value type; ``STRING`` reads the
             string value column, otherwise the numeric one.
+        variant : int, optional
+            Rows to read: raw (``RAW_VARIANT``, default) or a pushdown's derived rows.
 
         Returns
         -------
         SampleSeries or PointsInTimeSeries
         """
-        lo, hi = self._ranges.get((mid, cid), (0, 0))
-        s = self.pdf.iloc[lo:hi]
+        s = self._slice(mid, cid, variant)
 
         if series_type == SeriesType.POINTS_IN_TIME:
             # The selector's declared value type picks the column; the constructor
@@ -186,12 +216,79 @@ class TimeSeriesCache(SeriesCache):
                 )
             return PointsInTimeSeries(s[self._ts_col], s[value_col], value_type=value_type)
 
-        values = s[self._val_col]
-        if self._has_conversion and len(s) > 0 and uses_alias:
-            factor = s[self._conv_col].iloc[0]
+        return self.to_sample_series(s, uses_alias=uses_alias)
+
+    def materialized(self, expression):
+        """Serve a pushed-down node from its derived rows.
+
+        Returns ``None`` (evaluate normally) unless the node object *expression* is
+        pushed down and each of its selectors' channels carries derived rows in this
+        container.  A channel also read by a selector that is not pushed down ships
+        its raw rows only, so the node is evaluated from those.
+
+        Parameters
+        ----------
+        expression : TimeSeriesExpression
+            The node about to be built.
+
+        Returns
+        -------
+        Any or None
+            The rule-decoded result, or ``None``.
+
+        Raises
+        ------
+        KeyError
+            If the node's rule is not a built-in rule.
+        """
+        entry = self._pushed.get(id(expression))
+        if entry is None or not all(self._has_rows(s, entry.variant) for s in entry.selectors):
+            return None
+        rule = builtin_rules().get(entry.rule)
+        if rule is None:
+            raise KeyError(f"no pushdown rule named {entry.rule!r} to decode {expression}")
+        return rule.decode(entry, self)
+
+    def _has_rows(self, selector, variant: int) -> bool:
+        """Whether *selector*'s channel in this container has rows of *variant*."""
+        candidates = self.resolve(selector)
+        if len(candidates) == 0:
+            return False
+        mid, cid = candidates[self._cid_col].iloc[0], candidates[self._ch_col].iloc[0]
+        return (mid, cid, variant) in self._ranges
+
+    def to_sample_series(self, rows: pd.DataFrame, uses_alias: bool = False) -> SampleSeries:
+        """Build a :class:`SampleSeries` from channel-data *rows* of one channel.
+
+        Applies the per-channel conversion factor when *uses_alias* is ``True``
+        (see :meth:`load_blob`).
+        """
+        values = rows[self._val_col]
+        if self._has_conversion and len(rows) > 0 and uses_alias:
+            factor = rows[self._conv_col].iloc[0]
             if pd.notna(factor):
                 values = values * factor
-        return SampleSeries(s[self._ts_col], s[self._te_col], values)
+        return SampleSeries(rows[self._ts_col], rows[self._te_col], values)
+
+    @property
+    def tstart_col(self) -> str:
+        """Name of the ``tstart`` column of the cached rows."""
+        return self._ts_col
+
+    @property
+    def tend_col(self) -> str:
+        """Name of the ``tend`` column of the cached rows."""
+        return self._te_col
+
+    @property
+    def value_col(self) -> str:
+        """Name of the numeric value column of the cached rows."""
+        return self._val_col
+
+    def _slice(self, mid, cid, variant: int) -> pd.DataFrame:
+        """Rows of one container/channel/variant (empty when absent)."""
+        lo, hi = self._ranges.get((mid, cid, variant), (0, 0))
+        return self.pdf.iloc[lo:hi]
 
     @property
     def container_tags(self) -> dict:
@@ -257,6 +354,17 @@ class DefaultSolver(QuerySolver):
         ``RawEncoder.RLE`` (default) run-length encodes equal-valued runs;
         ``RawEncoder.INTERVAL`` only derives ``tend`` and drops exact
         duplicates.  Only consulted when ``is_raw_data`` is ``True``.
+    enable_pushdown : bool, optional
+        Whether to compute supported expression subtrees (e.g.
+        ``channel.resample(rate)``) natively in Spark before the pandas UDF, so
+        fewer rows are shipped to it (see :class:`QueryOptimizer`).  A channel
+        is only pushed down when every use of it in the solve is.  Default
+        ``False``.
+    pushdown_chunk_rows : int, optional
+        Average number of rows per chunk of a pushed-down channel (a sample
+        counts once per pushed-down expression reading it).  A chunk is processed
+        as one group: larger chunks need more memory per group.  Must be
+        ``>= 1``; only used with ``enable_pushdown``.  Default ``500000``.
     """
 
     def __init__(
@@ -266,12 +374,18 @@ class DefaultSolver(QuerySolver):
         is_raw_data: bool = False,
         drop_implausible_data: bool = False,
         raw_encoder: RawEncoder = RawEncoder.RLE,
+        enable_pushdown: bool = False,
+        pushdown_chunk_rows: int = CHUNK_ROWS,
     ):
+        if pushdown_chunk_rows < 1:
+            raise ValueError(f"pushdown_chunk_rows must be >= 1, got {pushdown_chunk_rows}")
         super().__init__(config=config)
         self.spark = spark
         self.is_raw_data = is_raw_data
         self.drop_implausible_data: bool = drop_implausible_data
         self.raw_encoder: RawEncoder = raw_encoder
+        self.optimizer: QueryOptimizer | None = QueryOptimizer() if enable_pushdown else None
+        self.pushdown_chunk_rows: int = pushdown_chunk_rows
         # In RAW mode an is_plausible channels filter drops samples before raw
         # encoding, bridging intervals instead of splitting them. Reject it.
         self.config.reject_implausible_channels_filter_in_raw(is_raw=self.is_raw_data)
@@ -715,8 +829,9 @@ class DefaultSolver(QuerySolver):
                 resolved = resolved.withColumn(source_unit_col, F.col("_map_source_unit"))
             resolved = resolved.withColumn(target_unit_col, F.col("_map_target_unit"))
 
+        # Ties in priority (e.g. no priorities configured) go to the lowest channel_id.
         dedup_window = Window.partitionBy(container_id_col, channel_alias_col).orderBy(
-            F.col(alias_priority_col).asc_nulls_last()
+            F.col(alias_priority_col).asc_nulls_last(), F.col(channel_id_col).asc()
         )
         resolved = resolved.withColumn("_rank", F.row_number().over(dedup_window))
         resolved = resolved.where(F.col("_rank") == 1).drop("_rank")
@@ -807,12 +922,13 @@ class DefaultSolver(QuerySolver):
 
         agg_exprs = [F.flatten(F.collect_list("selector_ids")).alias("selector_ids")]
         if has_unit_cols:
-            # collect_set serves a dual purpose: (a) it deduplicates so we
-            # can detect a conflict by size > 1, and (b) the single
-            # remaining element materializes the scalar unit value the
-            # downstream code expects.
-            agg_exprs.append(F.collect_set(source_unit_col).alias("_source_units"))
-            agg_exprs.append(F.collect_set(target_unit_col).alias("_target_units"))
+            # Distinct units: size > 1 is a conflict, else the single element is
+            # the unit.  Not collect_set: Databricks may plan copies of several
+            # collect_set differently, which blocks exchange reuse.
+            source_units = F.array_distinct(F.collect_list(source_unit_col))
+            target_units = F.array_distinct(F.collect_list(target_unit_col))
+            agg_exprs.append(source_units.alias("_source_units"))
+            agg_exprs.append(target_units.alias("_target_units"))
 
         grouped = merged.groupBy(
             self.config.container_id_col,
@@ -1008,6 +1124,7 @@ class DefaultSolver(QuerySolver):
         col_map: dict[str, str],
         container_tag_cols=None,
         container_metric_cols=None,
+        pushed: Iterable[PushedNode] = (),
     ) -> pd.DataFrame:
         """
         UDF to solve for a single container by applying selections.
@@ -1025,6 +1142,8 @@ class DefaultSolver(QuerySolver):
         container_metric_cols : list of str, optional
             Columns on *pdf* holding container-level metric values, exposed to
             expressions via ``cache.container_metrics``.
+        pushed : Iterable of PushedNode, optional
+            The pushed-down nodes of *selections* whose derived rows *pdf* carries.
 
         Returns
         -------
@@ -1038,6 +1157,7 @@ class DefaultSolver(QuerySolver):
             col_map=col_map,
             container_tag_cols=container_tag_cols,
             container_metric_cols=container_metric_cols,
+            pushed=pushed,
         )
         for s in selections:
             res = s.build(cache)
@@ -1076,7 +1196,7 @@ class DefaultSolver(QuerySolver):
             DataFrame containing results for each container.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
+        q, joined_df, container_count, plan, _ = self._prepare_channels_join(query, channels_df)
         container_tag_cols, container_metric_cols = self._container_meta_cols(query)
 
         schema = self._build_solve_output_schema(q, selections, dtypes)
@@ -1087,6 +1207,7 @@ class DefaultSolver(QuerySolver):
                 col_map=col_map,
                 container_tag_cols=container_tag_cols,
                 container_metric_cols=container_metric_cols,
+                pushed=plan.pushed_nodes if plan is not None else (),
             ),
             schema,
             F.PandasUDFType.GROUPED_MAP,
@@ -1099,7 +1220,9 @@ class DefaultSolver(QuerySolver):
             container_meta_cols=[*container_tag_cols, *container_metric_cols],
         )
 
-    def _prepare_channels_join(self, query, channels_df) -> tuple[DataFrame, DataFrame, int]:
+    def _prepare_channels_join(
+        self, query, channels_df, native_selections=None
+    ) -> tuple[DataFrame, DataFrame, int, PushdownPlan | None, dict | None]:
         """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
 
         Applies optional per-channel unit conversion, reads and column-maps the
@@ -1111,20 +1234,31 @@ class DefaultSolver(QuerySolver):
         *channels_df* (attached by :meth:`attach_container_metadata`) ride
         through the broadcast join into ``joined_df``.
 
+        With pushdown enabled, subtrees chosen by the optimizer are computed on
+        the channel data before the join (see :meth:`_apply_pushdowns`), and
+        ``joined_df`` carries their derived rows instead of the raw rows they
+        replace.
+
         Parameters
         ----------
         query : QueryBuilder
             Query object containing database and filter information.
         channels_df : pyspark.sql.DataFrame
             Channel-match DataFrame from the filter pipeline.
+        native_selections : list, optional
+            Calculated-channel selections that may be solved without the UDF
+            (see :meth:`PushdownPlan.native_targets`).
 
         Returns
         -------
-        tuple[DataFrame, DataFrame, int]
-            ``(channels_q, joined_df, container_count)`` — the column-mapped
-            channel-data DataFrame (authoritative for output ``container_id`` /
-            ``channel_id`` types), the join fed to the grouped-map UDF, and the
-            number of distinct containers.
+        tuple[DataFrame, DataFrame, int, PushdownPlan or None, dict or None]
+            ``(channels_q, joined_df, container_count, plan, native_targets)`` —
+            the column-mapped channel-data DataFrame (authoritative for output
+            ``container_id`` / ``channel_id`` types), the join fed to the
+            grouped-map UDF, the number of distinct containers, the pushdown
+            plan the UDF must receive (``None`` when nothing is pushed down),
+            and the native targets of *native_selections* (``None`` unless
+            they are solved natively; ``joined_df`` then holds no raw rows).
         """
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
@@ -1169,12 +1303,84 @@ class DefaultSolver(QuerySolver):
         if DefaultSolver._query_contains_poi_selections(query.selections):
             q = self._union_poi_channel_data(query, q)
 
-        joined_df = q.join(
+        container_count = channels_df.select(self.config.container_id_col).distinct().count()
+        plan = self._plan_pushdowns(query, q) if container_count > 0 else None
+        channel_data = q
+        targets = None
+        if plan is not None:
+            if native_selections is not None:
+                targets = plan.native_targets(native_selections)
+            if targets is None:
+                self._check_udf_rules(plan)
+            # Raw rows are only read by the UDF, for selectors that are not pushed down.
+            include_raw = targets is None and bool(plan.raw_selector_ids)
+            channel_data = self._apply_pushdowns(q, channels_df, plan, include_raw)
+
+        joined_df = channel_data.join(
             F.broadcast(channels_df),
             on=[self.config.container_id_col, self.config.channel_id_col],
         )
-        container_count = channels_df.select(self.config.container_id_col).distinct().count()
-        return q, joined_df, container_count
+        return q, joined_df, container_count, plan, targets
+
+    def _plan_pushdowns(self, query, channels_q: DataFrame) -> PushdownPlan | None:
+        """Plan the pushdowns for *query*, or ``None`` when disabled or nothing applies."""
+        if self.optimizer is None:
+            return None
+        plan = self.optimizer.optimize(
+            query.selections, PushdownContext.from_schema(channels_q.schema, self.config)
+        )
+        if plan.is_empty:
+            return None
+        logger.info("Spark pushdown plan: %s", plan.describe())
+        return plan
+
+    @staticmethod
+    def _check_udf_rules(plan: PushdownPlan) -> None:
+        """Fail on the driver if the UDF could not decode a pushed-down node of *plan*.
+
+        Raises
+        ------
+        ValueError
+            If a rule is not the built-in rule of its name (:func:`builtin_rules`).
+        """
+        builtin = builtin_rules()
+        for pushdown in plan.pushdowns_by_variant.values():
+            rule = pushdown.rule
+            if type(rule) is not type(builtin.get(rule.name)):
+                raise ValueError(
+                    f"pushdown rule {rule.name!r} ({type(rule).__name__}) is not a built-in "
+                    "rule; the UDF can only decode the built-in rules"
+                )
+
+    def _apply_pushdowns(
+        self,
+        channels_q: DataFrame,
+        channels_df: DataFrame,
+        plan: PushdownPlan,
+        include_raw: bool,
+    ) -> DataFrame:
+        """Replace raw channel data with the derived rows of *plan* where possible.
+
+        Each matched channel ships the variants of
+        :meth:`PushdownPlan.channel_variants`: its raw data (variant ``0``)
+        while any of its selectors still needs it, otherwise the derived
+        variants of its selectors, computed by their rules (see
+        :func:`~impulse_query_engine.analyze.query.optimizer.apply_pushdowns`).
+        The result carries a :data:`VARIANT_COL` column and keeps the
+        channel-data columns and types; raw rows are kept only if *include_raw*.
+        """
+        key = [self.config.container_id_col, self.config.channel_id_col]
+        variants = channels_df.select(
+            *key, plan.channel_variants(F.col("selector_ids")).alias(VARIANTS_COL)
+        )
+        return apply_pushdowns(
+            channels_q,
+            variants,
+            plan,
+            self.config,
+            include_raw=include_raw,
+            chunk_rows=self.pushdown_chunk_rows,
+        )
 
     @staticmethod
     def _query_contains_poi_selections(selections: Iterable[Any]) -> bool:
@@ -1383,6 +1589,7 @@ class DefaultSolver(QuerySolver):
         col_map: dict[str, str],
         container_tag_cols=None,
         container_metric_cols=None,
+        pushed: Iterable[PushedNode] = (),
     ) -> pd.DataFrame:
         """
         UDF to solve calculated channels for a single container.
@@ -1410,6 +1617,8 @@ class DefaultSolver(QuerySolver):
         container_metric_cols : list of str, optional
             Columns on *pdf* holding container-level metric values, exposed to
             expressions via ``cache.container_metrics``.
+        pushed : Iterable of PushedNode, optional
+            The pushed-down nodes of *selections* whose derived rows *pdf* carries.
 
         Returns
         -------
@@ -1422,6 +1631,7 @@ class DefaultSolver(QuerySolver):
             col_map=col_map,
             container_tag_cols=container_tag_cols,
             container_metric_cols=container_metric_cols,
+            pushed=pushed,
         )
         cid_col = col_map["cid"]
         ch_col = col_map["ch"]
@@ -1460,12 +1670,6 @@ class DefaultSolver(QuerySolver):
             copy=False,
         )
 
-    @staticmethod
-    def _identity_map_expr(identity: dict[str, str]) -> "F.Column":
-        """Build a ``map<string,string>`` literal column from an identity dict."""
-        kv_literals = [F.lit(str(x)) for k, v in identity.items() for x in (k, v)]
-        return F.create_map(*kv_literals)
-
     def solve_calculated_channels(self, query, channels_df, selections) -> DataFrame:
         """
         Solve calculated channels by grouping channels and exploding each result.
@@ -1491,9 +1695,24 @@ class DefaultSolver(QuerySolver):
         -------
         pyspark.sql.DataFrame
             Narrow DataFrame of calculated-channel samples.
+
+        Notes
+        -----
+        When every selection is a pushdown as a whole (see
+        :meth:`PushdownPlan.native_targets`), the rows are produced in Spark from
+        the derived rows and no pandas UDF runs.
         """
+        self._validate_calculated_channel_id_type(query)
         col_map = self.config.col_map
-        q, joined_df, container_count = self._prepare_channels_join(query, channels_df)
+        q, joined_df, container_count, plan, targets = self._prepare_channels_join(
+            query, channels_df, native_selections=selections
+        )
+
+        if targets is not None:
+            logger.info("Calculated channels solved natively in Spark, without the pandas UDF")
+            native = native_calculated_channel_rows(joined_df, q.schema, targets, self.config)
+            return attach_identity(native, selections, self.config.channel_id_col)
+
         container_tag_cols, container_metric_cols = self._container_meta_cols(query)
 
         schema = self._build_calculated_channels_udf_schema(q)
@@ -1504,6 +1723,7 @@ class DefaultSolver(QuerySolver):
                 col_map=col_map,
                 container_tag_cols=container_tag_cols,
                 container_metric_cols=container_metric_cols,
+                pushed=plan.pushed_nodes if plan is not None else (),
             ),
             schema,
             F.PandasUDFType.GROUPED_MAP,
@@ -1516,16 +1736,21 @@ class DefaultSolver(QuerySolver):
             container_meta_cols=[*container_tag_cols, *container_metric_cols],
         )
 
-        # Identity is constant per channel_id, so attach it here via a
-        # channel_id-keyed CASE instead of the UDF shipping a copy per row.
-        channel_id_col = self.config.channel_id_col
-        identity_expr = None
-        for cc in selections:
-            branch = F.col(channel_id_col) == F.lit(cc.channel_id)
-            id_map = self._identity_map_expr(cc.identity)
-            identity_expr = (
-                F.when(branch, id_map)
-                if identity_expr is None
-                else identity_expr.when(branch, id_map)
+        return attach_identity(res, selections, self.config.channel_id_col)
+
+    def _validate_calculated_channel_id_type(self, query) -> None:
+        """Raise unless the ``channels`` table's ``channel_id`` can hold calculated-channel ids.
+
+        :attr:`CalculatedChannel.channel_id` is a 31-bit integer, which only fits
+        ``IntegerType`` and ``LongType`` columns.  Only the table schema is read, so
+        the check runs no Spark job.
+        """
+        channels = self._apply_column_mapping(
+            query.db.channels(self.spark), self.config.channels.column_name_mapping
+        )
+        dtype = channels.schema[self.config.channel_id_col].dataType
+        if not isinstance(dtype, T.IntegerType | T.LongType):
+            raise ValueError(
+                "Calculated channels need an integer or long channel_id column, got "
+                f"{dtype.simpleString()}."
             )
-        return res.withColumn("identity", identity_expr)

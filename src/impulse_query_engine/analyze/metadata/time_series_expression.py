@@ -840,7 +840,9 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             return d
         return SampleSeries.deserialize(d)
 
-    def build(self, cache: SeriesCache) -> SampleSeries | PointsInTimeSeries:
+    def build(
+        self, cache: SeriesCache, variant: int | None = None
+    ) -> SampleSeries | PointsInTimeSeries:
         """
         Instantiate the selected series from cache data.
 
@@ -858,6 +860,9 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         ----------
         cache : SeriesCache
             Cache containing time series data.
+        variant : int, optional
+            Pushdown variant to load instead of the raw rows (``None``); only
+            caches serving pushdowns accept it.
 
         Returns
         -------
@@ -879,6 +884,7 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
             uses_alias=self.uses_alias,
             series_type=self._series_type,
             value_type=self._value_type,
+            **({} if variant is None else {"variant": variant}),
         )
 
     def get_required_tag_exprs(self) -> set[TagExpression]:
@@ -1226,6 +1232,10 @@ class TimeSeriesOp(TimeSeriesExpression):
         """
         Build the time series from cache.
 
+        A result the cache already holds for this node (see
+        :meth:`SeriesCache.materialized`) is returned as-is, without building the
+        operands.
+
         Parameters
         ----------
         cache : SeriesCache
@@ -1236,6 +1246,10 @@ class TimeSeriesOp(TimeSeriesExpression):
         Any
             Built time series object.
         """
+        # Looked up on the type so caches without the hook (or test doubles) are skipped.
+        materialized = getattr(type(cache), "materialized", None)
+        if materialized is not None and (result := materialized(cache, self)) is not None:
+            return result
         argsb = [a.build(cache) if isinstance(a, TimeSeriesExpression) else a for a in self.args]
         kwargsb = {
             k: a.build(cache) if isinstance(a, TimeSeriesExpression) else a

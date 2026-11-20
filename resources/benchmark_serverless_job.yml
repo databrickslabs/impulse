@@ -19,6 +19,9 @@ resources:
         # A serverless Python worker runs out of memory with all ~50 channels of a trip in one
         # solve, and with trip 39 (4.35 h, ~1.7 M rows per channel) even with 3. Part of the
         # compute: runs compare only with runs of the same.
+        # Comma-separated scenarios to run, e.g. "full,full_pushdown"; empty for all. Tasks
+        # without a selected scenario do nothing.
+        - {name: scenarios, default: ""}
         - name: compute_overrides
           default: >-
             {"query_engine": {"max_channels_per_batch": 10},
@@ -62,10 +65,17 @@ resources:
           depends_on: [{task_key: setup}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
+        # full_pushdown: `full` with Spark pushdown.
+        - task_key: run_pushdown
+          environment_key: bench_env_pushdown
+          disable_auto_optimization: true
+          depends_on: [{task_key: setup}]
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
+
         - task_key: compare
           environment_key: bench_env
           disable_auto_optimization: true
-          depends_on: [{task_key: run}, {task_key: run_udfs}]
+          depends_on: [{task_key: run}, {task_key: run_udfs}, {task_key: run_pushdown}]
           # Also reports a failed run.
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_compare.py, base_parameters: *params}
@@ -79,7 +89,7 @@ resources:
         - task_key: teardown
           environment_key: bench_env
           disable_auto_optimization: true
-          depends_on: [{task_key: run}, {task_key: run_udfs}]
+          depends_on: [{task_key: run}, {task_key: run_udfs}, {task_key: run_pushdown}]
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_teardown.py, base_parameters: *params}
 
@@ -88,3 +98,4 @@ resources:
           spec: &bench_env
             environment_version: ${var.bench_serverless_environment_version}
         - {environment_key: bench_env_udfs, spec: *bench_env}
+        - {environment_key: bench_env_pushdown, spec: *bench_env}
