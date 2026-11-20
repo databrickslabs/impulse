@@ -1164,3 +1164,89 @@ def test_determine_aggregations_with_multi_output_statistics(spark):
     }
     assert lo_hi_instance_0 == instance_interval_0
     assert len(instance_interval_0) == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-row metadata column builders (constant map lookups)
+# ---------------------------------------------------------------------------
+
+
+def _make_stats(name, channel_names, event=None, **kwargs):
+    return StatsAggregator(
+        name=name,
+        input_expressions=[TimeSeriesSelector(None) for _ in channel_names],
+        channel_names=channel_names,
+        statistics=["min"],
+        event=event,
+        **kwargs,
+    )
+
+
+def test_add_channel_name_column_multi_channel(spark):
+    aggregations = [
+        _make_stats("s_a", ["a0", "a1", "a2"]),
+        _make_stats("s_b", ["b0", "b1"]),
+    ]
+    df = spark.createDataFrame(
+        [
+            ("s_a", 0),
+            ("s_a", 2),
+            ("s_b", 1),
+            ("s_b", -1),  # cross-channel row
+            ("s_b", 2),  # out of range
+            ("unknown", 0),
+        ],
+        "stats_name string, signal_index int",
+    )
+    rows = df.transform(StatsAggregator._add_channel_name_column(aggregations)).collect()
+    assert [r["channel_name"] for r in rows] == ["a0", "a2", "b1", None, None, None]
+
+
+def test_add_cross_channel_name_column(spark):
+    aggregations = [_make_custom_stats_aggregator("s_x"), _make_stats("s_y", ["y0"])]
+    df = spark.createDataFrame(
+        [
+            ("s_x", -1, "spread", None),  # explicit descriptor channel_name
+            ("s_x", -1, "ratio", None),  # no channel_name: defaults to label
+            ("s_x", 0, "spread", "ch_a"),  # per-channel row keeps its name
+            ("s_y", -1, "spread", None),  # other aggregation: label default
+        ],
+        "stats_name string, signal_index int, aggregation_label string, channel_name string",
+    )
+    rows = df.transform(StatsAggregator._add_cross_channel_name_column(aggregations)).collect()
+    assert [r["channel_name"] for r in rows] == ["combined", "ratio", "ch_a", "spread"]
+
+
+def test_add_event_name_column_with_and_without_event(spark):
+    event = BasicEvent(name="my_event", expr=TimeSeriesSelector(None) > 0)
+    aggregations = [_make_stats("s_ev", ["c"], event=event), _make_stats("s_none", ["c"])]
+    df = spark.createDataFrame([("s_ev",), ("s_none",), ("unknown",)], "stats_name string")
+    result = df.transform(StatsAggregator._add_event_name_column(aggregations))
+    assert result.schema["event_name"].dataType == T.StringType()
+    assert [r["event_name"] for r in result.collect()] == ["my_event", None, None]
+
+
+def test_add_event_instance_id_column_mixed_event_types(spark):
+    from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
+
+    container_event = ContainerEvent(name="whole_container")
+    basic_event = BasicEvent(name="band", expr=TimeSeriesSelector(None) > 0)
+    aggregations = [
+        _make_stats("s_container", ["c"], event=container_event),
+        _make_stats("s_basic", ["c"], event=basic_event),
+    ]
+    df = spark.createDataFrame(
+        [(7, "s_container", "band", 1.0, 2.0), (7, "s_basic", "band", 1.0, 2.0)],
+        "container_id int, stats_name string, event_name string, start_ts double, end_ts double",
+    )
+    result = df.transform(StatsAggregator._add_event_instance_id_column(aggregations))
+    expected = df.select(
+        generate_event_instance_id_column(event_type=ContainerEvent).alias("container_id_hash"),
+        generate_event_instance_id_column().alias("timestamp_hash"),
+    ).collect()[0]
+    assert expected["container_id_hash"] != expected["timestamp_hash"]
+    rows = {r["stats_name"]: r["event_instance_id"] for r in result.collect()}
+    assert rows == {
+        "s_container": expected["container_id_hash"],
+        "s_basic": expected["timestamp_hash"],
+    }

@@ -3,13 +3,13 @@ from __future__ import annotations
 import abc
 from abc import ABC
 
-import pyspark.sql.functions as f
 from pyspark.sql import Column, DataFrame, Row, SparkSession
 from pyspark.sql.types import IntegerType
 
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_reporting.events.event import Event
+from impulse_reporting.util.constant_lookup import constant_map_lookup
 
 
 class Aggregation(ABC):
@@ -260,19 +260,13 @@ class Aggregation(ABC):
         -------
         pyspark.sql.Column
             A Spark SQL Column expression mapping names to IDs, or None if no match is found.
+            The mapping is a single constant map lookup (see ``constant_map_lookup``), so
+            its cost does not grow with the number of aggregations. If several
+            aggregations share a name, the first one's ID is used.
         """
-        col_expr = None
+        name_to_id: dict[str, int] = {}
         for agg in aggregations:
             aggregation_id = agg.get_id()
-
-            if aggregation_id is None:
-                continue
-            elif col_expr is None:
-                col_expr = f.when(f.col(hist_name) == f.lit(agg.get_name()), f.lit(aggregation_id))
-            else:
-                col_expr = col_expr.when(
-                    f.col(hist_name) == f.lit(agg.get_name()), f.lit(aggregation_id)
-                )
-        return (
-            col_expr.otherwise(None) if col_expr is not None else f.lit(None).cast(IntegerType())
-        )
+            if aggregation_id is not None:
+                name_to_id.setdefault(agg.get_name(), aggregation_id)
+        return constant_map_lookup(name_to_id, hist_name, IntegerType())

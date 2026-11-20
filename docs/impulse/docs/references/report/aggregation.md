@@ -403,6 +403,36 @@ band_stats = StatsAggregator(
 )
 ```
 
+### Grouping and sizing
+
+A single `StatsAggregator` can cover many signals. Group expressions by **event and set of statistics**:
+every expression that needs the same statistics over the same event goes into one `StatsAggregator`
+with several `input_expressions` / `channel_names`. Expressions that differ in the event or in the
+set of statistics go into separate instances. Fewer, larger aggregators mean fewer aggregations per
+report and less work while the report builds its query plan.
+
+```python
+# Instead of one StatsAggregator per (signal, event, statistics) ...
+stats = StatsAggregator(
+    name="band_min_max",
+    input_expressions=[eng_rpm, veh_spd, oil_temp],
+    channel_names=["Engine RPM", "Vehicle Speed", "Oil Temperature"],
+    statistics=["min", "max"],
+    event=eng_rpm_event,
+)
+```
+
+Keep the number of channels each instance reads at or below `max_channels_per_batch` (default
+`500`, see [Configuration](../../config/configuration.md)). Aggregations are packed into solve
+batches of at most that many distinct channels. An aggregation that reads more than the cap on its
+own still runs, but in an oversized batch of its own, which increases memory pressure. The cap
+counts distinct channel selections, so an expression that combines channels (for example `a + b`)
+counts as more than one. If a group has more channels than the cap, split it into several
+`StatsAggregator` instances with the same event and statistics.
+
+Spreading aggregations over several pages or reports does not improve performance: batching runs
+over all aggregations of a report, regardless of their page.
+
 ---
 
 ## PointValueAggregator
