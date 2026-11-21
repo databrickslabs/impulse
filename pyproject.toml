@@ -44,7 +44,7 @@ Issues = "https://github.com/databrickslabs/impulse/issues"
 
 [dependency-groups]
 dev = [
-    "pre-commit==4.1.0",
+    "pre-commit==4.6.0",
     "pydoc-markdown==4.8.2",
     "pytest==8.3.5",
     "pytest-benchmark==5.1.0",
