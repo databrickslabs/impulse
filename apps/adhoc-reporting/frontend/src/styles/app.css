@@ -1425,3 +1425,52 @@ kbd {
   color: var(--success);
   font-size: 12px;
 }
+
+.table-scroll:focus {
+  outline: none;
+}
+
+.th-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: text;
+}
+
+.th-search svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.th-search:focus-within svg,
+.th-search.active svg {
+  color: var(--accent);
+}
+
+.th-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+}
+
+.th-search input::placeholder {
+  color: var(--muted);
+}
+
+.th-search button {
+  display: flex;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.th-search button:hover {
+  color: var(--text);
+}
