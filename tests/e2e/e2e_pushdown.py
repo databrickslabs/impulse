@@ -258,5 +258,6 @@ for mixed in (False, True):
         ("missing", expected_events.exceptAll(actual)),
     ]:
         assert diff.count() == 0, f"{name}: {label} event rows {diff.take(5)}"
-    assert actual.count() > 0, f"{name}: no outlier events"
-    print(f"{name}: {actual.count()} event rows equal to {name}_ref; plans {plans}")
+    n_events = actual.count()
+    assert n_events > 0, f"{name}: no outlier events"
+    print(f"{name}: {n_events} event rows equal to {name}_ref; plans {plans}")

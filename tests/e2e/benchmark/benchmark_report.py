@@ -52,6 +52,14 @@ TASKS = {
 }
 SCENARIOS = [scenario for _, scenarios in TASKS.values() for scenario in scenarios]
 
+# The limit scenarios, by whether their limits are debounced (`build_limits_report`).
+LIMITS_SCENARIOS = {
+    "limits": False,
+    "limits_pushdown": False,
+    "limits_debounced": True,
+    "limits_debounced_pushdown": True,
+}
+
 # Scenarios that run another report than the task's previous scenario: they start in an empty
 # schema, as the report config is incremental.
 FRESH_SCHEMA_SCENARIOS = {"limits_debounced", "limits_debounced_pushdown"}
@@ -90,7 +98,7 @@ _NOT_TRIP_39 = [{"column_name": "container_id", "comparator": "!=", "value": 39}
 SCENARIO_FILTERS = {
     "cluster": {
         "wide_report": _NOT_TRIP_39,
-        **{s: _NOT_TRIP_39 for s in SCENARIOS if s.startswith("limits")},
+        **{s: _NOT_TRIP_39 for s in LIMITS_SCENARIOS},
     },
     "serverless": {
         "python_udfs": [{"column_name": "container_id", "comparator": "<", "value": 30}]

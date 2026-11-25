@@ -46,6 +46,44 @@ LAST = "_pd_last"
 BLOCK_END = "_pd_block_end"
 
 
+def nan_to_null(col: Column) -> Column:
+    """*col* with NaN as null, as ``numpy.nanmin`` / ``nanmax`` skip it and Arrow encodes it."""
+    return F.when(~F.isnan(col), col)
+
+
+def converted(value: Column, factor: Column, applies: Column) -> Column:
+    """*value* times the unit-conversion *factor* where *applies*, as the UDF's cache converts.
+
+    Like ``TimeSeriesCache.to_sample_series``: a null or NaN factor leaves the value as it is.
+    """
+    applies = applies & factor.isNotNull() & ~F.isnan(factor)
+    return F.when(applies, value * factor).otherwise(value)
+
+
+def element(
+    tstart: Column | None = None, tend: Column | None = None, value: Column | None = None
+) -> Column:
+    """One emitted row; ``tstart`` / ``tend`` left out keep the row's own times."""
+
+    def field(col: Column | None, name: str) -> Column:
+        return (F.lit(None) if col is None else col).cast("double").alias(name)
+
+    return F.struct(field(tstart, "tstart"), field(tend, "tend"), field(value, "value"))
+
+
+def _per_variant(variants: Mapping[int, Pushdown], column: Callable[[Pushdown], Column]) -> Column:
+    """``column(pushdown)`` for the row's variant: a CASE over *variants*."""
+    result = None
+    for vid, pushdown in sorted(variants.items()):
+        branch = F.col(VARIANT_COL) == F.lit(vid)
+        result = (
+            F.when(branch, column(pushdown))
+            if result is None
+            else result.when(branch, column(pushdown))
+        )
+    return F.lit(None) if result is None else result
+
+
 def run_col(run: str, name: str) -> str:
     """Name of the pipeline column *name* of the run *run*."""
     return f"_pd_run__{run}__{name}"
@@ -187,15 +225,7 @@ class SeriesContext:
 
     def per_variant(self, column: Callable[[Pushdown], Column]) -> Column:
         """``column(pushdown)`` for the sample's variant: a CASE over the rule's variants."""
-        result = None
-        for vid, pushdown in sorted(self._variants.items()):
-            branch = F.col(VARIANT_COL) == F.lit(vid)
-            result = (
-                F.when(branch, column(pushdown))
-                if result is None
-                else result.when(branch, column(pushdown))
-            )
-        return F.lit(None) if result is None else result
+        return _per_variant(self._variants, column)
 
     @property
     def tstart(self) -> Column:
@@ -224,25 +254,16 @@ class SeriesContext:
         converting = sorted(vid for vid, p in self._variants.items() if self._rule.needs_factor(p))
         if not self._has_factor or not converting:
             return value
-        factor = F.col(FACTOR_COL).cast("double")
-        applies = F.col(VARIANT_COL).isin(converting) & factor.isNotNull() & ~F.isnan(factor)
-        return F.when(applies, value * factor).otherwise(value)
+        return converted(
+            value, F.col(FACTOR_COL).cast("double"), F.col(VARIANT_COL).isin(converting)
+        )
 
     @property
     def sample(self) -> Sample:
         """The current sample."""
         return Sample(self.tstart, self.tend, self.value)
 
-    @staticmethod
-    def element(
-        tstart: Column | None = None, tend: Column | None = None, value: Column | None = None
-    ) -> Column:
-        """One emitted row; ``tstart`` / ``tend`` left out keep the sample's own times."""
-
-        def field(col: Column | None, name: str) -> Column:
-            return (F.lit(None) if col is None else col).cast("double").alias(name)
-
-        return F.struct(field(tstart, "tstart"), field(tend, "tend"), field(value, "value"))
+    element = staticmethod(element)
 
     # --- rules running in series order --------------------------------------------
 
@@ -362,8 +383,11 @@ class RowsContext:
         """The rule's finishing column *column*, defined by an earlier hook entry."""
         return F.col(self.name(column))
 
-    per_variant = SeriesContext.per_variant
-    element = staticmethod(SeriesContext.element)
+    def per_variant(self, column: Callable[[Pushdown], Column]) -> Column:
+        """``column(pushdown)`` for the row's variant: a CASE over the rule's variants."""
+        return _per_variant(self._variants, column)
+
+    element = staticmethod(element)
 
     @property
     def tstart(self) -> Column:

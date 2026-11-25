@@ -251,18 +251,16 @@ def setup_raw_channels_db(spark):
     )
 
 
+def drop_gold_tables(spark):
+    """Drop all tables of ``spark_catalog.gold``."""
+    for table in spark.sql("SHOW TABLES IN spark_catalog.gold").collect():
+        spark.sql(f"DROP TABLE IF EXISTS spark_catalog.gold.{table.tableName} PURGE")
+
+
 @pytest.fixture(scope="function", autouse=True)
 def cleanup_gold(request, spark):
     """Drop all gold tables after each test function."""
-
-    def remove_gold_layer():
-        gold_tables = spark.sql("SHOW TABLES IN spark_catalog.gold").collect()
-
-        for table in gold_tables:
-            table_name = table.tableName
-            spark.sql(f"DROP TABLE IF EXISTS spark_catalog.gold.{table_name} PURGE")
-
-    request.addfinalizer(remove_gold_layer)
+    request.addfinalizer(lambda: drop_gold_tables(spark))
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -26,6 +26,7 @@ from impulse_query_engine.analyze.query.optimizer import (
 from .solver_config import SolverConfig
 
 _KEY = "_ns_key"
+_SELECTOR_IDS = "_ns_selector_ids"
 
 
 def native_solve_rows(
@@ -57,7 +58,9 @@ def native_solve_rows(
         Rows with *schema*.
     """
     cid = config.container_id_col
-    selector_ids = PushdownPlan.channel_selector_ids("selector_ids")
+    # Once per row, read by every selection's filter.
+    rows = rows.withColumn(_SELECTOR_IDS, PushdownPlan.channel_selector_ids("selector_ids"))
+    selector_ids = F.col(_SELECTOR_IDS)
     # Rows in the order of the UDF's cache: the sort key first, then the element.
     keyed = F.struct(
         F.struct(*series_order(config)).alias(_KEY),

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import math
-import numbers
 import operator
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pyspark.sql.functions as F
@@ -20,8 +19,15 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.model.series.intervals import Intervals
 
-from .context import RowsContext, SeriesContext
-from .pushdown import VALUE_TYPES, Operand, Pushdown, PushdownContext, PushdownRule
+from .context import RowsContext, SeriesContext, nan_to_null
+from .pushdown import (
+    VALUE_TYPES,
+    Operand,
+    Pushdown,
+    PushdownContext,
+    PushdownRule,
+    real_scalar,
+)
 
 if TYPE_CHECKING:
     from impulse_query_engine.analyze.query.solvers.default_solver import TimeSeriesCache
@@ -29,14 +35,16 @@ if TYPE_CHECKING:
     from .plan import PushedNode
 
 _OP, _THRESHOLD, _ALIAS = "op", "threshold", "alias"
+#: The comparisons by parameter name; ``ne`` treats NaN differently (see ``_holds``).
 _OPS = {
-    operator.gt: "gt",
-    operator.ge: "ge",
-    operator.lt: "lt",
-    operator.le: "le",
-    operator.eq: "eq",
-    operator.ne: "ne",
+    "gt": operator.gt,
+    "ge": operator.ge,
+    "lt": operator.lt,
+    "le": operator.le,
+    "eq": operator.eq,
+    "ne": operator.ne,
 }
+_OP_NAMES = {fn: name for name, fn in _OPS.items()}
 #: ``scalar op x`` as the same comparison with the series first.
 _FLIPPED = {"gt": "lt", "ge": "le", "lt": "gt", "le": "ge", "eq": "eq", "ne": "ne"}
 
@@ -81,7 +89,7 @@ class ConditionPushdownRule(PushdownRule):
             or not callable(node.operation)
         ):
             return None
-        op = _OPS.get(node.operation)
+        op = _OP_NAMES.get(node.operation)
         if op is None:
             return None
         first, second = node.args
@@ -95,15 +103,19 @@ class ConditionPushdownRule(PushdownRule):
             series, other, op = second, first, _FLIPPED[op]
         else:
             return None
-        threshold = _scalar(other)
+        threshold = real_scalar(other)
         selector = operand(series)
         if threshold is None or not isinstance(selector, TimeSeriesSelector):
             return None
         if selector.series_type is not SeriesType.CONTINUOUS:
             return None
+        # One NaN object, so equal comparisons have equal variant keys.
+        if threshold is not None and math.isnan(threshold):
+            threshold = math.nan
         return Pushdown(
             rule=self,
             selector=selector,
+            # The alias flag is part of the variant key: the selector id ignores it.
             params=((_OP, op), (_THRESHOLD, threshold), (_ALIAS, bool(selector.uses_alias))),
             consumed=(selector,),
         )
@@ -121,9 +133,10 @@ class ConditionPushdownRule(PushdownRule):
 
     def row_columns(self, ctx: SeriesContext) -> Mapping[str, Column]:
         selected, joins = ctx.col("selected"), ctx.col("joins")
+        value = ctx.converted_value
         running = ctx.in_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
         return {
-            "selected": ctx.per_variant(lambda p: _holds(p, ctx.converted_value)),
+            "selected": ctx.per_variant(lambda p: _holds(p, value)),
             # The sample continues the piece of the previous sample in its chunk.
             "joins": F.coalesce(
                 selected
@@ -197,22 +210,9 @@ class ConditionPushdownRule(PushdownRule):
 
     def native_value(self, pushdown: Pushdown, rows: Column) -> Column:
         # Intervals.get_data(), with NaN as the UDF's Arrow output encodes it: null.
-        def time(col: Column) -> Column:
-            return F.when(~F.isnan(col), col)
-
-        return F.transform(rows, lambda r: F.array(time(r["tstart"]), time(r["tend"])))
-
-
-def _scalar(value: Any) -> float | None:
-    """*value* as the float64 numpy compares with, or ``None`` if not a real scalar."""
-    if isinstance(value, bool | np.bool_) or not isinstance(value, numbers.Real):
-        return None
-    try:
-        value = float(value)
-    except (OverflowError, TypeError, ValueError):
-        return None
-    # One NaN object, so equal comparisons have equal variant keys.
-    return math.nan if math.isnan(value) else value
+        return F.transform(
+            rows, lambda r: F.array(nan_to_null(r["tstart"]), nan_to_null(r["tend"]))
+        )
 
 
 def _holds(pushdown: Pushdown, value: Column) -> Column:
@@ -224,14 +224,7 @@ def _holds(pushdown: Pushdown, value: Column) -> Column:
         return F.lit(True) if math.isnan(threshold) else missing | (value != F.lit(threshold))
     if math.isnan(threshold):
         return F.lit(False)
-    t = F.lit(threshold)
-    compared = {
-        "gt": value > t,
-        "ge": value >= t,
-        "lt": value < t,
-        "le": value <= t,
-        "eq": value == t,
-    }[op]
+    compared = _OPS[op](value, F.lit(threshold))
     return ~missing & F.coalesce(compared, F.lit(False))
 
 

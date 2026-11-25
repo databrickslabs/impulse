@@ -15,7 +15,7 @@ from impulse_reporting.config.config_parser import (
 )
 from impulse_reporting.core.report import Report
 from impulse_reporting.events.basic_event import BasicEvent
-from tests.conftest import spark  # noqa: F401  (pytest fixture)
+from tests.conftest import drop_gold_tables, spark  # noqa: F401  (pytest fixture)
 
 _EVENT_FACT = "spark_catalog.gold.evaluation_event_instance_fact"
 
@@ -47,11 +47,6 @@ def _report(spark, enable_pushdown: bool) -> Report:
     return report
 
 
-def _drop_gold(spark):
-    for table in spark.sql("SHOW TABLES IN spark_catalog.gold").collect():
-        spark.sql(f"DROP TABLE IF EXISTS spark_catalog.gold.{table.tableName} PURGE")
-
-
 def test_outlier_event_facts_are_identical_without_the_udf(spark, monkeypatch):
     udf_runs = []
     original = DefaultSolver._apply_grouped_map
@@ -63,7 +58,7 @@ def test_outlier_event_facts_are_identical_without_the_udf(spark, monkeypatch):
     monkeypatch.setattr(DefaultSolver, "_apply_grouped_map", _counting)
     facts = []
     for enable_pushdown in (False, True):
-        _drop_gold(spark)
+        drop_gold_tables(spark)
         udf_runs.append(0)
         report = _report(spark, enable_pushdown)
         report.determine_report()

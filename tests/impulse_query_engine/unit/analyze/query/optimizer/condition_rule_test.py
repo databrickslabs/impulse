@@ -20,6 +20,7 @@ from impulse_query_engine.analyze.query.optimizer import (
     FACTOR_COL,
     PRESENCE_VARIANT,
     VARIANT_COL,
+    Classifier,
     ConditionPushdownRule,
     PushdownContext,
     PushdownPlan,
@@ -292,14 +293,10 @@ def test_container_where_the_condition_never_holds_is_present(spark):
 )
 def test_not_matched(build):
     rule = ConditionPushdownRule()
-    from impulse_query_engine.analyze.query.optimizer import Classifier
-
     assert Classifier([rule])(build(_X)) is None
 
 
 def test_points_in_time_selection_is_not_matched():
-    from impulse_query_engine.analyze.query.optimizer import Classifier
-
     poi = TimeSeriesSelector(
         TagSelector("channel_name") == "p", series_type=SeriesType.POINTS_IN_TIME
     )

@@ -28,6 +28,7 @@ whl = max(glob.glob(f"{dbutils.widgets.get('wheel_dir')}/databricks_impulse-*.wh
 # COMMAND ----------
 
 import datetime
+import functools
 import json
 
 import benchmark_udfs
@@ -36,6 +37,7 @@ from benchmark_metrics import Measurement, compute_kind
 from benchmark_report import (
     DELTA_CONTAINERS,
     FRESH_SCHEMA_SCENARIOS,
+    LIMITS_SCENARIOS,
     SCENARIO_CONFIG,
     SCENARIO_FILTERS,
     TASKS,
@@ -75,16 +77,21 @@ def scenario_config(scenario):
     )
 
 
+@functools.cache
+def signal_stats():
+    """`wide_signal_stats` of the source, which no scenario changes: one query per task."""
+    return wide_signal_stats(spark, p.source)
+
+
 def builder(scenario, cfg):
     if scenario == "wide_report":
-        signals = wide_signal_stats(spark, p.source)
+        signals = signal_stats()
         cap = cfg.get("query_engine", {}).get("max_channels_per_batch")
         return lambda report: build_wide_report(report, signals, cap)
     if scenario == "python_udfs":
         return build_udf_report
-    if scenario.startswith("limits"):
-        signals = wide_signal_stats(spark, p.source)
-        debounced = scenario.startswith("limits_debounced")
+    if scenario in LIMITS_SCENARIOS:
+        signals, debounced = signal_stats(), LIMITS_SCENARIOS[scenario]
         return lambda report: build_limits_report(report, signals, debounced)
     return build_report
 

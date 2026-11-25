@@ -113,7 +113,8 @@ resources:
 
         - task_key: compare
           job_cluster_key: bench_cluster
-          depends_on:
+          # The run tasks.
+          depends_on: &run_tasks
             - {task_key: run}
             - {task_key: run_wide}
             - {task_key: run_udfs}
@@ -131,12 +132,6 @@ resources:
 
         - task_key: teardown
           job_cluster_key: bench_cluster
-          depends_on:
-            - {task_key: run}
-            - {task_key: run_wide}
-            - {task_key: run_udfs}
-            - {task_key: run_pushdown}
-            - {task_key: run_limits}
-            - {task_key: run_limits_pushdown}
+          depends_on: *run_tasks
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_teardown.py, base_parameters: *params}

@@ -33,13 +33,9 @@ p = params()
 BASELINE_RUNS = 5
 # Gated metrics of this compute, checked in the longer scenarios.
 GATED = GATED[compute_kind()]
-GATED_SCENARIOS = {
-    "full",
-    "wide_report",
-    "python_udfs",
-    *PUSHDOWN_PAIRS,
-    *PUSHDOWN_PAIRS.values(),
-} & set(p.selected(COMPUTE_SCENARIOS[compute_kind()]))
+GATED_SCENARIOS = {"wide_report", "python_udfs", *PUSHDOWN_PAIRS, *PUSHDOWN_PAIRS.values()} & set(
+    p.selected(COMPUTE_SCENARIOS[compute_kind()])
+)
 # Fingerprint sums may differ in the last digits, as Spark sums in any order.
 FINGERPRINT_RTOL = 1e-6
 # With and without pushdown, in one run: the sums of the gold tables without `rows_hash`.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import numbers
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -53,6 +54,19 @@ VALUE_TYPES = (
 )
 
 _NAME = re.compile(r"[a-z][a-z0-9]*(_[a-z0-9]+)*")
+
+
+def real_scalar(value: Any) -> float | None:
+    """*value* as the float numpy computes with, or ``None`` unless it is a real number.
+
+    Booleans (``bool``, ``numpy.bool_``) are not numbers here.
+    """
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        return None
+    try:
+        return float(value)
+    except (OverflowError, ValueError):
+        return None
 
 
 def check_name(kind: str, name: str) -> str:

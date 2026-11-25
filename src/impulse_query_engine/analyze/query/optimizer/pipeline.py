@@ -86,6 +86,7 @@ from .context import (
     Sample,
     SeriesContext,
     block_break,
+    nan_to_null,
     run_col,
 )
 from .context import ELEMENT_TYPE as _ELEMENT_TYPE
@@ -317,10 +318,9 @@ class SeriesPipeline:
         # The rules' columns read the variant (SeriesContext.active, .param).  The
         # conversion factor is only kept where a rule computes on converted values.
         has_factor = self.converts and FACTOR_COL in variants.columns
-        fanned = variants
         if FACTOR_COL in variants.columns and not has_factor:
-            fanned = variants.drop(FACTOR_COL)
-        df = _fan_out(df, fanned, self.channel_key, self.variant_ids, self.presence_ids)
+            variants = variants.drop(FACTOR_COL)
+        df = _fan_out(df, variants, self.channel_key, self.variant_ids, self.presence_ids)
         contexts = [
             (rule, self._context(rule, rule_variants, has_factor))
             for rule, rule_variants in self.rules
@@ -358,8 +358,8 @@ class SeriesPipeline:
         # still cut by its tstart range.
         series = (
             matched.groupBy(*self.channel_key).agg(
-                F.min(_nan_free(ts_d)).alias("_pd_first"),
-                F.greatest(F.max(_nan_free(te_d)), F.max(_nan_free(ts_d))).alias("_pd_end"),
+                F.min(nan_to_null(ts_d)).alias("_pd_first"),
+                F.greatest(F.max(nan_to_null(te_d)), F.max(nan_to_null(ts_d))).alias("_pd_end"),
                 F.count(F.lit(1)).alias("_pd_count"),
                 F.max(F.size(_shipped(self.variant_ids))).alias("_pd_k"),
             )
@@ -700,8 +700,9 @@ def finish_rows(df: DataFrame, plan: PushdownPlan, config) -> DataFrame:
     columns = df.columns
     ts, te, val = config.tstart_col, config.tend_col, config.value_col
     # The sort keys as columns: windows ordered by the same columns share one sort.
-    keys = [f"_pd_row_key{i}" for i in range(len(series_order(config)))]
-    for name, key in zip(keys, series_order(config), strict=True):
+    order = series_order(config)
+    keys = [f"_pd_row_key{i}" for i in range(len(order))]
+    for name, key in zip(keys, order, strict=True):
         df = df.withColumn(name, key)
     series = Window.partitionBy(
         config.container_id_col, config.channel_id_col, VARIANT_COL
@@ -747,10 +748,10 @@ def finish_rows(df: DataFrame, plan: PushdownPlan, config) -> DataFrame:
         if field is None:
             return F.col(col)
         derived = element.getField(field).cast(schema[col].dataType)
-        if field == "value":
-            return F.when(finishing, derived).otherwise(F.col(col)).alias(col)
-        # Times left out of the element keep the row's own.
-        return F.when(finishing, F.coalesce(derived, F.col(col))).otherwise(F.col(col)).alias(col)
+        if field != "value":
+            # Times left out of the element keep the row's own.
+            derived = F.coalesce(derived, F.col(col))
+        return F.when(finishing, derived).otherwise(F.col(col)).alias(col)
 
     return df.select(*[out(c) for c in columns])
 
@@ -866,11 +867,6 @@ def _flag(name: str) -> Column:
     return F.coalesce(F.col(name), F.lit(False))
 
 
-def _nan_free(col: Column) -> Column:
-    """Map NaN to null so ``min`` / ``max`` behave like ``numpy.nanmin`` / ``nanmax``."""
-    return F.when(~F.isnan(col), col)
-
-
 def _found(end: Column) -> Column:
     """*end* in a struct that is not null even when *end* is."""
     return F.struct(end.alias("end"))
@@ -883,5 +879,5 @@ def _block_end_at(last_sample: Column, single: Column) -> Column:
     maximum is the last ``tend`` or, for blocks of several samples, the last
     ``tstart`` if larger (NaN ``tend`` ignored).
     """
-    tend = _nan_free(last_sample.getField("tend"))
+    tend = nan_to_null(last_sample.getField("tend"))
     return F.when(single, tend).otherwise(F.greatest(last_sample.getField("tstart"), tend))

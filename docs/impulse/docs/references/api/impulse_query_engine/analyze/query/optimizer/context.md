@@ -23,6 +23,37 @@ Element type of the arrays returned by :meth:`PushdownRule.emit`.
 Name of the built-in run of continuous samples.
 
 
+#### nan\_to\_null
+
+```python
+def nan_to_null(col: Column) -> Column
+```
+
+*col* with NaN as null, as ``numpy.nanmin`` / ``nanmax`` skip it and Arrow encodes it.
+
+
+#### converted
+
+```python
+def converted(value: Column, factor: Column, applies: Column) -> Column
+```
+
+*value* times the unit-conversion *factor* where *applies*, as the UDF's cache converts.
+
+Like ``TimeSeriesCache.to_sample_series``: a null or NaN factor leaves the value as it is.
+
+
+#### element
+
+```python
+def element(tstart: Column | None = None,
+            tend: Column | None = None,
+            value: Column | None = None) -> Column
+```
+
+One emitted row; ``tstart`` / ``tend`` left out keep the row's own times.
+
+
 #### run\_col
 
 ```python
@@ -199,17 +230,6 @@ def sample() -> Sample
 The current sample.
 
 
-#### element
-
-```python
-def element(tstart: Column | None = None,
-            tend: Column | None = None,
-            value: Column | None = None) -> Column
-```
-
-One emitted row; ``tstart`` / ``tend`` left out keep the sample's own times.
-
-
 #### prev
 
 ```python
@@ -338,6 +358,15 @@ def col(column: str) -> Column
 ```
 
 The rule's finishing column *column*, defined by an earlier hook entry.
+
+
+#### per\_variant
+
+```python
+def per_variant(column: Callable[[Pushdown], Column]) -> Column
+```
+
+``column(pushdown)`` for the row's variant: a CASE over the rule's variants.
 
 
 #### tstart

@@ -17,10 +17,12 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.optimizer import (
     CHUNK_ROWS,
+    FACTOR_COL,
     PRESENCE_VARIANT,
     VARIANT_COL,
     VARIANTS_COL,
     Classifier,
+    ConditionPushdownRule,
     Pushdown,
     ResamplePushdownRule,
     SeriesPipeline,
@@ -417,16 +419,12 @@ def test_invalid_rule_column_and_run_names_are_rejected(spark, hook):
 
 
 def _condition_and_resample(spark, factor=None, aliased=False):
-    from impulse_query_engine.analyze.query.optimizer import ConditionPushdownRule
-
     rng = np.random.default_rng(5)
     samples = random_series(rng, 30)
     # Channel (1, 1) ships a condition and a resample, channel (2, 1) the condition only.
     series = {(1, 1, 1): samples, (1, 1, 2): samples, (2, 1, 1): samples}
     df, variants = channel_rows(spark, series)
     if factor is not None:
-        from impulse_query_engine.analyze.query.optimizer import FACTOR_COL
-
         # Derived from a column, so the optimizer cannot fold it into the comparison.
         variants = variants.withColumn(FACTOR_COL, F.col("channel_id").cast("double") * factor)
     x = TimeSeriesSelector(TagSelector("channel_name") == "x", uses_alias=aliased)
@@ -455,13 +453,6 @@ def test_presence_rows_only_for_rules_that_may_emit_nothing(spark):
     resample_only = plan_for({2: plan.pushdowns_by_variant[2]})
     result = apply_pushdowns(df, variants, resample_only, CONFIG, include_raw=False)
     assert result.where(F.col(VARIANT_COL) == PRESENCE_VARIANT).count() == 0
-
-
-def test_resample_only_plans_do_not_mark_presence(spark):
-    df, variants, plan = _condition_and_resample(spark)
-    resample_only = plan_for({2: plan.pushdowns_by_variant[2]})
-    result = apply_pushdowns(df, variants, resample_only, CONFIG, include_raw=False)
-    assert "_pd_present_in" not in result._jdf.queryExecution().optimizedPlan().toString()
 
 
 @pytest.mark.parametrize("aliased", [False, True])

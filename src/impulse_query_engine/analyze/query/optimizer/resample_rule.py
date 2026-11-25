@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import numbers
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +20,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .context import SeriesContext
-from .pushdown import Operand, Pushdown, PushdownContext, PushdownRule
+from .pushdown import Operand, Pushdown, PushdownContext, PushdownRule, real_scalar
 
 if TYPE_CHECKING:
     from impulse_query_engine.analyze.query.solvers.default_solver import TimeSeriesCache
@@ -214,8 +213,5 @@ def _sample_rate(args: tuple, kwargs: dict[str, Any]) -> float | None:
     """The resample rate of a ``resample(...)`` call, or ``None`` if unsupported."""
     if len(args) > 1 or set(kwargs) - {_RATE} or (args and kwargs):
         return None
-    rate = args[0] if args else kwargs.get(_RATE, _DEFAULT_RATE)
-    if isinstance(rate, bool) or not isinstance(rate, numbers.Real):
-        return None
-    rate = float(rate)
-    return rate if math.isfinite(rate) and rate > 0 else None
+    rate = real_scalar(args[0] if args else kwargs.get(_RATE, _DEFAULT_RATE))
+    return rate if rate is not None and math.isfinite(rate) and rate > 0 else None

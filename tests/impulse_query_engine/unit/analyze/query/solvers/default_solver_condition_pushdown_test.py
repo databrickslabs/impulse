@@ -135,19 +135,18 @@ class TestNativeSolve:
         _assert_udf_free(df_on)
 
     @pytest.mark.parametrize("id_type", ["int", "string"])
-    def test_id_types(
-        self, spark: SparkSession, setup_key_value_store_db, mock_workspace_client, id_type
-    ):
+    def test_id_types(self, spark: SparkSession, key_value_store_db, id_type):
+        # The fixture's tables with container_id and channel_id recast.
         tables = {
-            name: spark.read.table(f"spark_catalog.silver_key_value_store.{name}")
-            for name in ("container_tags", "container_metrics", "channel_metrics", "channels")
+            name: df.select(
+                *[
+                    F.col(c).cast(id_type).alias(c) if c in ("container_id", "channel_id") else c
+                    for c in df.columns
+                ]
+            )
+            for name, df in key_value_store_db.config.debug_tables.items()
         }
-        for name, table in tables.items():
-            for col in ("container_id", "channel_id"):
-                if col in table.columns:
-                    table = table.withColumn(col, F.col(col).cast(id_type))
-            tables[name] = table
-        db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=mock_workspace_client)
+        db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=key_value_store_db.ws)
         off, on, df_on = _rows_both(
             spark,
             db,
@@ -156,10 +155,7 @@ class TestNativeSolve:
         )
         assert on == off
         assert any(len(r["rpm_high"]) > 0 for r in on)
-        assert (
-            df_on.schema["container_id"].dataType.simpleString()
-            == T._parse_datatype_string(id_type).simpleString()
-        )
+        assert df_on.schema["container_id"].dataType.simpleString() == id_type
         _assert_udf_free(df_on)
 
 

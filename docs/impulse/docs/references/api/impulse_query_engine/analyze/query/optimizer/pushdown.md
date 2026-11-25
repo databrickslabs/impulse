@@ -46,6 +46,17 @@ exactly as numpy converts them.
 Spark types of value columns the rules compute on, as double like ``SampleSeries``.
 
 
+#### real\_scalar
+
+```python
+def real_scalar(value: Any) -> float | None
+```
+
+*value* as the float numpy computes with, or ``None`` unless it is a real number.
+
+Booleans (``bool``, ``numpy.bool_``) are not numbers here.
+
+
 #### check\_name
 
 ```python
