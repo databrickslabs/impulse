@@ -21,6 +21,31 @@ Column listing the variant ids a matched channel ships, one row per channel.
 Variant id of the unmodified (raw) channel data.
 
 
+#### PRESENCE\_VARIANT
+
+Variant id of the presence rows: one row per channel shipping a variant of a rule
+
+that may emit nothing (:attr:`PushdownRule.may_emit_nothing`), so that its container
+still reaches the UDF.  No node reads these rows.
+
+
+#### FACTOR\_COL
+
+Optional column of the variants frame: the channel's unit-conversion factor.
+
+
+#### TIME\_TYPES
+
+Spark types of time columns the rules compute on: integral times convert to double
+
+exactly as numpy converts them.
+
+
+#### VALUE\_TYPES
+
+Spark types of value columns the rules compute on, as double like ``SampleSeries``.
+
+
 #### check\_name
 
 ```python
@@ -45,6 +70,7 @@ Plan-time facts about the channel data a pushdown would run on.
 **Arguments**:
 
 - `tstart_type, tend_type` (`pyspark.sql.types.DataType`): Spark types of the channel-data ``tstart`` / ``tend`` columns.
+- `value_type` (`pyspark.sql.types.DataType`): Spark type of the channel-data value column; defaults to double.
 
 #### from\_schema
 
@@ -53,6 +79,15 @@ def from_schema(schema: T.StructType, config: SolverConfig) -> PushdownContext
 ```
 
 Build the context from the column-mapped channel-data schema.
+
+
+#### numeric\_times
+
+```python
+def numeric_times() -> bool
+```
+
+Whether both time columns have a type of :data:`TIME_TYPES`.
 
 
 ## Pushdown
@@ -128,6 +163,14 @@ one series (channel and variant) at a time, with a :class:`SeriesContext`:
 3. :meth:`kept_columns` per kept sample;
 4. :meth:`emit` the derived rows of a kept sample.
 
+A rule that sets :attr:`finishes` also gets a second pass over its derived
+rows, all of a series in order, once they are grouped by container
+(:func:`~.pipeline.finish_rows`, with a :class:`RowsContext`):
+
+5. :meth:`finish_columns` per derived row;
+6. :meth:`finish_keep` selects the rows that are shipped;
+7. :meth:`finish_row` the shipped row.
+
 Rules never handle DataFrames, so every rule shares the pipeline's reads and
 shuffles.  Derived rows have the channel-data shape
 ``(container_id, channel_id, variant, tstart, tend, value)``.
@@ -145,6 +188,19 @@ letters, digits and single underscores (see :func:`check_name`).
 Whether the rule needs its series in order (neighbours, runs, series
 
 facts).  Per-sample rules set ``False`` and skip the series scan.
+
+
+#### may\_emit\_nothing
+
+Whether a series may emit no derived rows although it has samples (e.g. a
+
+comparison that never holds).  The pipeline then ships a presence row per
+channel (:data:`PRESENCE_VARIANT`), so the container still reaches the UDF.
+
+
+#### finishes
+
+Whether the rule has the finishing pass (:meth:`finish_columns`,
 
 
 #### match
@@ -180,6 +236,17 @@ def result_type(pushdown: Pushdown) -> type
 ```
 
 Core-model class :meth:`decode` returns for *pushdown*.
+
+
+#### needs\_factor
+
+```python
+def needs_factor(pushdown: Pushdown) -> bool
+```
+
+Whether *pushdown* computes on unit-converted values in Spark.
+
+The pipeline then provides the channel's conversion factor, and
 
 
 #### runs
@@ -223,6 +290,36 @@ def kept_columns(ctx: SeriesContext) -> Mapping[str, Column]
 Columns computed for the kept samples, in order (``ctx.block_end`` available).
 
 
+#### finish\_columns
+
+```python
+def finish_columns(ctx: RowsContext) -> Mapping[str, Column]
+```
+
+Columns computed for every derived row in the finishing pass, in order.
+
+
+#### finish\_keep
+
+```python
+def finish_keep(ctx: RowsContext) -> Column
+```
+
+Whether a derived row is shipped after the finishing pass.
+
+
+#### finish\_row
+
+```python
+def finish_row(ctx: RowsContext) -> Column
+```
+
+The shipped row: one :data:`~.context.ELEMENT_TYPE` struct.
+
+Times left out keep the row's own ``tstart`` / ``tend``; the value is the
+element's.
+
+
 #### emit
 
 ```python
@@ -262,4 +359,35 @@ Whether *pushdown*'s derived rows are its result's samples as they are.
 (apart from the alias conversion factor).  Calculated channels that are such a
 pushdown as a whole are then emitted from Spark, without :meth:`decode`.
 
+
+#### has\_native\_value
+
+```python
+def has_native_value(pushdown: Pushdown) -> bool
+```
+
+Whether :meth:`native_value` can produce *pushdown*'s ``solve()`` result in Spark.
+
+A solve whose every selection is such a pushdown as a whole runs without
+the pandas UDF.
+
+
+#### native\_value
+
+```python
+def native_value(pushdown: Pushdown, rows: Column) -> Column
+```
+
+*pushdown*'s ``solve()`` result for one container, built in Spark.
+
+**Arguments**:
+
+- `pushdown` (`Pushdown`): A pushdown for which :meth:`has_native_value` holds.
+- `rows` (`Column`): The series' shipped rows: an array of :data:`~.context.ELEMENT_TYPE`
+structs in series order; empty when the container has none.
+
+**Returns**:
+
+`Column`: The value the UDF would emit for the selection, NaN encoded as the UDF's
+Arrow output encodes it.
 

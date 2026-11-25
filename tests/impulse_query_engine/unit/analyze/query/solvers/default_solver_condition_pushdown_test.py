@@ -1,0 +1,209 @@
+# pylint: disable=missing-function-docstring
+"""Condition pushdown (``channel op scalar``) in the solver: UDF-free solves and the UDF route."""
+
+import pyspark.sql.functions as F
+import pytest
+from pyspark.sql import SparkSession
+
+from impulse_query_engine.analyze.query.optimizer import (
+    PRESENCE_VARIANT,
+    RAW_VARIANT,
+    PushdownContext,
+    QueryOptimizer,
+)
+from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
+from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
+from tests.conftest import spark
+from tests.impulse_query_engine.unit.analyze.query.solvers.default_solver_pushdown_test import (
+    PUSHED_SCANS,
+    SAMPLE_SHUFFLE,
+    SMALL_CHUNKS,
+    _assert_same,
+    _final_plan,
+    _kvs_config,
+    _solve_both,
+    _unit_conversion_config,
+    channel_data_scans,
+    shuffles,
+    udf_rows,
+)
+import pyspark.sql.types as T
+
+RPM_HIGH = 1500
+
+
+def _rows_both(spark, db, make_selections, **solver_kwargs):
+    """``solve()`` rows with pushdown off and on, sorted by container, and the solve on."""
+    results = []
+    for enable_pushdown in (False, True):
+        solver = DefaultSolver(
+            spark,
+            enable_pushdown=enable_pushdown,
+            pushdown_chunk_rows=SMALL_CHUNKS,
+            **solver_kwargs,
+        )
+        q = db.query
+        df = q.select(*make_selections(q)).solve(spark, solver=solver)
+        results.append((sorted(df.collect(), key=lambda r: r["container_id"]), df))
+    (off, _), (on, df_on) = results
+    return off, on, df_on
+
+
+def _assert_udf_free(df):
+    plan = _final_plan(df)
+    assert "FlatMapGroupsInPandas" not in plan and "ArrowEvalPython" not in plan
+
+
+class TestNativeSolve:
+    def test_outlier_detection_runs_without_the_udf(
+        self, spark: SparkSession, key_value_store_db, udf_rows
+    ):
+        def selections(q):
+            return [(q.channel(channel_name="Engine RPM") > RPM_HIGH).alias("rpm_high")]
+
+        off, on, df_on = _rows_both(spark, key_value_store_db, selections, config=_kvs_config())
+        assert on == off
+        assert any(len(r["rpm_high"]) > 0 for r in on)
+        # Only the solve with pushdown off reached the grouped-map UDF.
+        assert len(udf_rows) == 1
+        _assert_udf_free(df_on)
+        assert channel_data_scans(df_on) == PUSHED_SCANS
+        samples = [e for e in shuffles(df_on) if "_pd_chunk" in e]
+        assert len(samples) == 1 and samples[0].startswith(SAMPLE_SHUFFLE)
+
+    def test_several_conditions_and_thresholds_on_one_channel(
+        self, spark: SparkSession, key_value_store_db, udf_rows
+    ):
+        def selections(q):
+            rpm = q.channel(channel_name="Engine RPM")
+            spd = q.channel(channel_name="Vehicle Speed Sensor")
+            return [
+                (rpm > RPM_HIGH).alias("rpm_high"),
+                (rpm <= 900).alias("rpm_low"),
+                (2000 < rpm).alias("rpm_very_high"),
+                (spd != 0).alias("moving"),
+            ]
+
+        off, on, df_on = _rows_both(spark, key_value_store_db, selections, config=_kvs_config())
+        assert on == off
+        assert all(any(len(r[c]) > 0 for r in on) for c in ("rpm_high", "moving"))
+        assert len(udf_rows) == 1
+        _assert_udf_free(df_on)
+
+    def test_condition_that_never_holds_keeps_every_container(
+        self, spark: SparkSession, key_value_store_db
+    ):
+        def selections(q):
+            return [(q.channel(channel_name="Engine RPM") > 1e12).alias("never")]
+
+        off, on, _ = _rows_both(spark, key_value_store_db, selections, config=_kvs_config())
+        assert on == off
+        assert len(on) > 0 and all(r["never"] == [] for r in on)
+
+    def test_aliased_channel_with_unit_conversion(
+        self, spark: SparkSession, key_value_store_unit_conversion_db, udf_rows
+    ):
+        def selections(q):
+            speed = q.channel_with_alias(channel_alias="vehicle_speed")
+            return [(speed > 10).alias("fast")]
+
+        off, on, df_on = _rows_both(
+            spark,
+            key_value_store_unit_conversion_db,
+            selections,
+            config=_unit_conversion_config(),
+        )
+        assert on == off
+        assert any(len(r["fast"]) > 0 for r in on)
+        _assert_udf_free(df_on)
+
+    def test_raw_data(self, spark: SparkSession, setup_raw_channels_db, mock_workspace_client):
+        tables = {
+            name: spark.read.table(f"spark_catalog.silver_raw.{name}")
+            for name in ("container_metrics", "channel_metrics", "channels")
+        }
+        db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=mock_workspace_client)
+        off, on, df_on = _rows_both(
+            spark,
+            db,
+            lambda q: [(q.channel(channel_name="Engine RPM") > RPM_HIGH).alias("rpm_high")],
+            is_raw_data=True,
+        )
+        assert on == off
+        assert any(len(r["rpm_high"]) > 0 for r in on)
+        _assert_udf_free(df_on)
+
+    @pytest.mark.parametrize("id_type", ["int", "string"])
+    def test_id_types(
+        self, spark: SparkSession, setup_key_value_store_db, mock_workspace_client, id_type
+    ):
+        tables = {
+            name: spark.read.table(f"spark_catalog.silver_key_value_store.{name}")
+            for name in ("container_tags", "container_metrics", "channel_metrics", "channels")
+        }
+        for name, table in tables.items():
+            for col in ("container_id", "channel_id"):
+                if col in table.columns:
+                    table = table.withColumn(col, F.col(col).cast(id_type))
+            tables[name] = table
+        db = MeasurementDB(MeasurementDBConfig.for_debug(tables), ws=mock_workspace_client)
+        off, on, df_on = _rows_both(
+            spark,
+            db,
+            lambda q: [(q.channel(channel_name="Engine RPM") > RPM_HIGH).alias("rpm_high")],
+            config=_kvs_config(),
+        )
+        assert on == off
+        assert any(len(r["rpm_high"]) > 0 for r in on)
+        assert (
+            df_on.schema["container_id"].dataType.simpleString()
+            == T._parse_datatype_string(id_type).simpleString()
+        )
+        _assert_udf_free(df_on)
+
+
+class TestUdfRoute:
+    def test_mixed_with_a_raw_selection(self, spark: SparkSession, key_value_store_db, udf_rows):
+        def selections(q):
+            rpm = q.channel(channel_name="Engine RPM")
+            spd = q.channel(channel_name="Vehicle Speed Sensor")
+            return [(rpm > RPM_HIGH).alias("rpm_high"), spd.max().alias("spd_max")]
+
+        off, on, _ = _rows_both(spark, key_value_store_db, selections, config=_kvs_config())
+        assert on == off
+        assert any(len(r["rpm_high"]) > 0 for r in on)
+        # The UDF gets the merged intervals of rpm (variant 1) and its presence rows.
+        rows_on = udf_rows[1]
+        assert {v for (ch, v) in rows_on if ch == 5} == {1, PRESENCE_VARIANT}
+        assert {v for (ch, v) in rows_on if ch == 7} == {RAW_VARIANT}
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda rpm, _: (rpm > RPM_HIGH).debounce(2e6),
+            lambda rpm, spd: spd.where(rpm > RPM_HIGH).mean(),
+            lambda rpm, _: (rpm > RPM_HIGH).merge_intervals(5e6),
+        ],
+    )
+    def test_nested_conditions(self, spark: SparkSession, key_value_store_db, build):
+        def selections(q):
+            rpm = q.channel(channel_name="Engine RPM")
+            spd = q.channel(channel_name="Vehicle Speed Sensor")
+            return [build(rpm, spd).alias("nested")]
+
+        plan = QueryOptimizer().optimize(
+            selections(key_value_store_db.query), PushdownContext(T.LongType(), T.LongType())
+        )
+        assert plan.describe().startswith("variants [1=condition(op=gt, threshold=1500.0")
+        assert plan.native_selections(selections(key_value_store_db.query)) is None
+        off, on = _solve_both(spark, key_value_store_db, selections, config=_kvs_config())
+        _assert_same(on, off)
+
+    def test_resampled_comparison_pushes_only_the_resample(self, key_value_store_db):
+        q = key_value_store_db.query
+        rpm = q.channel(channel_name="Engine RPM")
+        plan = QueryOptimizer().optimize(
+            [(rpm.resample(1e7) > RPM_HIGH).alias("x")],
+            PushdownContext(T.LongType(), T.LongType()),
+        )
+        assert plan.describe().startswith("variants [1=resample(")

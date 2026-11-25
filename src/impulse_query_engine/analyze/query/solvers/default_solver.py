@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +20,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 )
 from impulse_query_engine.analyze.query.optimizer import (
     CHUNK_ROWS,
+    FACTOR_COL,
     RAW_VARIANT,
     VARIANT_COL,
     VARIANTS_COL,
@@ -29,11 +30,14 @@ from impulse_query_engine.analyze.query.optimizer import (
     QueryOptimizer,
     apply_pushdowns,
     builtin_rules,
+    finish_rows,
+    finishing_rules,
 )
 from impulse_query_engine.model.series.points_in_time_series import PointsInTimeSeries
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .native_calculated_channels import attach_identity, native_calculated_channel_rows
+from .native_solve import native_solve_rows
 from .query_solver import QuerySolver
 from .series_cache import SeriesCache
 from .solver_config import RawEncoder, SolverConfig
@@ -88,7 +92,9 @@ class TimeSeriesCache(SeriesCache):
         pushed : Iterable of PushedNode, optional
             Pushed-down nodes whose derived rows *pdf* carries, unpickled with the
             expressions built on this cache; :meth:`materialized` serves them by
-            identity.
+            identity.  Presence rows (``PRESENCE_VARIANT``) give a channel whose
+            pushdowns emitted no rows its metadata entry; no node reads them, so such
+            a node is evaluated normally, on the channel's empty raw rows.
         """
         self._cid_col = col_map["cid"]
         self._ch_col = col_map["ch"]
@@ -1245,12 +1251,26 @@ class DefaultSolver(QuerySolver):
         -------
         pyspark.sql.DataFrame
             DataFrame containing results for each container.
+
+        Notes
+        -----
+        When every selection is a pushdown as a whole whose rule builds its result in
+        Spark (see :meth:`PushdownPlan.native_selections`), e.g. ``(rpm > 5000)``, the
+        result is computed in Spark from the derived rows and no pandas UDF runs.
         """
         col_map = self.config.col_map
-        q, joined_df, container_count, plan, _ = self._prepare_channels_join(query, channels_df)
-        container_tag_cols, container_metric_cols = self._container_meta_cols(query)
-
+        q, joined_df, container_count, plan, native = self._prepare_channels_join(
+            query, channels_df, native=lambda p: p.native_selections(selections)
+        )
         schema = self._build_solve_output_schema(q, selections, dtypes)
+        if native is not None:
+            logger.info("Selections solved natively in Spark, without the pandas UDF")
+            if container_count == 0:
+                return self.spark.createDataFrame([], schema=schema)
+            rows = self._partitioned_by_container(joined_df, container_count, plan)
+            return native_solve_rows(rows, schema, native, selections, self.config)
+
+        container_tag_cols, container_metric_cols = self._container_meta_cols(query)
         solve_udf = F.pandas_udf(
             partial(
                 DefaultSolver._solve_udf,
@@ -1269,11 +1289,15 @@ class DefaultSolver(QuerySolver):
             schema,
             solve_udf,
             container_meta_cols=[*container_tag_cols, *container_metric_cols],
+            plan=plan,
         )
 
     def _prepare_channels_join(
-        self, query, channels_df, native_selections=None
-    ) -> tuple[DataFrame, DataFrame, int, PushdownPlan | None, dict | None]:
+        self,
+        query,
+        channels_df,
+        native: Callable[[PushdownPlan], Any] | None = None,
+    ) -> tuple[DataFrame, DataFrame, int, PushdownPlan | None, Any]:
         """Shared prelude for :meth:`solve` and :meth:`solve_calculated_channels`.
 
         Applies optional per-channel unit conversion, reads and column-maps the
@@ -1296,20 +1320,21 @@ class DefaultSolver(QuerySolver):
             Query object containing database and filter information.
         channels_df : pyspark.sql.DataFrame
             Channel-match DataFrame from the filter pipeline.
-        native_selections : list, optional
-            Calculated-channel selections that may be solved without the UDF
-            (see :meth:`PushdownPlan.native_targets`).
+        native : callable, optional
+            Maps the pushdown plan to what the caller needs to solve its selections
+            without the UDF (e.g. :meth:`PushdownPlan.native_targets` or
+            :meth:`PushdownPlan.native_selections`), or ``None`` if it cannot.
 
         Returns
         -------
-        tuple[DataFrame, DataFrame, int, PushdownPlan or None, dict or None]
-            ``(channels_q, joined_df, container_count, plan, native_targets)`` —
+        tuple[DataFrame, DataFrame, int, PushdownPlan or None, Any]
+            ``(channels_q, joined_df, container_count, plan, native)`` —
             the column-mapped channel-data DataFrame (authoritative for output
             ``container_id`` / ``channel_id`` types), the join fed to the
             grouped-map UDF, the number of distinct containers, the pushdown
             plan the UDF must receive (``None`` when nothing is pushed down),
-            and the native targets of *native_selections* (``None`` unless
-            they are solved natively; ``joined_df`` then holds no raw rows).
+            and the result of *native* (``None`` unless the selections are solved
+            natively; ``joined_df`` then holds no raw rows).
         """
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
@@ -1359,8 +1384,8 @@ class DefaultSolver(QuerySolver):
         channel_data = q
         targets = None
         if plan is not None:
-            if native_selections is not None:
-                targets = plan.native_targets(native_selections)
+            if native is not None:
+                targets = native(plan)
             if targets is None:
                 self._check_udf_rules(plan)
             # Raw rows are only read by the UDF, for selectors that are not pushed down.
@@ -1421,8 +1446,11 @@ class DefaultSolver(QuerySolver):
         channel-data columns and types; raw rows are kept only if *include_raw*.
         """
         key = [self.config.container_id_col, self.config.channel_id_col]
+        conv = self.config.conversion_factor_col
+        # Rules computing on converted values read the channel's factor in Spark.
+        factor = [F.col(conv).alias(FACTOR_COL)] if conv in channels_df.columns else []
         variants = channels_df.select(
-            *key, plan.channel_variants(F.col("selector_ids")).alias(VARIANTS_COL)
+            *key, plan.channel_variants(F.col("selector_ids")).alias(VARIANTS_COL), *factor
         )
         return apply_pushdowns(
             channels_q,
@@ -1604,10 +1632,31 @@ class DefaultSolver(QuerySolver):
 
         return meta_df
 
-    def _apply_grouped_map(
-        self, joined_df, container_count, schema, solve_udf, container_meta_cols=None
+    def _partitioned_by_container(
+        self, joined_df: DataFrame, container_count: int, plan: PushdownPlan | None
     ) -> DataFrame:
-        """Run *solve_udf* per container, or return an empty frame when none match."""
+        """*joined_df* partitioned by container, with the plan's finishing pass applied.
+
+        The finishing pass (:func:`finish_rows`) windows over each channel's derived
+        rows within a container, so it adds no shuffle here.
+        """
+        df = joined_df.repartition(container_count, self.config.container_id_col)
+        return df if plan is None else finish_rows(df, plan, self.config)
+
+    def _apply_grouped_map(
+        self,
+        joined_df,
+        container_count,
+        schema,
+        solve_udf,
+        container_meta_cols=None,
+        plan: PushdownPlan | None = None,
+    ) -> DataFrame:
+        """Run *solve_udf* per container, or return an empty frame when none match.
+
+        With a pushdown *plan*, its finishing pass runs first (see
+        :meth:`_partitioned_by_container`).
+        """
         if container_count == 0:
             return self.spark.createDataFrame([], schema=schema)
 
@@ -1616,11 +1665,14 @@ class DefaultSolver(QuerySolver):
         # on a single row per (container_id, channel_id) so the repeated values
         # don't inflate every group's pandas frame; the cache reads them off the
         # surviving ``selector_ids``-notna row (by notna, not by position), so the
-        # order is arbitrary — order by a constant to avoid an unnecessary
-        # per-channel sort (row_number just requires *some* ordering).
-        df = joined_df.repartition(container_count, self.config.container_id_col)
+        # order is arbitrary — row_number just requires *some* ordering.  Without a
+        # finishing pass, order by a constant to avoid an unnecessary per-channel
+        # sort; a finishing pass leaves the rows sorted by container, channel and
+        # variant, and ordering by the variant reuses that sort.
+        df = self._partitioned_by_container(joined_df, container_count, plan)
+        order = [F.col(VARIANT_COL)] if plan is not None and finishing_rules(plan) else [F.lit(1)]
         w = Window.partitionBy(self.config.container_id_col, self.config.channel_id_col).orderBy(
-            F.lit(1)
+            *order
         )
         df = df.withColumn("_rn", F.row_number().over(w))
         for col_name in ["selector_ids", *(container_meta_cols or [])]:
@@ -1756,7 +1808,7 @@ class DefaultSolver(QuerySolver):
         self._validate_calculated_channel_id_type(query)
         col_map = self.config.col_map
         q, joined_df, container_count, plan, targets = self._prepare_channels_join(
-            query, channels_df, native_selections=selections
+            query, channels_df, native=lambda p: p.native_targets(selections)
         )
 
         if targets is not None:
@@ -1785,6 +1837,7 @@ class DefaultSolver(QuerySolver):
             schema,
             solve_udf,
             container_meta_cols=[*container_tag_cols, *container_metric_cols],
+            plan=plan,
         )
 
         return attach_identity(res, selections, self.config.channel_id_col)

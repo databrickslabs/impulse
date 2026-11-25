@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 
 _RATE = "sample_rate"
 _DEFAULT_RATE = 1.0
-_TIME_TYPES = (T.ByteType, T.ShortType, T.IntegerType, T.LongType, T.DoubleType)
 
 
 class ResamplePushdownRule(PushdownRule):
@@ -78,9 +77,9 @@ class ResamplePushdownRule(PushdownRule):
         )
 
     def supports(self, pushdown: Pushdown, context: PushdownContext) -> bool:
-        time_types = (context.tstart_type, context.tend_type)
-        if not all(isinstance(t, _TIME_TYPES) for t in time_types):
+        if not context.numeric_times:
             return False
+        time_types = (context.tstart_type, context.tend_type)
         # Integral time columns receive the grid cast back from double; an integral
         # rate keeps every grid point integral, so that cast is exact.
         rate = dict(pushdown.params)[_RATE]

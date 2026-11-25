@@ -7,7 +7,9 @@
 # MAGIC tables must equal those of the run without pushdown. Covers calculated channels computed
 # MAGIC in Spark (one channel at two rates, so its samples fan out into two variants), pushed
 # MAGIC subtrees inside events and aggregations, a nested op above a pushdown, and a channel also
-# MAGIC used raw, which is not pushed down.
+# MAGIC used raw, which is not pushed down. Two outlier reports cover comparisons with a number:
+# MAGIC one of such events only, solved without the pandas UDF, and one that mixes them with
+# MAGIC debounced events, where the comparisons are pushed down below the UDF.
 
 # COMMAND ----------
 
@@ -32,6 +34,7 @@ SLOW_RATE = 5 * RATE  # A second rate on speed: two pushed-down variants of one 
 SOLVER_LOGGER = "impulse_query_engine.analyze.query.solvers.default_solver"
 PLAN_LOG = "Spark pushdown plan"
 NATIVE_LOG = "Calculated channels solved natively in Spark"
+NATIVE_SOLVE_LOG = "Selections solved natively in Spark"
 #: Rate of each calculated channel, by channel id (filled by build()).
 CALCULATED_RATES = {}
 
@@ -206,3 +209,54 @@ assert gold(p, "histogram_fact").agg(F.sum("hist_value")).first()[0] > 0, "empty
 # The calculated channel samples are covered by their metrics and the comparison above.
 for table in [*EXACT[1:], "calculated_channel_metrics"]:
     check(p, table, gold(p, table))
+
+# COMMAND ----------
+
+# Outlier detection: events that compare a channel with a number. On their own they are solved
+# in Spark without the pandas UDF; next to a debounced event the UDF runs, on the pushed-down
+# intervals.
+
+
+def build_outliers(prefix, pushdown, mixed):
+    cfg = config(p, query_engine={"enable_pushdown": pushdown, "pushdown_chunk_rows": 1000})
+    cfg["unity_sink"]["table_prefix"] = prefix
+    report = new_report(cfg)
+    rpm, speed, coolant = (
+        channel(report, name)
+        for name in ["Engine RPM", "Vehicle Speed Sensor", "Engine Coolant Temperature"]
+    )
+    events = [
+        BasicEvent(name="rpm_outlier", expr=rpm > 4000),
+        BasicEvent(name="rpm_stall", expr=500 > rpm),
+        BasicEvent(name="coolant_hot", expr=coolant >= 100),
+    ]
+    if mixed:
+        events.append(BasicEvent(name="speeding", expr=(speed > 120).debounce(5)))
+    for event in events:
+        report.add_event(event)
+    return report
+
+
+for mixed in (False, True):
+    name = f"{p.prefix}_outliers_{'mixed' if mixed else 'native'}"
+    outlier_logs = {}
+    for pushdown in (False, True):
+        prefix = name if pushdown else f"{name}_ref"
+        report = build_outliers(prefix, pushdown, mixed)
+        with solver_logs() as messages:
+            report.run()
+        outlier_logs[pushdown] = messages
+    assert not any(NATIVE_SOLVE_LOG in m for m in outlier_logs[False]), "native without opt-in"
+    native = any(NATIVE_SOLVE_LOG in m for m in outlier_logs[True])
+    assert native is not mixed, f"{name}: native solve {native}"
+    plans = [m for m in outlier_logs[True] if m.startswith(PLAN_LOG)]
+    assert plans and all("condition(op=" in m for m in plans), plans
+    actual = gold(p, "event_instance_fact", prefix=name)
+    expected_events = gold(p, "event_instance_fact", prefix=f"{name}_ref")
+    for label, diff in [
+        ("extra", actual.exceptAll(expected_events)),
+        ("missing", expected_events.exceptAll(actual)),
+    ]:
+        assert diff.count() == 0, f"{name}: {label} event rows {diff.take(5)}"
+    assert actual.count() > 0, f"{name}: no outlier events"
+    print(f"{name}: {actual.count()} event rows equal to {name}_ref; plans {plans}")

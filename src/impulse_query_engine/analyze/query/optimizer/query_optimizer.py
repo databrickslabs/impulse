@@ -10,6 +10,7 @@ from typing import Any
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
 
+from .condition_rule import ConditionPushdownRule
 from .plan import PushdownPlan
 from .pushdown import Pushdown, PushdownContext, PushdownRule, check_name
 from .resample_rule import ResamplePushdownRule
@@ -18,7 +19,7 @@ from .traversal import Classifier, discover
 
 def default_rules() -> tuple[PushdownRule, ...]:
     """All built-in pushdown rules."""
-    return (ResamplePushdownRule(),)
+    return (ResamplePushdownRule(), ConditionPushdownRule())
 
 
 @cache

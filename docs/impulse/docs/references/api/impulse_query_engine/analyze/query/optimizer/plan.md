@@ -122,6 +122,26 @@ given variant's rows of the channel resolved for ``selector_id``.
 ``None`` unless every selection is a ``CalculatedChannel`` whose
 whole expression is a pushdown emitting its result rows.
 
+#### native\_selections
+
+```python
+def native_selections(
+        selections: Iterable[Any]) -> list[tuple[Pushdown, int]] | None
+```
+
+The pushdowns computing the selections of a ``solve`` call, if Spark can produce them.
+
+**Arguments**:
+
+- `selections` (`Iterable`): The selections of a ``solve`` call.
+
+**Returns**:
+
+`list or None`: ``(pushdown, variant)`` per selection, in order: each selection is a
+pushed-down node as a whole whose rule builds its result in Spark
+(:meth:`PushdownRule.has_native_value`).  ``None`` unless every selection
+is such a node.
+
 #### channel\_variants
 
 ```python
