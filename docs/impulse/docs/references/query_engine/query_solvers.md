@@ -209,19 +209,24 @@ that downsample.
 ### Solves without the pandas UDF
 
 When every selection of a `solve()` call (in a report: of a solve batch) is a pushed-down
-expression as a whole, its result is computed entirely in Spark and no pandas UDF runs. This is
-the case for lightweight outlier detection, e.g.
+expression as a whole **and** Spark can produce its result, the result is computed entirely in
+Spark and no pandas UDF runs. Spark produces the results of comparisons (lists of intervals);
+this is the case for lightweight outlier detection, e.g.
 
 ```python
 rpm = q.channel(channel_name="eng_rpm")
 q.select((rpm > 5000).alias("rpm_high"), (rpm < 300).alias("rpm_low")).solve(spark, solver=solver)
 ```
 
-or a report whose events are all such comparisons. If any selection of the call needs the
-pandas evaluation, e.g. `(rpm > 5000).debounce(1e6)` or `speed.max()`, all of them are evaluated
-in the UDF as usual; their pushed-down parts still run in Spark. Either way the result is
-identical, including one row per container whose channels have data, with an empty list of
-intervals where a comparison never holds.
+or a report whose events are all such comparisons. A selection that is a series, e.g. a bare
+`rpm.resample(1e6)`, is pushed down too, but `solve()` returns series as serialized
+`SampleSeries` objects, which only the UDF produces; use a calculated channel (below) to get
+resampled rows without the UDF.
+
+If any selection of the call needs the UDF, e.g. `(rpm > 5000).debounce(1e6)`, `speed.max()` or
+`rpm.resample(1e6)`, all of them are evaluated in the UDF as usual; their pushed-down parts still
+run in Spark. Either way the result is identical, including one row per container whose channels
+have data, with an empty list of intervals where a comparison never holds.
 
 ### Calculated channels without the pandas UDF
 
