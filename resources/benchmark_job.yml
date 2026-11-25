@@ -51,8 +51,6 @@ resources:
         - {job_cluster_key: bench_cluster_wide, new_cluster: *bench_cluster}
         - {job_cluster_key: bench_cluster_udfs, new_cluster: *bench_cluster}
         - {job_cluster_key: bench_cluster_pushdown, new_cluster: *bench_cluster}
-        - {job_cluster_key: bench_cluster_limits, new_cluster: *bench_cluster}
-        - {job_cluster_key: bench_cluster_limits_pushdown, new_cluster: *bench_cluster}
 
       tasks:
         - task_key: setup
@@ -99,16 +97,20 @@ resources:
           depends_on: [{task_key: setup}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
-        # limits, limits_debounced: limit detection, without and with Spark pushdown, each pair
-        # on identical clusters.
+        # limits, limits_debounced: limit detection without and with Spark pushdown. Each on the
+        # cluster of a shorter task, after it: no more clusters than tasks in parallel (the
+        # workspace's subnet runs out of addresses), and both pairs' halves on a cluster that
+        # ran one task before. Also after that task failed, so that the limits are measured.
         - task_key: run_limits
-          job_cluster_key: bench_cluster_limits
-          depends_on: [{task_key: setup}]
+          job_cluster_key: bench_cluster_udfs
+          depends_on: [{task_key: run_udfs}]
+          run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
         - task_key: run_limits_pushdown
-          job_cluster_key: bench_cluster_limits_pushdown
-          depends_on: [{task_key: setup}]
+          job_cluster_key: bench_cluster_pushdown
+          depends_on: [{task_key: run_pushdown}]
+          run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
         - task_key: compare
