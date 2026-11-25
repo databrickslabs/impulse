@@ -1264,9 +1264,8 @@ class DefaultSolver(QuerySolver):
         )
         schema = self._build_solve_output_schema(q, selections, dtypes)
         if native is not None:
+            # A plan, so container_count > 0.
             logger.info("Selections solved natively in Spark, without the pandas UDF")
-            if container_count == 0:
-                return self.spark.createDataFrame([], schema=schema)
             rows = self._partitioned_by_container(joined_df, container_count, plan)
             return native_solve_rows(rows, schema, native, selections, self.config)
 

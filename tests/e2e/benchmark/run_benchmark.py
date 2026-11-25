@@ -36,7 +36,7 @@ from bench_utils import RESULTS_SCHEMA, fingerprint, params, report_config, run_
 from benchmark_metrics import Measurement, compute_kind
 from benchmark_report import (
     DELTA_CONTAINERS,
-    FRESH_SCHEMA_SCENARIOS,
+    FRESH_GOLD_SCENARIOS,
     LIMITS_SCENARIOS,
     SCENARIO_CONFIG,
     SCENARIO_FILTERS,
@@ -98,10 +98,12 @@ def builder(scenario, cfg):
 
 def prepare(scenario):
     """What happens in the silver and gold layers before the scenario's run."""
-    if scenario in FRESH_SCHEMA_SCENARIOS:
-        # Another report than the previous scenario's: start from an empty gold layer.
-        spark.sql(f"DROP SCHEMA {p.catalog}.{p.schema} CASCADE")
-        spark.sql(f"CREATE SCHEMA {p.catalog}.{p.schema}")
+    if scenario in FRESH_GOLD_SCENARIOS:
+        # Another report than the previous scenario's: start from an empty gold layer. Only
+        # the gold tables, so that other tables of the task's schema stay.
+        for table in spark.sql(f"SHOW TABLES IN {p.catalog}.{p.schema}").collect():
+            if table.tableName.startswith(f"{p.prefix}_"):
+                spark.sql(f"DROP TABLE {p.catalog}.{p.schema}.{table.tableName}")
     if scenario == "incremental_delta":
         ids = ", ".join(str(c) for c in DELTA_CONTAINERS)
         spark.sql(

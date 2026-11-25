@@ -52,9 +52,10 @@ Spark types of value columns the rules compute on, as double like ``SampleSeries
 def real_scalar(value: Any) -> float | None
 ```
 
-*value* as the float numpy computes with, or ``None`` unless it is a real number.
+*value* as the float numpy computes with, or ``None`` unless Spark can use it as is.
 
-Booleans (``bool``, ``numpy.bool_``) are not numbers here.
+Accepts integers and floats (Python or numpy, up to double precision); booleans are not
+numbers here.
 
 
 #### check\_name
@@ -207,6 +208,7 @@ Whether a series may emit no derived rows although it has samples (e.g. a
 
 comparison that never holds).  The pipeline then ships a presence row per
 channel (:data:`PRESENCE_VARIANT`), so the container still reaches the UDF.
+Only ordered rules may set it (checked by :class:`~.query_optimizer.QueryOptimizer`).
 
 
 #### finishes

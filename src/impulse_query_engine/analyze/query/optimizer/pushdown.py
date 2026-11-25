@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import abc
-import numbers
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import numpy as np
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import Column
@@ -56,16 +56,23 @@ VALUE_TYPES = (
 _NAME = re.compile(r"[a-z][a-z0-9]*(_[a-z0-9]+)*")
 
 
-def real_scalar(value: Any) -> float | None:
-    """*value* as the float numpy computes with, or ``None`` unless it is a real number.
+#: Scalar types numpy compares with float64 values as their float64 value, like Spark: Python
+#: and numpy integers and floats up to double precision.  Not ``Fraction`` (compared exactly)
+#: or ``numpy.longdouble`` (compared in extended precision).
+_SCALAR_TYPES = (int, float, np.integer, np.float16, np.float32, np.float64)
 
-    Booleans (``bool``, ``numpy.bool_``) are not numbers here.
+
+def real_scalar(value: Any) -> float | None:
+    """*value* as the float numpy computes with, or ``None`` unless Spark can use it as is.
+
+    Accepts integers and floats (Python or numpy, up to double precision); booleans are not
+    numbers here.
     """
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+    if isinstance(value, bool) or not isinstance(value, _SCALAR_TYPES):
         return None
     try:
         return float(value)
-    except (OverflowError, ValueError):
+    except OverflowError:
         return None
 
 
@@ -206,9 +213,11 @@ class PushdownRule(abc.ABC):
     #: Whether a series may emit no derived rows although it has samples (e.g. a
     #: comparison that never holds).  The pipeline then ships a presence row per
     #: channel (:data:`PRESENCE_VARIANT`), so the container still reaches the UDF.
+    #: Only ordered rules may set it (checked by :class:`~.query_optimizer.QueryOptimizer`).
     may_emit_nothing: ClassVar[bool] = False
     #: Whether the rule has the finishing pass (:meth:`finish_columns`,
-    #: :meth:`finish_keep`, :meth:`finish_row`).  Only ordered rules can finish.
+    #: :meth:`finish_keep`, :meth:`finish_row`).  Only ordered rules can finish (checked
+    #: by :class:`~.query_optimizer.QueryOptimizer`).
     finishes: ClassVar[bool] = False
 
     @abc.abstractmethod

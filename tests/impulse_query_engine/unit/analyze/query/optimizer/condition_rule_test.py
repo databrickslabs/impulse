@@ -1,6 +1,7 @@
 # pylint: disable=missing-function-docstring
 """Parity of the Spark condition pushdown (``channel op scalar``) with the pandas evaluation."""
 
+import fractions
 import math
 from dataclasses import dataclass
 
@@ -282,6 +283,23 @@ def test_container_where_the_condition_never_holds_is_present(spark):
     assert len(outcome.shipped_rows[1]) == 0
 
 
+def test_channel_with_only_nan_tstarts_is_present(spark):
+    # NaN tstarts all go to a channel's last chunk; the presence row still comes along.
+    nan = math.nan
+    series = {1: ([nan] * 6, [1, 2, 3, 4, 5, 6], [0.0] * 6), 2: ([0, 1], [1, 2], [3.0, 3.0])}
+    outcome = _evaluate(spark, _X > 1, series, T.DoubleType(), chunk_rows=2)
+    _assert_parity(outcome)
+    assert outcome.native[1] == []
+
+
+@pytest.mark.parametrize(
+    "threshold", [80, 80.5, np.float64(1.5), np.float32(0.1), np.int64(3), 2**70, math.inf]
+)
+def test_numeric_thresholds_are_matched(threshold):
+    pushdown = Classifier([ConditionPushdownRule()])(_X > threshold)
+    assert dict(pushdown.params)["threshold"] == float(threshold)
+
+
 @pytest.mark.parametrize(
     "build",
     [
@@ -289,6 +307,9 @@ def test_container_where_the_condition_never_holds_is_present(spark):
         lambda x: x > x,
         lambda x: x.resample(1) > 2,
         lambda x: x > "1",
+        # numpy compares these exactly or in extended precision, Spark in double.
+        lambda x: x > fractions.Fraction(1, 3),
+        lambda x: x > np.longdouble(1.5),
     ],
 )
 def test_not_matched(build):

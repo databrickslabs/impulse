@@ -34,7 +34,8 @@ Spark computes the merged intervals in two passes:
    comparisons pandas makes between their samples, including its rules for a
    trailing zero-duration interval and for dropping empty intervals.
 
-Exact unless two samples of different pieces share a ``tstart``: the UDF's
-cache orders those arbitrarily, and the pandas result depends on the order.
+Exact unless two selected samples share a ``tstart``: Spark orders them by
+``tend`` and value, the UDF's cache in their arbitrary arrival order, and pandas'
+merge depends on the order.
 
 

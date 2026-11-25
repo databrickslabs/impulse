@@ -61,8 +61,7 @@ def test_outlier_event_facts_are_identical_without_the_udf(spark, monkeypatch):
         drop_gold_tables(spark)
         udf_runs.append(0)
         report = _report(spark, enable_pushdown)
-        report.determine_report()
-        report.persist_results()
+        report.run()
         facts.append(
             spark.read.table(_EVENT_FACT)
             .drop("_created_at")

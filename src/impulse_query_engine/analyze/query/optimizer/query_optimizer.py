@@ -56,6 +56,13 @@ class QueryOptimizer:
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
             raise ValueError(f"pushdown rule names must be unique: {duplicates}")
+        for rule in self.rules:
+            # Presence rows and the finishing pass come from the ordered pass only.
+            if not rule.ordered and (rule.may_emit_nothing or rule.finishes):
+                raise ValueError(
+                    f"pushdown rule {rule.name!r}: may_emit_nothing and finishes need an "
+                    "ordered rule"
+                )
 
     def optimize(self, selections: Iterable[Any], context: PushdownContext) -> PushdownPlan:
         """Build the pushdown plan for the *selections* of one solve call.

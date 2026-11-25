@@ -327,12 +327,13 @@ class SeriesPipeline:
         ]
         for rule, ctx in contexts:
             df = _with_rule_columns(df, ctx, rule.row_columns(ctx))
-        # The channel's first sample, in one copy, ships the channel's presence row.
+        # The channel's first sample, in one copy, ships the channel's presence row: the
+        # start of its first block, in whichever chunk (all-NaN tstarts are in the last).
         presence = None
         if self.presence_ids:
             presence = (
-                F.col(FIRST_IN_CHUNK)
-                & (F.col(CHUNK) == 0)
+                F.coalesce(F.col(run_col(BLOCK, "starts")), F.lit(False))
+                & (F.col(run_col(BLOCK, "id")) == 1)
                 & F.coalesce(F.col(VARIANT_COL) == F.col(_PRESENT_IN), F.lit(False))
             )
         extra = _flag(run_col(BLOCK, "ends"))

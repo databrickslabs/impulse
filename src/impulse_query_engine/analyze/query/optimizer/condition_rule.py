@@ -72,8 +72,9 @@ class ConditionPushdownRule(PushdownRule):
        comparisons pandas makes between their samples, including its rules for a
        trailing zero-duration interval and for dropping empty intervals.
 
-    Exact unless two samples of different pieces share a ``tstart``: the UDF's
-    cache orders those arbitrarily, and the pandas result depends on the order.
+    Exact unless two selected samples share a ``tstart``: Spark orders them by
+    ``tend`` and value, the UDF's cache in their arbitrary arrival order, and pandas'
+    merge depends on the order.
     """
 
     name = "condition"
@@ -110,7 +111,7 @@ class ConditionPushdownRule(PushdownRule):
         if selector.series_type is not SeriesType.CONTINUOUS:
             return None
         # One NaN object, so equal comparisons have equal variant keys.
-        if threshold is not None and math.isnan(threshold):
+        if math.isnan(threshold):
             threshold = math.nan
         return Pushdown(
             rule=self,

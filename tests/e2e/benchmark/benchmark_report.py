@@ -60,9 +60,9 @@ LIMITS_SCENARIOS = {
     "limits_debounced_pushdown": True,
 }
 
-# Scenarios that run another report than the task's previous scenario: they start in an empty
-# schema, as the report config is incremental.
-FRESH_SCHEMA_SCENARIOS = {"limits_debounced", "limits_debounced_pushdown"}
+# Scenarios that run another report than the task's previous scenario: their gold tables are
+# dropped first, as the report config is incremental.
+FRESH_GOLD_SCENARIOS = {"limits_debounced", "limits_debounced_pushdown"}
 
 # Scenarios run with Spark pushdown, by the scenario they must equal bit for bit.
 PUSHDOWN_PAIRS = {
