@@ -8,6 +8,8 @@
 # MAGIC - `run_wide`: `wide_report`, the wide report.
 # MAGIC - `run_udfs`: `python_udfs`, the report of Python extensions.
 # MAGIC - `run_pushdown`: `full_pushdown`, the `full` report with Spark pushdown.
+# MAGIC - `run_limits`: `limits` and `limits_debounced`, limit detection without pushdown.
+# MAGIC - `run_limits_pushdown`: `limits_pushdown` and `limits_debounced_pushdown`, with pushdown.
 # MAGIC
 # MAGIC Appends one row per scenario to the results table; a failed scenario is recorded and fails
 # MAGIC the task.
@@ -33,9 +35,11 @@ from bench_utils import RESULTS_SCHEMA, fingerprint, params, report_config, run_
 from benchmark_metrics import Measurement, compute_kind
 from benchmark_report import (
     DELTA_CONTAINERS,
+    FRESH_SCHEMA_SCENARIOS,
     SCENARIO_CONFIG,
     SCENARIO_FILTERS,
     TASKS,
+    build_limits_report,
     build_report,
     build_udf_report,
     build_wide_report,
@@ -78,11 +82,19 @@ def builder(scenario, cfg):
         return lambda report: build_wide_report(report, signals, cap)
     if scenario == "python_udfs":
         return build_udf_report
+    if scenario.startswith("limits"):
+        signals = wide_signal_stats(spark, p.source)
+        debounced = scenario.startswith("limits_debounced")
+        return lambda report: build_limits_report(report, signals, debounced)
     return build_report
 
 
 def prepare(scenario):
-    """What happens in the silver layer before the scenario's run."""
+    """What happens in the silver and gold layers before the scenario's run."""
+    if scenario in FRESH_SCHEMA_SCENARIOS:
+        # Another report than the previous scenario's: start from an empty gold layer.
+        spark.sql(f"DROP SCHEMA {p.catalog}.{p.schema} CASCADE")
+        spark.sql(f"CREATE SCHEMA {p.catalog}.{p.schema}")
     if scenario == "incremental_delta":
         ids = ", ".join(str(c) for c in DELTA_CONTAINERS)
         spark.sql(

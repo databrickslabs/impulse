@@ -5,8 +5,13 @@
 - `build_wide_report` (`wide_report`): 100 channels, many events and histograms, a chain of
   calculated channels.
 - `build_udf_report` (`python_udfs`): Python extensions (`benchmark_udfs.py`).
+- `build_limits_report` (`limits`, `limits_debounced` and their `_pushdown` runs): limit
+  detection, events of 60 signals above their p90 and below their p10. `limits` compares the raw
+  signals, which pushdown solves without the pandas UDF; `limits_debounced` debounces and merges
+  the limits, so with pushdown the comparisons run in Spark and the rest in the UDF.
 
-Bump `BENCHMARK_VERSION` on any change of a report, its config or the scenarios.
+Bump `BENCHMARK_VERSION` when a change alters what an existing scenario measures (its report, its
+config or its compute); new scenarios start their own baselines without a bump.
 """
 
 import math
@@ -42,18 +47,32 @@ TASKS = {
     "run_wide": ("_wide", ["wide_report"]),
     "run_udfs": ("_udfs", ["python_udfs"]),
     "run_pushdown": ("_pushdown", ["full_pushdown"]),
+    "run_limits": ("_limits", ["limits", "limits_debounced"]),
+    "run_limits_pushdown": ("_limitspushdown", ["limits_pushdown", "limits_debounced_pushdown"]),
 }
 SCENARIOS = [scenario for _, scenarios in TASKS.values() for scenario in scenarios]
 
+# Scenarios that run another report than the task's previous scenario: they start in an empty
+# schema, as the report config is incremental.
+FRESH_SCHEMA_SCENARIOS = {"limits_debounced", "limits_debounced_pushdown"}
+
+# Scenarios run with Spark pushdown, by the scenario they must equal bit for bit.
+PUSHDOWN_PAIRS = {
+    "full_pushdown": "full",
+    "limits_pushdown": "limits",
+    "limits_debounced_pushdown": "limits_debounced",
+}
+
 # Report config of a scenario, by compute, merged per section after the compute's overrides and
 # before the run's (`report_config`); `None` removes a setting. With pushdown, most of the
-# resampled signals reach the pandas UDF at 1 Hz, so serverless workers fit a trip's ~50
-# channels in one solve: `full_pushdown` drops the compute's cap of 10 for Impulse's default.
+# resampled signals reach the pandas UDF at 1 Hz and the limits as intervals, so serverless
+# workers fit a trip's channels in one solve: the pushdown scenarios drop the compute's cap of 10
+# for Impulse's default.
 _PUSHDOWN = {"enable_pushdown": True}
 SCENARIO_CONFIG = {
-    "cluster": {"full_pushdown": {"query_engine": _PUSHDOWN}},
+    "cluster": {s: {"query_engine": _PUSHDOWN} for s in PUSHDOWN_PAIRS},
     "serverless": {
-        "full_pushdown": {"query_engine": {**_PUSHDOWN, "max_channels_per_batch": None}}
+        s: {"query_engine": {**_PUSHDOWN, "max_channels_per_batch": None}} for s in PUSHDOWN_PAIRS
     },
 }
 
@@ -64,9 +83,15 @@ COMPUTE_SCENARIOS = {
 }
 
 # Container filters of a scenario, by compute, added to the compute's; without, all trips. Trip
-# 39 (4.35 h) runs the wide report's calculated channels out of executor memory.
+# 39 (4.35 h) runs the wide report's calculated channels out of executor memory; the limit
+# scenarios, on the same signals, skip it too, so that their raw signals fit one pandas UDF task
+# without pushdown (serverless excludes it for every scenario).
+_NOT_TRIP_39 = [{"column_name": "container_id", "comparator": "!=", "value": 39}]
 SCENARIO_FILTERS = {
-    "cluster": {"wide_report": [{"column_name": "container_id", "comparator": "!=", "value": 39}]},
+    "cluster": {
+        "wide_report": _NOT_TRIP_39,
+        **{s: _NOT_TRIP_39 for s in SCENARIOS if s.startswith("limits")},
+    },
     "serverless": {
         "python_udfs": [{"column_name": "container_id", "comparator": "<", "value": 30}]
     },
@@ -340,6 +365,27 @@ def _round(x):
     return float(f"{x:.6g}")
 
 
+def _varying_signals(signals):
+    """`WIDE_SIGNAL_COUNT` of the varying `signals`, evenly spaced over the sorted names."""
+    varying = [
+        s
+        for s in signals
+        if s["std"] and s["hi"] > s["lo"] and s["p90"] is not None and s["p90"] > s["p10"]
+    ]
+    n = min(WIDE_SIGNAL_COUNT, len(varying))
+    return [varying[i * len(varying) // n] for i in range(n)]
+
+
+def _pick(varying, n, offset=0):
+    """`n` of the `varying` signals, evenly spaced, from `offset`."""
+    return [varying[(offset + i * len(varying) // n) % len(varying)] for i in range(n)]
+
+
+def limit_signals(signals):
+    """The signals of the limit events: those of the wide report's limit section."""
+    return _pick(_varying_signals(signals), WIDE_THRESHOLD_SIGNALS)
+
+
 def build_wide_report(report, signals, max_channels=None):
     """Adds the wide report to `report`; `signals` as returned by `wide_signal_stats`.
 
@@ -350,17 +396,8 @@ def build_wide_report(report, signals, max_channels=None):
     chain_length = min(WIDE_CHAIN_LENGTH, (max_channels or WIDE_CHAIN_LENGTH + 1) - 1)
     query = report.get_db().query
     ch = lambda name: query.channel(channel_name=name)
-    varying = [
-        s
-        for s in signals
-        if s["std"] and s["hi"] > s["lo"] and s["p90"] is not None and s["p90"] > s["p10"]
-    ]
-    # WIDE_SIGNAL_COUNT of the varying signals, evenly spaced over the sorted names.
-    n = min(WIDE_SIGNAL_COUNT, len(varying))
-    varying = [varying[i * len(varying) // n] for i in range(n)]
-    pick = lambda n, offset=0: [
-        varying[(offset + i * len(varying) // n) % len(varying)] for i in range(n)
-    ]
+    varying = _varying_signals(signals)
+    pick = lambda n, offset=0: _pick(varying, n, offset)
 
     trip = ContainerEvent(name="trip", desc="Whole trip")
     report.add_event(trip)
@@ -494,6 +531,33 @@ def build_wide_report(report, signals, max_channels=None):
         )
     )
     report.add_page(page)
+    return report
+
+
+def build_limits_report(report, signals, debounced=False):
+    """Adds limit events to `report`: each of the wide report's limit signals above its p90 and
+    below its p10; `signals` as returned by `wide_signal_stats`.
+
+    Only events, so a solve holds nothing but the limits. Raw comparisons are solved without the
+    pandas UDF with pushdown; `debounced` limits drop violations shorter than 0.5 s and merge
+    those less than 2 s apart, as limit toolboxes do, which keeps the UDF.
+    """
+    query = report.get_db().query
+    for i, s in enumerate(limit_signals(signals)):
+        signal = query.channel(channel_name=s["name"])
+        for side, expr in [
+            ("high", signal > _round(s["p90"])),
+            ("low", signal < _round(s["p10"])),
+        ]:
+            if debounced:
+                expr = expr.debounce(0.5 * US).merge_intervals(2 * US)
+            report.add_event(
+                BasicEvent(
+                    name=f"limit_{i:02d}_{side}",
+                    expr=expr,
+                    desc=f"{s['name']} {'above p90' if side == 'high' else 'below p10'}",
+                )
+            )
     return report
 
 
