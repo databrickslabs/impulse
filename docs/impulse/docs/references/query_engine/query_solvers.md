@@ -170,22 +170,10 @@ rows of every channel the selections reference are shipped into it. With pushdow
 rule-based optimizer finds expression subtrees that Spark can compute natively, computes them
 **before** the UDF, and ships their (smaller) result instead of the raw rows.
 
-Supported today:
-
-| Expression                         | Computed in Spark as                                                      |
-|------------------------------------|---------------------------------------------------------------------------|
-| `channel.resample(sample_rate)`    | The resampled series, identical to `SampleSeries.resample`, on a physical `channel()` or `channel_with_alias()` selection |
-| `channel > k` (also `>=`, `<`, `<=`, `==`, `!=`, and `k < channel`) | The intervals where the comparison with the number `k` holds, merged like `Intervals(..., merge_overlaps=True)`, on a physical `channel()` or `channel_with_alias()` selection; aliased selections compare the unit-converted values |
-
-The subtree can sit anywhere in an expression, e.g. `veh_spd.resample(1e6).cumtrapz()` or
-`(rpm > 4000).debounce(1e6)`, inside a `CalculatedChannel`, an aggregation, or an event condition;
-only the pushed-down part runs in Spark. A comparison is pushed down on a channel itself:
-in `rpm.resample(1e6) > 4000`, only the resample runs in Spark, the comparison runs in pandas.
-
-Comparisons follow numpy, like the pandas evaluation: NaN and null values satisfy only `!=`.
-Results are identical to the pandas evaluation, except when two samples of a channel share a
-`tstart`: pandas orders such samples arbitrarily, and its merged intervals can depend on that
-order.
+[Pushdown Rules](pushdown_rules.md) lists the subtrees Spark computes today (`resample` and
+comparisons with a number), their limits and the planned rules. The subtree can sit anywhere in
+an expression, inside a `CalculatedChannel`, an aggregation, or an event condition; only the
+pushed-down part runs in Spark.
 
 ```python
 solver = DefaultSolver(spark, enable_pushdown=True)
@@ -198,12 +186,6 @@ All selections of a solve share the raw data of their channels, so a channel is 
 if **every** use of it in the solve is a pushed-down subtree. If the same channel is also used in
 any other way, e.g. `rpm.resample(1e6)` next to `rpm.max()`, its raw rows are still needed: they are
 shipped as before and the resample runs in pandas. Results are the same either way.
-:::
-
-:::caution Intended for downsampling
-`resample` is pushed down regardless of the rate. A rate finer than the channel's native sample
-spacing (upsampling) produces **more** rows than the raw channel, so enable pushdown for workloads
-that downsample.
 :::
 
 ### Solves without the pandas UDF

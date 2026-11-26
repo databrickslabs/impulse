@@ -110,23 +110,9 @@ reads `veh_spd` raw, and that keeps ① in pandas too (condition 3).
 
 ### Available rules
 
-| Rule | Subtree computed in Spark | Result |
-|------|---------------------------|--------|
-| `resample` | `channel.resample(sample_rate)` | The resampled series |
-| `condition` | `channel > k`, also `>=`, `<`, `<=`, `==`, `!=` and `k < channel`, with `k` a number | The intervals where the comparison holds |
-
-Both apply to physical `channel()` and aliased `channel_with_alias()` selections. Until a rule
-covers a subtree, it is evaluated in stage 5 as before; [Spark pushdown](query_solvers.md#spark-pushdown-opt-in)
-describes what each rule computes and its limits.
-
-Planned rules, following the same flow:
-
-- **Scalar maps** such as `rpm * 60 / 1000`.
-- **`where` on the same channel**, such as `veh_spd.where(veh_spd > 0)`.
-- **Compositions** of rules on one channel, such as `rpm.resample(1e6) > 4000`, which today
-  pushes down the resample only.
-- **Interval operations** such as `debounce`, `merge_intervals`, `&`, `|` and `~`.
-- **Per-series aggregates**, statistics and histograms computed in Spark.
+Today Spark computes `resample(...)` and comparisons with a number such as `veh_spd > 0`; until a
+rule covers a subtree, it is evaluated in stage 5 as before. [Pushdown Rules](pushdown_rules.md)
+describes each rule, its limits and the planned rules.
 
 ## 5. Evaluate per container (pandas UDF)
 
