@@ -9,9 +9,7 @@ from collections.abc import Callable
 import pyspark.sql.functions as f
 import zlib
 from pyspark.sql import DataFrame, Row, SparkSession
-from pyspark.sql.types import (
-    StringType,
-)
+from pyspark.sql.types import ArrayType, MapType, StringType
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
@@ -33,6 +31,7 @@ from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.events.event import Event
 from impulse_reporting.persist.dimension_schema import STATS_AGGREGATOR_DIMENSION_SCHEMA
 from impulse_reporting.persist.fact_schema import STATS_AGGREGATOR_FACT_SCHEMA
+from impulse_reporting.util.constant_lookup import constant_map_lookup
 from impulse_reporting.util.event_instance_util import generate_event_instance_id_column
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
@@ -435,28 +434,14 @@ class StatsAggregator(Aggregation):
         """
 
         def _(df: DataFrame) -> DataFrame:
-            # Build mapping from aggregation name to event name
-            name_to_event_name = {}
-            for agg in aggregations:
-                if agg and agg.get_event():
-                    name_to_event_name[agg.get_name()] = agg.get_event().get_name()
+            # Aggregation name -> event name, looked up through one constant map.
+            name_to_event_name = {
+                agg.get_name(): agg.get_event().get_name()
+                for agg in aggregations
+                if agg and agg.get_event()
+            }
 
-            col_expr = None
-            for agg_name, event_name in name_to_event_name.items():
-                if event_name is None:
-                    continue
-                elif col_expr is None:
-                    col_expr = f.when(f.col("stats_name") == f.lit(agg_name), f.lit(event_name))
-                else:
-                    col_expr = col_expr.when(
-                        f.col("stats_name") == f.lit(agg_name), f.lit(event_name)
-                    )
-
-            event_name_column = (
-                col_expr.otherwise(None)
-                if col_expr is not None
-                else f.lit(None).cast(StringType())
-            )
+            event_name_column = constant_map_lookup(name_to_event_name, "stats_name", StringType())
             return df.withColumn("event_name", event_name_column)
 
         return _
@@ -574,37 +559,32 @@ class StatsAggregator(Aggregation):
         """
 
         def _(df: DataFrame) -> DataFrame:
-            is_cross_channel = f.col("signal_index") == f.lit(-1)
-            col_expr = None
+            # Aggregation name -> {aggregation_label -> explicit channel_name}, looked
+            # up through one constant map. The first descriptor naming a label wins.
+            label_channel_names: dict[str, dict[str, str]] = {}
             for agg in aggregations:
                 if agg is None:
                     continue
-                agg_name = agg.get_name()
                 for statistic in agg.cross_channel_custom_statistics:
                     if statistic.channel_name is None:
                         continue
-                    labels = statistic.aggregation_labels
-                    condition = (
-                        is_cross_channel
-                        & (f.col("stats_name") == f.lit(agg_name))
-                        & (f.col("aggregation_label").isin(labels))
-                    )
-                    if col_expr is None:
-                        col_expr = f.when(condition, f.lit(statistic.channel_name))
-                    else:
-                        col_expr = col_expr.when(condition, f.lit(statistic.channel_name))
+                    agg_labels = label_channel_names.setdefault(agg.get_name(), {})
+                    for label in statistic.aggregation_labels:
+                        agg_labels.setdefault(label, statistic.channel_name)
+
+            explicit_channel_name = constant_map_lookup(
+                label_channel_names,
+                "stats_name",
+                MapType(StringType(), StringType()),
+            )[f.col("aggregation_label")]
 
             # Cross-channel rows without an explicit descriptor channel_name default
             # to their aggregation_label; per-channel rows keep the channel_name the
             # previous pass set (never overwritten here).
-            cross_channel_default = f.when(is_cross_channel, f.col("aggregation_label")).otherwise(
-                f.col("channel_name")
-            )
-            channel_name_column = (
-                col_expr.otherwise(cross_channel_default)
-                if col_expr is not None
-                else cross_channel_default
-            )
+            channel_name_column = f.when(
+                f.col("signal_index") == f.lit(-1),
+                f.coalesce(explicit_channel_name, f.col("aggregation_label")),
+            ).otherwise(f.col("channel_name"))
             return df.withColumn("channel_name", channel_name_column)
 
         return _
@@ -628,30 +608,19 @@ class StatsAggregator(Aggregation):
         """
 
         def _(df: DataFrame) -> DataFrame:
-            # Build a nested when expression: for each stats_name, map signal_index to channel_name
-            col_expr = None
+            # Aggregation name -> channel_names, looked up through one constant map
+            # and indexed by signal_index. ``get`` returns NULL for a negative or
+            # out-of-range index (e.g. cross-channel rows with signal_index -1).
+            name_to_channel_names: dict[str, list[str]] = {}
             for agg in aggregations:
                 if agg is None:
                     continue
-                agg_name = agg.get_name()
-                channel_names = agg.channel_names
+                name_to_channel_names.setdefault(agg.get_name(), agg.channel_names)
 
-                # For this aggregation, create when conditions for each signal index
-                for idx, channel_name in enumerate(channel_names):
-                    condition = (f.col("stats_name") == f.lit(agg_name)) & (
-                        f.col("signal_index") == f.lit(idx)
-                    )
-                    if col_expr is None:
-                        col_expr = f.when(condition, f.lit(channel_name))
-                    else:
-                        col_expr = col_expr.when(condition, f.lit(channel_name))
-
-            channel_name_column = (
-                col_expr.otherwise(None)
-                if col_expr is not None
-                else f.lit(None).cast(StringType())
+            channel_names = constant_map_lookup(
+                name_to_channel_names, "stats_name", ArrayType(StringType())
             )
-            return df.withColumn("channel_name", channel_name_column)
+            return df.withColumn("channel_name", f.get(channel_names, f.col("signal_index")))
 
         return _
 
@@ -688,6 +657,8 @@ class StatsAggregator(Aggregation):
 
             timestamp_based_id = generate_event_instance_id_column()
             if container_event_stats_names:
+                # ``isin`` (not a constant map lookup): the optimizer turns larger
+                # lists into a hash-set probe, which is cheaper per row.
                 event_instance_id_column = f.when(
                     f.col("stats_name").isin(container_event_stats_names),
                     generate_event_instance_id_column(event_type=ContainerEvent),

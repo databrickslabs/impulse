@@ -1,4 +1,3 @@
-import pyspark.sql.functions as f
 from pyspark.sql import Column
 from pyspark.sql.types import IntegerType
 
@@ -8,6 +7,7 @@ from impulse_query_engine.analyze.query.query_builder import QueryBuilder
 from impulse_reporting.aggregations.aggregation import Aggregation
 from impulse_reporting.config.config_parser import Comparator, MetricFilter, TagFilter
 from impulse_reporting.events.event import Event
+from impulse_reporting.util.constant_lookup import constant_map_lookup
 
 
 class ReportEntityUtil:
@@ -31,21 +31,10 @@ class ReportEntityUtil:
         -------
         pyspark.sql.Column
             A Spark SQL Column expression mapping names to IDs, or None if no match is found.
+            Built as one constant map lookup (see ``constant_map_lookup``).
         """
-
         name_to_id = ReportEntityUtil._get_name_to_id_mapping(elements)
-        col_expr = None
-        for name, event_id in name_to_id.items():
-            if event_id is None:
-                continue
-            elif col_expr is None:
-                col_expr = f.when(f.col(element_name) == f.lit(name), f.lit(event_id))
-            else:
-                col_expr = col_expr.when(f.col(element_name) == f.lit(name), f.lit(event_id))
-
-        return (
-            col_expr.otherwise(None) if col_expr is not None else f.lit(None).cast(IntegerType())
-        )
+        return constant_map_lookup(name_to_id, element_name, IntegerType())
 
     @staticmethod
     def _get_name_to_id_mapping(elements: list[Aggregation] | list[Event]) -> dict:
