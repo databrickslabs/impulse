@@ -170,14 +170,10 @@ rows of every channel the selections reference are shipped into it. With pushdow
 rule-based optimizer finds expression subtrees that Spark can compute natively, computes them
 **before** the UDF, and ships their (smaller) result instead of the raw rows.
 
-Supported today:
-
-| Expression                         | Computed in Spark as                                                      |
-|------------------------------------|---------------------------------------------------------------------------|
-| `channel.resample(sample_rate)`    | The resampled series, identical to `SampleSeries.resample`, on a physical `channel()` or `channel_with_alias()` selection |
-
-The subtree can sit anywhere in an expression, e.g. `veh_spd.resample(1e6).cumtrapz()`, inside a
-`CalculatedChannel`, an aggregation, or an event condition; only the pushed-down part runs in Spark.
+[Pushdown Rules](pushdown_rules.md) lists the subtrees Spark computes today (`resample` and
+comparisons with a number), their limits and the planned rules. The subtree can sit anywhere in
+an expression, inside a `CalculatedChannel`, an aggregation, or an event condition; only the
+pushed-down part runs in Spark.
 
 ```python
 solver = DefaultSolver(spark, enable_pushdown=True)
@@ -192,11 +188,27 @@ any other way, e.g. `rpm.resample(1e6)` next to `rpm.max()`, its raw rows are st
 shipped as before and the resample runs in pandas. Results are the same either way.
 :::
 
-:::caution Intended for downsampling
-`resample` is pushed down regardless of the rate. A rate finer than the channel's native sample
-spacing (upsampling) produces **more** rows than the raw channel, so enable pushdown for workloads
-that downsample.
-:::
+### Solves without the pandas UDF
+
+When every selection of a `solve()` call (in a report: of a solve batch) is a pushed-down
+expression as a whole **and** Spark can produce its result, the result is computed entirely in
+Spark and no pandas UDF runs. Spark produces the results of comparisons (lists of intervals);
+this is the case for lightweight outlier detection, e.g.
+
+```python
+rpm = q.channel(channel_name="eng_rpm")
+q.select((rpm > 5000).alias("rpm_high"), (rpm < 300).alias("rpm_low")).solve(spark, solver=solver)
+```
+
+or a report whose events are all such comparisons. A selection that is a series, e.g. a bare
+`rpm.resample(1e6)`, is pushed down too, but `solve()` returns series as serialized
+`SampleSeries` objects, which only the UDF produces; use a calculated channel (below) to get
+resampled rows without the UDF.
+
+If any selection of the call needs the UDF, e.g. `(rpm > 5000).debounce(1e6)`, `speed.max()` or
+`rpm.resample(1e6)`, all of them are evaluated in the UDF as usual; their pushed-down parts still
+run in Spark. Either way the result is identical, including one row per container whose channels
+have data, with an empty list of intervals where a comparison never holds.
 
 ### Calculated channels without the pandas UDF
 
@@ -221,4 +233,6 @@ Auto-generated symbol-level docs:
   — the Spark pushdown optimizer and the interface for its rules;
   [`pipeline`](../api/impulse_query_engine/analyze/query/optimizer/pipeline.md) and
   [`SeriesContext`](../api/impulse_query_engine/analyze/query/optimizer/context.md) — how rules
-  run in Spark and what they can use.
+  run in Spark and what they can use;
+  [`ConditionPushdownRule`](../api/impulse_query_engine/analyze/query/optimizer/condition_rule.md)
+  — comparisons with a number.

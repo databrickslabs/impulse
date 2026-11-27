@@ -76,11 +76,12 @@ aliased channels, their source and target units.
 
 Pushed-down subtrees are computed **in Spark, before any pandas code runs**, and only the rest of
 each expression is left for the pandas UDF. The optimizer is rule-based: each rule computes one
-kind of subtree on the rows of one channel, e.g. `resample(...)` or filter conditions such as
-`veh_spd > 0`. All rules share the same reads of the channel data (see
-[Spark pushdown](query_solvers.md#spark-pushdown-opt-in)).
+kind of subtree on the rows of one channel, e.g. `resample(...)` or comparisons such as
+`veh_spd > 0` (see [Available rules](#available-rules)). All rules share the same reads of the
+channel data (see [Spark pushdown](query_solvers.md#spark-pushdown-opt-in)).
 
-The example expression forms this tree (`event` is used twice, so it appears twice):
+The example expression forms this tree (`event` is used twice, so it appears twice). It shows
+how the optimizer cuts out subtrees once a `where` rule is available, a planned rule:
 
 ```
 histogram2d(rpm_bins, speed_bins)          pandas UDF
@@ -104,11 +105,14 @@ The results of cut-out subtrees are **derived rows** that replace the raw rows o
 Here, instead of the full `veh_spd` channel, the UDF receives the event intervals ① (usually a few
 rows) and the samples with `veh_spd > 0` ②. A channel can ship several derived results like this.
 
-:::note Rules available today
-The optimizer currently implements the `resample` rule; rules for further operations such as
-filter conditions follow the same flow. Until a rule covers a subtree, it is evaluated in stage 5
-as before.
-:::
+With the rules available today, nothing in the example is pushed down: ② has no rule, so it
+reads `veh_spd` raw, and that keeps ① in pandas too (condition 3).
+
+### Available rules
+
+Today Spark computes `resample(...)` and comparisons with a number such as `veh_spd > 0`; until a
+rule covers a subtree, it is evaluated in stage 5 as before. [Pushdown Rules](pushdown_rules.md)
+describes each rule, its limits and the planned rules.
 
 ## 5. Evaluate per container (pandas UDF)
 
@@ -117,7 +121,7 @@ as before.
 - A `TimeSeriesCache` serves the container's channels, its container tags and metrics, and the
   results of pushed-down subtrees.
 - Each expression is **evaluated bottom-up, except for its pushed-down subtrees**: those arrive as
-  finished results from stage 4. In the example, the UDF clips the raw `eng_rpm` rows to the
+  finished results from stage 4. In the example, with the planned `where` rule, the UDF clips the raw `eng_rpm` rows to the
   precomputed event intervals ① and computes the 2D histogram against the precomputed `veh_spd`
   samples ②. Every other leaf loads its channel from the cache as a `SampleSeries` (or
   `PointsInTimeSeries` for POI channels), multiplied by the conversion factor for aliased
@@ -139,6 +143,9 @@ When **every** calculated channel of a `solve_calculated_channels()` call is pus
 whole, e.g. `CalculatedChannel(veh_spd.resample(1e6), {...})`, its rows come straight from stage 4
 and no pandas UDF runs (see
 [Calculated channels without the pandas UDF](query_solvers.md#calculated-channels-without-the-pandas-udf)).
+Likewise, when every selection of a `solve()` call is pushed down as a whole and Spark can produce
+its result, e.g. `veh_spd > 0`, the results are computed in Spark and stage 5 is skipped (see
+[Solves without the pandas UDF](query_solvers.md#solves-without-the-pandas-udf)).
 
 :::note Where the work happens
 Stages 2 to 4 are distributed Spark jobs; for rules that need samples in order, stage 4 even

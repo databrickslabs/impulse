@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import numbers
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +20,7 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .context import SeriesContext
-from .pushdown import Operand, Pushdown, PushdownContext, PushdownRule
+from .pushdown import Operand, Pushdown, PushdownContext, PushdownRule, real_scalar
 
 if TYPE_CHECKING:
     from impulse_query_engine.analyze.query.solvers.default_solver import TimeSeriesCache
@@ -30,7 +29,6 @@ if TYPE_CHECKING:
 
 _RATE = "sample_rate"
 _DEFAULT_RATE = 1.0
-_TIME_TYPES = (T.ByteType, T.ShortType, T.IntegerType, T.LongType, T.DoubleType)
 
 
 class ResamplePushdownRule(PushdownRule):
@@ -52,6 +50,10 @@ class ResamplePushdownRule(PushdownRule):
     numpy builds that fuse this into a multiply-add can differ by one ulp for
     fractional grids (e.g. seconds-as-double with a rate of ``0.1``); integral
     grids are exact.
+
+    A bare resample selection has no native ``solve()`` value: ``solve()`` returns a
+    series as a serialized ``SampleSeries``, which only the UDF produces.  Calculated
+    channels that are a resample are emitted from Spark (:meth:`emits_result_rows`).
     """
 
     name = "resample"
@@ -78,9 +80,9 @@ class ResamplePushdownRule(PushdownRule):
         )
 
     def supports(self, pushdown: Pushdown, context: PushdownContext) -> bool:
-        time_types = (context.tstart_type, context.tend_type)
-        if not all(isinstance(t, _TIME_TYPES) for t in time_types):
+        if not context.numeric_times:
             return False
+        time_types = (context.tstart_type, context.tend_type)
         # Integral time columns receive the grid cast back from double; an integral
         # rate keeps every grid point integral, so that cast is exact.
         rate = dict(pushdown.params)[_RATE]
@@ -211,8 +213,5 @@ def _sample_rate(args: tuple, kwargs: dict[str, Any]) -> float | None:
     """The resample rate of a ``resample(...)`` call, or ``None`` if unsupported."""
     if len(args) > 1 or set(kwargs) - {_RATE} or (args and kwargs):
         return None
-    rate = args[0] if args else kwargs.get(_RATE, _DEFAULT_RATE)
-    if isinstance(rate, bool) or not isinstance(rate, numbers.Real):
-        return None
-    rate = float(rate)
-    return rate if math.isfinite(rate) and rate > 0 else None
+    rate = real_scalar(args[0] if args else kwargs.get(_RATE, _DEFAULT_RATE))
+    return rate if rate is not None and math.isfinite(rate) and rate > 0 else None

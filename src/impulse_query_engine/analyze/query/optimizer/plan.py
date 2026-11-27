@@ -187,6 +187,27 @@ class PushdownPlan:
             )
         return targets
 
+    def native_selections(self, selections: Iterable[Any]) -> list[tuple[Pushdown, int]] | None:
+        """The pushdowns computing the selections of a ``solve`` call, if Spark can produce them.
+
+        Parameters
+        ----------
+        selections : Iterable
+            The selections of a ``solve`` call.
+
+        Returns
+        -------
+        list or None
+            ``(pushdown, variant)`` per selection, in order: each selection is a
+            pushed-down node as a whole whose rule builds its result in Spark
+            (:meth:`PushdownRule.has_native_value`).  ``None`` unless every selection
+            is such a node.
+        """
+        hits = [self.variant_of(selection) for selection in selections]
+        if not hits or any(h is None or not h[0].rule.has_native_value(h[0]) for h in hits):
+            return None
+        return hits
+
     def channel_variants(self, selector_ids: Column) -> Column:
         """Variant ids a matched channel ships, given its ``selector_ids`` array.
 

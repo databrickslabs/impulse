@@ -306,6 +306,13 @@ class TestRuleNames:
         with pytest.raises(ValueError, match="unique"):
             QueryOptimizer([ResamplePushdownRule(), ResamplePushdownRule()])
 
+    @pytest.mark.parametrize("flag", ["may_emit_nothing", "finishes"])
+    def test_per_sample_rules_can_neither_emit_nothing_nor_finish(self, flag):
+        # Presence rows and the finishing pass only exist in the ordered pass.
+        rule = type("_PerSample", (ResamplePushdownRule,), {"ordered": False, flag: True})()
+        with pytest.raises(ValueError, match="need an ordered rule"):
+            QueryOptimizer([rule])
+
     def test_plan_rejects_two_rules_sharing_a_name(self, rpm, spd):
         first, second = ResamplePushdownRule(), ResamplePushdownRule()
         rpm_1s, spd_2s = rpm.resample(1e6), spd.resample(2e6)

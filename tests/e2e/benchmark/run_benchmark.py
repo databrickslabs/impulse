@@ -8,6 +8,8 @@
 # MAGIC - `run_wide`: `wide_report`, the wide report.
 # MAGIC - `run_udfs`: `python_udfs`, the report of Python extensions.
 # MAGIC - `run_pushdown`: `full_pushdown`, the `full` report with Spark pushdown.
+# MAGIC - `run_limits`: `limits` and `limits_debounced`, limit detection without pushdown.
+# MAGIC - `run_limits_pushdown`: `limits_pushdown` and `limits_debounced_pushdown`, with pushdown.
 # MAGIC
 # MAGIC Appends one row per scenario to the results table; a failed scenario is recorded and fails
 # MAGIC the task.
@@ -26,6 +28,7 @@ whl = max(glob.glob(f"{dbutils.widgets.get('wheel_dir')}/databricks_impulse-*.wh
 # COMMAND ----------
 
 import datetime
+import functools
 import json
 
 import benchmark_udfs
@@ -33,9 +36,12 @@ from bench_utils import RESULTS_SCHEMA, fingerprint, params, report_config, run_
 from benchmark_metrics import Measurement, compute_kind
 from benchmark_report import (
     DELTA_CONTAINERS,
+    FRESH_GOLD_SCENARIOS,
+    LIMITS_SCENARIOS,
     SCENARIO_CONFIG,
     SCENARIO_FILTERS,
     TASKS,
+    build_limits_report,
     build_report,
     build_udf_report,
     build_wide_report,
@@ -71,18 +77,33 @@ def scenario_config(scenario):
     )
 
 
+@functools.cache
+def signal_stats():
+    """`wide_signal_stats` of the source, which no scenario changes: one query per task."""
+    return wide_signal_stats(spark, p.source)
+
+
 def builder(scenario, cfg):
     if scenario == "wide_report":
-        signals = wide_signal_stats(spark, p.source)
+        signals = signal_stats()
         cap = cfg.get("query_engine", {}).get("max_channels_per_batch")
         return lambda report: build_wide_report(report, signals, cap)
     if scenario == "python_udfs":
         return build_udf_report
+    if scenario in LIMITS_SCENARIOS:
+        signals, debounced = signal_stats(), LIMITS_SCENARIOS[scenario]
+        return lambda report: build_limits_report(report, signals, debounced)
     return build_report
 
 
 def prepare(scenario):
-    """What happens in the silver layer before the scenario's run."""
+    """What happens in the silver and gold layers before the scenario's run."""
+    if scenario in FRESH_GOLD_SCENARIOS:
+        # Another report than the previous scenario's: start from an empty gold layer. Only
+        # the gold tables, so that other tables of the task's schema stay.
+        for table in spark.sql(f"SHOW TABLES IN {p.catalog}.{p.schema}").collect():
+            if table.tableName.startswith(f"{p.prefix}_"):
+                spark.sql(f"DROP TABLE {p.catalog}.{p.schema}.{table.tableName}")
     if scenario == "incremental_delta":
         ids = ", ".join(str(c) for c in DELTA_CONTAINERS)
         spark.sql(

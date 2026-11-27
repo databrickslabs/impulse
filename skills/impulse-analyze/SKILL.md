@@ -134,10 +134,12 @@ DefaultSolver(spark, config=None, is_raw_data=False, drop_implausible_data=False
 - `drop_implausible_data=True` drops rows where `is_plausible = false` (requires `is_raw_data=True`).
   A `channels.filters` entry on `is_plausible` with `is_raw_data=True` is rejected at construction; use
   `drop_implausible_data` instead.
-- `enable_pushdown=True` computes supported expression subtrees (e.g. `channel.resample(rate)`)
-  natively in Spark before the pandas UDF, so fewer rows are shipped to it; the ad-hoc equivalent of
-  `query_engine.enable_pushdown` (see `impulse-config`). A channel is pushed down only when every use
-  of it in the solve is. Results are the same either way.
+- `enable_pushdown=True` computes supported expression subtrees (`channel.resample(rate)`, and
+  comparisons with a number such as `rpm > 4000`) natively in Spark before the pandas UDF, so fewer
+  rows are shipped to it; the ad-hoc equivalent of `query_engine.enable_pushdown` (see
+  `impulse-config`). A channel is pushed down only when every use of it in the solve is. When every
+  selection is such a comparison, `solve()` runs without the pandas UDF. Results are the same either
+  way.
 - `config` takes a `SolverConfig` for column-name remapping / project scoping — the same object
   described under `solver_config` in `impulse-config`.
 
