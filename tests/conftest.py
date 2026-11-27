@@ -42,6 +42,8 @@ def spark(tmp_path_factory, worker_id) -> SparkSession:
         .config("spark.sql.shuffle.partitions", 1)
         .config("spark.default.parallelism", 1)
         .config("spark.ui.enabled", "false")
+        # One session serves all of a worker's tests; the 1 GB default runs out.
+        .config("spark.driver.memory", "2g")
     )
     # configure_spark_with_delta_pip resolves the Delta jars via ivy at JVM launch. Under
     # xdist, workers sharing the default ~/.ivy2 race on a cold cache and some fail with
