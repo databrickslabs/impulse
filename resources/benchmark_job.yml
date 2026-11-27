@@ -97,7 +97,7 @@ resources:
           depends_on: [{task_key: setup}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
-        # limits, limits_debounced: limit detection without and with Spark pushdown. Each on the
+        # limits, limits_debounced, limits_resampled: limit detection without and with Spark pushdown. Each on the
         # cluster of a shorter task, after it: no more clusters than tasks in parallel (the
         # workspace's subnet runs out of addresses), and both pairs' halves on a cluster that
         # ran one task before. Also after that task failed, so that the limits are measured.

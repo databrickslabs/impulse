@@ -10,15 +10,17 @@ over the channel data.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+import copy
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import Column, Window, WindowSpec
 
-from .pushdown import FACTOR_COL, VARIANT_COL
+from .pushdown import FACTOR_COL, VARIANT_COL, check_name
 
 if TYPE_CHECKING:
     from .pushdown import Pushdown, PushdownRule
@@ -174,26 +176,88 @@ class SeriesContext:
         has_factor: bool = False,
     ):
         self._rule = rule
-        self._variants = variants
+        self._variants = dict(variants)
         self._key = tuple(key)
         self._order = tuple(order)
         self._ordered = ordered
         self._runs = dict(runs)
         self._kept = kept
         self._has_factor = has_factor
+        # Column names are the prefix plus the rule's name for them; scoped contexts
+        # extend the prefix (see scoped()).
+        self._prefix = f"_pd_rule__{rule.name}__"
+        self._scope: str | None = None
+
+    def _derived(self, **attributes) -> SeriesContext:
+        """A copy of this context with the given attributes (without their underscore)."""
+        ctx = copy.copy(self)
+        for name, value in attributes.items():
+            setattr(ctx, f"_{name}", value)
+        return ctx
 
     def kept_stage(self) -> SeriesContext:
         """This context, for the hooks that run on the kept samples."""
-        return SeriesContext(
-            self._rule,
-            self._variants,
-            self._key,
-            self._order,
-            self._ordered,
-            self._runs,
-            kept=True,
-            has_factor=self._has_factor,
+        return self._derived(kept=True)
+
+    def restricted(self, variant_ids: Iterable[int]) -> SeriesContext:
+        """This context for a subset of its variants, with the same column names.
+
+        Lets a rule compute columns for some of its variants only (e.g. those
+        absorbing another pushdown).
+        """
+        ids = set(variant_ids)
+        return self._derived(variants={v: p for v, p in self._variants.items() if v in ids})
+
+    def scoped(
+        self, scope: str, rule: PushdownRule, variants: Mapping[int, Pushdown]
+    ) -> SeriesContext:
+        """A context for *rule*'s hooks on some of this rule's variants, in its own namespace.
+
+        A rule absorbing a pushed operand (:attr:`~.pushdown.Pushdown.absorbed`) runs
+        the operand's rule's hooks through it: *variants* maps each of its variant
+        ids to the absorbed pushdown, so :meth:`param` and :meth:`per_variant` read
+        that pushdown.  Column names live under *scope* within this rule's names, so
+        they cannot collide with the rule's own as long as those don't start with
+        ``"<scope>_"``.  Return the scoped hooks' columns through :meth:`columns`.
+
+        Raises
+        ------
+        ValueError
+            If *rule* defines runs of its own (:meth:`PushdownRule.runs`): the
+            pipeline only computes the runs of the rules it was given.
+        """
+        if self._scope is not None:
+            raise ValueError(f"{self._rule.name}: scopes do not nest")
+        if rule.runs():
+            raise ValueError(f"{rule.name}: rules with runs of their own cannot be absorbed")
+        unknown = set(variants) - set(self._variants)
+        if unknown:
+            raise ValueError(f"{self._rule.name}: variants {sorted(unknown)} are not the rule's")
+        return self._derived(
+            rule=rule,
+            variants=dict(variants),
+            runs={},
+            prefix=f"{self._prefix}{check_name('scope', scope)}_",
+            scope=scope,
         )
+
+    def columns(self, columns: Mapping[str, Column]) -> dict[str, Column]:
+        """The columns of a scoped context's hooks, named for the enclosing rule's hook.
+
+        Each column is defined for the scope's variants only: the absorbed rule's
+        columns may fail for variants without its parameters.
+        """
+        if self._scope is None:
+            raise TypeError(f"{self._rule.name}: columns() is for scoped contexts")
+        return {
+            f"{self._scope}_{check_name('column', name)}": F.when(self.active, column)
+            for name, column in columns.items()
+        }
+
+    @property
+    def variants(self) -> Mapping[int, Pushdown]:
+        """The variants the hooks compute, by variant id."""
+        return MappingProxyType(self._variants)
 
     # --- always available -------------------------------------------------------
 
@@ -204,7 +268,7 @@ class SeriesContext:
 
     def name(self, column: str) -> str:
         """Pipeline name of the rule's column *column*."""
-        return f"_pd_rule__{self._rule.name}__{column}"
+        return f"{self._prefix}{column}"
 
     def col(self, column: str) -> Column:
         """The rule's column *column*, defined by an earlier hook entry."""
@@ -331,6 +395,27 @@ class SeriesContext:
         if not self._kept:
             raise TypeError(f"{self._rule.name}: block_end is available to kept samples only")
         return F.col(BLOCK_END)
+
+    @property
+    def kept_in_chunk_reversed(self) -> WindowSpec:
+        """Window over the kept samples of the sample's chunk in reverse series order.
+
+        For ``lag`` / ``lead`` (``lead`` is the previous kept sample) and, with a
+        running frame, for looking forward.  It is the order the pipeline already
+        sorts the kept samples in, so it adds no sort; the ascending
+        :attr:`in_chunk` would sort them once more.
+        """
+        self._require_ordered("kept_in_chunk_reversed")
+        if not self._kept:
+            raise TypeError(
+                f"{self._rule.name}: kept_in_chunk_reversed is available to kept samples only"
+            )
+        return reverse_chunk_window(self._key, self._order)
+
+
+def reverse_chunk_window(key: Sequence[str], order: Sequence[str]) -> WindowSpec:
+    """Window over a series' chunk in reverse series order, without a frame."""
+    return Window.partitionBy(*key, CHUNK).orderBy(*[F.col(c).desc() for c in order])
 
 
 #: Columns of the finishing pass, shared by all finishing rules.

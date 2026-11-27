@@ -8,8 +8,10 @@
 # MAGIC - `run_wide`: `wide_report`, the wide report.
 # MAGIC - `run_udfs`: `python_udfs`, the report of Python extensions.
 # MAGIC - `run_pushdown`: `full_pushdown`, the `full` report with Spark pushdown.
-# MAGIC - `run_limits`: `limits` and `limits_debounced`, limit detection without pushdown.
-# MAGIC - `run_limits_pushdown`: `limits_pushdown` and `limits_debounced_pushdown`, with pushdown.
+# MAGIC - `run_limits`: `limits`, `limits_debounced` and `limits_resampled`, limit detection without
+# MAGIC   pushdown.
+# MAGIC - `run_limits_pushdown`: `limits_pushdown`, `limits_debounced_pushdown` and
+# MAGIC   `limits_resampled_pushdown`, with pushdown.
 # MAGIC
 # MAGIC Appends one row per scenario to the results table; a failed scenario is recorded and fails
 # MAGIC the task.
@@ -91,8 +93,8 @@ def builder(scenario, cfg):
     if scenario == "python_udfs":
         return build_udf_report
     if scenario in LIMITS_SCENARIOS:
-        signals, debounced = signal_stats(), LIMITS_SCENARIOS[scenario]
-        return lambda report: build_limits_report(report, signals, debounced)
+        signals, options = signal_stats(), LIMITS_SCENARIOS[scenario]
+        return lambda report: build_limits_report(report, signals, **options)
     return build_report
 
 

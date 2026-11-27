@@ -21,6 +21,7 @@ from impulse_query_engine.analyze.query.optimizer import (
     FACTOR_COL,
     PRESENCE_VARIANT,
     VARIANT_COL,
+    VARIANTS_COL,
     Classifier,
     ConditionPushdownRule,
     PushdownContext,
@@ -103,6 +104,8 @@ class _Outcome:
     decoded: dict
     native: dict
     shipped_rows: dict
+    #: Rows of the ordered pass, before the finishing pass merges them (no presence rows).
+    pieces: int = 0
 
 
 def _evaluate(
@@ -119,14 +122,34 @@ def _evaluate(
     Pandas: the UDF's cache on the raw rows.  Spark: the pipeline, its finishing
     pass, then the UDF's cache on the shipped rows and the native solve() rows.
     """
-    expr = expr.alias("x_cond")
-    plan = QueryOptimizer().optimize(
-        [expr], PushdownContext(time_type, time_type, value_type=value_type)
+    (outcome,) = _evaluate_all(
+        spark, [expr], series_by_cid, time_type, chunk_rows, factor, value_type
     )
-    (selector,) = expr.get_selectors()
-    sid = selector.selector_id
+    return outcome
+
+
+def _evaluate_all(
+    spark,
+    exprs,
+    series_by_cid,
+    time_type=T.LongType(),
+    chunk_rows=None,
+    factor=_NO_FACTOR,
+    value_type=T.DoubleType(),
+) -> list[_Outcome]:
+    """:func:`_evaluate` for the selections *exprs* of one solve, all on one channel."""
+    names = [f"x_cond{i}" for i in range(len(exprs))]
+    exprs = [expr.alias(name) for expr, name in zip(exprs, names, strict=True)]
+    plan = QueryOptimizer().optimize(
+        exprs, PushdownContext(time_type, time_type, value_type=value_type)
+    )
+    (sid,) = {s.selector_id for expr in exprs for s in expr.get_selectors()}
     df, variants = channel_rows(
         spark, {(cid, _CH, 1): s for cid, s in series_by_cid.items()}, time_type
+    )
+    # The channel ships every variant of the plan, as in a solve.
+    variants = variants.withColumn(
+        VARIANTS_COL, F.array(*[F.lit(v) for v in sorted(plan.pushdowns_by_variant)])
     )
     df = df.withColumn("value", F.col("value").cast(value_type))
     if factor is not _NO_FACTOR:
@@ -147,30 +170,34 @@ def _evaluate(
     raw = df.withColumn("selector_ids", F.array(F.lit(sid).cast("long")))
     if factor is not _NO_FACTOR:
         raw = raw.withColumn("conversion_factor", F.lit(factor).cast("double"))
-    expected = {
-        cid: expr.build(TimeSeriesCache(pdf, CONFIG.col_map))
-        for cid, pdf in by_container(raw).items()
-    }
+    raw_pdfs = by_container(raw)
     shipped_pdfs = by_container(finished)
-    decoded = {
-        cid: expr.build(TimeSeriesCache(pdf, CONFIG.col_map, pushed=plan.pushed_nodes))
-        for cid, pdf in shipped_pdfs.items()
-    }
+    pieces = shipped.where(F.col(VARIANT_COL) != PRESENCE_VARIANT).toPandas()
     schema = T.StructType(
         [
             T.StructField("container_id", T.LongType()),
-            T.StructField("x_cond", T.ArrayType(T.ArrayType(T.DoubleType()))),
+            *[T.StructField(name, T.ArrayType(T.ArrayType(T.DoubleType()))) for name in names],
         ]
     )
-    native_hits = plan.native_selections([expr])
-    native = {}
+    native_hits = plan.native_selections(exprs)
+    native_rows = []
     if native_hits is not None:
-        native = {
-            r["container_id"]: r["x_cond"]
-            for r in native_solve_rows(finished, schema, native_hits, [expr], CONFIG).collect()
+        native_rows = native_solve_rows(finished, schema, native_hits, exprs, CONFIG).collect()
+    outcomes = []
+    for expr, name in zip(exprs, names, strict=True):
+        _, variant = plan.variant_of(expr) or (None, None)
+        expected = {
+            cid: expr.build(TimeSeriesCache(pdf, CONFIG.col_map)) for cid, pdf in raw_pdfs.items()
         }
-    rows = {cid: pdf[pdf[VARIANT_COL] != PRESENCE_VARIANT] for cid, pdf in shipped_pdfs.items()}
-    return _Outcome(plan, expected, decoded, native, rows)
+        decoded = {
+            cid: expr.build(TimeSeriesCache(pdf, CONFIG.col_map, pushed=plan.pushed_nodes))
+            for cid, pdf in shipped_pdfs.items()
+        }
+        native = {r["container_id"]: r[name] for r in native_rows}
+        rows = {cid: pdf[pdf[VARIANT_COL] == variant] for cid, pdf in shipped_pdfs.items()}
+        n_pieces = int((pieces[VARIANT_COL] == variant).sum())
+        outcomes.append(_Outcome(plan, expected, decoded, native, rows, n_pieces))
+    return outcomes
 
 
 def _udf_encoded(intervals: Intervals) -> list:
@@ -305,6 +332,8 @@ def test_numeric_thresholds_are_matched(threshold):
     [
         lambda x: x > True,
         lambda x: x > x,
+        # Without the resample rule, the resample is not a pushdown the comparison can
+        # absorb (see condition_on_resample_test.py).
         lambda x: x.resample(1) > 2,
         lambda x: x > "1",
         # numpy compares these exactly or in extended precision, Spark in double.

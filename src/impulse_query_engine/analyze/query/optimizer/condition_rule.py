@@ -28,6 +28,7 @@ from .pushdown import (
     PushdownRule,
     real_scalar,
 )
+from .resample_rule import ResamplePushdownRule, kept_bucket
 
 if TYPE_CHECKING:
     from impulse_query_engine.analyze.query.solvers.default_solver import TimeSeriesCache
@@ -52,8 +53,10 @@ _FLIPPED = {"gt": "lt", "ge": "le", "lt": "gt", "le": "ge", "eq": "eq", "ne": "n
 class ConditionPushdownRule(PushdownRule):
     """Pushes ``channel op scalar`` (``>``, ``>=``, ``<``, ``<=``, ``==``, ``!=``) down to Spark.
 
-    The channel is a continuous physical or aliased selection; the scalar may come
-    first (``500 < rpm``).  The result is what pandas computes,
+    The channel is a continuous physical or aliased selection, or its resample
+    (``rpm.resample(1e6) > 4000``), which the rule then absorbs
+    (:attr:`~.pushdown.Pushdown.absorbed`) and computes in the same pass.  The scalar
+    may come first (``500 < rpm``).  The result is what pandas computes,
     ``Intervals(tstarts[holds], tends[holds], merge_overlaps=True)``: the samples
     where the comparison holds, merged where one starts at or before the previous
     one's ``tend``.  Comparisons follow numpy: NaN and null values satisfy only
@@ -72,9 +75,17 @@ class ConditionPushdownRule(PushdownRule):
        comparisons pandas makes between their samples, including its rules for a
        trailing zero-duration interval and for dropping empty intervals.
 
+    On a resample, the samples are the resampled grid rows.  The resample keeps the
+    last sample of each grid bucket, whose grid rows all hold its value and follow
+    each other without a gap, so a piece is a run of consecutive selected buckets of
+    a block within a chunk; a trailing zero-duration grid point is a piece of its
+    own.  The comparison computes the resample's columns for its own variants, even
+    when the channel also ships the resample itself.
+
     Exact unless two selected samples share a ``tstart``: Spark orders them by
     ``tend`` and value, the UDF's cache in their arbitrary arrival order, and pandas'
-    merge depends on the order.
+    merge depends on the order.  On a resample, the limits of
+    :class:`~.resample_rule.ResamplePushdownRule` apply as well.
     """
 
     name = "condition"
@@ -105,8 +116,15 @@ class ConditionPushdownRule(PushdownRule):
         else:
             return None
         threshold = real_scalar(other)
-        selector = operand(series)
-        if threshold is None or not isinstance(selector, TimeSeriesSelector):
+        if threshold is None:
+            return None
+        classified = operand(series)
+        absorbed: tuple[Pushdown, ...] = ()
+        if isinstance(classified, TimeSeriesSelector):
+            selector = classified
+        elif _is_absorbable(classified):
+            selector, absorbed = classified.selector, (classified,)
+        else:
             return None
         if selector.series_type is not SeriesType.CONTINUOUS:
             return None
@@ -119,10 +137,15 @@ class ConditionPushdownRule(PushdownRule):
             # The alias flag is part of the variant key: the selector id ignores it.
             params=((_OP, op), (_THRESHOLD, threshold), (_ALIAS, bool(selector.uses_alias))),
             consumed=(selector,),
+            absorbed=absorbed,
         )
 
     def supports(self, pushdown: Pushdown, context: PushdownContext) -> bool:
-        return context.numeric_times and isinstance(context.value_type, VALUE_TYPES)
+        return (
+            context.numeric_times
+            and isinstance(context.value_type, VALUE_TYPES)
+            and all(inner.rule.supports(inner, context) for inner in pushdown.absorbed)
+        )
 
     def result_type(self, pushdown: Pushdown) -> type:
         return Intervals
@@ -133,37 +156,118 @@ class ConditionPushdownRule(PushdownRule):
     # --- pass 1: pieces --------------------------------------------------------------
 
     def row_columns(self, ctx: SeriesContext) -> Mapping[str, Column]:
-        selected, joins = ctx.col("selected"), ctx.col("joins")
+        plain, resampled = _inputs(ctx)
         value = ctx.converted_value
-        running = ctx.in_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
-        return {
-            "selected": ctx.per_variant(lambda p: _holds(p, value)),
-            # The sample continues the piece of the previous sample in its chunk.
-            "joins": F.coalesce(
-                selected
-                & ~ctx.first_in_chunk
-                & _greater(ctx.tend, ctx.tstart)
-                & F.coalesce(F.lag(selected).over(ctx.in_chunk), F.lit(False))
-                & ctx.prev.tstart.isNotNull()
-                & _at_most(ctx.tstart, ctx.prev.tend),
-                F.lit(False),
-            ),
-            # The piece's first tstart, wrapped so a null tstart is not skipped.
-            "start": F.when(~joins, F.struct(ctx.tstart.alias("t"))).otherwise(
-                F.last(
-                    F.when(selected & ~joins, F.struct(ctx.tstart.alias("t"))), ignorenulls=True
-                ).over(running)
-            ),
-            "next_joins": F.coalesce(F.lead(joins).over(ctx.in_chunk), F.lit(False)),
-        }
+        # Shared: a resample bucket's grid rows hold the value of the sample it keeps.
+        columns = {"selected": ctx.per_variant(lambda p: _holds(p, value))}
+        if plain is not None:
+            columns.update(_only(plain, resampled, _sample_pieces(plain)))
+        if resampled is not None:
+            resample = _resample_rule(resampled)
+            columns.update(resampled.columns(resample.row_columns(resampled)))
+            # The samples the resample keeps: its buckets (other kept rows are block
+            # ends, which it keeps too, and the channel's presence row).
+            columns.update(resampled.columns({"bucket": resample.keep(resampled)}))
+        return columns
 
     def keep(self, ctx: SeriesContext) -> Column:
+        plain, resampled = _inputs(ctx)
         # The last sample of each piece.
-        return ctx.col("selected") & ~ctx.col("next_joins")
+        sample_keep = ctx.col("selected") & ~ctx.col("next_joins")
+        if resampled is None:
+            return sample_keep
+        # Every bucket, selected or not: the resample's grid checks run on all of them.
+        bucket_keep = F.coalesce(resampled.col("bucket"), F.lit(False))
+        if plain is None:
+            return bucket_keep
+        return F.when(plain.active, sample_keep).when(resampled.active, bucket_keep)
+
+    def kept_columns(self, ctx: SeriesContext) -> Mapping[str, Column]:
+        plain, resampled = _inputs(ctx)
+        if resampled is None:
+            return {}
+        columns = resampled.columns(_resample_rule(resampled).kept_columns(resampled))
+        bucket = kept_bucket(resampled)
+        # lead is the previous kept sample: the order the pipeline already sorts them in.
+        reverse = ctx.kept_in_chunk_reversed
+        running = reverse.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        run, joins, next_joins = ctx.col("run"), ctx.col("joins_run"), ctx.col("next_joins_run")
+        prev = F.lead(
+            F.struct(run.alias("run"), ctx.block.id.alias("block"), bucket.stop.alias("stop"))
+        ).over(reverse)
+        columns.update(
+            _only(
+                resampled,
+                plain,
+                {
+                    # A selected bucket with grid rows; the grid check comes first, so a
+                    # block the resample cannot grid fails like pandas.
+                    "run": F.coalesce(bucket.emits, F.lit(False))
+                    & F.coalesce(resampled.col("bucket"), F.lit(False))
+                    & ctx.col("selected"),
+                    # It continues the previous bucket's grid rows, unless it is the
+                    # trailing point, which stays a piece of its own.
+                    "joins_run": run
+                    & ~F.coalesce(bucket.only_point, F.lit(False))
+                    & F.coalesce(
+                        prev.getField("run")
+                        & (prev.getField("block") == ctx.block.id)
+                        & (prev.getField("stop") == bucket.first),
+                        F.lit(False),
+                    ),
+                    "next_joins_run": F.coalesce(F.lag(joins).over(reverse), F.lit(False)),
+                    # The end of the piece, from its last bucket.
+                    "run_end": F.last(
+                        F.when(
+                            run & ~next_joins,
+                            F.struct(
+                                bucket.end.alias("end"),
+                                F.coalesce(bucket.has_point, F.lit(False)).alias("has_point"),
+                                bucket.point.alias("point"),
+                            ),
+                        ),
+                        ignorenulls=True,
+                    ).over(running),
+                },
+            )
+        )
+        return columns
 
     def emit(self, ctx: SeriesContext) -> Column:
+        plain, resampled = _inputs(ctx)
         # The piece ends at its last sample's own tend.
-        return F.array(ctx.element(tstart=ctx.col("start").getField("t"), value=F.lit(None)))
+        sample_piece = F.array(
+            ctx.element(tstart=ctx.col("start").getField("t"), value=F.lit(None))
+        )
+        if resampled is None:
+            return sample_piece
+        bucket = kept_bucket(resampled)
+        end = ctx.col("run_end")
+        grid_piece = F.filter(
+            F.array(
+                F.when(
+                    ~F.coalesce(bucket.only_point, F.lit(False)),
+                    ctx.element(tstart=bucket.start, tend=end.getField("end"), value=F.lit(None)),
+                ),
+                F.when(
+                    end.getField("has_point"),
+                    ctx.element(
+                        tstart=end.getField("point"), tend=end.getField("point"), value=F.lit(None)
+                    ),
+                ),
+            ),
+            lambda e: e.isNotNull(),
+        )
+        bucket_piece = (
+            # A series of one sample is not resampled: a piece of that sample.
+            F.when(
+                ~bucket.resampled,
+                F.when(ctx.col("selected"), F.array(ctx.element(value=F.lit(None)))),
+            ).when(ctx.col("run") & ~ctx.col("joins_run"), grid_piece)
+        )
+        if plain is None:
+            return bucket_piece
+        return F.when(plain.active, sample_piece).when(resampled.active, bucket_piece)
 
     # --- pass 2: merge ---------------------------------------------------------------
 
@@ -248,3 +352,71 @@ def _greater_equal(a: Column, b: Column) -> Column:
 
 def _equal(a: Column, b: Column) -> Column:
     return _numpy(a == b, a, b)
+
+
+#: Scope of an absorbed resample's columns (see :meth:`SeriesContext.scoped`).
+_RESAMPLE_SCOPE = "resample"
+
+
+def _is_absorbable(classified) -> bool:
+    """Whether the operand's pushdown is a resample the condition can compute in its pass."""
+    return (
+        isinstance(classified, Pushdown)
+        and type(classified.rule) is ResamplePushdownRule
+        and classified.source is None
+        and not classified.absorbed
+    )
+
+
+def _inputs(ctx: SeriesContext) -> tuple[SeriesContext | None, SeriesContext | None]:
+    """The rule's variants on samples, and those on an absorbed resample, as contexts.
+
+    The first restricts *ctx* to the comparisons of samples; the second is scoped to
+    the absorbed resamples of the others.  ``None`` when there are no such variants.
+    """
+    plain = [vid for vid, p in ctx.variants.items() if not p.absorbed]
+    absorbed = {vid: p.absorbed[0] for vid, p in ctx.variants.items() if p.absorbed}
+    return (
+        ctx.restricted(plain) if plain else None,
+        ctx.scoped(_RESAMPLE_SCOPE, _resample_rule_of(absorbed), absorbed) if absorbed else None,
+    )
+
+
+def _resample_rule_of(absorbed: Mapping[int, Pushdown]) -> ResamplePushdownRule:
+    return next(iter(absorbed.values())).rule
+
+
+def _resample_rule(scope: SeriesContext) -> ResamplePushdownRule:
+    return _resample_rule_of(scope.variants)
+
+
+def _only(ctx: SeriesContext, other: SeriesContext | None, columns: Mapping[str, Column]):
+    """*columns* defined for *ctx*'s variants only, if the rule has *other* variants too."""
+    if other is None:
+        return dict(columns)
+    return {name: F.when(ctx.active, column) for name, column in columns.items()}
+
+
+def _sample_pieces(ctx: SeriesContext) -> dict[str, Column]:
+    """The piece columns of comparisons of the channel's samples."""
+    selected, joins = ctx.col("selected"), ctx.col("joins")
+    running = ctx.in_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+    return {
+        # The sample continues the piece of the previous sample in its chunk.
+        "joins": F.coalesce(
+            selected
+            & ~ctx.first_in_chunk
+            & _greater(ctx.tend, ctx.tstart)
+            & F.coalesce(F.lag(selected).over(ctx.in_chunk), F.lit(False))
+            & ctx.prev.tstart.isNotNull()
+            & _at_most(ctx.tstart, ctx.prev.tend),
+            F.lit(False),
+        ),
+        # The piece's first tstart, wrapped so a null tstart is not skipped.
+        "start": F.when(~joins, F.struct(ctx.tstart.alias("t"))).otherwise(
+            F.last(
+                F.when(selected & ~joins, F.struct(ctx.tstart.alias("t"))), ignorenulls=True
+            ).over(running)
+        ),
+        "next_joins": F.coalesce(F.lead(joins).over(ctx.in_chunk), F.lit(False)),
+    }

@@ -138,6 +138,60 @@ def kept_stage() -> SeriesContext
 This context, for the hooks that run on the kept samples.
 
 
+#### restricted
+
+```python
+def restricted(variant_ids: Iterable[int]) -> SeriesContext
+```
+
+This context for a subset of its variants, with the same column names.
+
+Lets a rule compute columns for some of its variants only (e.g. those
+absorbing another pushdown).
+
+
+#### scoped
+
+```python
+def scoped(scope: str, rule: PushdownRule,
+           variants: Mapping[int, Pushdown]) -> SeriesContext
+```
+
+A context for *rule*'s hooks on some of this rule's variants, in its own namespace.
+
+A rule absorbing a pushed operand (:attr:`~.pushdown.Pushdown.absorbed`) runs
+the operand's rule's hooks through it: *variants* maps each of its variant
+ids to the absorbed pushdown, so :meth:`param` and :meth:`per_variant` read
+that pushdown.  Column names live under *scope* within this rule's names, so
+they cannot collide with the rule's own as long as those don't start with
+``"<scope>_"``.  Return the scoped hooks' columns through :meth:`columns`.
+
+**Raises**:
+
+- `ValueError`: If *rule* defines runs of its own (:meth:`PushdownRule.runs`): the
+pipeline only computes the runs of the rules it was given.
+
+#### columns
+
+```python
+def columns(columns: Mapping[str, Column]) -> dict[str, Column]
+```
+
+The columns of a scoped context's hooks, named for the enclosing rule's hook.
+
+Each column is defined for the scope's variants only: the absorbed rule's
+columns may fail for variants without its parameters.
+
+
+#### variants
+
+```python
+def variants() -> Mapping[int, Pushdown]
+```
+
+The variants the hooks compute, by variant id.
+
+
 #### active
 
 ```python
@@ -313,6 +367,29 @@ def block_end() -> Column
 ```
 
 ``nanmax`` of the ``tend`` values of the sample's block (kept samples only).
+
+
+#### kept\_in\_chunk\_reversed
+
+```python
+def kept_in_chunk_reversed() -> WindowSpec
+```
+
+Window over the kept samples of the sample's chunk in reverse series order.
+
+For ``lag`` / ``lead`` (``lead`` is the previous kept sample) and, with a
+running frame, for looking forward.  It is the order the pipeline already
+sorts the kept samples in, so it adds no sort; the ascending
+
+
+#### reverse\_chunk\_window
+
+```python
+def reverse_chunk_window(key: Sequence[str],
+                         order: Sequence[str]) -> WindowSpec
+```
+
+Window over a series' chunk in reverse series order, without a frame.
 
 
 ## RowsContext

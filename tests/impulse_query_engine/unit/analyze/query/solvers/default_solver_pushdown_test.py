@@ -19,6 +19,7 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagSelector
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesSelector
 from impulse_query_engine.analyze.query.channels.calculated_channel import CalculatedChannel
 from impulse_query_engine.analyze.query.optimizer import (
+    PRESENCE_VARIANT,
     RAW_VARIANT,
     VARIANT_COL,
     Classifier,
@@ -306,7 +307,9 @@ class TestIdenticalResults:
         _assert_same(on, off)
         assert any(len(intervals) > 0 for intervals in on["rpm_high"])
         _, rows_on = udf_rows
-        assert set(rows_on) == {(5, 1), (5, 2)}
+        # Resamples at both rates, and the comparison absorbing the second one: its
+        # intervals and the channel's presence row.
+        assert set(rows_on) == {(5, 1), (5, 2), (5, 3), (5, PRESENCE_VARIANT)}
 
     def test_aliased_selector_with_unit_conversion(
         self, spark: SparkSession, key_value_store_unit_conversion_db, udf_rows

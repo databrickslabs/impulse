@@ -91,6 +91,27 @@ class TestNativeSolve:
         assert len(udf_rows) == 1
         _assert_udf_free(df_on)
 
+    def test_resampled_outliers_run_without_the_udf(
+        self, spark: SparkSession, key_value_store_db, udf_rows
+    ):
+        # Comparisons of the resampled and of the raw channel, in one pass over its samples.
+        def selections(q):
+            rpm = q.channel(channel_name="Engine RPM")
+            return [
+                (rpm.resample(RATE) > RPM_HIGH).alias("rpm_high_10s"),
+                (rpm.resample(RATE) <= 900).alias("rpm_low_10s"),
+                (rpm > RPM_HIGH).alias("rpm_high"),
+            ]
+
+        off, on, df_on = _rows_both(spark, key_value_store_db, selections, config=_kvs_config())
+        assert on == off
+        assert all(any(len(r[c]) > 0 for r in on) for c in ("rpm_high_10s", "rpm_high"))
+        assert len(udf_rows) == 1
+        _assert_udf_free(df_on)
+        assert channel_data_scans(df_on) == PUSHED_SCANS
+        samples = [e for e in shuffles(df_on) if "_pd_chunk" in e]
+        assert len(samples) == 1 and samples[0].startswith(SAMPLE_SHUFFLE)
+
     def test_condition_that_never_holds_keeps_every_container(
         self, spark: SparkSession, key_value_store_db
     ):
@@ -220,11 +241,18 @@ class TestUdfRoute:
         off, on = _solve_both(spark, key_value_store_db, selections, config=_kvs_config())
         _assert_same(on, off)
 
-    def test_resampled_comparison_pushes_only_the_resample(self, key_value_store_db):
-        q = key_value_store_db.query
-        rpm = q.channel(channel_name="Engine RPM")
+    def test_nested_resampled_comparison(self, spark: SparkSession, key_value_store_db):
+        # The comparison absorbs the resample; the debounce runs in the UDF on its intervals.
+        def selections(q):
+            rpm = q.channel(channel_name="Engine RPM")
+            return [(rpm.resample(RATE) > RPM_HIGH).debounce(2e7).alias("nested")]
+
         plan = QueryOptimizer().optimize(
-            [(rpm.resample(1e7) > RPM_HIGH).alias("x")],
-            PushdownContext(T.LongType(), T.LongType()),
+            selections(key_value_store_db.query), PushdownContext(T.LongType(), T.LongType())
         )
-        assert plan.describe().startswith("variants [1=resample(")
+        assert plan.describe().startswith(
+            f"variants [1=condition(op=gt, threshold=1500.0, alias=False) absorbing "
+            f"resample(sample_rate={float(RATE)})]"
+        )
+        off, on = _solve_both(spark, key_value_store_db, selections, config=_kvs_config())
+        _assert_same(on, off)

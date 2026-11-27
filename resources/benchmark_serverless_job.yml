@@ -74,7 +74,7 @@ resources:
           depends_on: [{task_key: run_udfs}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
-        # limits, limits_debounced: limit detection, without and with Spark pushdown.
+        # limits, limits_debounced, limits_resampled: limit detection, without and with Spark pushdown.
         - task_key: run_limits
           environment_key: bench_env_limits
           disable_auto_optimization: true

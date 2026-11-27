@@ -130,8 +130,8 @@ class Pushdown:
     :attr:`variant_key` to identify equivalent pushdowns.
 
     A pushdown reads the samples of its channel, possibly absorbing pushed
-    operands into that pass, or computes on the result of another pushdown, its
-    :attr:`source`.  The pipeline computes the former only.
+    operands into that pass (:attr:`absorbed`), or computes on the result of
+    another pushdown, its :attr:`source`.  The pipeline computes the former only.
 
     Parameters
     ----------
@@ -146,6 +146,10 @@ class Pushdown:
     source : Pushdown, optional
         The pushdown whose result this one computes on; ``None`` when it reads
         the channel's samples.
+    absorbed : tuple of Pushdown
+        Pushed operands this pushdown computes in its own pass over the channel's
+        samples, innermost first (e.g. the resample of ``rpm.resample(1e6) > 4000``).
+        Each reads the same selector's samples and absorbs nothing itself.
     """
 
     rule: PushdownRule
@@ -153,17 +157,36 @@ class Pushdown:
     params: tuple[tuple[str, Any], ...]
     consumed: tuple[TimeSeriesSelector, ...]
     source: Pushdown | None = None
+    absorbed: tuple[Pushdown, ...] = ()
+
+    def __post_init__(self):
+        for inner in self.absorbed:
+            if (
+                inner.source is not None
+                or inner.absorbed
+                or inner.selector.selector_id != self.selector.selector_id
+            ):
+                raise ValueError(
+                    f"{self.rule.name}: cannot absorb {inner.describe()}: an absorbed pushdown "
+                    "reads the same channel's samples and absorbs nothing itself"
+                )
 
     @property
     def variant_key(self) -> tuple:
         """Identity of the derived series, independent of the input channel."""
         key = (self.rule.name, self.params)
+        if self.absorbed:
+            key = (*key, ("absorbs", tuple(inner.variant_key for inner in self.absorbed)))
         return key if self.source is None else (*key, self.source.variant_key)
 
     def describe(self) -> str:
         """Human-readable ``rule(param=value, ...)`` label."""
         params = ", ".join(f"{k}={v}" for k, v in self.params)
         label = f"{self.rule.name}({params})"
+        if self.absorbed:
+            label += " absorbing " + " absorbing ".join(
+                inner.describe() for inner in reversed(self.absorbed)
+            )
         return label if self.source is None else f"{label} on {self.source.describe()}"
 
 
@@ -226,9 +249,10 @@ class PushdownRule(abc.ABC):
 
         Nodes are classified bottom-up: *operand* returns the classification of
         any operand of *node*.  A pushdown reading the channel's samples sets no
-        ``source``; when it absorbs a pushed operand into that pass, its
-        ``consumed`` includes the operand's and :meth:`supports` covers both.  A
-        pushdown computing on a pushed operand's result sets ``source`` to it.
+        ``source``; when it absorbs a pushed operand into that pass, it lists the
+        operand in ``absorbed``, its ``consumed`` includes the operand's and
+        :meth:`supports` covers both.  A pushdown computing on a pushed operand's
+        result sets ``source`` to it.
 
         Purely syntactic and driver-only: checks of the channel data belong in
         :meth:`supports`.

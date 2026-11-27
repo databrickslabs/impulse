@@ -114,8 +114,8 @@ Expression nodes overload ``==``, so pushdowns compare by identity; use
 :attr:`variant_key` to identify equivalent pushdowns.
 
 A pushdown reads the samples of its channel, possibly absorbing pushed
-operands into that pass, or computes on the result of another pushdown, its
-:attr:`source`.  The pipeline computes the former only.
+operands into that pass (:attr:`absorbed`), or computes on the result of
+another pushdown, its :attr:`source`.  The pipeline computes the former only.
 
 **Arguments**:
 
@@ -125,6 +125,9 @@ operands into that pass, or computes on the result of another pushdown, its
 - `consumed` (`tuple of TimeSeriesSelector`): Every selector occurrence inside the subtree (its ``get_selectors()``).
 - `source` (`Pushdown`): The pushdown whose result this one computes on; ``None`` when it reads
 the channel's samples.
+- `absorbed` (`tuple of Pushdown`): Pushed operands this pushdown computes in its own pass over the channel's
+samples, innermost first (e.g. the resample of ``rpm.resample(1e6) > 4000``).
+Each reads the same selector's samples and absorbs nothing itself.
 
 #### variant\_key
 
@@ -226,11 +229,8 @@ Return the pushdown for *node*, or ``None`` if the rule does not apply.
 
 Nodes are classified bottom-up: *operand* returns the classification of
 any operand of *node*.  A pushdown reading the channel's samples sets no
-``source``; when it absorbs a pushed operand into that pass, its
-``consumed`` includes the operand's and :meth:`supports` covers both.  A
-pushdown computing on a pushed operand's result sets ``source`` to it.
-
-Purely syntactic and driver-only: checks of the channel data belong in
+``source``; when it absorbs a pushed operand into that pass, it lists the
+operand in ``absorbed``, its ``consumed`` includes the operand's and
 
 
 #### supports

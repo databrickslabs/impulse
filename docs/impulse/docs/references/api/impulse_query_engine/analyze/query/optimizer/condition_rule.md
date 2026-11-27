@@ -14,8 +14,10 @@ class ConditionPushdownRule(PushdownRule)
 
 Pushes ``channel op scalar`` (``>``, ``>=``, ``<``, ``<=``, ``==``, ``!=``) down to Spark.
 
-The channel is a continuous physical or aliased selection; the scalar may come
-first (``500 < rpm``).  The result is what pandas computes,
+The channel is a continuous physical or aliased selection, or its resample
+(``rpm.resample(1e6) > 4000``), which the rule then absorbs
+(:attr:`~.pushdown.Pushdown.absorbed`) and computes in the same pass.  The scalar
+may come first (``500 < rpm``).  The result is what pandas computes,
 ``Intervals(tstarts[holds], tends[holds], merge_overlaps=True)``: the samples
 where the comparison holds, merged where one starts at or before the previous
 one's ``tend``.  Comparisons follow numpy: NaN and null values satisfy only
@@ -34,8 +36,15 @@ Spark computes the merged intervals in two passes:
    comparisons pandas makes between their samples, including its rules for a
    trailing zero-duration interval and for dropping empty intervals.
 
+On a resample, the samples are the resampled grid rows.  The resample keeps the
+last sample of each grid bucket, whose grid rows all hold its value and follow
+each other without a gap, so a piece is a run of consecutive selected buckets of
+a block within a chunk; a trailing zero-duration grid point is a piece of its
+own.  The comparison computes the resample's columns for its own variants, even
+when the channel also ships the resample itself.
+
 Exact unless two selected samples share a ``tstart``: Spark orders them by
 ``tend`` and value, the UDF's cache in their arbitrary arrival order, and pandas'
-merge depends on the order.
+merge depends on the order.  On a resample, the limits of
 
 

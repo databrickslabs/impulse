@@ -5,10 +5,12 @@
 - `build_wide_report` (`wide_report`): 100 channels, many events and histograms, a chain of
   calculated channels.
 - `build_udf_report` (`python_udfs`): Python extensions (`benchmark_udfs.py`).
-- `build_limits_report` (`limits`, `limits_debounced` and their `_pushdown` runs): limit
-  detection, events of 60 signals above their p90 and below their p10. `limits` compares the raw
-  signals, which pushdown solves without the pandas UDF; `limits_debounced` debounces and merges
-  the limits, so with pushdown the comparisons run in Spark and the rest in the UDF.
+- `build_limits_report` (`limits`, `limits_debounced`, `limits_resampled` and their `_pushdown`
+  runs): limit detection, events of 60 signals above their p90 and below their p10. `limits`
+  compares the raw signals, which pushdown solves without the pandas UDF; `limits_debounced`
+  debounces and merges the limits, so with pushdown the comparisons run in Spark and the rest in
+  the UDF; `limits_resampled` compares the signals resampled to 1 s, which pushdown solves
+  without the UDF too.
 
 Bump `BENCHMARK_VERSION` when a change alters what an existing scenario measures (its report, its
 config or its compute); new scenarios start their own baselines without a bump.
@@ -47,28 +49,39 @@ TASKS = {
     "run_wide": ("_wide", ["wide_report"]),
     "run_udfs": ("_udfs", ["python_udfs"]),
     "run_pushdown": ("_pushdown", ["full_pushdown"]),
-    "run_limits": ("_limits", ["limits", "limits_debounced"]),
-    "run_limits_pushdown": ("_limitspushdown", ["limits_pushdown", "limits_debounced_pushdown"]),
+    "run_limits": ("_limits", ["limits", "limits_debounced", "limits_resampled"]),
+    "run_limits_pushdown": (
+        "_limitspushdown",
+        ["limits_pushdown", "limits_debounced_pushdown", "limits_resampled_pushdown"],
+    ),
 }
 SCENARIOS = [scenario for _, scenarios in TASKS.values() for scenario in scenarios]
 
-# The limit scenarios, by whether their limits are debounced (`build_limits_report`).
+# The limit scenarios, by their `build_limits_report` options.
 LIMITS_SCENARIOS = {
-    "limits": False,
-    "limits_pushdown": False,
-    "limits_debounced": True,
-    "limits_debounced_pushdown": True,
+    "limits": {},
+    "limits_pushdown": {},
+    "limits_debounced": {"debounced": True},
+    "limits_debounced_pushdown": {"debounced": True},
+    "limits_resampled": {"resampled": True},
+    "limits_resampled_pushdown": {"resampled": True},
 }
 
 # Scenarios that run another report than the task's previous scenario: their gold tables are
 # dropped first, as the report config is incremental.
-FRESH_GOLD_SCENARIOS = {"limits_debounced", "limits_debounced_pushdown"}
+FRESH_GOLD_SCENARIOS = {
+    "limits_debounced",
+    "limits_debounced_pushdown",
+    "limits_resampled",
+    "limits_resampled_pushdown",
+}
 
 # Scenarios run with Spark pushdown, by the scenario they must equal bit for bit.
 PUSHDOWN_PAIRS = {
     "full_pushdown": "full",
     "limits_pushdown": "limits",
     "limits_debounced_pushdown": "limits_debounced",
+    "limits_resampled_pushdown": "limits_resampled",
 }
 
 # Report config of a scenario, by compute, merged per section after the compute's overrides and
@@ -542,17 +555,20 @@ def build_wide_report(report, signals, max_channels=None):
     return report
 
 
-def build_limits_report(report, signals, debounced=False):
+def build_limits_report(report, signals, debounced=False, resampled=False):
     """Adds limit events to `report`: each of the wide report's limit signals above its p90 and
     below its p10; `signals` as returned by `wide_signal_stats`.
 
     Only events, so a solve holds nothing but the limits. Raw comparisons are solved without the
     pandas UDF with pushdown; `debounced` limits drop violations shorter than 0.5 s and merge
-    those less than 2 s apart, as limit toolboxes do, which keeps the UDF.
+    those less than 2 s apart, as limit toolboxes do, which keeps the UDF. `resampled` limits
+    compare the signals resampled to 1 s, also solved without the UDF with pushdown.
     """
     query = report.get_db().query
     for i, s in enumerate(limit_signals(signals)):
         signal = query.channel(channel_name=s["name"])
+        if resampled:
+            signal = signal.resample(1 * US)
         for side, expr in [
             ("high", signal > _round(s["p90"])),
             ("low", signal < _round(s["p10"])),

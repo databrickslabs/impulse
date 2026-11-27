@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pyspark.sql.functions as F
@@ -145,6 +146,78 @@ class ResamplePushdownRule(PushdownRule):
     def emits_result_rows(self, pushdown: Pushdown) -> bool:
         # The derived rows are the resampled samples, as decode loads them.
         return True
+
+
+@dataclass(frozen=True)
+class Bucket:
+    """The resampled rows a kept sample emits, as columns, for rules absorbing a resample.
+
+    A kept sample of a resampled series holds grid points ``c`` up to ``c_stop``
+    (exclusive), all with its value; consecutive kept samples of a block hold
+    consecutive grid points.  Every grid row has a positive duration except a
+    trailing zero-duration point: the last grid point of a series that ends with a
+    zero-duration sample.
+
+    Attributes
+    ----------
+    resampled : Column
+        The series is resampled; a series of one sample is returned as it is.
+    emits : Column
+        The sample emits at least one grid row (resampled series only).
+    start : Column
+        ``tstart`` of its first grid row.
+    end : Column
+        ``tend`` of its last grid row of positive duration.
+    has_point : Column
+        Its last grid row is the trailing zero-duration point, at ``point``.
+    only_point : Column
+        It emits that point only.
+    point : Column
+        The time of the trailing zero-duration point.
+    first : Column
+        Grid index of its first grid row (``c``).
+    stop : Column
+        Grid index after its last grid row (``c_stop``).
+    """
+
+    resampled: Column
+    emits: Column
+    start: Column
+    end: Column
+    has_point: Column
+    only_point: Column
+    point: Column
+    first: Column
+    stop: Column
+
+
+def kept_bucket(ctx: SeriesContext) -> Bucket:
+    """The rows the kept sample emits, for the resample's columns in *ctx*.
+
+    *ctx* is the kept-stage context the resample's hooks ran with (e.g. a scoped
+    context of a rule absorbing the resample); valid on the samples the resample
+    keeps only.
+    """
+    grid = _Grid(ctx)
+    c, c_stop, n_grid = ctx.col("c"), ctx.col("c_stop"), ctx.col("n_grid")
+    resampled = ctx.col("resampled")
+    last_point = grid.point(n_grid - 1)
+    # In a block that does not end with the trailing point, every grid point is below
+    # the block end.
+    has_point = (c_stop == n_grid) & (last_point == ctx.block_end)
+    return Bucket(
+        resampled=resampled,
+        emits=resampled & (c_stop > c),
+        start=grid.point(c),
+        end=F.when(has_point, last_point)
+        .when(c_stop == n_grid, ctx.block_end)
+        .otherwise(grid.point(c_stop)),
+        has_point=has_point,
+        only_point=has_point & (c == n_grid - 1),
+        point=last_point,
+        first=c,
+        stop=c_stop,
+    )
 
 
 def _next_in_block(ctx: SeriesContext) -> Column:

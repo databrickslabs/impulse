@@ -1,4 +1,5 @@
-"""Outlier events (``channel op scalar``) are solved in Spark without the pandas UDF."""
+"""Outlier events (``channel op scalar``, also on a resampled channel) are solved in Spark
+without the pandas UDF."""
 
 from unittest.mock import create_autospec
 
@@ -18,6 +19,7 @@ from impulse_reporting.events.basic_event import BasicEvent
 from tests.conftest import drop_gold_tables, spark  # noqa: F401  (pytest fixture)
 
 _EVENT_FACT = "spark_catalog.gold.evaluation_event_instance_fact"
+_EVENT_DIMENSION = "spark_catalog.gold.evaluation_event_dimension"
 
 
 def _report(spark, enable_pushdown: bool) -> Report:
@@ -44,6 +46,12 @@ def _report(spark, enable_pushdown: bool) -> Report:
     report.add_event(BasicEvent(name="rpm_high", expr=rpm > 2000, desc="RPM outlier"))
     report.add_event(BasicEvent(name="rpm_low", expr=400 > rpm, desc="RPM below 400"))
     report.add_event(BasicEvent(name="speed_high", expr=speed >= 50, desc="Speed outlier"))
+    # On the 10 s grid; the comparison absorbs the resample.
+    report.add_event(
+        BasicEvent(
+            name="speed_high_10s", expr=speed.resample(1e7) >= 50, desc="Speed outlier, 10 s"
+        )
+    )
     return report
 
 
@@ -62,15 +70,18 @@ def test_outlier_event_facts_are_identical_without_the_udf(spark, monkeypatch):
         udf_runs.append(0)
         report = _report(spark, enable_pushdown)
         report.run()
+        names = spark.read.table(_EVENT_DIMENSION).select("event_id", "event_name")
         facts.append(
             spark.read.table(_EVENT_FACT)
             .drop("_created_at")
+            .join(names, on="event_id")
             .toPandas()
             .sort_values(["container_id", "event_id", "start_ts"])
             .reset_index(drop=True)
         )
     off, on = facts
     assert udf_runs[0] > 0 and udf_runs[1] == 0
-    assert len(off) > 0
+    # The resampled comparison has instances, like the raw one.
+    assert {"speed_high", "speed_high_10s"} <= set(off["event_name"])
     assert off["end_ts"].gt(off["start_ts"]).all()
     pd.testing.assert_frame_equal(on, off, check_exact=True)

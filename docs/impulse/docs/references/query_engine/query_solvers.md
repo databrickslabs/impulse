@@ -192,12 +192,16 @@ shipped as before and the resample runs in pandas. Results are the same either w
 
 When every selection of a `solve()` call (in a report: of a solve batch) is a pushed-down
 expression as a whole **and** Spark can produce its result, the result is computed entirely in
-Spark and no pandas UDF runs. Spark produces the results of comparisons (lists of intervals);
-this is the case for lightweight outlier detection, e.g.
+Spark and no pandas UDF runs. Spark produces the results of comparisons (lists of intervals),
+also of a resampled channel; this is the case for lightweight outlier detection, e.g.
 
 ```python
 rpm = q.channel(channel_name="eng_rpm")
-q.select((rpm > 5000).alias("rpm_high"), (rpm < 300).alias("rpm_low")).solve(spark, solver=solver)
+q.select(
+    (rpm > 5000).alias("rpm_high"),
+    (rpm < 300).alias("rpm_low"),
+    (rpm.resample(1e6) > 4500).alias("rpm_high_1s"),
+).solve(spark, solver=solver)
 ```
 
 or a report whose events are all such comparisons. A selection that is a series, e.g. a bare

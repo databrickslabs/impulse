@@ -13,7 +13,7 @@ down](query_solvers.md#spark-pushdown-opt-in)); otherwise it runs in pandas as b
 | Rule | Subtree | Result | Solve without the UDF |
 |------|---------|--------|-----------------------|
 | [`resample`](#resample) | `channel.resample(sample_rate)` | `SampleSeries` | As a calculated channel |
-| [`condition`](#condition) | `channel > k`, also `>=`, `<`, `<=`, `==`, `!=` | `Intervals` | Yes |
+| [`condition`](#condition) | `channel > k`, also `>=`, `<`, `<=`, `==`, `!=`, and `channel.resample(sample_rate) > k` | `Intervals` | Yes |
 
 Both apply to continuous `channel()` and `channel_with_alias()` selections, and their subtree can
 sit anywhere in an expression, e.g. `veh_spd.resample(1e6).cumtrapz()` or
@@ -36,13 +36,18 @@ sit anywhere in an expression, e.g. `veh_spd.resample(1e6).cumtrapz()` or
 - **Matches** a comparison of a channel with a number, on either side (`500 < rpm`). The number is
   a regular Python or numpy integer or float, e.g. `4000` or `80.5`; other number types, e.g.
   `Fraction`, are compared in pandas.
+- **Also matches** a comparison of a resampled channel, e.g. `rpm.resample(1e6) > 4000`: the rule
+  absorbs the resample and computes both in the same pass over the channel's samples, without
+  shipping the resampled rows.
 - **Computes** the intervals where the comparison holds, merged like
   `Intervals(..., merge_overlaps=True)`.
   - Comparisons follow numpy: NaN and null values satisfy only `!=`.
   - Aliased selections compare the unit-converted values.
 - **Limits:**
-  - The comparison must be on the channel itself: in `rpm.resample(1e6) > 4000`, only the
-    resample is pushed down.
+  - On a resampled channel, the [`resample`](#resample) limits apply too: with integer timestamps,
+    e.g. `rpm.resample(2.5) > 4000` runs in pandas.
+  - Other operations between the channel and the comparison, e.g. `(rpm * 60) > 4000`, are not
+    pushed down; only the subtrees a rule matches on its own run in Spark.
 - **Without the UDF:** solves whose selections are all comparisons
   ([Solves without the pandas UDF](query_solvers.md#solves-without-the-pandas-udf)).
 - **API:** [`ConditionPushdownRule`](../api/impulse_query_engine/analyze/query/optimizer/condition_rule.md)
@@ -51,6 +56,7 @@ sit anywhere in an expression, e.g. `veh_spd.resample(1e6).cumtrapz()` or
 
 - **Scalar maps**, e.g. `rpm * 60 / 1000`.
 - **`where` on the same channel**, e.g. `veh_spd.where(veh_spd > 0)`.
-- **Compositions** on one channel, e.g. `rpm.resample(1e6) > 4000`.
+- **Further compositions** on one channel, e.g. `(rpm * 60 / 1000) > 5` once scalar maps are
+  pushed down, or `v.where(v < 100) * 3.6 > 1`.
 - **Interval operations**: `debounce`, `merge_intervals`, `&`, `|`, `~`.
 - **Per-series aggregates**: statistics and histograms in Spark.

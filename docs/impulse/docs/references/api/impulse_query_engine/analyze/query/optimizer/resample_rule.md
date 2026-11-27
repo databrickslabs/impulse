@@ -36,6 +36,45 @@ series as a serialized ``SampleSeries``, which only the UDF produces.  Calculate
 channels that are a resample are emitted from Spark (:meth:`emits_result_rows`).
 
 
+## Bucket
+
+```python
+class Bucket()
+```
+
+The resampled rows a kept sample emits, as columns, for rules absorbing a resample.
+
+A kept sample of a resampled series holds grid points ``c`` up to ``c_stop``
+(exclusive), all with its value; consecutive kept samples of a block hold
+consecutive grid points.  Every grid row has a positive duration except a
+trailing zero-duration point: the last grid point of a series that ends with a
+zero-duration sample.
+
+**Arguments**:
+
+- `resampled` (`Column`): The series is resampled; a series of one sample is returned as it is.
+- `emits` (`Column`): The sample emits at least one grid row (resampled series only).
+- `start` (`Column`): ``tstart`` of its first grid row.
+- `end` (`Column`): ``tend`` of its last grid row of positive duration.
+- `has_point` (`Column`): Its last grid row is the trailing zero-duration point, at ``point``.
+- `only_point` (`Column`): It emits that point only.
+- `point` (`Column`): The time of the trailing zero-duration point.
+- `first` (`Column`): Grid index of its first grid row (``c``).
+- `stop` (`Column`): Grid index after its last grid row (``c_stop``).
+
+#### kept\_bucket
+
+```python
+def kept_bucket(ctx: SeriesContext) -> Bucket
+```
+
+The rows the kept sample emits, for the resample's columns in *ctx*.
+
+*ctx* is the kept-stage context the resample's hooks ran with (e.g. a scoped
+context of a rule absorbing the resample); valid on the samples the resample
+keeps only.
+
+
 ## \_Grid
 
 ```python

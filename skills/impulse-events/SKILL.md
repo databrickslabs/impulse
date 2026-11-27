@@ -63,7 +63,8 @@ report.add_event(rpm_band)
 | `attributes`        | `Mapping[str, str]`    | No       | Free-form metadata; values coerced to strings.                     |
 
 With Spark pushdown on (`query_engine.enable_pushdown`, see `impulse-config`), a comparison of a
-channel with a number, e.g. `eng_rpm > 2000`, is computed in Spark. When every event and
+channel with a number, e.g. `eng_rpm > 2000`, also of a resampled channel, e.g.
+`eng_rpm.resample(1e6) > 2000`, is computed in Spark. When every event and
 aggregation of a solve batch is such a comparison (limit or outlier detection), the batch runs
 without the pandas UDF. In `(eng_rpm > 2000) & (eng_rpm < 5000)` the two comparisons run in Spark and
 the `&` in pandas. Results are the same either way.

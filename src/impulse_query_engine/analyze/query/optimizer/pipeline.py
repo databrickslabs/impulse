@@ -87,6 +87,7 @@ from .context import (
     SeriesContext,
     block_break,
     nan_to_null,
+    reverse_chunk_window,
     run_col,
 )
 from .context import ELEMENT_TYPE as _ELEMENT_TYPE
@@ -596,10 +597,10 @@ class SeriesPipeline:
         the kept samples finds it; a block that continues past the chunk ends
         where the chunk summary says.
         """
-        reverse = (
-            Window.partitionBy(*self.key, CHUNK)
-            .orderBy(*[F.col(c).desc() for c in self.order])
-            .rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        # The same spec as SeriesContext.kept_in_chunk_reversed: rules' windows over the
+        # kept samples share this sort.
+        reverse = reverse_chunk_window(self.key, self.order).rowsBetween(
+            Window.unboundedPreceding, Window.currentRow
         )
         here = F.when(
             F.col(run_col(BLOCK, "ends")),
