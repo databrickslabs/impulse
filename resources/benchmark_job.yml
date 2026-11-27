@@ -97,13 +97,32 @@ resources:
           depends_on: [{task_key: setup}]
           notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
 
+        # limits, limits_debounced: limit detection without and with Spark pushdown. Each on the
+        # cluster of a shorter task, after it: no more clusters than tasks in parallel (the
+        # workspace's subnet runs out of addresses), and both pairs' halves on a cluster that
+        # ran one task before. Also after that task failed, so that the limits are measured.
+        - task_key: run_limits
+          job_cluster_key: bench_cluster_udfs
+          depends_on: [{task_key: run_udfs}]
+          run_if: ALL_DONE
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
+
+        - task_key: run_limits_pushdown
+          job_cluster_key: bench_cluster_pushdown
+          depends_on: [{task_key: run_pushdown}]
+          run_if: ALL_DONE
+          notebook_task: {notebook_path: ../tests/e2e/benchmark/run_benchmark.py, base_parameters: *params}
+
         - task_key: compare
           job_cluster_key: bench_cluster
-          depends_on:
+          # The run tasks.
+          depends_on: &run_tasks
             - {task_key: run}
             - {task_key: run_wide}
             - {task_key: run_udfs}
             - {task_key: run_pushdown}
+            - {task_key: run_limits}
+            - {task_key: run_limits_pushdown}
           # Also reports a failed run.
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_compare.py, base_parameters: *params}
@@ -115,10 +134,6 @@ resources:
 
         - task_key: teardown
           job_cluster_key: bench_cluster
-          depends_on:
-            - {task_key: run}
-            - {task_key: run_wide}
-            - {task_key: run_udfs}
-            - {task_key: run_pushdown}
+          depends_on: *run_tasks
           run_if: ALL_DONE
           notebook_task: {notebook_path: ../tests/e2e/benchmark/bench_teardown.py, base_parameters: *params}

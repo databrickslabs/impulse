@@ -16,6 +16,7 @@ import pyspark.sql.types as T
 from pyspark.sql import Column, DataFrame
 
 from impulse_query_engine.analyze.query.optimizer import VARIANT_COL, PushdownPlan
+from impulse_query_engine.analyze.query.optimizer.context import converted
 
 from .solver_config import SolverConfig
 
@@ -70,7 +71,7 @@ def native_calculated_channel_rows(
     )
     value = F.col(val).cast("double")
     if has_conversion:
-        value = _converted(value, F.col(conv))
+        value = converted(value, F.col(conv), F.col(_USES_ALIAS))
     return rows.select(
         cid,
         F.col(_CHANNEL_ID).cast(schema[ch].dataType).alias(ch),
@@ -135,15 +136,6 @@ def _target(channel_id: int, uses_alias: bool) -> Column:
     return F.struct(
         F.lit(channel_id).cast("long").alias(_CHANNEL_ID), F.lit(uses_alias).alias(_USES_ALIAS)
     )
-
-
-def _converted(value: Column, factor: Column) -> Column:
-    """*value* times the conversion factor for aliased selectors.
-
-    Like ``TimeSeriesCache.to_sample_series``: a null or NaN factor leaves values as they are.
-    """
-    applies = F.col(_USES_ALIAS) & factor.isNotNull() & ~F.isnan(factor)
-    return F.when(applies, value * factor).otherwise(value)
 
 
 def _as_udf_output(col: Column, dtype: T.DataType) -> Column:

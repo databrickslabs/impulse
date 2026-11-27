@@ -27,6 +27,7 @@ from impulse_query_engine.analyze.query.optimizer import (
     PushdownRule,
     PushedNode,
     QueryOptimizer,
+    ConditionPushdownRule,
     ResamplePushdownRule,
 )
 from impulse_query_engine.analyze.query.solvers import default_solver
@@ -530,7 +531,10 @@ class TestTimeSeriesCacheVariants:
         nptest.assert_array_equal(integral.tstarts, [0, 10])
 
     def test_optimizer_default_rules(self):
-        assert [type(r) for r in QueryOptimizer().rules] == [ResamplePushdownRule]
+        assert [type(r) for r in QueryOptimizer().rules] == [
+            ResamplePushdownRule,
+            ConditionPushdownRule,
+        ]
 
 
 def _rpm(uses_alias: bool = False) -> TimeSeriesSelector:

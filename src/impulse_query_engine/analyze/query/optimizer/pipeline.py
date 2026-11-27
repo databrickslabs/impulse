@@ -59,23 +59,41 @@ from .context import (
     BLOCK_END,
     CHUNK,
     COUNT,
+    FIRST_IN_CHUNK,
     LAST,
+    LAST_IN_CHUNK,
     NEXT_TE,
     NEXT_TS,
     NEXT_VALUE,
     PREV_TE,
     PREV_TS,
     PREV_VALUE,
+    ROW_FIRST,
+    ROW_LAST,
+    ROW_NEXT_TE,
+    ROW_NEXT_TS,
+    ROW_NEXT_VALUE,
+    ROW_PREV_TE,
+    ROW_PREV_TS,
+    ROW_PREV_VALUE,
+    ROW_TE,
+    ROW_TS,
+    ROW_VALUE,
     TE,
     TS,
+    RowsContext,
     RunBreak,
     Sample,
     SeriesContext,
     block_break,
+    nan_to_null,
     run_col,
 )
+from .context import ELEMENT_TYPE as _ELEMENT_TYPE
 from .plan import PushdownPlan
 from .pushdown import (
+    FACTOR_COL,
+    PRESENCE_VARIANT,
     RAW_VARIANT,
     VARIANT_COL,
     VARIANTS_COL,
@@ -89,6 +107,10 @@ CHUNK_ROWS = 500_000
 
 _ELEMENT = "_pd_element"
 _KEPT = "_pd_kept"
+#: The variant whose copy of a channel's first sample ships the channel's presence row.
+_PRESENT_IN = "_pd_present_in"
+#: Marks the emitted element that is a presence row.
+_PRESENCE = "_pd_presence"
 
 
 def apply_pushdowns(
@@ -109,7 +131,9 @@ def apply_pushdowns(
     variants : pyspark.sql.DataFrame
         ``(container_id, channel_id, VARIANTS_COL)``: the variant ids each matched
         channel ships, one row per channel (see :meth:`PushdownPlan.channel_variants`).
-        Channels without a row are dropped.
+        Channels without a row are dropped.  An optional :data:`FACTOR_COL` holds the
+        channel's unit-conversion factor, for rules that compute on converted values
+        (:meth:`~.pushdown.PushdownRule.needs_factor`).
     plan : PushdownPlan
         The solve's pushdown plan.
     config : SolverConfig
@@ -123,7 +147,11 @@ def apply_pushdowns(
     Returns
     -------
     pyspark.sql.DataFrame
-        Rows with the columns and types of *rows* plus :data:`VARIANT_COL`.
+        Rows with the columns and types of *rows* plus :data:`VARIANT_COL`.  When a
+        rule may emit nothing (:attr:`~.pushdown.PushdownRule.may_emit_nothing`),
+        every channel shipping one of its variants also ships one row of
+        :data:`PRESENCE_VARIANT`.  Rules that finish
+        (:attr:`~.pushdown.PushdownRule.finishes`) still need :func:`finish_rows`.
     """
     groups = plan.variants_by_rule()
     ordered = [(rule, variants) for rule, variants in groups if rule.ordered]
@@ -134,11 +162,13 @@ def apply_pushdowns(
     row_variants = ([RAW_VARIANT] if include_raw else []) + _variant_ids(per_sample)
     if row_variants:
         # Only the channels shipping a row-branch variant, so the join drops the others.
-        shipping = variants.select(*key, _shipped(row_variants).alias(VARIANTS_COL))
+        # Per-sample rules may compute on converted values; raw rows never do.
+        factor = [FACTOR_COL] if per_sample and FACTOR_COL in variants.columns else []
+        shipping = variants.select(*key, _shipped(row_variants).alias(VARIANTS_COL), *factor)
         tagged = rows.join(F.broadcast(shipping.where(F.size(VARIANTS_COL) > 0)), on=key).select(
-            *rows.columns, F.explode(VARIANTS_COL).alias(VARIANT_COL)
+            *rows.columns, *factor, F.explode(VARIANTS_COL).alias(VARIANT_COL)
         )
-        parts.append(_row_branch(tagged, per_sample, config, schema))
+        parts.append(_row_branch(tagged, per_sample, config, schema, has_factor=bool(factor)))
     if ordered:
         parts.append(SeriesPipeline(ordered, config, chunk_rows).run(rows, variants))
     if not parts:
@@ -155,16 +185,26 @@ def _shipped(ids: Sequence[int]) -> Column:
     return F.filter(F.col(VARIANTS_COL), lambda vid: vid.isin(sorted(ids)))
 
 
-def _fan_out(df: DataFrame, variants: DataFrame, key: Sequence[str], ids: Sequence[int]):
+def _fan_out(
+    df: DataFrame,
+    variants: DataFrame,
+    key: Sequence[str],
+    ids: Sequence[int],
+    presence_ids: Sequence[int] = (),
+):
     """*df* with one row per variant among *ids* its channel ships, in :data:`VARIANT_COL`.
 
     Channels shipping none of *ids* are dropped.  Unlike ``explode``, ``explode_outer``
     adds no inferred filter to the broadcast side of the join, so the pipeline's joins
-    with *variants* share one broadcast.
+    with *variants* share one broadcast.  With *presence_ids*, :data:`_PRESENT_IN`
+    names the smallest of them the channel ships (null if none).  The channel's
+    conversion factor (:data:`FACTOR_COL`), if *variants* has it, comes along.
     """
+    df = df.join(F.broadcast(variants), on=key)
+    if presence_ids:
+        df = df.withColumn(_PRESENT_IN, F.array_min(_shipped(presence_ids)))
     return (
-        df.join(F.broadcast(variants), on=key)
-        .withColumn(VARIANT_COL, F.explode_outer(_shipped(ids)))
+        df.withColumn(VARIANT_COL, F.explode_outer(_shipped(ids)))
         .where(F.col(VARIANT_COL).isNotNull())
         .drop(VARIANTS_COL)
     )
@@ -236,6 +276,12 @@ class SeriesPipeline:
         self.key = [*self.channel_key, VARIANT_COL]
         self.order = [config.tstart_col, config.tend_col, config.value_col]
         self.variant_ids = _variant_ids(self.rules)
+        self.presence_ids = sorted(
+            vid for rule, variants in self.rules if rule.may_emit_nothing for vid in variants
+        )
+        self.converts = any(
+            rule.needs_factor(p) for rule, variants in self.rules for p in variants.values()
+        )
         self.runs = [_Run(BLOCK, block_break)]
         self.rule_runs: dict[str, dict[str, str]] = {}
         for rule, _ in self.rules:
@@ -245,8 +291,18 @@ class SeriesPipeline:
                 self.runs.append(_Run(names[name], breaks))
             self.rule_runs[rule.name] = names
 
-    def _context(self, rule: PushdownRule, variants: Mapping[int, Pushdown]) -> SeriesContext:
-        return SeriesContext(rule, variants, self.key, self.order, True, self.rule_runs[rule.name])
+    def _context(
+        self, rule: PushdownRule, variants: Mapping[int, Pushdown], has_factor: bool
+    ) -> SeriesContext:
+        return SeriesContext(
+            rule,
+            variants,
+            self.key,
+            self.order,
+            True,
+            self.rule_runs[rule.name],
+            has_factor=has_factor,
+        )
 
     def run(self, rows: DataFrame, variants: DataFrame) -> DataFrame:
         """Replace the samples of the rules' variants with their derived rows.
@@ -259,17 +315,34 @@ class SeriesPipeline:
         df = self._chunk_scan(df)
         df = _opaque_join(df, self._chunk_summaries(df), [*self.channel_key, CHUNK])
         df = self._resolve_neighbours_and_runs(df)
-        # The rules' columns read the variant (SeriesContext.active, .param).
-        df = _fan_out(df, variants, self.channel_key, self.variant_ids)
-        contexts = [(rule, self._context(rule, variants)) for rule, variants in self.rules]
+        # The rules' columns read the variant (SeriesContext.active, .param).  The
+        # conversion factor is only kept where a rule computes on converted values.
+        has_factor = self.converts and FACTOR_COL in variants.columns
+        if FACTOR_COL in variants.columns and not has_factor:
+            variants = variants.drop(FACTOR_COL)
+        df = _fan_out(df, variants, self.channel_key, self.variant_ids, self.presence_ids)
+        contexts = [
+            (rule, self._context(rule, rule_variants, has_factor))
+            for rule, rule_variants in self.rules
+        ]
         for rule, ctx in contexts:
             df = _with_rule_columns(df, ctx, rule.row_columns(ctx))
-        df = _keep(df, contexts, extra=_flag(run_col(BLOCK, "ends")))
+        # The channel's first sample, in one copy, ships the channel's presence row: the
+        # start of its first block, in whichever chunk (all-NaN tstarts are in the last).
+        presence = None
+        if self.presence_ids:
+            presence = (
+                F.coalesce(F.col(run_col(BLOCK, "starts")), F.lit(False))
+                & (F.col(run_col(BLOCK, "id")) == 1)
+                & F.coalesce(F.col(VARIANT_COL) == F.col(_PRESENT_IN), F.lit(False))
+            )
+        extra = _flag(run_col(BLOCK, "ends"))
+        df = _keep(df, contexts, extra=extra if presence is None else extra | presence)
         df = self._with_block_end(df)
         kept = [(rule, ctx.kept_stage()) for rule, ctx in contexts]
         for rule, ctx in kept:
             df = _with_rule_columns(df, ctx, rule.kept_columns(ctx))
-        return _emit(df, kept, _output_schema(rows), self.order, raw=None)
+        return _emit(df, kept, _output_schema(rows), self.order, raw=None, presence=presence)
 
     # --- stages ----------------------------------------------------------------------
 
@@ -286,8 +359,8 @@ class SeriesPipeline:
         # still cut by its tstart range.
         series = (
             matched.groupBy(*self.channel_key).agg(
-                F.min(_nan_free(ts_d)).alias("_pd_first"),
-                F.greatest(F.max(_nan_free(te_d)), F.max(_nan_free(ts_d))).alias("_pd_end"),
+                F.min(nan_to_null(ts_d)).alias("_pd_first"),
+                F.greatest(F.max(nan_to_null(te_d)), F.max(nan_to_null(ts_d))).alias("_pd_end"),
                 F.count(F.lit(1)).alias("_pd_count"),
                 F.max(F.size(_shipped(self.variant_ids))).alias("_pd_k"),
             )
@@ -316,8 +389,8 @@ class SeriesPipeline:
         running = in_chunk.rowsBetween(Window.unboundedPreceding, Window.currentRow)
         # The neighbour windows read the raw columns and cast their results.
         df = (
-            df.withColumn("_pd_first_in_chunk", F.row_number().over(in_chunk) == 1)
-            .withColumn("_pd_last_in_chunk", F.lead(F.lit(True)).over(in_chunk).isNull())
+            df.withColumn(FIRST_IN_CHUNK, F.row_number().over(in_chunk) == 1)
+            .withColumn(LAST_IN_CHUNK, F.lead(F.lit(True)).over(in_chunk).isNull())
             .withColumn("_pd_lag_ts", F.lag(ts).over(in_chunk).cast("double"))
             .withColumn("_pd_lag_te", F.lag(te).over(in_chunk).cast("double"))
             .withColumn("_pd_lag_value", F.lag(value).over(in_chunk))
@@ -336,7 +409,7 @@ class SeriesPipeline:
             df = (
                 df.withColumn(
                     run_col(run.name, "brk"),
-                    F.when(F.col("_pd_first_in_chunk"), F.lit(0).cast("long")).otherwise(
+                    F.when(F.col(FIRST_IN_CHUNK), F.lit(0).cast("long")).otherwise(
                         _breaks(run, prev, cur)
                     ),
                 )
@@ -360,8 +433,8 @@ class SeriesPipeline:
         block_brk, block_seg = F.col(run_col(BLOCK, "brk")), F.col(run_col(BLOCK, "seg"))
         # Head and tail are taken via the chunk window's flags, so the summaries always
         # run on the chunk-partitioned samples and share their read.
-        head = F.when(F.col("_pd_first_in_chunk"), F.lit(1))
-        tail = F.when(F.col("_pd_last_in_chunk"), F.lit(1))
+        head = F.when(F.col(FIRST_IN_CHUNK), F.lit(1))
+        tail = F.when(F.col(LAST_IN_CHUNK), F.lit(1))
         aggregates = [
             F.max_by(sample, head).alias("_pd_head"),
             F.max_by(sample, tail).alias("_pd_tail"),
@@ -461,7 +534,7 @@ class SeriesPipeline:
 
     def _resolve_neighbours_and_runs(self, df: DataFrame) -> DataFrame:
         """Neighbours and run facts of every sample, across chunk boundaries."""
-        first, last = F.col("_pd_first_in_chunk"), F.col("_pd_last_in_chunk")
+        first, last = F.col(FIRST_IN_CHUNK), F.col(LAST_IN_CHUNK)
         df = (
             df.withColumn(
                 PREV_TS,
@@ -548,11 +621,12 @@ def _row_branch(
     rules: Sequence[tuple[PushdownRule, Mapping[int, Pushdown]]],
     config,
     schema: T.StructType,
+    has_factor: bool = False,
 ) -> DataFrame:
     """Raw rows unchanged, and the derived rows of per-sample rules.
 
     *rows* are tagged with :data:`VARIANT_COL`, one copy per variant; *schema* gives
-    the output columns.
+    the output columns.  *has_factor* tells whether *rows* carry :data:`FACTOR_COL`.
     """
     if not rules:
         return rows
@@ -562,7 +636,8 @@ def _row_branch(
         TE, F.col(order[1]).cast("double")
     )
     contexts = [
-        (rule, SeriesContext(rule, variants, key, order, False, {})) for rule, variants in rules
+        (rule, SeriesContext(rule, variants, key, order, False, {}, has_factor=has_factor))
+        for rule, variants in rules
     ]
     for rule, ctx in contexts:
         df = _with_rule_columns(df, ctx, rule.row_columns(ctx))
@@ -571,6 +646,115 @@ def _row_branch(
     for rule, ctx in kept:
         df = _with_rule_columns(df, ctx, rule.kept_columns(ctx))
     return _emit(df, kept, schema, order, raw=F.col(VARIANT_COL) == RAW_VARIANT)
+
+
+def finishing_rules(plan: PushdownPlan) -> list[tuple[PushdownRule, dict[int, Pushdown]]]:
+    """The plan's rules with a finishing pass, with their variants."""
+    return [(rule, variants) for rule, variants in plan.variants_by_rule() if rule.finishes]
+
+
+def series_order(config) -> list[Column]:
+    """Sort keys of a channel's rows as the UDF's cache orders them.
+
+    By ``tstart``, then ``tend``, NaN and null last and equal to each other, as
+    ``numpy.lexsort`` orders float64 arrays.
+    """
+
+    def keys(col: str) -> list[Column]:
+        as_double = F.col(col).cast("double")
+        missing = as_double.isNull() | F.isnan(as_double)
+        return [missing, F.when(~missing, as_double)]
+
+    return [*keys(config.tstart_col), *keys(config.tend_col)]
+
+
+def finish_rows(df: DataFrame, plan: PushdownPlan, config) -> DataFrame:
+    """Apply the finishing pass of the plan's rules to the shipped rows *df*.
+
+    Each finishing rule sees all derived rows of each of its series (one channel's
+    rows of one variant in a container) in order (:func:`series_order`), through a
+    :class:`~.context.RowsContext`, and decides which rows are shipped and what
+    they hold.  Rows of other variants pass unchanged; all columns of *df* are kept.
+
+    The window is partitioned by container, channel and variant: called on rows
+    already partitioned by container, it adds one sort, no shuffle, and leaves the
+    rows sorted by container, channel and variant.
+
+    Parameters
+    ----------
+    df : pyspark.sql.DataFrame
+        Shipped rows with :data:`VARIANT_COL` (see :func:`apply_pushdowns`), possibly
+        with further columns.
+    plan : PushdownPlan
+        The solve's pushdown plan.
+    config : SolverConfig
+        Provides the internal column names.
+
+    Returns
+    -------
+    pyspark.sql.DataFrame
+        *df* with the finishing rules' rows replaced by their finished rows.
+    """
+    groups = finishing_rules(plan)
+    if not groups:
+        return df
+    columns = df.columns
+    ts, te, val = config.tstart_col, config.tend_col, config.value_col
+    # The sort keys as columns: windows ordered by the same columns share one sort.
+    order = series_order(config)
+    keys = [f"_pd_row_key{i}" for i in range(len(order))]
+    for name, key in zip(keys, order, strict=True):
+        df = df.withColumn(name, key)
+    series = Window.partitionBy(
+        config.container_id_col, config.channel_id_col, VARIANT_COL
+    ).orderBy(*keys)
+    contexts = [(rule, RowsContext(rule, variants, series)) for rule, variants in groups]
+    finishing = F.col(VARIANT_COL).isin(sorted(vid for _, variants in groups for vid in variants))
+
+    def doubles(col: str) -> Column:
+        return F.col(col).cast("double")
+
+    df = (
+        df.withColumn(ROW_TS, doubles(ts))
+        .withColumn(ROW_TE, doubles(te))
+        .withColumn(ROW_VALUE, doubles(val))
+        .withColumn(ROW_PREV_TS, F.lag(ts).over(series).cast("double"))
+        .withColumn(ROW_PREV_TE, F.lag(te).over(series).cast("double"))
+        .withColumn(ROW_PREV_VALUE, F.lag(val).over(series).cast("double"))
+        .withColumn(ROW_NEXT_TS, F.lead(ts).over(series).cast("double"))
+        .withColumn(ROW_NEXT_TE, F.lead(te).over(series).cast("double"))
+        .withColumn(ROW_NEXT_VALUE, F.lead(val).over(series).cast("double"))
+        .withColumn(ROW_FIRST, F.lag(F.lit(True)).over(series).isNull())
+        .withColumn(ROW_LAST, F.lead(F.lit(True)).over(series).isNull())
+    )
+    for rule, ctx in contexts:
+        df = _with_rule_columns(df, ctx, rule.finish_columns(ctx))
+    keep = ~finishing
+    row = None
+    for rule, ctx in contexts:
+        keep = keep | (ctx.active & F.coalesce(rule.finish_keep(ctx), F.lit(False)))
+        row = (
+            F.when(ctx.active, rule.finish_row(ctx))
+            if row is None
+            else row.when(ctx.active, rule.finish_row(ctx))
+        )
+    # Behind the guard, like _keep: the filter must not inline the rule columns.
+    df = df.withColumn(_KEPT, F.when(F.spark_partition_id() >= 0, keep)).where(F.col(_KEPT))
+    df = df.withColumn(_ELEMENT, row)
+    element = F.col(_ELEMENT)
+    schema = df.schema
+
+    def out(col: str) -> Column:
+        field = {ts: "tstart", te: "tend", val: "value"}.get(col)
+        if field is None:
+            return F.col(col)
+        derived = element.getField(field).cast(schema[col].dataType)
+        if field != "value":
+            # Times left out of the element keep the row's own.
+            derived = F.coalesce(derived, F.col(col))
+        return F.when(finishing, derived).otherwise(F.col(col)).alias(col)
+
+    return df.select(*[out(c) for c in columns])
 
 
 # --- helpers shared by both branches ------------------------------------------------
@@ -608,11 +792,17 @@ def _keep(df: DataFrame, contexts, extra: Column) -> DataFrame:
 
 
 def _emit(
-    df: DataFrame, contexts, schema: T.StructType, order: Sequence[str], raw: Column | None
+    df: DataFrame,
+    contexts,
+    schema: T.StructType,
+    order: Sequence[str],
+    raw: Column | None,
+    presence: Column | None = None,
 ) -> DataFrame:
     """Explode the rules' emitted rows into rows with the columns and types of *schema*.
 
-    *raw* marks rows passed through unchanged.
+    *raw* marks rows passed through unchanged; *presence* the rows that also ship
+    their channel's :data:`PRESENCE_VARIANT` row (a copy of the sample).
     """
     elements = None
     for rule, ctx in contexts:
@@ -624,6 +814,21 @@ def _emit(
     if raw is not None:
         # One placeholder element keeps each raw row.
         elements = F.when(raw, F.array(SeriesContext.element())).otherwise(elements)
+    if presence is not None:
+        # Elements gain a presence flag; the presence element copies the sample.
+        def flagged(e: Column, flag: bool) -> Column:
+            return F.struct(
+                *[e.getField(f) for f in ("tstart", "tend", "value")], F.lit(flag).alias(_PRESENCE)
+            )
+
+        derived = F.transform(
+            F.coalesce(elements, F.array().cast(T.ArrayType(_ELEMENT_TYPE))),
+            lambda e: flagged(e, False),
+        )
+        elements = F.when(
+            presence, F.concat(derived, F.array(flagged(SeriesContext.element(), True)))
+        ).otherwise(derived)
+        original = original | F.col(_ELEMENT).getField(_PRESENCE)
     element = F.col(_ELEMENT)
     fields = dict(zip(order, ("tstart", "tend", "value"), strict=True))
 
@@ -632,6 +837,12 @@ def _emit(
             # Columns beyond the channel-data shape (e.g. POI string values) are not
             # carried through the series scan; derived rows have none.
             return F.lit(None).cast(schema[col].dataType).alias(col)
+        if col == VARIANT_COL and presence is not None:
+            return (
+                F.when(element.getField(_PRESENCE), F.lit(PRESENCE_VARIANT))
+                .otherwise(F.col(col))
+                .alias(col)
+            )
         if col not in fields:
             return F.col(col)
         derived = element.getField(fields[col]).cast(schema[col].dataType)
@@ -657,11 +868,6 @@ def _flag(name: str) -> Column:
     return F.coalesce(F.col(name), F.lit(False))
 
 
-def _nan_free(col: Column) -> Column:
-    """Map NaN to null so ``min`` / ``max`` behave like ``numpy.nanmin`` / ``nanmax``."""
-    return F.when(~F.isnan(col), col)
-
-
 def _found(end: Column) -> Column:
     """*end* in a struct that is not null even when *end* is."""
     return F.struct(end.alias("end"))
@@ -674,5 +880,5 @@ def _block_end_at(last_sample: Column, single: Column) -> Column:
     maximum is the last ``tend`` or, for blocks of several samples, the last
     ``tstart`` if larger (NaN ``tend`` ignored).
     """
-    tend = _nan_free(last_sample.getField("tend"))
+    tend = nan_to_null(last_sample.getField("tend"))
     return F.when(single, tend).otherwise(F.greatest(last_sample.getField("tstart"), tend))

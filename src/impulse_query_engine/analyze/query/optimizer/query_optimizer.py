@@ -10,6 +10,7 @@ from typing import Any
 
 from impulse_query_engine.analyze.metadata.time_series_expression import TimeSeriesExpression
 
+from .condition_rule import ConditionPushdownRule
 from .plan import PushdownPlan
 from .pushdown import Pushdown, PushdownContext, PushdownRule, check_name
 from .resample_rule import ResamplePushdownRule
@@ -18,7 +19,7 @@ from .traversal import Classifier, discover
 
 def default_rules() -> tuple[PushdownRule, ...]:
     """All built-in pushdown rules."""
-    return (ResamplePushdownRule(),)
+    return (ResamplePushdownRule(), ConditionPushdownRule())
 
 
 @cache
@@ -55,6 +56,13 @@ class QueryOptimizer:
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
             raise ValueError(f"pushdown rule names must be unique: {duplicates}")
+        for rule in self.rules:
+            # Presence rows and the finishing pass come from the ordered pass only.
+            if not rule.ordered and (rule.may_emit_nothing or rule.finishes):
+                raise ValueError(
+                    f"pushdown rule {rule.name!r}: may_emit_nothing and finishes need an "
+                    "ordered rule"
+                )
 
     def optimize(self, selections: Iterable[Any], context: PushdownContext) -> PushdownPlan:
         """Build the pushdown plan for the *selections* of one solve call.

@@ -31,6 +31,10 @@ numpy builds that fuse this into a multiply-add can differ by one ulp for
 fractional grids (e.g. seconds-as-double with a rate of ``0.1``); integral
 grids are exact.
 
+A bare resample selection has no native ``solve()`` value: ``solve()`` returns a
+series as a serialized ``SampleSeries``, which only the UDF produces.  Calculated
+channels that are a resample are emitted from Spark (:meth:`emits_result_rows`).
+
 
 ## \_Grid
 
