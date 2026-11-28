@@ -10,7 +10,7 @@ endif
 # Ensure that build-system requires are hash-verified when building.
 export UV_BUILD_CONSTRAINT := .build-constraints.txt
 
-UV_RUN := uv run --exact --all-extras
+UV_RUN := uv run --exact --all-extras --group test
 
 # Path(s) passed to pytest. Defaults to the whole suite; CI overrides this to run a
 # single component's tests in parallel, e.g. `make test TEST_PATH=tests/impulse_query_engine`.
@@ -28,7 +28,7 @@ clean:
 	find . -name '__pycache__' -print0 | xargs -0 rm -fr
 
 dev:
-	uv sync --all-extras
+	uv sync --all-extras --group test
 
 lint:
 	$(UV_RUN) black --check src/ tests/
@@ -44,6 +44,12 @@ test:
 coverage:
 	$(UV_RUN) pytest tests/ --cov=src --cov-branch --cov-report=html
 	open htmlcov/index.html
+
+mdf-coverage:
+	$(UV_RUN) coverage run -m pytest tests/impulse_data_sources/mdf -q --no-cov
+	$(UV_RUN) coverage report --include='src/impulse_data_sources/mdf/*' \
+	  --omit='src/impulse_data_sources/mdf/converter.py' \
+	  --fail-under=95 --precision=1
 
 # Run the end-to-end suite on Databricks. Needs the Databricks CLI and workspace auth.
 test-e2e:
@@ -82,4 +88,4 @@ fork-sync:
 	./.github/scripts/fork-sync-pr.sh $(PR)
 
 .DEFAULT: all
-.PHONY: all clean dev lint fmt test test-e2e benchmark benchmark-serverless coverage build update-api-docs lock-dependencies fork-sync
+.PHONY: all clean dev lint fmt test mdf-coverage test-e2e benchmark benchmark-serverless coverage build update-api-docs lock-dependencies fork-sync
